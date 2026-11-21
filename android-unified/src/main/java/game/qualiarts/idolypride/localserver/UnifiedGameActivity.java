@@ -129,8 +129,9 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
         // Preserve the live Unity instance while bringing the existing menu forward.
         Intent menu = new Intent(this, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        UnifiedMP4Export.serverMenuOpening(this);
         try { startActivity(menu); }
-        catch (RuntimeException unavailable) { cancelMenuHold(); }
+        catch (RuntimeException unavailable) { UnifiedMP4Export.serverMenuOpenFailed(this); cancelMenuHold(); }
     }
 
     private int currentDisplay() {

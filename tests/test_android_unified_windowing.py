@@ -93,6 +93,7 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
     sources[package + "UnifiedMP4Export.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedMP4Export {static void restoreState(android.content.Context c,android.os.Bundle b){}
         static void attachGame(android.app.Activity a){}static void geometryChanged(android.app.Activity a){}
+        static void serverMenuOpening(android.app.Activity a){}static void serverMenuOpenFailed(android.app.Activity a){}
         static void focusChanged(android.app.Activity a,boolean focused){}
         static void gamePaused(android.app.Activity a){}static void gameResumed(android.app.Activity a){}static void gameDestroyed(android.app.Activity a){}
         static void gameStarted(android.app.Activity a){}static void gameStopped(android.app.Activity a){}

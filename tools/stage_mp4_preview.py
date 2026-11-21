@@ -29,7 +29,7 @@ REPO = "tagundo/IdolyPride_client"
 WORKFLOW = ".github/workflows/build-mp4-preview.yml"
 CODEC_WORKFLOW = ".github/workflows/verify-mp4-codecs.yml"
 BRANCH = "refs/heads/feat/ios-unified-server"
-VERSION = "2026.11.21.6"
+VERSION = "2026.11.21.7"
 APK = "IdolyPride-Unified-" + VERSION + "-prototype.apk"
 APK_REPORT = APK.removesuffix(".apk") + ".provenance.json"
 VERIFICATION = "MP4-PREVIEW-VERIFICATION.json"
@@ -42,7 +42,12 @@ MP4_NATIVE = {"client-presentation/native/" + name for name in (
     "mp4_session_api.h", "mp4_queue.hpp", "mp4_queue_runtime.hpp", "mp4_queue_cleanup.hpp", "mp4_selection_capture.hpp",
     "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp", "mp4_output_policy.hpp",
     "mp4_controller_profile.hpp", "mp4_type_descriptor.hpp",
+    "mp4_photography_replay_factory.hpp", "mp4_photography_replay_profile.hpp",
     "shared_cache_core.hpp", "shared_cache_hooks.hpp")}
+# Android's actual builder hashes JSON generator evidence; Darwin's compiled
+# source receipt includes headers only. Keep these profile pins out of MP4_NATIVE.
+MP4_ANDROID_PROFILES = {"client-presentation/native/" + name for name in (
+    "mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json")}
 MP4_JAVA = {"android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/ServerService.java",
@@ -128,6 +133,13 @@ def source_pins(values, base, required):
         need(sha(path) == digest, "source_bytes_changed")
 
 
+def mp4_native_sources(values, *, android=False):
+    required = MP4_NATIVE
+    if android:
+        required = required | MP4_ANDROID_PROFILES | {"client-presentation/native/mp4_android_session.hpp"}
+    source_pins(values, ROOT, required)
+
+
 def korean_translation_proof(report, platform):
     guard = module("mp4_preview_translation_guard", ROOT / "tools/refresh_korean_translation_bundle.py")
     pin = guard.pins()
@@ -149,7 +161,7 @@ def android_files(folder, source):
     paths = guard.apk_files(folder, source)
     proof = read(paths[1])
     native = proof["native_addon_build"]
-    source_pins(native.get("source_sha256"), ROOT, MP4_NATIVE | {"client-presentation/native/mp4_android_session.hpp"})
+    mp4_native_sources(native.get("source_sha256"), android=True)
     exports = native.get("jni_exports", [])
     need(type(exports) is list and {"Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_native" + method
         for method in ("Configure", "Start", "Status", "Cancel", "Ready", "Suspend", "Resume",
@@ -230,7 +242,7 @@ def ios_files(folder, source):
         "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMVEncoder.mm", "IdolyEmbeddedServer.m", "IdolySettings.m", "MP4LifecyclePolicy.h", "MP4FinalizationPolicy.h",
         "../../client-presentation/native/mp4_encoder_api.h"})
     presentation = read(folder / "presentation-native-build.json")
-    source_pins(presentation.get("source_sha256"), ROOT, MP4_NATIVE)
+    mp4_native_sources(presentation.get("source_sha256"))
     runtime = read(folder / "device-runtime-report.json")
     need(runtime.get("target") == "device" and runtime.get("frameworks_codesign_verify_passed") is True,
          "ios_runtime_target_differs")
@@ -267,7 +279,7 @@ def ios_files(folder, source):
                 need(hashlib.file_digest(incoming, "sha256").hexdigest() == members[row.filename], "ipa_member_bytes_differ")
         app = "Payload/IDOLY PRIDE.app/"
         info = plistlib.loads(archive.read(app + "Info.plist"))
-        need(info.get("CFBundleVersion") == "2026.1121.6", "ipa_preview_version_differs")
+        need(info.get("CFBundleVersion") == "2026.1121.7", "ipa_preview_version_differs")
         need(members[app + "Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer"] == native["post_sign_binary_sha256"]
              and members[app + "Frameworks/IdolyPresentation.dylib"] == presentation["sha256"], "ipa_native_source_binding_differs")
         need(members[app + "LocalServer/ServerData.zip"] == korean.output_pin()["sha256"], "ipa_server_data_pin_differs")

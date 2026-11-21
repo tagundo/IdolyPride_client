@@ -145,6 +145,9 @@ void *install(void *) {
         HOOK(mp4_brain_delta,mp4_brain_delta_hook,mp4_brain_delta_original),
         HOOK(mp4_core_camera,mp4_core_camera_hook,mp4_core_camera_original),
         HOOK(mp4_player_initialize,mp4_player_initialize_hook,mp4_player_initialize_original),
+        HOOK(mp4_photography_initialize,mp4_photography_initialize_hook,mp4_photography_initialize_original),
+        HOOK(mp4_photography_player_initialize,mp4_photography_player_initialize_hook,mp4_photography_player_initialize_original),
+        HOOK(mp4_photography_end,mp4_photography_end_hook,mp4_photography_end_original),
     };
 #undef HOOK
     for (auto &hook:hooks) {

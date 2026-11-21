@@ -44,6 +44,7 @@ public final class UnifiedMP4Export {
     private static boolean resumed, stopped = true, userPaused, polling;
     private static boolean gameFocused;
     private static volatile boolean foregroundSelectionReady;
+    private static volatile long menuHandoffDeadline;
     private static long pendingDeadline;
     private static int[] pending;
     private static LinearLayout overlay;
@@ -80,7 +81,7 @@ public final class UnifiedMP4Export {
     /** Only ServerService's trusted worker supplies this private Python descriptor. */
     static boolean prepare(Context context, String descriptor) {
         configured = false;
-        foregroundSelectionReady = false;
+        foregroundSelectionReady = false; menuHandoffDeadline = 0;
         titleCatalog = Mp4TitleCatalog.empty();
         if (!UnifiedRuntime.isEnabled(context)) return false;
         try {
@@ -118,7 +119,11 @@ public final class UnifiedMP4Export {
     }
 
     static void serverStopped() {
-        configured = false; queueConfigured = false; foregroundSelectionReady = false;
+        // The queue can own an original pre-download before a session exists.
+        // Park it on the host thread before retiring the server/encoder path.
+        if (initialized && queueConfigured) try { nativeQueuePause(); }
+        catch (LinkageError unavailable) { /* Optional addon; still retire the session below. */ }
+        configured = false; queueConfigured = false; foregroundSelectionReady = false; menuHandoffDeadline = 0;
         MAIN.post(() -> { cancel(); pending = null; wake(); });
     }
     static boolean available() { return configured; }
@@ -133,7 +138,13 @@ public final class UnifiedMP4Export {
         try { return nativeReady(); } catch (LinkageError unavailable) { return false; }
     }
     private static void observeForegroundReadiness(boolean nativeReady) {
-        if (resumed && gameFocused && !busy()) foregroundSelectionReady = nativeReady;
+        boolean menuHandoff = menuHandoffDeadline > 0
+                && android.os.SystemClock.uptimeMillis() <= menuHandoffDeadline;
+        // A config/layout callback can release the source before Android has
+        // delivered onPause/focus loss. Do not let the intervening poll undo
+        // this short, explicit menu handoff's already verified selection.
+        if (resumed && gameFocused && !busy() && (nativeReady || !menuHandoff))
+            foregroundSelectionReady = nativeReady;
     }
     static JSONObject snapshot() {
         try { return new JSONObject(last.toString()); } catch (Exception ignored) { return new JSONObject(); }
@@ -317,7 +328,7 @@ public final class UnifiedMP4Export {
 
     static void attachGame(Activity activity) {
         game = new WeakReference<>(activity);
-        foregroundSelectionReady = false; gameFocused = false;
+        foregroundSelectionReady = false; gameFocused = false; menuHandoffDeadline = 0;
         LinearLayout bar = new LinearLayout(activity); bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL); bar.setBackgroundColor(0xe6222630);
         int padding = Math.round(10 * activity.getResources().getDisplayMetrics().density);
@@ -338,6 +349,7 @@ public final class UnifiedMP4Export {
     }
     static void gameResumed(Activity activity) {
         if (game.get() != activity) return;
+        menuHandoffDeadline = 0;
         resumed = true; stopped = false; resumeForLifecycle(); MAIN.postDelayed(BEGIN, 200); wake();
     }
     static void gameResuming(Activity activity) {
@@ -404,9 +416,28 @@ public final class UnifiedMP4Export {
             wake(); return true;
         } catch (RuntimeException | LinkageError unavailable) { return false; }
     }
+    static void serverMenuOpening(Activity activity) {
+        if (!configured || game.get() != activity || activity.isDestroyed() || activity.isFinishing()) return;
+        // Android may deliver the landscape -> server-menu portrait config
+        // before onPause. Bind this short handoff to the existing Unity owner.
+        menuHandoffDeadline = android.os.SystemClock.uptimeMillis() + 8000;
+        if (initialized) try { if (nativeReady()) foregroundSelectionReady = true; }
+        catch (LinkageError unavailable) { /* Only retain an actually verified selection. */ }
+    }
+    static void serverMenuOpenFailed(Activity activity) {
+        if (game.get() == activity) menuHandoffDeadline = 0;
+    }
     static void geometryChanged(Activity activity) {
         if (game.get() == activity && pending == null && !UnifiedMP4Background.ownsSurface(activity)) {
-            foregroundSelectionReady = false; cancel();
+            boolean menuHandoff = menuHandoffDeadline > 0
+                    && android.os.SystemClock.uptimeMillis() <= menuHandoffDeadline;
+            boolean activePlayerWindow = resumed || (!stopped && activity.isInMultiWindowMode());
+            // A background Unity resize can release only its render target,
+            // while its logical MV remains selected. Native enqueue fixes that
+            // identity and revalidates the actual source after returning.
+            if (!menuHandoff && activePlayerWindow) foregroundSelectionReady = false;
+            // An existing capture still cancels on every real geometry change.
+            cancel();
         }
     }
     static void focusChanged(Activity activity, boolean focused) {
@@ -421,7 +452,7 @@ public final class UnifiedMP4Export {
     static void gameDestroyed(Activity activity) {
         if (game.get() != activity) return;
         cancel(); pending = null; game.clear(); resumed = false; stopped = true;
-        foregroundSelectionReady = false; gameFocused = false;
+        foregroundSelectionReady = false; gameFocused = false; menuHandoffDeadline = 0;
         if (overlay != null && overlay.getParent() instanceof ViewGroup) ((ViewGroup) overlay.getParent()).removeView(overlay);
         overlay = null; overlayText = null; overlaySave = null; overlayCancel = null; overlayPause = null; overlayDismiss = null;
     }
@@ -474,7 +505,11 @@ public final class UnifiedMP4Export {
     static String statusText(Context context) {
         if (saving) return context.getString(R.string.mp4_finishing);
         if (pending != null) return context.getString(R.string.mp4_preparing_audio);
-        switch (last.optString("phase", "idle")) {
+        String phase = last.optString("phase", "idle");
+        if (backgroundQueueHasWork() && (phase.isEmpty() || phase.equals("idle") || phase.equals("completed")
+                || phase.equals("failed") || phase.equals("cancelled")))
+            return context.getString(R.string.mp4_queue_waiting_scene);
+        switch (phase) {
             case "preparing_audio": return last.optLong("total_audio_frames") > 0
                     ? context.getString(R.string.mp4_preparing_audio_progress, last.optLong("audio_frames"), last.optLong("total_audio_frames"))
                     : context.getString(R.string.mp4_preparing_audio);

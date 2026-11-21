@@ -230,7 +230,20 @@ inline const char* pause_reason_name(int reason){
 }
 inline void install_game_api(const Api& api,const Layout& layout){if(installed||busy_stage())return;installed=game.set_api(api,layout)&&selection.set_api(api);}
 inline void observe_presenter(void* presenter){if(installed){game.observe_presenter(presenter);pthread_mutex_lock(&control_mutex);selected_identity=selection.identity(game.selected_player());pthread_mutex_unlock(&control_mutex);}}
+inline void observe_presenter_ended(void* presenter){
+    if(!installed)return;
+    const bool selected=game.selected_presenter()==presenter;
+    game.observe_presenter_ended(presenter);
+    if(selected){pthread_mutex_lock(&control_mutex);selected_identity=0;published.ready=false;
+        snprintf(readiness_error,sizeof(readiness_error),"%s","selected_mv_ended");pthread_mutex_unlock(&control_mutex);}
+}
 inline void observe_player_initializing(void* player,void* param){if(installed)selection.observe(player,param);}
+inline void observe_photography_initializing(void* player,void* data,void* descriptors){if(installed)selection.observe_photography(player,data,descriptors);}
+inline void observe_photography_transition(void* player,void* transition){
+    if(!installed)return;
+    selection.attach_photography_transition(player,transition);
+    pthread_mutex_lock(&control_mutex);selected_identity=selection.identity(game.selected_player());pthread_mutex_unlock(&control_mutex);
+}
 inline void observe_camera_controller(void* camera){if(installed)game.observe_camera_controller(camera);}
 inline void capture_pass_did_execute(void* pass,const void*data){if(installed)game.observe_capture_pass(pass,data);}
 inline void camera_did_render(void*camera){if(installed&&job.stage==Stage::frame_wait&&!job.captured&&game.after_camera(camera)){job.captured=true;pthread_mutex_lock(&control_mutex);increment_counter(capture_acks);pthread_mutex_unlock(&control_mutex);}}

@@ -51,12 +51,24 @@ struct Actor {
     int32_t collider_type=0,render_layer_base=0;
     uint8_t humanoid=0,trigger=0,auto_blink_disabled=0,use_adv_settings=0,name_is_null=0;
 };
+struct PhotoCostume {
+    char costume_id[name_capacity]{},hair_id[name_capacity]{};
+};
+struct PhotoSelection {
+    // 0 is the original OutGame scene; 1 is normal master-data Photography.
+    // Keep this logical transition distinct from its resolved render assets.
+    uint32_t source_kind=0;
+    uint8_t is_preview=0,is_original=0,screen_transition=0;
+    char stage_id[name_capacity]{},music_id[name_capacity]{};
+    uint32_t actor_count=0;PhotoCostume actors[max_actors]{};
+};
 struct Descriptor {
     char stage_asset[name_capacity]{},timeline_asset[name_capacity]{};
     uint32_t actor_count=0;Actor actors[max_actors]{};
     // OutGameLivePlayerParam; detached actors with GameObjects are unsupported.
     int32_t stage_max_capacity=0;
     uint8_t detach_actors_on_player_destroyed=0;
+    PhotoSelection photo{};
 };
 struct Graphics {
     int64_t revision=0;uint8_t custom_graphics=0;
@@ -100,7 +112,21 @@ inline bool hex(const char* s,size_t n){if(length(s,n+1)!=n)return false;for(siz
 inline bool name(const char* s){size_t n=length(s,name_capacity);if(!n||n>=name_capacity)return false;for(size_t i=0;i<n;++i){const char c=s[i];if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.'))return false;}return true;}
 inline bool display_name(const char*s){size_t n=length(s,name_capacity);if(n>=name_capacity)return false;for(size_t i=0;i<n;){uint32_t c=static_cast<uint8_t>(s[i++]);if(c<0x80){if(c<0x20||c==0x7f)return false;continue;}unsigned extra;uint32_t minimum;if(c>=0xc2&&c<=0xdf){extra=1;minimum=0x80;c&=0x1f;}else if(c>=0xe0&&c<=0xef){extra=2;minimum=0x800;c&=0x0f;}else if(c>=0xf0&&c<=0xf4){extra=3;minimum=0x10000;c&=7;}else return false;if(extra>n-i)return false;for(unsigned k=0;k<extra;++k){uint32_t tail=static_cast<uint8_t>(s[i++]);if((tail&0xc0)!=0x80)return false;c=(c<<6)|(tail&0x3f);}if(c<minimum||c>0x10ffff||(c>=0xd800&&c<=0xdfff)||(c>=0x80&&c<0xa0))return false;}return true;}
 inline bool code(const char* s){size_t n=length(s,65);if(!n||n>=65)return false;for(size_t i=0;i<n;++i)if(!((s[i]>='a'&&s[i]<='z')||(s[i]>='0'&&s[i]<='9')||s[i]=='_'))return false;return true;}
-inline bool descriptor(const Descriptor& d){if(!name(d.stage_asset)||!name(d.timeline_asset)||!d.actor_count||d.actor_count>max_actors||d.detach_actors_on_player_destroyed>1)return false;
+inline bool empty_photo_name(const char* value){for(size_t i=0;i<name_capacity;++i)if(value[i])return false;return true;}
+inline bool photo(const PhotoSelection& p,uint32_t actor_count){
+    if(p.source_kind>1||p.is_preview>1||p.is_original>1||p.screen_transition>1||p.actor_count>max_actors)return false;
+    if(p.source_kind==0){
+        if(p.is_preview||p.is_original||p.screen_transition||p.actor_count
+            ||!empty_photo_name(p.stage_id)||!empty_photo_name(p.music_id))return false;
+    }else if(!name(p.stage_id)||!name(p.music_id)||p.actor_count!=actor_count
+        ||!p.actor_count||(!p.screen_transition&&p.is_original))return false;
+    for(size_t i=0;i<max_actors;++i){
+        if(i<p.actor_count){if(!name(p.actors[i].costume_id)||!name(p.actors[i].hair_id))return false;}
+        else if(!empty_photo_name(p.actors[i].costume_id)||!empty_photo_name(p.actors[i].hair_id))return false;
+    }
+    return true;
+}
+inline bool descriptor(const Descriptor& d){if(!name(d.stage_asset)||!name(d.timeline_asset)||!d.actor_count||d.actor_count>max_actors||d.detach_actors_on_player_destroyed>1||!photo(d.photo,d.actor_count))return false;
     for(size_t i=0;i<d.actor_count;++i){const Actor& a=d.actors[i];if(!name(a.character_id)||!display_name(a.descriptor_name)||a.name_is_null>1||(a.name_is_null&&a.descriptor_name[0])||!a.asset_count||a.asset_count>max_assets||a.humanoid>1||a.trigger>1||a.auto_blink_disabled>1||a.use_adv_settings>1||(a.collider_type!=0&&a.collider_type!=1))return false;
         for(size_t j=0;j<a.asset_count;++j)if(!name(a.assets[j]))return false;
         for(size_t j=0;j<i;++j)if(d.actors[j].actor_index==a.actor_index||d.actors[j].track_index==a.track_index)return false;
@@ -141,24 +167,40 @@ struct Reader {
     void raw(void*p,size_t n){if(!ok||n>cap-at){ok=false;return;}memcpy(p,bytes+at,n);at+=n;}
     uint32_t u32(){uint8_t b[4]{};raw(b,4);return get32(b);}
     uint64_t u64(){uint8_t b[8]{};raw(b,8);return get64(b);}
-    void str(char*s,size_t cap){uint8_t b[2]{};raw(b,2);size_t n=size_t(b[0])|(size_t(b[1])<<8);if(!ok||n>=cap){ok=false;return;}raw(s,n);if(ok)s[n]=0;}
+    void str(char*s,size_t cap){uint8_t b[2]{};raw(b,2);size_t n=size_t(b[0])|(size_t(b[1])<<8);if(!ok||n>=cap){ok=false;return;}raw(s,n);if(ok){for(size_t i=0;i<n;++i)if(!s[i]){ok=false;return;}s[n]=0;}}
 };
-inline void encode(Writer&w,const Job&j,uint32_t version=2){
+inline void encode(Writer&w,const Job&j,uint32_t version=3){
+    if(version<1||version>3||!descriptor(j.descriptor)||(version<3&&j.descriptor.photo.source_kind)){
+        w.ok=false;return;
+    }
     w.str(j.id,33);w.str(j.output_id,33);w.u32(static_cast<uint32_t>(j.state));w.u32(j.attempts);w.str(j.error,65);w.str(j.pause_reason,65);
     const Options&o=j.options;for(uint32_t v:{o.fps_num,o.fps_den,o.codec,o.video_bitrate,o.audio_bitrate,o.width,o.height})w.u32(v);
     if(version>=2){w.u32(o.output_width);w.u32(o.output_height);}
     const Graphics&g=o.graphics;w.u64(static_cast<uint64_t>(g.revision));w.u32(g.custom_graphics);w.u32(static_cast<uint32_t>(g.quality));w.u32(static_cast<uint32_t>(g.target_fps));uint32_t scale=0;memcpy(&scale,&g.render_scale,4);w.u32(scale);w.u32(static_cast<uint32_t>(g.max_buffer_pixel));w.u32(static_cast<uint32_t>(g.aa_mode));w.u32(static_cast<uint32_t>(g.shadow_resolution));w.u32(g.expand_photography);
     const Descriptor&d=j.descriptor;w.str(d.stage_asset,name_capacity);w.str(d.timeline_asset,name_capacity);w.u32(static_cast<uint32_t>(d.stage_max_capacity));w.u32(d.detach_actors_on_player_destroyed);w.u32(d.actor_count);
     for(size_t i=0;i<d.actor_count;++i){const Actor&a=d.actors[i];w.str(a.character_id,name_capacity);w.str(a.descriptor_name,name_capacity);for(int32_t v:{a.actor_index,a.track_index,a.audience_amount,a.psyllium_color_type,a.collider_type,a.render_layer_base})w.u32(static_cast<uint32_t>(v));w.u32(a.humanoid);w.u32(a.trigger);w.u32(a.auto_blink_disabled);w.u32(a.use_adv_settings);w.u32(a.name_is_null);w.u32(a.asset_count);for(size_t k=0;k<a.asset_count;++k)w.str(a.assets[k],name_capacity);}
+    if(version>=3){
+        const PhotoSelection&p=d.photo;w.u32(p.source_kind);w.u32(p.is_preview);w.u32(p.is_original);w.u32(p.screen_transition);
+        w.str(p.stage_id,name_capacity);w.str(p.music_id,name_capacity);w.u32(p.actor_count);
+        for(size_t i=0;i<p.actor_count;++i){w.str(p.actors[i].costume_id,name_capacity);w.str(p.actors[i].hair_id,name_capacity);}
+    }
 }
-inline bool decode(Reader&r,Job&j,uint32_t version=2){
+inline bool decode(Reader&r,Job&j,uint32_t version=3){
+    if(version<1||version>3)return false;
     r.str(j.id,33);r.str(j.output_id,33);uint32_t s=r.u32();if(s<1||s>7)return false;j.state=static_cast<State>(s);j.attempts=r.u32();r.str(j.error,65);r.str(j.pause_reason,65);
     Options&o=j.options;o.fps_num=r.u32();o.fps_den=r.u32();o.codec=r.u32();o.video_bitrate=r.u32();o.audio_bitrate=r.u32();o.width=r.u32();o.height=r.u32();
     if(version>=2){o.output_width=r.u32();o.output_height=r.u32();}
     else {o.output_width=o.output_height=0;}
     Graphics&g=o.graphics;g.revision=static_cast<int64_t>(r.u64());uint32_t custom=r.u32();g.quality=static_cast<int32_t>(r.u32());g.target_fps=static_cast<int32_t>(r.u32());uint32_t scale=r.u32();memcpy(&g.render_scale,&scale,4);g.max_buffer_pixel=static_cast<int32_t>(r.u32());g.aa_mode=static_cast<int32_t>(r.u32());g.shadow_resolution=static_cast<int32_t>(r.u32());uint32_t expanded=r.u32();if(custom>1||expanded>1)return false;g.custom_graphics=static_cast<uint8_t>(custom);g.expand_photography=static_cast<uint8_t>(expanded);
-    Descriptor&d=j.descriptor;r.str(d.stage_asset,name_capacity);r.str(d.timeline_asset,name_capacity);d.stage_max_capacity=static_cast<int32_t>(r.u32());uint32_t detach=r.u32();if(detach>1)return false;d.detach_actors_on_player_destroyed=static_cast<uint8_t>(detach);d.actor_count=r.u32();if(d.actor_count>max_actors)return false;
+    Descriptor&d=j.descriptor;d.photo=PhotoSelection{};r.str(d.stage_asset,name_capacity);r.str(d.timeline_asset,name_capacity);d.stage_max_capacity=static_cast<int32_t>(r.u32());uint32_t detach=r.u32();if(detach>1)return false;d.detach_actors_on_player_destroyed=static_cast<uint8_t>(detach);d.actor_count=r.u32();if(d.actor_count>max_actors)return false;
     for(size_t i=0;i<d.actor_count;++i){Actor&a=d.actors[i];r.str(a.character_id,name_capacity);r.str(a.descriptor_name,name_capacity);a.actor_index=static_cast<int32_t>(r.u32());a.track_index=static_cast<int32_t>(r.u32());a.audience_amount=static_cast<int32_t>(r.u32());a.psyllium_color_type=static_cast<int32_t>(r.u32());a.collider_type=static_cast<int32_t>(r.u32());a.render_layer_base=static_cast<int32_t>(r.u32());uint32_t human=r.u32(),trigger=r.u32(),blink=r.u32(),adv=r.u32(),isnull=r.u32();if(human>1||trigger>1||blink>1||adv>1||isnull>1)return false;a.humanoid=static_cast<uint8_t>(human);a.trigger=static_cast<uint8_t>(trigger);a.auto_blink_disabled=static_cast<uint8_t>(blink);a.use_adv_settings=static_cast<uint8_t>(adv);a.name_is_null=static_cast<uint8_t>(isnull);a.asset_count=r.u32();if(a.asset_count>max_assets)return false;for(size_t k=0;k<a.asset_count;++k)r.str(a.assets[k],name_capacity);}
+    if(version>=3){
+        PhotoSelection&p=d.photo;p.source_kind=r.u32();uint32_t preview=r.u32(),original=r.u32(),screen=r.u32();
+        if(preview>1||original>1||screen>1)return false;
+        p.is_preview=static_cast<uint8_t>(preview);p.is_original=static_cast<uint8_t>(original);p.screen_transition=static_cast<uint8_t>(screen);
+        r.str(p.stage_id,name_capacity);r.str(p.music_id,name_capacity);p.actor_count=r.u32();if(p.actor_count>max_actors)return false;
+        for(size_t i=0;i<p.actor_count;++i){r.str(p.actors[i].costume_id,name_capacity);r.str(p.actors[i].hair_id,name_capacity);}
+    }
     return r.ok&&hex(j.id,32)&&(!j.output_id[0]||hex(j.output_id,32))&&descriptor(d)&&options(o)
         &&(!j.error[0]||code(j.error))&&(!j.pause_reason[0]||code(j.pause_reason))
         &&(j.state!=State::pending||!j.output_id[0])
@@ -188,7 +230,7 @@ public:
         bool stable=::fstat(fd,&after)==0&&detail::same(s,after);::close(fd);
         Error result=Error::corrupt;
         const uint32_t version=detail::get32(bytes+8);
-        if(at==n&&extra==0&&stable&&memcmp(bytes,"IDMPQ001",8)==0&&(version==1||version==2)&&detail::get32(bytes+12)==header_bytes
+        if(at==n&&extra==0&&stable&&memcmp(bytes,"IDMPQ001",8)==0&&(version==1||version==2||version==3)&&detail::get32(bytes+12)==header_bytes
             &&detail::get32(bytes+92)==n-header_bytes&&detail::get32(bytes+88)<=max_jobs
             &&detail::get64(bytes+96)==detail::checksum(bytes+header_bytes,n-header_bytes,detail::checksum(bytes,96))){
             if(memcmp(bytes+16,profile_,64)!=0)result=Error::profile_mismatch;
@@ -229,7 +271,7 @@ public:
     Error remove(const char*id){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(active(state_->jobs[i]))return Error::busy;Store*next=clone();if(!next)return Error::io;for(size_t k=static_cast<size_t>(i)+1;k<next->count;++k)next->jobs[k-1]=next->jobs[k];--next->count;next->jobs[next->count]=Job{};return commit(next);}
     Error move(const char*id,size_t target){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(target>=state_->count)return Error::invalid_argument;if(state_->jobs[i].state!=State::pending)return Error::invalid_state;if(target==static_cast<size_t>(i))return Error::ok;Store*next=clone();if(!next)return Error::io;Job*saved=detail::allocate<Job>();if(!saved){free(next);return Error::io;}*saved=next->jobs[i];if(target<static_cast<size_t>(i))for(size_t k=static_cast<size_t>(i);k>target;--k)next->jobs[k]=next->jobs[k-1];else for(size_t k=static_cast<size_t>(i);k<target;++k)next->jobs[k]=next->jobs[k+1];next->jobs[target]=*saved;free(saved);return commit(next);}
 private:
-    // Keep the owned path/lock stable while the checked header advances to v2.
+    // Keep the owned path/lock stable while the checked header advances to v3.
     // Old jobs migrate only on the next ordinary transactional mutation.
     static const char*filename(){return "queue-v1.bin";}
     static bool active(const Job&j){return j.state==State::running||j.state==State::paused;}
@@ -240,7 +282,7 @@ private:
     Error commit(Store*next){
         if(!state_||blocked_){free(next);return Error::not_open;}if(!current()){free(next);return Error::changed_storage;}if(state_->generation==~uint64_t(0)){free(next);return Error::invalid_state;}next->generation=state_->generation+1;
         uint8_t*bytes=static_cast<uint8_t*>(malloc(max_wire_bytes));if(!bytes){free(next);return Error::io;}memset(bytes,0,header_bytes);detail::Writer w{bytes+header_bytes,max_wire_bytes-header_bytes};for(size_t i=0;i<next->count;++i)detail::encode(w,next->jobs[i]);if(!w.ok){free(bytes);free(next);return Error::invalid_descriptor;}
-        memcpy(bytes,"IDMPQ001",8);detail::put32(bytes+8,2);detail::put32(bytes+12,header_bytes);memcpy(bytes+16,profile_,64);detail::put64(bytes+80,next->generation);detail::put32(bytes+88,next->count);detail::put32(bytes+92,static_cast<uint32_t>(w.at));detail::put64(bytes+96,detail::checksum(bytes+header_bytes,w.at,detail::checksum(bytes,96)));size_t length=header_bytes+w.at;
+        memcpy(bytes,"IDMPQ001",8);detail::put32(bytes+8,3);detail::put32(bytes+12,header_bytes);memcpy(bytes+16,profile_,64);detail::put64(bytes+80,next->generation);detail::put32(bytes+88,next->count);detail::put32(bytes+92,static_cast<uint32_t>(w.at));detail::put64(bytes+96,detail::checksum(bytes+header_bytes,w.at,detail::checksum(bytes,96)));size_t length=header_bytes+w.at;
         uint8_t nonce[16];if(!random_(random_context_,nonce,16)){free(bytes);free(next);return Error::random_failed;}char temp[64];static const char alphabet[]="0123456789abcdef";memcpy(temp,".queue-",7);for(size_t i=0;i<16;++i){temp[7+i*2]=alphabet[nonce[i]>>4];temp[8+i*2]=alphabet[nonce[i]&15];}memcpy(temp+39,".tmp",5);
         int fd=::openat(directory_,temp,detail::wr|detail::create|detail::exclusive|detail::nofollow,0600);struct stat owned{};bool created=fd>=0&&::fstat(fd,&owned)==0;size_t at=0;
         while(created&&at<length){long n=::write(fd,bytes+at,length-at);if(n<0&&detail::error_number()==4)continue;if(n<=0)break;at+=static_cast<size_t>(n);}free(bytes);bool good=created&&at==length&&::fsync(fd)==0;struct stat ready{};good=good&&detail::safe_file(fd,ready);if(fd>=0)::close(fd);

@@ -8,6 +8,7 @@
 namespace idoly_mp4_replay {
 using Descriptor=idoly_mp4_queue::Descriptor;
 using Actor=idoly_mp4_queue::Actor;
+using PhotoSelection=idoly_mp4_queue::PhotoSelection;
 using Method=const void;
 struct UniTask16 { void* source=nullptr; uint64_t token_and_padding=0; };
 struct CancellationToken8 { void* source=nullptr; };
@@ -46,11 +47,25 @@ struct Api {
     UniTask16(*task_get_awaiter)(UniTask16*,Method*)=nullptr;
     void(*task_get_result)(UniTask16*,Method*)=nullptr;
     bool(*player_ready)(void*,Method*)=nullptr;
+    // Ordinary photography uses its own original transition constructor and
+    // scene loader. It must not be converted into an OutGame MV with default
+    // crowd/stage settings, nor use an OutGame menu-return tree.
+    bool(*photography_can_route)()=nullptr;
+    bool(*photography_open)(const PhotoSelection&)=nullptr;
+    void(*photography_cancel)()=nullptr;
+    const char*(*photography_error)()=nullptr;
+    bool(*photography_current)(void*,void*)=nullptr;
 };
 inline bool descriptor_equal(const Descriptor&a,const Descriptor&b){
     if(strcmp(a.stage_asset,b.stage_asset)||strcmp(a.timeline_asset,b.timeline_asset)
        ||a.actor_count!=b.actor_count||a.stage_max_capacity!=b.stage_max_capacity
        ||a.detach_actors_on_player_destroyed!=b.detach_actors_on_player_destroyed)return false;
+    const PhotoSelection& p=a.photo;const PhotoSelection& q=b.photo;
+    if(p.source_kind!=q.source_kind||p.is_preview!=q.is_preview||p.is_original!=q.is_original
+        ||p.screen_transition!=q.screen_transition||strcmp(p.stage_id,q.stage_id)||strcmp(p.music_id,q.music_id)
+        ||p.actor_count!=q.actor_count)return false;
+    for(size_t i=0;i<p.actor_count;++i)if(strcmp(p.actors[i].costume_id,q.actors[i].costume_id)
+        ||strcmp(p.actors[i].hair_id,q.actors[i].hair_id))return false;
     for(size_t i=0;i<a.actor_count;++i){const Actor&x=a.actors[i];const Actor&y=b.actors[i];
         if(strcmp(x.character_id,y.character_id)||strcmp(x.descriptor_name,y.descriptor_name)
            ||x.name_is_null!=y.name_is_null||x.actor_index!=y.actor_index||x.track_index!=y.track_index
@@ -69,17 +84,20 @@ public:
     bool set_api(Api api){if(active())return false;reset();api_=api;return valid_api();}
     // Supply only a descriptor associated with THIS presenter's actual player.
     // Capture.selected(player, descriptor) is the integration boundary.
-    bool observe(void*presenter,void*player,const Descriptor&descriptor){
+    bool observe(void*presenter,void*player,const Descriptor&descriptor,uint64_t selection_identity=0){
         if(!valid_api()||!idoly_mp4_queue::detail::descriptor(descriptor))return false;
         try{
-            if(!live_type(presenter,"Solis.OutGame.LivePlayerScreenPresenter")
+            if(descriptor.photo.source_kind==1){
+                if(!live_type(presenter,"Solis.Photography.PhotographyLivePresenter")
+                    ||!live_type(player,"Solis.Common.Photography.PhotographyLive3DPresenter"))return false;
+            }else if(!live_type(presenter,"Solis.OutGame.LivePlayerScreenPresenter")
                 ||!live_type(player,"Solis.Common.SolisLivePlayer"))return false;
             if(get(observed_presenter_)==presenter&&get(observed_player_)==player
-                &&descriptor_equal(observed_,descriptor))return true;
+                &&descriptor_equal(observed_,descriptor)&&observed_identity_==selection_identity)return true;
             uint32_t p=api_.retain(presenter);if(!p)return false;
             uint32_t v=api_.retain(player);if(!v){api_.release(p);return false;}
             drop(observed_presenter_);drop(observed_player_);observed_presenter_=p;observed_player_=v;
-            observed_=descriptor;return true;
+            observed_=descriptor;observed_identity_=selection_identity;++observed_revision_;return true;
         }catch(...){fail("original_selection_observer_failed");return false;}
     }
     bool begin(const Descriptor&descriptor,uint64_t now){
@@ -87,13 +105,18 @@ public:
         release_attempt();error_="none";phase_=Phase::idle;cancel_requested_=false;
         if(!valid_api()){fail("replay_api_unavailable");return false;}
         if(!idoly_mp4_queue::detail::descriptor(descriptor)){fail("invalid_mv_descriptor");return false;}
+        if(descriptor.photo.source_kind==1&&(!api_.photography_open||!api_.photography_can_route
+            ||!api_.photography_current||!api_.photography_cancel)){
+            fail("photography_replay_api_unavailable");return false;
+        }
         target_=descriptor;started_=now;phase_=Phase::closing;return true;
     }
     // Read-only readiness for accepting Queue Run. A loaded native bridge or
     // server settings window alone does not imply an original game router.
     bool can_route()const{
         if(!valid_api())return false;
-        try{void*scene=api_.scene_instance(nullptr);return scene&&api_.alive(scene)&&!api_.scene_busy(scene,nullptr);}
+        try{if(api_.photography_can_route&&api_.photography_can_route())return true;
+            void*scene=api_.scene_instance(nullptr);return scene&&api_.alive(scene)&&!api_.scene_busy(scene,nullptr);}
         catch(...){return false;}
     }
     void tick(uint64_t now){
@@ -104,8 +127,17 @@ public:
             ?"previous_mv_close_timeout":"queued_mv_load_timeout");return;}
         try{
             if(phase_==Phase::closing){
-                void*scene=api_.scene_instance(nullptr);if(!scene||!api_.alive(scene)||api_.scene_busy(scene,nullptr))return;
                 void*presenter=get(observed_presenter_),*player=get(observed_player_);
+                if(target_.photo.source_kind==1){
+                    if(!api_.photography_can_route())return;
+                    if(observed_.photo.source_kind==1&&api_.photography_current(presenter,player)
+                        &&descriptor_equal(observed_,target_)){
+                        if(!keep(result_presenter_,presenter)||!keep(result_player_,player)){fail("replay_gc_handle_failed");return;}
+                        phase_=Phase::ready;return;
+                    }
+                    phase_=Phase::opening;started_=now;
+                }else{
+                void*scene=api_.scene_instance(nullptr);if(!scene||!api_.alive(scene)||api_.scene_busy(scene,nullptr))return;
                 if(api_.top_screen(scene,nullptr)==presenter&&live_type(presenter,"Solis.OutGame.LivePlayerScreenPresenter")&&live_type(player,"Solis.Common.SolisLivePlayer")){
                     // End assumes the original player has finished binding.
                     // Never tear down a half-initialized original MV ourselves.
@@ -122,6 +154,7 @@ public:
                     close_consumed_=false;phase_=Phase::waiting_for_close;started_=now;return;
                 }
                 phase_=Phase::opening;started_=now;
+                }
             }
             if(phase_==Phase::waiting_for_close){
                 if(!close_consumed_){
@@ -142,20 +175,44 @@ public:
                 phase_=Phase::opening;started_=now;
             }
             if(phase_==Phase::opening){
+                if(target_.photo.source_kind==1){
+                    if(!api_.photography_can_route())return;
+                    phase_=Phase::waiting_for_open;started_=now;opening_revision_=observed_revision_;
+                    if(!api_.photography_open(target_.photo)){
+                        const char* reason=api_.photography_error?api_.photography_error():nullptr;
+                        fail(reason&&reason[0]?reason:"photography_scene_load_failed");
+                    }
+                    return;
+                }
                 void*scene=api_.scene_instance(nullptr);if(!scene||!api_.alive(scene)||api_.scene_busy(scene,nullptr))return;
                 if(!construct_transition()){fail("queued_mv_construction_failed");return;}
                 Root state(api_,api_.live_state(nullptr));if(!state){fail("live_player_state_unavailable");return;}
-                Root tree(api_,api_.tree_with_param(state.get(),get(transition_),nullptr));if(!tree){fail("live_player_tree_unavailable");return;}
+                Root tree(api_,api_.tree_with_param(state.get(),get(transition_),nullptr));
+                if(!tree){fail("live_player_tree_unavailable");return;}
                 if(!keep(tree_,tree.get())){fail("replay_gc_handle_failed");return;}
                 // Set the phase BEFORE original OpenTree: its original async
                 // initializer may synchronously publish the new player.
-                phase_=Phase::waiting_for_open;started_=now;api_.open_tree(scene,tree.get(),nullptr,nullptr);return;
+                phase_=Phase::waiting_for_open;started_=now;opening_revision_=observed_revision_;
+                api_.open_tree(scene,get(tree_),nullptr,nullptr);return;
             }
             if(phase_==Phase::waiting_for_open){
+                if(target_.photo.source_kind==1){
+                    if(cancel_requested_&&api_.photography_can_route()){finish_cancel();return;}
+                    const char* reason=api_.photography_error?api_.photography_error():nullptr;
+                    if(!cancel_requested_&&reason&&reason[0]&&strcmp(reason,"none")){fail(reason);return;}
+                }
                 void*presenter=get(observed_presenter_),*player=get(observed_player_);
                 if(!presenter||!api_.alive(presenter)||!api_.alive(player))return;
-                void*scene=api_.scene_instance(nullptr);if(!scene||!api_.alive(scene)||api_.scene_busy(scene,nullptr)
-                    ||api_.top_screen(scene,nullptr)!=presenter||!api_.player_ready(player,nullptr))return;
+                if(target_.photo.source_kind==1){
+                    if(!api_.photography_can_route()||!api_.photography_current(presenter,player))return;
+                }else{
+                    void*scene=api_.scene_instance(nullptr);if(!scene||!api_.alive(scene)||api_.scene_busy(scene,nullptr)
+                        ||api_.top_screen(scene,nullptr)!=presenter||!api_.player_ready(player,nullptr))return;
+                }
+                // Photo's root is nested inside a pooled screen. Until its
+                // new initializer publishes a fresh selection identity, the
+                // old still-active MV cannot satisfy or fail this new route.
+                if(target_.photo.source_kind==1&&observed_revision_==opening_revision_)return;
                 // The original pool can reuse a presenter/player pair. The
                 // exact current top screen, ready player and associated frozen
                 // descriptor matter; pointer novelty is not a lifecycle proof.
@@ -171,7 +228,9 @@ public:
     void resume_clock(uint64_t now){if(active())started_=now;}
     // An original navigation already in flight must settle before the queue
     // starts another job. Cancellation stops export, not the original UI task.
-    void cancel(){if(active()){cancel_requested_=true;if(phase_==Phase::closing||phase_==Phase::opening)finish_cancel();}}
+    void cancel(){if(active()&&!cancel_requested_){cancel_requested_=true;
+        if(target_.photo.source_kind==1&&api_.photography_cancel)api_.photography_cancel();
+        if(phase_==Phase::closing||phase_==Phase::opening)finish_cancel();}}
     bool reset(){if(active())return false;clear_all();return true;}
     Phase phase()const{return phase_;}
     const char*error()const{return error_;}
@@ -199,7 +258,8 @@ private:
     bool live_type(void*p,const char*name)const{return p&&api_.alive(p)&&api_.is_type(p,name);}
     void release_attempt(){drop(transition_);drop(tree_);drop(closing_presenter_);drop(closing_player_);drop(result_presenter_);drop(result_player_);drop(closing_task_source_);closing_task_=UniTask16{};close_consumed_=false;}
     void finish_cancel(){release_attempt();phase_=Phase::cancelled;error_="cancelled";}
-    void clear_all(){release_attempt();drop(observed_presenter_);drop(observed_player_);phase_=Phase::idle;error_="none";}
+    void clear_all(){release_attempt();drop(observed_presenter_);drop(observed_player_);
+        observed_identity_=observed_revision_=opening_revision_=0;phase_=Phase::idle;error_="none";}
     void fail(const char*error){release_attempt();phase_=Phase::failed;error_=error;}
     bool construct_transition(){
         Root param(api_,api_.new_object(Kind::out_game_param));
@@ -232,7 +292,8 @@ private:
             &&api_.set_bool(transition.get(),"isDebugMode",false)&&keep(transition_,transition.get());
     }
     Api api_{};Descriptor observed_{},target_{};
-    Phase phase_=Phase::idle;const char*error_="none";uint64_t started_=0;
+    Phase phase_=Phase::idle;const char*error_="none";uint64_t started_=0,
+        observed_identity_=0,observed_revision_=0,opening_revision_=0;
     UniTask16 closing_task_{};bool close_consumed_=false,cancel_requested_=false;
     uint32_t observed_presenter_=0,observed_player_=0,closing_presenter_=0,closing_player_=0,
         transition_=0,tree_=0,result_presenter_=0,result_player_=0,closing_task_source_=0;

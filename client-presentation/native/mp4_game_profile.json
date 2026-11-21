@@ -52,6 +52,108 @@
       "registration_pointer_slot": "0x9fc5cc0",
       "native_abi": "UniTask16(void*,void*,bool,CancellationToken8,const MethodInfo*)"
     },
+    "photography_initialize": {
+      "type": "Solis.Photography.PhotographyLivePresenter",
+      "name": "InitializeAsync",
+      "parameter_count": 3,
+      "static": false,
+      "rva": "0x551184c",
+      "prefix": "ff4302d1fe2b00f9f85f06a9f65707a9",
+      "return": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "param",
+          "type": "Solis.Photography.Data.IPhotographyTransition",
+          "metadata_type_index": 60581
+        },
+        {
+          "name": "controller",
+          "type": "Solis.Photography.PhotographyCaptureController",
+          "metadata_type_index": 68084
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "metadata_method_index": 2776,
+      "token_row": 2777,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0x9ab0058",
+      "native_abi": "UniTask16(void*,void*,void*,CancellationToken8,const MethodInfo*)"
+    },
+    "photography_end": {
+      "type": "Solis.Photography.PhotographyLivePresenter",
+      "name": "End",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x5511fe0",
+      "prefix": "fe0f1ff8001840f9800000b4e1031faa",
+      "return": "System.Void",
+      "parameters": [],
+      "metadata_method_index": 2783,
+      "token_row": 2784,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0x9ab0090",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "photography_player_initialize": {
+      "type": "Solis.Common.Photography.PhotographyLive3DPresenter",
+      "name": "InitializeAsync",
+      "parameter_count": 2,
+      "static": false,
+      "rva": "0x887f06c",
+      "prefix": "ffc301d1fe5f04a9f65705a9f44f06a9",
+      "return": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "data",
+          "type": "Solis.Common.Photography.PhotographyLiveData",
+          "metadata_type_index": 68188
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "metadata_method_index": 160753,
+      "token_row": 3155,
+      "module": "solis-submodule.Runtime.dll",
+      "registration_pointer_slot": "0x9fc81a0",
+      "native_abi": "UniTask16(void*,void*,CancellationToken8,const MethodInfo*)"
+    },
+    "photo_mode_is_mv": {
+      "type": "Solis.Photography.PhotographyLiveModePresenter",
+      "name": "get_IsMvMode",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x53eea3c",
+      "prefix": "081840f9a80000b408a140391f010071",
+      "return": "System.Boolean",
+      "parameters": [],
+      "metadata_method_index": 2728,
+      "token_row": 2729,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0x9aafed8",
+      "native_abi": "bool(void*,const MethodInfo*)"
+    },
+    "active_enabled": {
+      "type": "UnityEngine.Behaviour",
+      "name": "get_isActiveAndEnabled",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x8f7bb50",
+      "prefix": "fe0f1ef8f44f01a9f48700b081d647f9",
+      "return": "System.Boolean",
+      "parameters": [],
+      "metadata_method_index": 164639,
+      "token_row": 3147,
+      "module": "UnityEngine.CoreModule.dll",
+      "registration_pointer_slot": "0xa01edd8",
+      "native_abi": "bool(void*,const MethodInfo*)"
+    },
     "director_get_asset": {
       "type": "UnityEngine.Playables.PlayableDirector",
       "name": "get_playableAsset",
@@ -1397,6 +1499,57 @@
       "module": "ActorSwing.Runtime.dll",
       "registration_pointer_slot": "0x9aa6428",
       "native_abi": "void(const MethodInfo*)"
+    },
+    "photo_select_to_array": {
+      "type": ".SelectList`2",
+      "name": "ToArray",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x71589b8",
+      "prefix": "fe67bca9f85f01a9f65702a9f44f03a9",
+      "return": "generic-parameter:TResult[]",
+      "parameters": [],
+      "native_abi": "void*(void*,const MethodInfo*)",
+      "generic_binding": true,
+      "runtime_closed_method_info_required": true,
+      "metadata_method_index": 157626,
+      "token_row": 28,
+      "module": "solis-submodule.Runtime.dll",
+      "generic_proof": {
+        "type_definition_index": 22884,
+        "constructor_instructions": [
+          {
+            "rva": "0x7158994",
+            "word": "f40301aa"
+          },
+          {
+            "rva": "0x715899c",
+            "word": "f30302aa"
+          },
+          {
+            "rva": "0x71589a0",
+            "word": "f50300aa"
+          },
+          {
+            "rva": "0x71589a8",
+            "word": "b44e01a9"
+          }
+        ],
+        "original_calls": [
+          {
+            "rva": "0x5fe6570",
+            "target": "0x715898c",
+            "word": "0x9445c907"
+          },
+          {
+            "rva": "0x57788c4",
+            "target": "0x71589b8",
+            "word": "0x9467803d"
+          }
+        ],
+        "declared_return": "generic-parameter:2557[]"
+      },
+      "scope": "Pinned original FasterLinq.SelectList shared reference-generic body"
     }
   },
   "fields": {
@@ -1421,6 +1574,14 @@
     "selection_descriptor_adv": 50,
     "selection_descriptor_render_layer": 52,
     "presenter_player": 224,
+    "photo_root_mode": 48,
+    "photo_mode_player": 32,
+    "photo_mode_data": 48,
+    "photo_data_stage": 16,
+    "photo_data_timeline": 24,
+    "photo_data_descriptors": 32,
+    "photo_data_characters": 40,
+    "player_built": 112,
     "player_director_controller": 56,
     "brain_update_mode": 48,
     "brain_blend_update_mode": 52,
@@ -1459,6 +1620,8 @@
     "properties_gain": 16,
     "mixer_pan": 20,
     "mixer_spatial": 24,
+    "photo_select_source": 16,
+    "photo_select_selector": 24,
     "rendering_camera": 144,
     "rendering_final_target": 344
   },
@@ -1588,6 +1751,54 @@
       "name": "_player",
       "offset": 224,
       "metadata_field_index": 32985
+    },
+    "photo_root_mode": {
+      "type": "Solis.Photography.PhotographyLiveModePresenter",
+      "name": "_livePresenter",
+      "offset": 48,
+      "metadata_field_index": 2215
+    },
+    "photo_mode_player": {
+      "type": "Solis.Common.Photography.PhotographyLive3DPresenter",
+      "name": "_3DPresenter",
+      "offset": 32,
+      "metadata_field_index": 2166
+    },
+    "photo_mode_data": {
+      "type": "Solis.Photography.Data.PhotographyLiveTransitionData",
+      "name": "_data",
+      "offset": 48,
+      "metadata_field_index": 2168
+    },
+    "photo_data_stage": {
+      "type": "System.String",
+      "name": "<StageSceneName>k__BackingField",
+      "offset": 16,
+      "metadata_field_index": 108814
+    },
+    "photo_data_timeline": {
+      "type": "System.String",
+      "name": "<TimelineSceneName>k__BackingField",
+      "offset": 24,
+      "metadata_field_index": 108815
+    },
+    "photo_data_descriptors": {
+      "type": "System.Collections.Generic.IEnumerable`1<Solis.Common.SolisActorDescriptor>",
+      "name": "<ActorDescriptors>k__BackingField",
+      "offset": 32,
+      "metadata_field_index": 108816
+    },
+    "photo_data_characters": {
+      "type": "System.String[]",
+      "name": "<CharacterIds>k__BackingField",
+      "offset": 40,
+      "metadata_field_index": 108817
+    },
+    "player_built": {
+      "type": "System.Boolean",
+      "name": "<Built>k__BackingField",
+      "offset": 112,
+      "metadata_field_index": 109371
     },
     "player_director_controller": {
       "type": "Solis.Common.Live.SolisLiveTimelineController",
@@ -1816,6 +2027,20 @@
       "name": "spatialBlend",
       "offset": 24,
       "metadata_field_index": 135452
+    },
+    "photo_select_source": {
+      "type": "System.Collections.Generic.List`1<generic-parameter:2556>",
+      "name": "_source",
+      "offset": 16,
+      "metadata_field_index": 105866,
+      "offset_proof": "Original closed SelectList constructor stores x1 at self+0x10"
+    },
+    "photo_select_selector": {
+      "type": "System.Func`2<generic-parameter:2556,generic-parameter:2557>",
+      "name": "_selector",
+      "offset": 24,
+      "metadata_field_index": 105867,
+      "offset_proof": "Original closed SelectList constructor stores x2 at self+0x18"
     }
   },
   "runtime_types": {

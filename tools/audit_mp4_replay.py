@@ -67,8 +67,9 @@ FIELD_SELECT={
 }
 
 
-def c_exports(original,platform):
-    wanted={name:abi for name,abi in EXPORTS.values()};found={}
+def c_exports(original,platform,*,selected=None):
+    bindings=EXPORTS if selected is None else selected
+    wanted={name:abi for name,abi in bindings.values()};found={}
     data=original.b
     if platform=='android':
         offset=struct.unpack_from('<Q',data,40)[0];size,count=struct.unpack_from('<HH',data,58)
@@ -114,7 +115,7 @@ def c_exports(original,platform):
     need(set(found)==set(wanted),'replay_export_missing')
     return {alias:{'export':name,'rva':hex(found[name]),'prefix':data[original.offset(found[name]):original.offset(found[name])+16].hex(),
             'native_abi':abi,'dynamic_symbol':True,'has_method_info_argument':False,
-            'export_trie_and_symtab_agree':platform=='ios'} for alias,(name,abi) in EXPORTS.items()}
+            'export_trie_and_symtab_agree':platform=='ios'} for alias,(name,abi) in bindings.items()}
 
 
 def build_profile(original,platform):

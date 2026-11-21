@@ -12,6 +12,68 @@ import pytest
 from tools import stage_mp4_preview as delivery
 
 SOURCE = "a" * 40
+PHOTOGRAPHY_HEADERS = {"client-presentation/native/" + name for name in (
+    "mp4_photography_replay_factory.hpp", "mp4_photography_replay_profile.hpp")}
+
+
+@pytest.fixture
+def native_source_receipt(tmp_path, monkeypatch):
+    required = delivery.MP4_NATIVE | delivery.MP4_ANDROID_PROFILES | {
+        "client-presentation/native/mp4_android_session.hpp"}
+    values = {}
+    for name in required:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(("compiled current native source: " + name).encode())
+        values[name] = delivery.sha(path)
+    monkeypatch.setattr(delivery, "ROOT", tmp_path)
+    return tmp_path, values
+
+
+@pytest.mark.parametrize("android", [False, True])
+@pytest.mark.parametrize("missing", sorted(PHOTOGRAPHY_HEADERS))
+def test_both_platform_receipts_require_each_compiled_photography_replay_header(native_source_receipt, android, missing):
+    _, values = native_source_receipt
+    assert PHOTOGRAPHY_HEADERS <= delivery.MP4_NATIVE
+    assert all(Path(name).suffix in (".h", ".hpp") for name in delivery.MP4_NATIVE)
+    delivery.mp4_native_sources(values, android=android)
+    del values[missing]
+    with pytest.raises(ValueError, match="source_closure_missing"):
+        delivery.mp4_native_sources(values, android=android)
+
+
+@pytest.mark.parametrize("android", [False, True])
+@pytest.mark.parametrize("changed", sorted(PHOTOGRAPHY_HEADERS))
+def test_compiled_photography_replay_header_changes_after_build_are_rejected(native_source_receipt, android, changed):
+    root, values = native_source_receipt
+    (root / changed).write_text("different replay implementation after native compilation")
+    with pytest.raises(ValueError, match="source_bytes_changed"):
+        delivery.mp4_native_sources(values, android=android)
+
+
+@pytest.mark.parametrize("profile", ["mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json"])
+def test_android_requires_actual_builder_profile_json_pins_but_darwin_does_not(native_source_receipt, profile):
+    root, values = native_source_receipt
+    assert "client-presentation/native/" + profile in delivery.MP4_ANDROID_PROFILES
+    headers_only = {name: digest for name, digest in values.items() if not name.endswith(".json")}
+    delivery.mp4_native_sources(headers_only)  # Darwin does not emit JSON source hashes.
+    with pytest.raises(ValueError, match="source_closure_missing"):
+        delivery.mp4_native_sources(headers_only, android=True)
+    selected = "client-presentation/native/" + profile
+    missing = {name: digest for name, digest in values.items() if name != selected}
+    with pytest.raises(ValueError, match="source_closure_missing"):
+        delivery.mp4_native_sources(missing, android=True)
+    (root / selected).write_text('{"changed_after_native_build":true}')
+    with pytest.raises(ValueError, match="source_bytes_changed"):
+        delivery.mp4_native_sources(values, android=True)
+
+
+def test_actual_android_native_builder_emits_all_new_compiled_and_profile_source_pins():
+    builder = delivery.module("mp4_photography_android_build_contract", delivery.ROOT / "client-presentation/native/build_native.py")
+    emitted = {path.relative_to(delivery.ROOT).as_posix() for path in builder.sources()}
+    assert PHOTOGRAPHY_HEADERS | delivery.MP4_ANDROID_PROFILES <= emitted
+    assert delivery.MP4_NATIVE <= emitted
+    assert len(emitted) + 1 <= 64  # The package validator also counts its pinned dependency builder.
 
 
 @pytest.mark.parametrize("platform", ["android", "ios"])

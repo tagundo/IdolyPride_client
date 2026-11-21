@@ -7,6 +7,8 @@ namespace idoly_mp4_game {
 inline Api with_original_calls(Api api,const GameProfile& profile,uintptr_t image_base) {
 #define IDMP4_GAME_CALL(name) api.name=reinterpret_cast<decltype(api.name)>(image_base+profile.name.rva)
     IDMP4_GAME_CALL(object_get_name);
+    IDMP4_GAME_CALL(photo_mode_is_mv);
+    IDMP4_GAME_CALL(active_enabled);
     IDMP4_GAME_CALL(director_get_asset);
     IDMP4_GAME_CALL(director_get_binding);
     IDMP4_GAME_CALL(brain_output_camera);

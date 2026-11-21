@@ -2350,6 +2350,78 @@
       "return_type": "Cysharp.Threading.Tasks.UniTask",
       "registration_pointer_slot_rva": 175308288,
       "prefix16": "ff4302d1f85f05a9f65706a9f44f07a9"
+    },
+    "mp4_photography_initialize": {
+      "name": "Solis.Photography.PhotographyLivePresenter.InitializeAsync",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 393,
+      "metadata_method_index": 2782,
+      "token_row": 2783,
+      "rva": 48933844,
+      "return_type_index": 76556,
+      "parameters": [
+        {
+          "name": "param",
+          "metadata_type_index": 60433,
+          "type_name": "Solis.Photography.Data.IPhotographyTransition"
+        },
+        {
+          "name": "controller",
+          "metadata_type_index": 67968,
+          "type_name": "Solis.Photography.PhotographyCaptureController"
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50712,
+          "type_name": "System.Threading.CancellationToken"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 486,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": 169979968,
+      "prefix16": "ff4302d1f85f05a9f65706a9f44f07a9"
+    },
+    "mp4_photography_player_initialize": {
+      "name": "Solis.Common.Photography.PhotographyLive3DPresenter.InitializeAsync",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23537,
+      "metadata_method_index": 161173,
+      "token_row": 3156,
+      "rva": 117301336,
+      "return_type_index": 76556,
+      "parameters": [
+        {
+          "name": "data",
+          "metadata_type_index": 68072,
+          "type_name": "Solis.Common.Photography.PhotographyLiveData"
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50712,
+          "type_name": "System.Threading.CancellationToken"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 134,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": 175317736,
+      "prefix16": "ff0302d1f85f04a9f65705a9f44f06a9"
+    },
+    "mp4_photography_end": {
+      "name": "Solis.Photography.PhotographyLivePresenter.End",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 393,
+      "metadata_method_index": 2789,
+      "token_row": 2790,
+      "rva": 48935868,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 486,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 169980024,
+      "prefix16": "001840f9600000b4010080d2e516fb17"
     }
   },
   "hook_names": [
@@ -2405,7 +2477,10 @@
     "mp4_graph_mode",
     "mp4_brain_delta",
     "mp4_core_camera",
-    "mp4_player_initialize"
+    "mp4_player_initialize",
+    "mp4_photography_initialize",
+    "mp4_photography_player_initialize",
+    "mp4_photography_end"
   ],
   "segments": {
     "__TEXT": {
@@ -2447,12 +2522,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 1696,
+    "bytes": 1792,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 424,
+    "bytes": 448,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {

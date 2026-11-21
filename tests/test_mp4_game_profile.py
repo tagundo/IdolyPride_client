@@ -68,3 +68,26 @@ def test_profile_header_rejects_missing_platform_method():
     del ios['methods']['bundle_unload']
     with pytest.raises(ValueError,match='platform_api_aliases_differ'):
         audit.render_header(android,ios)
+
+
+def test_photography_bindings_preserve_actual_owner_async_abi_and_lazy_producer():
+    for name in ('mp4_game_profile.json','mp4_game_ios_profile.json'):
+        profile=json.loads((NATIVE/name).read_text())
+        methods=profile['methods'];fields=profile['fields']
+        assert methods['photography_initialize']['native_abi']=='UniTask16(void*,void*,void*,CancellationToken8,const MethodInfo*)'
+        assert methods['photography_player_initialize']['native_abi']=='UniTask16(void*,void*,CancellationToken8,const MethodInfo*)'
+        assert methods['photography_end']['native_abi']=='void(void*,const MethodInfo*)'
+        assert methods['photo_mode_is_mv']['native_abi']=='bool(void*,const MethodInfo*)'
+        assert methods['active_enabled']['native_abi']=='bool(void*,const MethodInfo*)'
+        assert fields['photo_root_mode']==0x30 and fields['photo_mode_player']==0x20
+        assert fields['photo_mode_data']==0x30 and fields['player_built']==0x70
+        assert [fields['photo_data_'+n] for n in ('stage','timeline','descriptors','characters')]==[0x10,0x18,0x20,0x28]
+        descriptor=profile['field_proof']['photo_data_descriptors']
+        assert descriptor['type']=='System.Collections.Generic.IEnumerable`1<Solis.Common.SolisActorDescriptor>'
+        assert descriptor['name']=='<ActorDescriptors>k__BackingField'
+        select=methods['photo_select_to_array']
+        assert select['runtime_closed_method_info_required'] and select['native_abi']=='void*(void*,const MethodInfo*)'
+        assert select['module']=='solis-submodule.Runtime.dll' and select['token_row']==28
+        assert fields['photo_select_source']==0x10 and fields['photo_select_selector']==0x18
+        assert select['generic_proof']['constructor_instructions'][-1]['word']=='b44e01a9'
+        assert select['generic_proof']['declared_return'].endswith('[]')

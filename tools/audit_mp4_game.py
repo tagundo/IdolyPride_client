@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 import resource
 import struct
-from audit_mp4_ios_game import Original, SELECT, FIELD_SELECT, need
+from audit_mp4_ios_game import Original, SELECT, FIELD_SELECT, need, photography_generic_binding
 from extract_client_schema import ClientImage
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -95,11 +95,15 @@ def build_profile(metadata:bytes,native:bytes)->dict:
         args=[] if method['static'] else ['void*']
         args.extend(original.native_type(arg['type']) for arg in method['parameters'])
         method['native_abi']=original.native_type(method['return'])+'('+','.join([*args,'const MethodInfo*'])+')'
+    photo_select, photo_fields = photography_generic_binding(original, 'android')
+    methods['photo_select_to_array'] = photo_select
     fields={};proof={}
     for alias,(owner,name) in FIELD_SELECT.items():
         available=original.fields(owner);need(name in available,'field_identity_missing:'+owner+'.'+name)
         found=available[name];need(type(found['offset']) is int and found['offset']>=0,'field_offset_invalid')
         fields[alias]=found['offset'];proof[alias]={'type':owner,'name':name,**found}
+    fields.update({name: row['offset'] for name, row in photo_fields.items()})
+    proof.update(photo_fields)
     render=original.fields('UnityEngine.Rendering.Universal.RenderingData')
     camera=original.fields('UnityEngine.Rendering.Universal.CameraData')
     fields['rendering_camera']=render['cameraData']['offset']-16+camera['camera']['offset']-16

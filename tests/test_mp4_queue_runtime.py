@@ -139,6 +139,22 @@ int main(int argc,char** argv){
     auto* bactor=obj(obj(get<void*>(get<void*>(b,0x10),0x10))->pointers[0]);auto* bd=obj(get<void*>(ptr(bactor),0x28));auto* bassets=obj(get<void*>(get<void*>(ptr(bd),0x10),0x10));obj(bassets->pointers[0])->name="body_MUTATED";
     void* c=make_selection("C");select_param(c);current_graphics.render_scale=.75f;current_graphics.quality=20;pump();
     assert(IDMP4QueueRun()==0);assert(IDMP4SessionStart(30,1,1,16000000,192000)!=0);
+    if(scenario=="priority_pause"){
+        // A host server-stop pause arrives before the queued Run's first Unity
+        // tick. It must win without waiting for the occupied command slot.
+        assert(IDMP4QueuePause()==0);
+        assert(session_core::requested_pause_reason==IDMP4_PAUSE_USER&&session_core::queue_pause_pending);
+        assert(session_core::queue_request.kind==session_core::QueueCommandKind::none);
+        char pending_status[16384]{};assert(IDMP4QueueStatus(pending_status,sizeof pending_status));
+        assert(std::strstr(pending_status,"\"command_pending\":true"));
+        for(int i=0;i<4;++i)pump();
+        assert(session_core::queue_paused&&!session_core::queue_running&&!opened&&!session_core::queue_active_id[0]);
+        assert(session_core::queue_store().count()==2&&session_core::queue_store().at(0)->state==qm::State::pending);
+        char status[16384]{};assert(IDMP4QueueStatus(status,sizeof status));
+        std::printf("{\"queue\":%s,\"priority_pause\":true}\n",status);
+        session_core::queue_replay().reset();session_core::selection.reset();session_core::game.reset_observations();assert(handles.empty());
+        session_core::queue_store().close();if(session_core::queue_exports>=0)close(session_core::queue_exports);session_core::close_configuration(session_core::configured);return 0;
+    }
     bool cancelled=false,paused=false,resumed=false,ownership_checked=false,storage_fault_verified=false;unsigned parked=0;int opening_at_cancel=0;
     if(scenario=="cancel_before_begin"||scenario=="session_cancel_before_begin"){
         // Queue starts its native session on one tick; cancellation happens
@@ -355,3 +371,12 @@ def test_paused_enqueue_does_not_substitute_selection_or_wait_forever(run_queue,
     assert result["queue"]["jobs"] == []
     assert result["queue"]["command_pending"] is False
     assert result["queue"]["error_code"] == error
+
+
+def test_host_pause_wins_over_pending_run_before_unity_tick(run_queue):
+    result = run_queue("priority_pause")
+    assert result["priority_pause"] is True
+    assert result["queue"]["paused"] is True
+    assert result["queue"]["running"] is False
+    assert result["queue"]["command_pending"] is False
+    assert [job["state"] for job in result["queue"]["jobs"]] == ["pending", "pending"]

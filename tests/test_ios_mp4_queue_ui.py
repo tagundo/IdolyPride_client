@@ -93,3 +93,60 @@ const retry=e.posted.find(x=>x.action==='mp4_queue_retry');assert.deepEqual(retr
 e.respond(retry,{available:true,can_run:true,running:false,phase:'idle',jobs:[completed,{...interrupted,state:'pending',output_id:'',error_code:'none'}]});await flush();
 assert.equal(api.translateUI('큐 실행','en'),'Run queue');assert.equal(api.translateUI('현재 MV 추가','ja'),'現在のMVを追加');app.dispose();
 """)
+
+
+def test_queue_scene_preparation_replaces_idle_or_previous_terminal_summary_and_stale_progress():
+    run_js(r"""
+const e=environment(),app=api.createSettingsApp(e.scope,e.document,e.timers);
+e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
+e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
+async function sample(session,queue){
+ e.elements.get('panel-mp4').fire('toggle');await flush();
+ e.respond(e.posted.filter(x=>x.action==='mp4_status').at(-1),session);
+ e.respond(e.posted.filter(x=>x.action==='mp4_queue_status').at(-1),{available:true,can_run:false,running:false,command_pending:false,phase:'idle',jobs:[],...queue});await flush();
+}
+for(const phase of ['idle','completed','cancelled','failed']){
+ await sample({phase,ready:false,frames:200,total_frames:200,width:1920,height:1080,error_code:phase==='failed'?'capture_failed':'none'},
+  {running:true,phase:'replaying'});
+ assert.equal(e.elements.get('mp4-summary').textContent,'게임 화면을 준비하고 있습니다.');
+ assert.equal(e.elements.get('mp4-progress').hidden,true);
+ if(phase==='failed')assert.equal(e.elements.get('mp4-feedback').textContent,'capture_failed');
+}
+// Enqueue can be accepted before its first native Unity tick creates the job.
+await sample({phase:'idle',ready:false},{command_pending:true});
+assert.equal(e.elements.get('mp4-summary').textContent,'게임 화면을 준비하고 있습니다.');
+for(const [language,expected] of [['ja','ゲーム画面を準備しています。'],['en','Preparing the game scene.']]){
+ e.elements.get('interface_language').value=language;e.elements.get('interface_language').fire('change');await flush();
+ assert.equal(e.elements.get('mp4-summary').textContent,expected);
+}
+app.dispose();
+""")
+
+
+def test_queue_work_does_not_replace_active_capture_pause_or_failure_feedback():
+    run_js(r"""
+const e=environment(),app=api.createSettingsApp(e.scope,e.document,e.timers);
+e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
+e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
+async function sample(session,queue){
+ e.elements.get('panel-mp4').fire('toggle');await flush();
+ e.respond(e.posted.filter(x=>x.action==='mp4_status').at(-1),{ready:false,frames:41,total_frames:100,...session});
+ e.respond(e.posted.filter(x=>x.action==='mp4_queue_status').at(-1),{available:true,can_run:false,running:true,command_pending:true,phase:'waiting_for_scene',jobs:[],...queue});await flush();
+}
+for(const [phase,label] of [['preparing_audio','음원 준비 중'],['rendering','MP4 렌더링'],['finishing','MP4 마무리 중'],['cancelling','취소 중'],['pausing','MP4 일시 정지 중…'],['paused','MP4 일시 정지']]){
+ await sample({phase,pause_reason:'user_paused'});
+ assert.equal(e.elements.get('mp4-summary').textContent,label+' · 41 / 100');
+ assert.equal(e.elements.get('mp4-progress').hidden,false);assert.equal(e.elements.get('mp4-progress').value,.41);
+ if(['paused','pausing'].includes(phase))assert.match(e.elements.get('mp4-feedback').textContent,/계속하기/);
+}
+await sample({phase:'failed',error_code:'audio_mix_failed'},{running:false,command_pending:false,phase:'failed',error_code:'queued_mv_prepare_failed'});
+assert.match(e.elements.get('mp4-summary').textContent,/MP4 실패/);
+assert.equal(e.elements.get('mp4-feedback').textContent,'audio_mix_failed');
+assert.equal(e.elements.get('mp4-queue-feedback').textContent,'queued_mv_prepare_failed');
+await sample({phase:'completed',frames:100},{running:false,command_pending:false,phase:'completed'});
+assert.equal(e.elements.get('mp4-summary').textContent,'MP4 완료 · 100 / 100');assert.equal(e.elements.get('mp4-progress').hidden,false);
+await sample({phase:'idle',frames:0,total_frames:0},{running:false,command_pending:false,phase:'idle'});
+assert.equal(e.elements.get('mp4-summary').textContent,'3D MV 준비 대기');app.dispose();
+""")

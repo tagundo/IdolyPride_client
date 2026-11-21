@@ -26,6 +26,13 @@ SELECT = {
  'presenter_update': ('Solis.OutGame.LivePlayerScreenPresenter','Update',0),
  'player_initialize': ('Solis.Common.SolisLivePlayer','InitializeAsync',3,
     ('Solis.Common.SolisLivePlayerParam','System.Boolean','System.Threading.CancellationToken')),
+ 'photography_initialize': ('Solis.Photography.PhotographyLivePresenter','InitializeAsync',3,
+    ('Solis.Photography.Data.IPhotographyTransition','Solis.Photography.PhotographyCaptureController','System.Threading.CancellationToken')),
+ 'photography_end': ('Solis.Photography.PhotographyLivePresenter','End',0),
+ 'photography_player_initialize': ('Solis.Common.Photography.PhotographyLive3DPresenter','InitializeAsync',2,
+    ('Solis.Common.Photography.PhotographyLiveData','System.Threading.CancellationToken')),
+ 'photo_mode_is_mv': ('Solis.Photography.PhotographyLiveModePresenter','get_IsMvMode',0),
+ 'active_enabled': ('UnityEngine.Behaviour','get_isActiveAndEnabled',0),
  'director_get_asset': ('UnityEngine.Playables.PlayableDirector','get_playableAsset',0),
  'director_get_time': ('UnityEngine.Playables.PlayableDirector','get_time',0),
  'director_set_time': ('UnityEngine.Playables.PlayableDirector','set_time',1),
@@ -122,6 +129,14 @@ FIELD_SELECT = {
  'selection_descriptor_adv': ('Solis.Common.SolisActorDescriptor','_useADVSettings'),
  'selection_descriptor_render_layer': ('Solis.Common.SolisActorDescriptor','_renderingLayerMaskBaseIndex'),
  'presenter_player': ('Solis.OutGame.LivePlayerScreenPresenter','_player'),
+ 'photo_root_mode': ('Solis.Photography.PhotographyLivePresenter','_livePresenter'),
+ 'photo_mode_player': ('Solis.Photography.PhotographyLiveModePresenter','_3DPresenter'),
+ 'photo_mode_data': ('Solis.Photography.PhotographyLiveModePresenter','_data'),
+ 'photo_data_stage': ('Solis.Common.Photography.PhotographyLiveData','<StageSceneName>k__BackingField'),
+ 'photo_data_timeline': ('Solis.Common.Photography.PhotographyLiveData','<TimelineSceneName>k__BackingField'),
+ 'photo_data_descriptors': ('Solis.Common.Photography.PhotographyLiveData','<ActorDescriptors>k__BackingField'),
+ 'photo_data_characters': ('Solis.Common.Photography.PhotographyLiveData','<CharacterIds>k__BackingField'),
+ 'player_built': ('Solis.Common.Live.SolisLivePlayerBase','<Built>k__BackingField'),
  'player_director_controller': ('Solis.Common.Live.SolisLivePlayerBase','_timelineController'),
  'brain_update_mode': ('Cinemachine.CinemachineBrain','m_UpdateMethod'),
  'brain_blend_update_mode': ('Cinemachine.CinemachineBrain','m_BlendUpdateMethod'),
@@ -396,6 +411,65 @@ class Original:
         need(len(found)==1,'method_identity_ambiguous:'+owner+'.'+name);return found[0]
 
 
+def photography_generic_binding(original, platform):
+    """Retain the audited shared reference-generic SelectList.ToArray body.
+
+    Open generic metadata has no codegen-module slot or concrete field offsets.
+    These addresses are the actual shared body called by the original closed
+    ActorCostume -> String producer; the runtime must resolve the descriptor
+    object's own closed MethodInfo and require this exact methodPointer.
+    """
+    locations = {
+        'android': (0x71589b8, 'fe67bca9f85f01a9f65702a9f44f03a9',
+                    ((0x7158994, 'f40301aa'), (0x715899c, 'f30302aa'), (0x71589a0, 'f50300aa'), (0x71589a8, 'b44e01a9'))),
+        'ios': (0x515a1c8, 'fa67bba9f85f01a9f65702a9f44f03a9',
+                ((0x515a1a0, 'f30302aa'), (0x515a1a4, 'f40301aa'), (0x515a1a8, 'f50300aa'), (0x515a1b4, 'b44e01a9'))),
+    }
+    address, prefix, ctor = locations[platform]
+    need(original.b[original.offset(address):original.offset(address)+16].hex() == prefix,
+         'photo_select_to_array_prefix_differs')
+    for location, word in ctor:
+        need(original.b[original.offset(location):original.offset(location)+4].hex() == word,
+             'photo_select_constructor_differs')
+    calls = {'android': ((0x5fe6570, 0x715898c), (0x57788c4, address)),
+             'ios': ((0x3ae0120, 0x515a190), (0x31424b4, address))}[platform]
+    call_proof = []
+    for call, target in calls:
+        word = struct.unpack_from('<I', original.b, original.offset(call))[0]
+        displacement = word & 0x3ffffff
+        if displacement & (1 << 25): displacement -= 1 << 26
+        need(word >> 26 == 0b100101 and call + displacement*4 == target,
+             'photo_select_original_call_differs')
+        call_proof.append({'rva': hex(call), 'target': hex(target), 'word': hex(word)})
+    owner = '.SelectList`2'
+    tid = original.type_id(owner)
+    definition = original.types[tid][1]
+    declarations = []
+    for index in range(definition[9], definition[9]+definition[16]):
+        method = struct.unpack_from('<7I4H', original.m, original.h[12]+index*36)
+        if original.string(method[0]) == 'ToArray' and method[10] == 0:
+            declarations.append((index, method))
+    need(len(declarations) == 1, 'photo_select_declaration_differs')
+    method_index, declaration = declarations[0]
+    need((declaration[6] & 0xffffff) == 28, 'photo_select_token_differs')
+    fields = original.fields(owner)
+    need(set(fields) == {'_source', '_selector'}, 'photo_select_fields_differ')
+    return {'type': owner, 'name': 'ToArray', 'parameter_count': 0, 'static': False,
+        'rva': hex(address), 'prefix': prefix, 'return': 'generic-parameter:TResult[]',
+        'parameters': [], 'native_abi': 'void*(void*,const MethodInfo*)',
+        'generic_binding': True, 'runtime_closed_method_info_required': True,
+        'metadata_method_index': method_index, 'token_row': 28, 'module': 'solis-submodule.Runtime.dll',
+        'generic_proof': {'type_definition_index': tid,
+            'constructor_instructions': [{'rva': hex(rva), 'word': word} for rva, word in ctor],
+            'original_calls': call_proof,
+            'declared_return': original.type_name(declaration[2])},
+        'scope': 'Pinned original FasterLinq.SelectList shared reference-generic body'}, {
+        'photo_select_source': {'type': owner, 'name': '_source', **fields['_source'], 'offset': 0x10,
+            'offset_proof': 'Original closed SelectList constructor stores x1 at self+0x10'},
+        'photo_select_selector': {'type': owner, 'name': '_selector', **fields['_selector'], 'offset': 0x18,
+            'offset_proof': 'Original closed SelectList constructor stores x2 at self+0x18'},
+    }
+
 def build_profile(metadata:bytes,native:bytes)->dict:
     original=Original(metadata,native)
     methods={alias:original.method(*select) for alias,select in SELECT.items()}
@@ -403,6 +477,8 @@ def build_profile(metadata:bytes,native:bytes)->dict:
         args=[] if method['static'] else ['void*']
         args.extend(original.native_type(arg['type']) for arg in method['parameters'])
         method['native_abi']=original.native_type(method['return'])+'('+','.join([*args,'const MethodInfo*'])+')'
+    photo_select, photo_fields = photography_generic_binding(original, 'ios')
+    methods['photo_select_to_array'] = photo_select
     methods['actor_swing_process']['aggregate_abi']={
         'parameter':'stream','managed_value_type':'UnityEngine.Animations.AnimationStream',
         'native_bytes':56,'aapcs64_lowering':'indirect pointer in x1',
@@ -414,6 +490,8 @@ def build_profile(metadata:bytes,native:bytes)->dict:
         need(name in available,'field_identity_missing:'+owner+'.'+name)
         found=available[name];need(type(found['offset']) is int and found['offset']>=0,'field_offset_invalid')
         fields[alias]=found['offset'];field_proof[alias]={'type':owner,'name':name,**found}
+    fields.update({name: row['offset'] for name, row in photo_fields.items()})
+    field_proof.update(photo_fields)
     render=original.fields('UnityEngine.Rendering.Universal.RenderingData')
     camera=original.fields('UnityEngine.Rendering.Universal.CameraData')
     fields['rendering_camera']=render['cameraData']['offset']-16+camera['camera']['offset']-16

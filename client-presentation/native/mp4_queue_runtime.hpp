@@ -37,6 +37,7 @@ static bool queue_available=false,queue_running=false,queue_paused=false,queue_r
     queue_export_started=false,queue_cancel_requested=false,queue_clock_was_paused=false;
 static bool queue_active_published=false;
 static bool queue_can_run=false,queue_blocked=false;
+static bool queue_pause_pending=false;
 static int queue_exports=-1;
 static char queue_root[path_capacity]{},queue_export_root[path_capacity]{},queue_active_id[33]{},queue_last_added[33]{};
 static char queue_error[65]="none",queue_phase[32]="idle";
@@ -54,7 +55,7 @@ inline void queue_process(const QueueRequest& request);
 inline void queue_observe_selection(){
     void* player=game.selected_player();
     if(player&&selection.selected(player,queue_descriptor_work)==Result::ok)
-        queue_replay().observe(game.selected_presenter(),player,queue_descriptor_work);
+        queue_replay().observe(game.selected_presenter(),player,queue_descriptor_work,selection.identity(player));
 }
 inline void install_queue_api(const replay_model::Api& api,bool(*snapshot)(queue_model::Graphics&),
     bool(*apply)(const queue_model::Graphics*),const char* profile){
@@ -67,7 +68,7 @@ inline void queue_set_error(const char* value){snprintf(queue_error,sizeof(queue
 inline void queue_publish(){
     char next[16384]{};size_t at=0;
     auto append=[&](const char* format,auto... values){if(at>=sizeof(next))return;const int n=snprintf(next+at,sizeof(next)-at,format,values...);if(n<0||static_cast<size_t>(n)>=sizeof(next)-at){at=sizeof(next);return;}at+=static_cast<size_t>(n);};
-    pthread_mutex_lock(&control_mutex);const bool command_pending=queue_request.kind!=QueueCommandKind::none;pthread_mutex_unlock(&control_mutex);
+    pthread_mutex_lock(&control_mutex);const bool command_pending=queue_pause_pending||queue_request.kind!=QueueCommandKind::none;pthread_mutex_unlock(&control_mutex);
     append("{\"schema\":1,\"available\":%s,\"command_pending\":%s,\"error_code\":\"%s\",\"last_added_job_id\":\"%s\",\"running\":%s,\"paused\":%s,\"phase\":\"%s\",\"capacity\":8,\"current_job_id\":\"%s\",\"replay_available\":%s,\"can_run\":%s,\"jobs\":[",
         queue_available?"true":"false",command_pending?"true":"false",queue_error,queue_last_added,
         queue_running?"true":"false",queue_paused?"true":"false",queue_phase,queue_active_id,queue_replay_available?"true":"false",queue_can_run?"true":"false");
@@ -101,6 +102,16 @@ inline bool queue_accept(QueueCommandKind kind,Options options={},int operation=
     if(kind==QueueCommandKind::enqueue&&!valid_options(options))return false;
     if(kind==QueueCommandKind::mutate&&(operation<IDMP4_QUEUE_CANCEL||operation>IDMP4_QUEUE_MOVE||!queue_model::detail::hex(id,32)||position<0))return false;
     pthread_mutex_lock(&control_mutex);
+    if(kind==QueueCommandKind::pause){
+        if(!queue_available||queue_blocked){pthread_mutex_unlock(&control_mutex);return false;}
+        // A server stop must win over a previously accepted Run/Resume even
+        // before Unity gets another tick. This is a host-only signal; managed
+        // task cleanup and the persistent queue transition happen on Unity.
+        queue_pause_pending=true;requested_pause_reason=IDMP4_PAUSE_USER;
+        if(queue_request.kind==QueueCommandKind::run||queue_request.kind==QueueCommandKind::resume)
+            queue_request.kind=QueueCommandKind::none;
+        pthread_mutex_unlock(&control_mutex);return true;
+    }
     if(!queue_available||queue_blocked||queue_request.kind!=QueueCommandKind::none
         ||((kind==QueueCommandKind::run||kind==QueueCommandKind::resume)&&!queue_can_run&&!queue_active_published)){pthread_mutex_unlock(&control_mutex);return false;}
     queue_request=QueueRequest{};queue_request.kind=kind;queue_request.options=options;
@@ -112,7 +123,7 @@ inline bool queue_accept(QueueCommandKind kind,Options options={},int operation=
 inline size_t queue_status(char* buffer,size_t capacity){
     if(!buffer||!capacity)return 0;
     pthread_mutex_lock(&control_mutex);
-    const size_t n=strlen(queue_published);const bool pending=queue_request.kind!=QueueCommandKind::none;
+    const size_t n=strlen(queue_published);const bool pending=queue_pause_pending||queue_request.kind!=QueueCommandKind::none;
     if(n>=capacity){pthread_mutex_unlock(&control_mutex);return 0;}
     memcpy(buffer,queue_published,n+1);
     // Commands are accepted on host threads before the next Unity tick can
@@ -305,7 +316,9 @@ inline void queue_execute(){
 }
 inline void queue_tick(){
     pthread_mutex_lock(&queue_owner_mutex);
-    QueueRequest request{};pthread_mutex_lock(&control_mutex);request=queue_request;pthread_mutex_unlock(&control_mutex);
+    QueueRequest request{};pthread_mutex_lock(&control_mutex);request=queue_request;
+    const bool priority_pause=queue_pause_pending;queue_pause_pending=false;pthread_mutex_unlock(&control_mutex);
+    if(priority_pause){QueueRequest pause{};pause.kind=QueueCommandKind::pause;queue_process(pause);}
     CaptureDecision capture=CaptureDecision::ready;
     if(request.kind==QueueCommandKind::enqueue)capture=queue_capture_readiness(request);
     if(capture!=CaptureDecision::waiting){

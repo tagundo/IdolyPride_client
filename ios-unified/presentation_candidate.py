@@ -26,7 +26,8 @@ MAX_RECEIPT = 256 * 1024
 SHARED_HOOKS = frozenset(("shared_setup", "shared_is_cached", "shared_file_path",
                          "shared_pre_download", "shared_downloader_update"))
 MP4_HOOKS = frozenset(("mp4_presenter_update", "mp4_capture_pass", "mp4_end_camera",
-                      "mp4_graph_mode", "mp4_brain_delta", "mp4_core_camera", "mp4_player_initialize"))
+                      "mp4_graph_mode", "mp4_brain_delta", "mp4_core_camera", "mp4_player_initialize",
+                      "mp4_photography_initialize", "mp4_photography_player_initialize", "mp4_photography_end"))
 NEW_BASE_HOOKS = SHARED_HOOKS | MP4_HOOKS
 
 
@@ -171,11 +172,11 @@ def verify(stock_ipa, patched_unity, plan_path, library):
 
 
 def verify_base_delta(incoming, patched_unity, original_sha256, plan_path):
-    """Keep every previous base patch, permitting eleven named new hook sites.
+    """Keep every previous base patch, permitting fifteen named new hook sites.
 
     This is independent of the stock reconstruction: old presentation hooks,
     bootstrap instructions and all other executable bytes must still equal the
-    translated 41-hook base image. Five shared-resource and six MV-export
+    translated 41-hook base image. Five shared-resource and ten MV-export
     entries must have their original prefixes; their gateways must occupy old
     zero padding. Existing entry points and gateways receive no exception.
     """

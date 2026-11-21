@@ -35,7 +35,7 @@ struct Object {
 std::vector<std::unique_ptr<Object>> heap;
 std::map<void*,Object*> objects;
 std::map<uint32_t,void*> handles;
-uint32_t serial=1;
+uint32_t serial=1;bool unity_alive_only=false;
 Object* make(const char* type,const char* text="") {
     auto item=std::make_unique<Object>();item->type=type;item->text=text;
     Object* out=item.get();objects[out->memory.data()]=out;
@@ -50,12 +50,17 @@ bool is_type(void* p,const char* type) {
     auto found=objects.find(p);
     return found!=objects.end()&&found->second->type==type;
 }
-bool alive(void* p){return p&&objects.count(p);}
-uint32_t retain(void* p){if(!alive(p))return 0;handles[serial]=p;return serial++;}
+bool alive(void* p){
+    if(unity_alive_only&&p&&objects.count(p))assert(objects.at(p)->type=="Solis.Common.SolisLivePlayer"
+        ||objects.at(p)->type=="Solis.Common.Photography.PhotographyLive3DPresenter"
+        ||objects.at(p)->type=="Solis.Common.Photography.Photography360Live3DPresenter");
+    return p&&objects.count(p);
+}
+uint32_t retain(void* p){if(!p||!objects.count(p))return 0;handles[serial]=p;return serial++;}
 void* retained(uint32_t h){auto found=handles.find(h);return found==handles.end()?nullptr:found->second;}
 void release(uint32_t h){assert(handles.erase(h)==1);}
-size_t array_length(void* p){assert(alive(p));return objects.at(p)->items.size();}
-void* array_data(void* p){assert(alive(p));return objects.at(p)->items.data();}
+size_t array_length(void* p){assert(p&&objects.count(p));return objects.at(p)->items.size();}
+void* array_data(void* p){assert(p&&objects.count(p));return objects.at(p)->items.data();}
 size_t string_utf8(void* p,char* out,size_t cap) {
     if(!p)return 0;assert(is_type(p,"System.String"));const auto& text=objects.at(p)->text;
     if(text.size()<cap)std::memcpy(out,text.c_str(),text.size()+1);
@@ -64,7 +69,7 @@ size_t string_utf8(void* p,char* out,size_t cap) {
 Api api() {
     Api a{};a.is_type=is_type;a.alive=alive;a.retain=retain;
     a.retained=retained;a.release=release;a.array_length=array_length;
-    a.array_data=array_data;a.string_utf8=string_utf8;return a;
+    a.array_data=array_data;a.string_utf8=string_utf8;a.exact_type=is_type;return a;
 }
 Object* string(const char* text){return make("System.String",text);}
 Object* array(std::initializer_list<void*> items) {
@@ -244,6 +249,81 @@ void gameobjects_and_duplicates() {
     put(second.actor,0x20,int32_t(3));succeeds(c,f,d);assert(d.actor_count==2);
     c.reset();assert(handles.empty());
 }
+void photography_selection() {
+    unity_alive_only=true;
+    Capture c;assert(c.set_api(api(),Layout{}));Fixture first,second;
+    first.player->type="Solis.Common.Photography.PhotographyLive3DPresenter";
+    second.character->text="mana";second.asset0->text="mdl_mana-body-002";
+    auto* data=make("Solis.Common.Photography.PhotographyLiveData");
+    auto* characters=array({ptr(first.character),ptr(second.character)});characters->type="System.String[]";
+    auto* descriptors=array({ptr(first.descriptor),ptr(second.descriptor)});
+    descriptors->type="Solis.Common.SolisActorDescriptor[]";
+    put(data,0x10,ptr(first.stage));put(data,0x18,ptr(first.timeline));
+    put(data,0x20,ptr(descriptors));put(data,0x28,ptr(characters));
+    auto* transition=make("Solis.Photography.Data.PhotographyLiveScreenTransitionData");
+    auto* stage_master=make("Solis.Common.Proto.Master.PhotoQuestStage");
+    auto* music_master=make("Solis.Common.Proto.Master.PhotoQuestMusic");
+    put(stage_master,0x18,ptr(string("photo-stage-001")));put(music_master,0x18,ptr(string("photo-music-002")));
+    auto* costume_a=make("Solis.Common.Data.ActorCostume");auto* costume_b=make("Solis.Common.Data.ActorCostume");
+    for(auto* costume:{costume_a,costume_b}){
+        auto* master=make("Solis.Common.Proto.Master.Costume");auto* hair=make("Solis.Common.Proto.Master.Hair");
+        put(master,0x18,ptr(string(costume==costume_a?"costume-rei-001":"costume-mana-002")));
+        put(hair,0x18,ptr(string(costume==costume_a?"hair-rei-003":"hair-mana-004")));
+        put(costume,0x10,ptr(master));put(costume,0x18,ptr(hair));
+    }
+    auto* costumes=list(array({ptr(costume_a),ptr(costume_b)}),2);
+    put(transition,0x10,uint8_t(1));put(transition,0x48,ptr(costumes));
+    put(transition,0x68,ptr(stage_master));put(transition,0x70,ptr(music_master));put(transition,0x80,uint8_t(0));
+    assert(c.observe_photography(ptr(first.player),ptr(data),ptr(descriptors))==Result::waiting);
+    assert(!c.identity(ptr(first.player)));
+    assert(c.attach_photography_transition(ptr(first.player),ptr(transition))==Result::ok);
+    Descriptor frozen{};assert(c.selected(ptr(first.player),frozen)==Result::ok);
+    assert(frozen.actor_count==2&&!std::strcmp(frozen.actors[1].character_id,"mana"));
+    assert(frozen.actors[0].actor_index==0&&frozen.actors[1].track_index==1);
+    assert(frozen.photo.source_kind==1&&frozen.photo.actor_count==2&&frozen.photo.screen_transition==1);
+    assert(frozen.photo.is_preview==1&&!frozen.photo.is_original);
+    assert(!std::strcmp(frozen.photo.stage_id,"photo-stage-001"));
+    assert(!std::strcmp(frozen.photo.actors[1].hair_id,"hair-mana-004"));
+    assert(!std::strcmp(frozen.actors[1].assets[0],"mdl_mana-body-002"));
+    const uint64_t identity=c.identity(ptr(first.player));assert(identity);
+    // The original loader may subsequently change masks and backing assets.
+    put(first.descriptor,0x34,int32_t(99));put(second.descriptor,0x34,int32_t(100));
+    first.asset0->text="changed_after_loader";second.character->text="changed_after_loader";
+    Descriptor after{};assert(c.selected(ptr(first.player),after)==Result::ok);
+    assert(!std::memcmp(&frozen,&after,sizeof frozen));
+    // Reinitializing the same player must invalidate the previous identity on
+    // malformed parameters, including a detached array that data does not own.
+    auto* alien=array({ptr(first.descriptor),ptr(second.descriptor)});alien->type=descriptors->type;
+    assert(c.observe_photography(ptr(first.player),ptr(data),ptr(alien))!=Result::ok);
+    assert(!c.identity(ptr(first.player))&&c.selected(ptr(first.player),after)!=Result::ok);
+    assert(c.attach_photography_transition(ptr(first.player),ptr(transition))!=Result::ok);
+    descriptors->type=".SelectList`2";
+    assert(c.observe_photography(ptr(first.player),ptr(data),ptr(descriptors))!=Result::ok);
+    descriptors->type="Solis.Common.SolisActorDescriptor[]";characters->items.pop_back();
+    assert(c.observe_photography(ptr(first.player),ptr(data),ptr(descriptors))!=Result::ok);
+    characters->items.push_back(ptr(second.character));
+    first.player->type="Solis.Common.Photography.Photography360Live3DPresenter";
+    assert(c.observe_photography(ptr(first.player),ptr(data),ptr(descriptors))!=Result::ok);
+    first.player->type="Solis.Common.Photography.PhotographyLive3DPresenter";
+    assert(c.observe_photography(ptr(first.player),ptr(data),ptr(descriptors))==Result::waiting);
+    transition->type="Solis.Photography.Data.SpecialPhotographyLiveTransitionData";
+    assert(c.attach_photography_transition(ptr(first.player),ptr(transition))==Result::unsupported);
+    assert(!c.identity(ptr(first.player)));
+    transition->type="Solis.Photography.Data.PhotographyLiveScreenTransitionData";
+    stage_master->type="Solis.Common.Proto.Api.SpecialPhotoQuestStage";
+    assert(c.attach_photography_transition(ptr(first.player),ptr(transition))==Result::unsupported);
+    stage_master->type="Solis.Common.Proto.Master.PhotoQuestStage";
+    put(transition,0x80,uint8_t(2));
+    assert(c.attach_photography_transition(ptr(first.player),ptr(transition))!=Result::ok);
+    put(transition,0x80,uint8_t(1));put(costumes,0x18,int32_t(1));
+    assert(c.attach_photography_transition(ptr(first.player),ptr(transition))!=Result::ok);
+    put(costumes,0x18,int32_t(2));
+    assert(c.attach_photography_transition(ptr(first.player),ptr(transition))==Result::ok);
+    auto* replaced=make(transition->type.c_str());replaced->memory=transition->memory;
+    assert(c.attach_photography_transition(ptr(first.player),ptr(replaced))==Result::stale);
+    assert(!c.identity(ptr(first.player)));
+    c.reset();assert(handles.empty());unity_alive_only=false;
+}
 int main(int argc,char** argv) {
     assert(argc==2);std::string mode=argv[1];
     if(mode=="immutable")immutable();
@@ -251,6 +331,7 @@ int main(int argc,char** argv) {
     else if(mode=="bounds")bounds_and_types();
     else if(mode=="gameobjects")gameobjects_and_duplicates();
     else if(mode=="lifetimes")lifetimes();
+    else if(mode=="photography")photography_selection();
     else assert(false);
     assert(handles.empty());
 }
@@ -278,7 +359,43 @@ def selection_capture_binary(tmp_path_factory):
     return executable
 
 
-@pytest.mark.parametrize("scenario", ["immutable", "lifetimes", "cache", "bounds", "gameobjects"])
+@pytest.mark.parametrize("scenario", ["immutable", "lifetimes", "cache", "bounds", "gameobjects", "photography"])
 def test_immutable_selection_boundary(selection_capture_binary, scenario):
     result = subprocess.run([str(selection_capture_binary), scenario], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("platform", ["android", "ios"])
+def test_photography_capture_fields_match_pinned_original_profiles(platform):
+    import json
+    import re
+
+    native = ROOT / "client-presentation/native"
+    code = (native / "mp4_selection_capture.hpp").read_text()
+    layout = code.split("struct Layout {", 1)[1].split("};", 1)[0]
+    offsets = {name: int(value, 16) for name, value in re.findall(r"(\w+)=(0x[0-9a-f]+)", layout)}
+    game_name = "mp4_game_profile.json" if platform == "android" else "mp4_game_ios_profile.json"
+    game = json.loads((native / game_name).read_text())
+    for member, alias in {
+        "photo_stage": "photo_data_stage",
+        "photo_timeline": "photo_data_timeline",
+        "photo_descriptors": "photo_data_descriptors",
+        "photo_characters": "photo_data_characters",
+    }.items():
+        assert offsets[member] == game["fields"][alias]
+    replay = json.loads((native / f"mp4_photography_replay_{platform}_profile.json").read_text())
+    fields = {(item["owner"], item["name"]): item for item in replay["fields"].values()}
+    for member, owner, field in [
+        ("photo_transition_preview", "Solis.Photography.Data.AbstPhotographyTransitionData", "<IsPreview>k__BackingField"),
+        ("photo_transition_display", "Solis.Photography.Data.AbstPhotographyTransitionData", "<DisplayActorCostumeList>k__BackingField"),
+        ("photo_transition_stage", "Solis.Photography.Data.PhotographyLiveTransitionData", "<PhotoStage>k__BackingField"),
+        ("photo_transition_music", "Solis.Photography.Data.PhotographyLiveTransitionData", "<PhotoMusic>k__BackingField"),
+        ("photo_transition_original", "Solis.Photography.Data.PhotographyLiveScreenTransitionData", "<IsOriginal>k__BackingField"),
+        ("photo_costume_master", "Solis.Common.Data.ActorCostume", "_costume"),
+        ("photo_hair_master", "Solis.Common.Data.ActorCostume", "_hair"),
+    ]:
+        assert offsets[member] == fields[owner, field]["offset"]
+    for name in ("PhotoQuestStage", "PhotoQuestMusic", "Costume", "Hair"):
+        original = fields[f"Solis.Common.Proto.Master.{name}", "id_"]
+        assert offsets["proto_id"] == original["offset"]
+        assert original["type"] == "System.String"

@@ -12,7 +12,7 @@ def test_initialize_hook_copies_original_selection_before_loader_mutation_and_pr
     if not compiler:pytest.skip('C++ compiler unavailable')
     source=(ROOT/'client-presentation/native/bridge.cpp').read_text()
     begin=source.index('struct Mp4UniTask {')
-    end=source.index('VoidMethod mp4_presenter_update_original;',begin)
+    end=source.index('// BEGIN_MP4_PHOTOGRAPHY_HOOKS',begin)
     wrappers=source[begin:end]
     fixture=r'''
 #include <atomic>

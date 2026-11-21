@@ -14,6 +14,8 @@ HERE = Path(__file__).resolve().parents[1] / "ios-unified"
 sys.path.insert(0, str(HERE))
 import presentation_candidate as candidate
 
+PHOTO_HOOKS = frozenset(("mp4_photography_initialize", "mp4_photography_player_initialize", "mp4_photography_end"))
+
 
 def library_fixture(tmp_path, monkeypatch):
     root = tmp_path / "source"
@@ -138,7 +140,8 @@ def test_previous_base_delta_preserves_old_hooks_and_all_other_sdk_bytes(tmp_pat
     old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch)
     proof=candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
     assert proof['previous_bootstrap_and_presentation_bytes_preserved'] is True
-    assert proof['new_hook_count']==12
+    assert proof['new_hook_count']==15
+    assert PHOTO_HOOKS <= set(proof['new_mp4_hooks'])
     assert proof['new_mp4_hooks']==sorted(candidate.MP4_HOOKS)
     assert proof['new_shared_hooks']==sorted(candidate.SHARED_HOOKS)
     expected[2000]=1;path.write_bytes(expected)
@@ -163,5 +166,27 @@ def test_mp4_delta_never_allows_old_patches_padding_or_other_data_changes(tmp_pa
     row=entries['mp4_presenter_update']
     at={'old_entry':1800,'old_gateway':1900,'new_gateway_padding':row['gateway']+28,'unrelated_data':2000}[location]
     expected[at]^=1;path.write_bytes(expected)
+    with pytest.raises(ValueError,match='prior bootstrap, presentation or SDK byte'):
+        candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
+
+
+@pytest.mark.parametrize('name',sorted(PHOTO_HOOKS))
+def test_photography_route_requires_every_named_hook_in_the_candidate_plan(tmp_path,monkeypatch,name):
+    old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch)
+    assert PHOTO_HOOKS <= candidate.MP4_HOOKS
+    incomplete=dict(entries);incomplete.pop(name)
+    monkeypatch.setattr(candidate,'load_plan',lambda path:{'entries':incomplete})
+    with pytest.raises(ValueError,match='additional hook plan is incomplete'):
+        candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
+    assert path.read_bytes()==expected
+
+
+@pytest.mark.parametrize('name',sorted(PHOTO_HOOKS))
+@pytest.mark.parametrize('part',['entry','gateway'])
+def test_photography_hook_declaration_cannot_substitute_for_its_patched_executable_bytes(tmp_path,monkeypatch,name,part):
+    old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch)
+    row=entries[name]
+    at,size=(row['rva'],4) if part=='entry' else (row['gateway'],len(bytes.fromhex(row['gateway_hex'])))
+    expected[at:at+size]=old[at:at+size];path.write_bytes(expected)
     with pytest.raises(ValueError,match='prior bootstrap, presentation or SDK byte'):
         candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')

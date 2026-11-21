@@ -344,6 +344,7 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
         }''',
         "android/app/Activity.java": '''package android.app; public class Activity extends android.content.Context {
           public int dispatches,lastAction,pauses,destroys,starts;public android.content.Intent started;
+          public Runnable beforeStart;public boolean failStart;
           protected void onCreate(android.os.Bundle b){}protected void onPause(){pauses++;}protected void onDestroy(){destroys++;}
           protected void onResume(){}protected void onStart(){}protected void onStop(){}public boolean isInMultiWindowMode(){return false;}
           protected void onSaveInstanceState(android.os.Bundle b){}protected void onActivityResult(int r,int c,android.content.Intent i){}
@@ -355,7 +356,7 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
           public android.view.Window getWindow(){return new android.view.Window();}
           public android.content.res.Resources getResources(){return new android.content.res.Resources();}
           public boolean isFinishing(){return false;}public boolean isDestroyed(){return false;}
-          public void startActivity(android.content.Intent i){started=i;starts++;}
+          public void startActivity(android.content.Intent i){if(beforeStart!=null)beforeStart.run();if(failStart)throw new RuntimeException("launch failed");started=i;starts++;}
         }''',
         "com/google/firebase/MessagingUnityPlayerActivity.java": '''package com.google.firebase;
           public class MessagingUnityPlayerActivity extends android.app.Activity {}''',
@@ -372,6 +373,9 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
     sources[package + "UnifiedMP4Export.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedMP4Export {static void restoreState(android.content.Context c,android.os.Bundle b){}
         static void attachGame(android.app.Activity a){}static void geometryChanged(android.app.Activity a){}
+        static boolean menuOpening;static int menuOpenFailures;
+        static void serverMenuOpening(android.app.Activity a){menuOpening=true;}
+        static void serverMenuOpenFailed(android.app.Activity a){menuOpening=false;menuOpenFailures++;}
         static void focusChanged(android.app.Activity a,boolean focused){}
         static void gamePaused(android.app.Activity a){}static void gameResumed(android.app.Activity a){}static void gameDestroyed(android.app.Activity a){}
         static void gameStarted(android.app.Activity a){}static void gameStopped(android.app.Activity a){}
@@ -392,6 +396,7 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
           p.down(2,399,0,400,400,1,8,0);need(!p.pending());
           p.down(1,399,0,400,400,1,8,0);p.move(2,399,0);need(!p.pending());
           UnifiedGameActivity activity=new UnifiedGameActivity();
+          activity.beforeStart=()->need(UnifiedMP4Export.menuOpening);
           need(!activity.dispatchTouchEvent(event(0,1,900,50))&&activity.dispatches==1);
           Handler.advance(1999);need(activity.starts==0);Handler.advance(2000);
           need(activity.dispatches==2&&activity.lastAction==MotionEvent.ACTION_CANCEL&&activity.starts==1);
@@ -399,6 +404,9 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
           need(activity.dispatchTouchEvent(event(1,1,900,50))&&activity.dispatches==2);
           SystemClock.now=3000;activity.dispatchTouchEvent(event(0,1,900,50));
           SystemClock.now=3500;activity.dispatchTouchEvent(event(2,1,920,50));Handler.advance(6000);need(activity.starts==1);
+          activity.failStart=true;activity.dispatchTouchEvent(event(0,1,900,50));Handler.advance(8000);
+          need(activity.starts==1&&UnifiedMP4Export.menuOpenFailures==1&&!UnifiedMP4Export.menuOpening);
+          activity.failStart=false;activity.dispatchTouchEvent(event(1,1,900,50));
           activity.dispatchTouchEvent(event(0,1,900,50));activity.onPause();Handler.advance(9000);need(activity.starts==1&&activity.pauses==1);
           activity.dispatchTouchEvent(event(0,1,900,50));activity.onDestroy();Handler.advance(12000);need(activity.starts==1&&activity.destroys==1);
           need(MotionEvent.obtained==MotionEvent.recycled);

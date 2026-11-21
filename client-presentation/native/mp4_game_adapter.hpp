@@ -12,6 +12,7 @@
 namespace idoly_mp4_game {
 using Method = void;
 enum class Result : int { ok=0, waiting=1, unsupported=-1, invalid=-2, failed=-3, stale=-4 };
+enum class SceneKind : uint8_t { none=0,out_game=1,photography=2 };
 constexpr size_t max_audio_clips=32, max_name_bytes=192;
 struct AudioClipProgram {
     char clip_name[max_name_bytes]{};
@@ -36,6 +37,7 @@ struct Layout {
     size_t brain_update_mode=0x30,brain_blend_update_mode=0x34,
         player_binder=0x58,binder_actors=0x40,actor_animation_player=0x20,animation_player_graph=0x28,
         presenter_player=0xe0, player_director_controller=0x38,
+        photo_root_mode=0x30,photo_mode_player=0x20,photo_mode_data=0x30,player_built=0x70,
         player_duration=0x20, player_bgm_source=0x28, player_voice_source=0x30,
         controller_master=0x20, camera_main=0x50, camera_captured=0xa0,
         wrapper_texture=0x10, wrapper_identifier=0x18, pass_identifier=0x88,
@@ -50,6 +52,7 @@ struct Layout {
 };
 struct Api {
     bool (*is_type)(void*,const char*)=nullptr;
+    bool (*exact_type)(void*,const char*)=nullptr;
     bool (*alive)(void*)=nullptr;
     uint32_t (*retain)(void*)=nullptr;
     void* (*retained)(uint32_t)=nullptr;
@@ -75,6 +78,10 @@ struct Api {
     // Apply after the original manual Cinemachine update; verify without
     // writes after rendering. A custom output never falls back to pixel scaling.
     bool (*output_projection)(void*,bool)=nullptr;
+    // Verified PhotographyLiveModePresenter discriminator: true selects its
+    // prerecorded VideoPlayer branch, false selects the separate 3D player.
+    bool (*photo_mode_is_mv)(void*,Method*)=nullptr;
+    bool (*active_enabled)(void*,Method*)=nullptr;
     void* (*director_get_asset)(void*,Method*)=nullptr;
     double (*director_get_time)(void*,Method*)=nullptr;
     double (*director_get_duration)(void*,Method*)=nullptr;
@@ -128,6 +135,7 @@ public:
     bool set_api(Api api) { if(manual_||audio_request_||audio_bundle_||audio_clip_)return false;api_=api;return true; }
     bool set_api(Api api,Layout layout) { if(!set_api(api))return false;layout_=layout;return true; }
     void observe_presenter(void* presenter);
+    void observe_presenter_ended(void* presenter);
     void observe_camera_controller(void* controller);
     Result snapshot(Snapshot& output);
     Result begin_manual();
@@ -153,8 +161,9 @@ public:
     bool has_source_geometry_probe()const{return api_.source_geometry!=nullptr;}
     bool owned_scene_current()const{return manual_&&identities_current();}
     bool owned_primary_scene_current()const{return manual_&&primary_scene_current();}
+    SceneKind scene_kind()const{return scene_kind_;}
     void* selected_presenter()const {void* value=get(presenter_);return value&&live(value)?value:nullptr;}
-    void* selected_player()const {void* presenter=selected_presenter();void* value=field<void*>(presenter,layout_.presenter_player);return type(value,"Solis.Common.SolisLivePlayer")&&live(value)?value:nullptr;}
+    void* selected_player()const {return resolve_selected_player(true);}
     Result source_geometry(int32_t& width,int32_t& height)const {
         if(api_.source_geometry){
             void* controller=get(camera_controller_);
@@ -180,6 +189,7 @@ private:
     Result append_track(void* track,const char* track_name,AudioProgram& output);
     bool identities_current() const;
     bool primary_scene_current() const;
+    void* resolve_selected_player(bool require_ready,void** mode=nullptr,void** data=nullptr,const char** error=nullptr) const;
     bool update_camera(float delta);
     Result collect_actor_graphs(void* player);
     bool actor_graphs_current() const;
@@ -187,7 +197,7 @@ private:
     struct ActorGraph { uint32_t player=0;PlayableGraph graph{};int32_t previous_mode=0; };
     ActorGraph actor_graphs_[32]{};size_t actor_graph_count_=0;
     Api api_{}; Layout layout_{}; Snapshot snapshot_{};
-    uint32_t presenter_=0,camera_controller_=0,player_=0,director_=0,timeline_asset_=0,brain_=0,bgm_source_=0,voice_source_=0,
+    uint32_t presenter_=0,photo_mode_=0,photo_data_=0,camera_controller_=0,player_=0,director_=0,timeline_asset_=0,brain_=0,bgm_source_=0,voice_source_=0,
         camera_=0,captured_texture_=0,cpu_texture_=0,
         audio_request_=0,audio_bundle_=0,audio_clip_=0,audio_array_=0;
     AudioClipProgram expected_audio_{};
@@ -197,6 +207,8 @@ private:
     float camera_step_delta_=0;int32_t previous_brain_update_=0,previous_brain_blend_=0;
     bool manual_=false,output_geometry_applied_=false,shader_was_custom_=false,capture_pending_=false,
         capture_pass_seen_=false,capture_submitted_=false;
+    SceneKind scene_kind_=SceneKind::none;
+    bool owner_replaced_=false;
     bool audio_cancel_pending_=false,audio_failed_=false;
     float previous_shader_time_=0, previous_bgm_volume_=0, previous_voice_volume_=0;
     const char* error_="none";
@@ -215,14 +227,60 @@ inline bool GameAdapter::valid_api() const {
         &&api_.audio_source_get_volume&&api_.audio_source_set_volume;
 }
 inline void GameAdapter::observe_presenter(void* value) {
-    if(!value||!type(value,"Solis.OutGame.LivePlayerScreenPresenter"))return;
-    if(manual_&&get(presenter_)!=value){error_="selected_scene_changed";return;}
+    const SceneKind kind=type(value,"Solis.OutGame.LivePlayerScreenPresenter")?SceneKind::out_game
+        :type(value,"Solis.Photography.PhotographyLivePresenter")?SceneKind::photography:SceneKind::none;
+    if(!value||kind==SceneKind::none)return;
+    if(manual_&&(get(presenter_)!=value||scene_kind_!=kind)){owner_replaced_=true;error_="selected_scene_changed";return;}
     if(get(presenter_)!=value)keep(presenter_,value);
+    if(!manual_){scene_kind_=kind;owner_replaced_=false;}
+}
+inline void GameAdapter::observe_presenter_ended(void* value) {
+    // Original PhotographyLivePresenter.End stops playback but deliberately
+    // retains its Built player, transition and enabled component hierarchy.
+    // A retained wrapper is therefore not evidence that its MV is still open.
+    if(scene_kind_!=SceneKind::photography||!value||get(presenter_)!=value
+        ||!type(value,"Solis.Photography.PhotographyLivePresenter"))return;
+    owner_replaced_=true;error_="selected_scene_changed";
+    drop(presenter_);drop(photo_mode_);drop(photo_data_);
+    scene_kind_=SceneKind::none;
 }
 inline void GameAdapter::observe_camera_controller(void* value) {
     if(!value||!type(value,"VL.Rendering.VLSRPCameraController"))return;
-    if(manual_&&get(camera_controller_)!=value){error_="selected_camera_changed";return;}
+    if(manual_&&get(camera_controller_)!=value){owner_replaced_=true;error_="selected_camera_changed";return;}
     if(get(camera_controller_)!=value)keep(camera_controller_,value);
+}
+inline void* GameAdapter::resolve_selected_player(bool require_ready,void** mode,void** data,const char** error) const {
+    const auto reject=[error](const char* reason)->void*{if(error)*error=reason;return nullptr;};
+    void* owner=get(presenter_);if(!owner||!live(owner))return reject("selected_presenter_missing");
+    if(scene_kind_==SceneKind::out_game){
+        if(!type(owner,"Solis.OutGame.LivePlayerScreenPresenter"))return reject("selected_scene_changed");
+        void* player=field<void*>(owner,layout_.presenter_player);
+        return type(player,"Solis.Common.SolisLivePlayer")&&live(player)?player:reject("selected_mv_not_loaded");
+    }
+    if(scene_kind_!=SceneKind::photography||!type(owner,"Solis.Photography.PhotographyLivePresenter"))
+        return reject("selected_presenter_missing");
+    void* selected_mode=field<void*>(owner,layout_.photo_root_mode);
+    if(!type(selected_mode,"Solis.Photography.PhotographyLiveModePresenter")||!live(selected_mode))
+        return reject("selected_photography_mode_not_loaded");
+    void* selected_data=field<void*>(selected_mode,layout_.photo_mode_data);
+    // The original getter returns false for null data as well. Typed nonnull
+    // transition ownership must be established before interpreting that bool.
+    // This transition derives from System.Object, not UnityEngine.Object.
+    // Typed field provenance and its GC handle establish ownership; passing it
+    // to Unity's object-alive predicate would read the wrong native layout.
+    if(!type(selected_data,"Solis.Photography.Data.PhotographyLiveTransitionData"))
+        return reject("selected_photography_data_not_loaded");
+    if(!api_.photo_mode_is_mv||!api_.active_enabled)return reject("photography_scene_api_unavailable");
+    if(api_.photo_mode_is_mv(selected_mode,nullptr))return reject("selected_video_mv_unsupported");
+    void* player=field<void*>(selected_mode,layout_.photo_mode_player);
+    if(!type(player,"Solis.Common.Photography.PhotographyLive3DPresenter")||!live(player))
+        return reject("selected_photography_3d_not_loaded");
+    if(require_ready&&(field<uint8_t>(player,layout_.player_built)!=1||!api_.active_enabled(owner,nullptr)
+        ||!api_.active_enabled(selected_mode,nullptr)||!api_.active_enabled(player,nullptr)))
+        return reject("selected_photography_3d_not_built");
+    if(mode)*mode=selected_mode;
+    if(data)*data=selected_data;
+    return player;
 }
 inline Result GameAdapter::append_track(void* track,const char* track_name,AudioProgram& output) {
     void* clips=api_.track_get_clips(track,nullptr);
@@ -332,9 +390,11 @@ inline Result GameAdapter::snapshot(Snapshot& output) {
     if(manual_)return fail(Result::invalid,"export_already_owns_scene");
     if(!valid_api())return fail(Result::unsupported,"game_api_unavailable");
     void* presenter=get(presenter_), *controller=get(camera_controller_);
-    if(!presenter||!live(controller))return fail(Result::waiting,"open_selected_mv_first");
-    void* player=field<void*>(presenter,layout_.presenter_player);
-    if(!type(player,"Solis.Common.SolisLivePlayer")||!live(player))return fail(Result::waiting,"selected_mv_not_loaded");
+    if(!presenter||!live(presenter))return fail(Result::waiting,"selected_presenter_missing");
+    void* selected_mode=nullptr,*selected_data=nullptr;const char* selection_error="selected_mv_not_loaded";
+    void* player=resolve_selected_player(true,&selected_mode,&selected_data,&selection_error);
+    if(!player)return fail(Result::waiting,selection_error);
+    if(!controller||!live(controller))return fail(Result::waiting,"selected_render_controller_missing");
     void* timeline=field<void*>(player,layout_.player_director_controller);
     if(!type(timeline,"Solis.Common.Live.SolisLiveTimelineController")||!live(timeline))return fail(Result::waiting,"selected_timeline_not_loaded");
     void* director=field<void*>(timeline,layout_.controller_master);
@@ -357,6 +417,9 @@ inline Result GameAdapter::snapshot(Snapshot& output) {
     if(!keep(player_,player)||!keep(director_,director)||!keep(timeline_asset_,asset)||!keep(camera_,camera)||!keep(bgm_source_,bgm)
         ||(voice&&!keep(voice_source_,voice)))return fail(Result::failed,"managed_handle_allocation_failed");
     if(!voice)drop(voice_source_);
+    if(scene_kind_==SceneKind::photography){
+        if(!keep(photo_mode_,selected_mode)||!keep(photo_data_,selected_data))return fail(Result::failed,"managed_handle_allocation_failed");
+    }else{drop(photo_mode_);drop(photo_data_);}
     void* tracks=api_.timeline_get_tracks(asset,nullptr);
     const size_t count=tracks?api_.array_length(tracks):0;
     if(!tracks||count>256)return fail(Result::unsupported,"timeline_tracks_out_of_bounds");
@@ -392,8 +455,10 @@ inline Result GameAdapter::snapshot(Snapshot& output) {
 }
 inline bool GameAdapter::primary_scene_current() const {
     void* presenter=get(presenter_),*player=get(player_),*director=get(director_),*controller=get(camera_controller_);
-    if(!presenter||!live(player)||!live(director)||!live(controller))return false;
-    if(field<void*>(presenter,layout_.presenter_player)!=player)return false;
+    if(owner_replaced_||!presenter||!live(player)||!live(director)||!live(controller))return false;
+    void* mode=nullptr,*data=nullptr;
+    if(resolve_selected_player(false,&mode,&data)!=player)return false;
+    if(scene_kind_==SceneKind::photography&&(mode!=get(photo_mode_)||data!=get(photo_data_)))return false;
     void* timeline=field<void*>(player,layout_.player_director_controller);
     return timeline&&field<void*>(timeline,layout_.controller_master)==director
         &&api_.director_get_asset(director,nullptr)==get(timeline_asset_)
@@ -689,7 +754,8 @@ inline Result GameAdapter::restore() {
     return geometry_restored?Result::ok:fail(Result::failed,"output_restore_failed");
 }
 inline void GameAdapter::reset_observations() {
-    restore();drop(presenter_);drop(camera_controller_);drop(player_);drop(director_);drop(timeline_asset_);drop(camera_);
+    restore();drop(presenter_);drop(photo_mode_);drop(photo_data_);drop(camera_controller_);drop(player_);drop(director_);drop(timeline_asset_);drop(camera_);
     drop(bgm_source_);drop(voice_source_);drop(brain_);drop_actor_graphs();snapshot_={};error_="none";
+    scene_kind_=SceneKind::none;owner_replaced_=false;
 }
 } // namespace idoly_mp4_game

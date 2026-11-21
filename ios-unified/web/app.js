@@ -570,6 +570,7 @@
 
   Object.assign(UI_TRANSLATIONS.en, {
     "MV를 모은 뒤 큐를 실행하세요.":"Add MVs, then run the queue.",
+    "게임 화면을 준비하고 있습니다.":"Preparing the game scene.",
     "큐 실행":"Run queue","현재 MV 추가":"Add current MV","큐 일시 정지":"Pause queue","큐 계속하기":"Resume queue",
     "큐 실행 중":"Queue running","작업 목록":"Jobs","등록한 작업이 없습니다.":"No jobs added.","MP4 작업 목록":"MP4 jobs",
     "앱을 나가면 멈추고 돌아오면 이어집니다.":"Export pauses when you leave the app and resumes when you return.",
@@ -581,6 +582,7 @@
   });
   Object.assign(UI_TRANSLATIONS.ja, {
     "MV를 모은 뒤 큐를 실행하세요.":"MVを追加してからキューを実行してください。",
+    "게임 화면을 준비하고 있습니다.":"ゲーム画面を準備しています。",
     "큐 실행":"キューを実行","현재 MV 추가":"現在のMVを追加","큐 일시 정지":"キューを一時停止","큐 계속하기":"キューを再開",
     "큐 실행 중":"キューを実行中","작업 목록":"処理リスト","등록한 작업이 없습니다.":"登録された処理はありません。","MP4 작업 목록":"MP4処理リスト",
     "앱을 나가면 멈추고 돌아오면 이어집니다.":"アプリを離れると一時停止し、戻ると処理を再開します。",
@@ -1007,14 +1009,17 @@
       const phase = mp4Status.phase, paused = phase === "paused" || phase === "pausing", active = ["preparing_audio","rendering","finishing","cancelling","pausing","paused"].includes(phase);
       const queuedOutput = Boolean(mp4Status.export_id) && mp4QueueStatus.jobs.some(job => job.output_id === mp4Status.export_id);
       const queueOwnsScene = mp4QueueStatus.running === true || mp4QueueStatus.paused === true || Boolean(mp4QueueStatus.current_job_id);
-      const label = {idle:"3D MV 준비 대기",preparing_audio:"음원 준비 중",rendering:"MP4 렌더링",finishing:"MP4 마무리 중",completed:"MP4 완료",cancelling:"취소 중",cancelled:"취소됨",failed:"MP4 실패",pausing:"MP4 일시 정지 중…",paused:"MP4 일시 정지"}[phase] || "3D MV 준비 대기";
+      const queuePreparing = (mp4QueueStatus.running === true || mp4QueueStatus.command_pending === true)
+        && ["","idle","completed","failed","cancelled"].includes(phase || "");
+      const label = queuePreparing ? "게임 화면을 준비하고 있습니다."
+        : {idle:"3D MV 준비 대기",preparing_audio:"음원 준비 중",rendering:"MP4 렌더링",finishing:"MP4 마무리 중",completed:"MP4 완료",cancelling:"취소 중",cancelled:"취소됨",failed:"MP4 실패",pausing:"MP4 일시 정지 중…",paused:"MP4 일시 정지"}[phase] || "3D MV 준비 대기";
       const frames = count(mp4Status.frames), total = count(mp4Status.total_frames);
       const geometry = integer(mp4Status.width) && integer(mp4Status.height) && mp4Status.width && mp4Status.height ? " · "+mp4Status.width+" × "+mp4Status.height : "";
-      text("mp4-summary",t(label)+(total ? " · "+frames+" / "+total : "")+geometry,false);
+      text("mp4-summary",t(label)+(queuePreparing ? "" : (total ? " · "+frames+" / "+total : "")+geometry),false);
       const pauseHint = mp4Status.pause_reason === "lifecycle_background" ? "앱으로 돌아오면 이어서 처리합니다."
         : mp4Status.pause_reason === "surface_unavailable" ? "게임 화면이 준비되면 계속할 수 있습니다." : "계속하기를 누르면 이어서 처리합니다.";
       text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : paused ? t(pauseHint) : phase === "failed" ? plain(mp4Status.error_code,128) : "",false);
-      el("mp4-progress").hidden = !active && phase !== "completed";
+      el("mp4-progress").hidden = queuePreparing || !active && phase !== "completed";
       el("mp4-progress").value = total ? Math.min(1,frames/total) : 0;
       el("mp4-fields").disabled = !mp4OptionsLoaded || mp4Mutating || active;
       el("mp4-start").disabled = !mp4OptionsLoaded || !validOptions || mp4Pending || active || queueOwnsScene || mp4Status.ready !== true || launchFlushing;

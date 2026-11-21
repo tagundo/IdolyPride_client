@@ -117,7 +117,7 @@ template<class T>T read(void* p,size_t offset){T value{};if(p)std::memcpy(&value
 struct Object {alignas(16) uint8_t storage[512]{};};
 struct Info {std::string type;bool alive=true;void* camera=nullptr;};
 std::unordered_map<void*,Info> objects;
-Object presenter,player,timeline,director,asset,track,track_other,brain,brain_other,camera,other_camera,controller,other_controller;
+Object photo_mode,photo_data,presenter,player,timeline,director,asset,track,track_other,brain,brain_other,camera,other_camera,controller,other_controller;
 void* ptr(Object& object){return object.storage;}
 void typed(Object& object,const char* type){objects[ptr(object)]={type,true,nullptr};}
 template<class T>void field(Object& object,size_t offset,T value){std::memcpy(object.storage+offset,&value,sizeof(value));}
@@ -151,14 +151,15 @@ void* get_asset(void* p,Method*){assert(p==ptr(director));return ptr(asset);}
 void* get_tracks(void* p,Method*){assert(p==ptr(asset));return &tracks;}
 void* get_binding(void* p,void* t,Method*){assert(p==ptr(director)&&mp4_type_is(t,".CinemachineTrack"));return t==ptr(track_other)?ptr(brain_other):ptr(brain);}
 void* get_camera(void* p,Method*){assert(p==ptr(brain)||p==ptr(brain_other));return objects.at(p).camera;}
-struct Api {void*(*director_get_asset)(void*,Method*);void*(*timeline_get_tracks)(void*,Method*);void*(*director_get_binding)(void*,void*,Method*);void*(*brain_output_camera)(void*,Method*);};
-Api mp4_api{get_asset,get_tracks,get_binding,get_camera};
+bool active=true,video=false;bool active_enabled(void*,Method*){return active;}bool is_mv(void*,Method*){return video;}
+struct Api {bool(*active_enabled)(void*,Method*);bool(*photo_mode_is_mv)(void*,Method*);void*(*director_get_asset)(void*,Method*);void*(*timeline_get_tracks)(void*,Method*);void*(*director_get_binding)(void*,void*,Method*);void*(*brain_output_camera)(void*,Method*);};
+Api mp4_api{active_enabled,is_mv,get_asset,get_tracks,get_binding,get_camera};
 
 // Actual source functions are injected below this line.
 @@PRODUCTION@@
 
 void reset(bool indirect=true){
-    events.clear();initialized=has_calls=instance_calls=cached=0;
+    active=true;video=false;events.clear();initialized=has_calls=instance_calls=cached=0;
     mp4_source_verified=true;mp4_replay_verified=false;on_unity=resolve_cells=has_existing=true;
     std::snprintf(mp4_binding_error,sizeof(mp4_binding_error),"%s","none");
     mp4_type_metadata_profile=indirect?mp4game::android_type_metadata_profile:mp4game::ios_type_metadata_profile;
@@ -216,6 +217,19 @@ int main(int argc,char** argv){
     }else if(test=="wrong_class"||test=="dead"){
         if(test=="wrong_class")objects.at(ptr(controller)).type="Other.Controller";else objects.at(ptr(controller)).alive=false;
         assert(mp4_original_current_controller()==nullptr&&instance_calls==1);
+    }else if(test.rfind("photo_",0)==0){
+        typed(presenter,"Solis.Photography.PhotographyLivePresenter");
+        typed(player,"Solis.Common.Photography.PhotographyLive3DPresenter");
+        typed(photo_mode,"Solis.Photography.PhotographyLiveModePresenter");
+        typed(photo_data,"Solis.Photography.Data.PhotographyLiveTransitionData");
+        field(presenter,0x30,ptr(photo_mode));field(photo_mode,0x20,ptr(player));field(photo_mode,0x30,ptr(photo_data));field(player,0x70,true);
+        if(test=="photo_video")video=true;
+        if(test=="photo_inactive")active=false;
+        if(test=="photo_unbuilt")field(player,0x70,false);
+        if(test=="photo_other_player")typed(player,"Solis.Photography.Photography360LiveControlPresenter");
+        if(test=="photo_other_data")typed(photo_data,"Other.Data");
+        if(test=="photo_current")assert(mp4_selected_controller(ptr(presenter))==ptr(controller)&&initialized==2);
+        else assert(mp4_selected_controller(ptr(presenter))==nullptr&&initialized==0);
     }else if(test=="cold_fallback"){
         assert(mp4_selected_controller(ptr(presenter))==ptr(controller));
         assert(initialized==2&&instance_calls==1&&controller_candidates[0].value==ptr(controller));
@@ -316,6 +330,7 @@ def controller_harness(tmp_path_factory):
 
 
 @pytest.mark.parametrize("scenario", (
+    "photo_current", "photo_video", "photo_inactive", "photo_unbuilt", "photo_other_player", "photo_other_data",
     "verified_existing", "unverified", "wrong_thread", "unresolved", "zero_has", "zero_instance",
     "tagged_has", "tagged_instance", "has_false", "wrong_class", "dead", "cold_fallback", "main_current", "candidate_current",
     "wrong_cached_camera", "wrong_original_camera", "camera_changed_after_cache", "ambiguous_timeline_cameras", "no_camera_track",

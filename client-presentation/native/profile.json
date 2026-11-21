@@ -3478,6 +3478,66 @@
       ],
       "source": "mp4-original-typed-profile",
       "is_static": false
+    },
+    "mp4_photography_initialize": {
+      "name": "Solis.Photography.PhotographyLivePresenter.InitializeAsync",
+      "rva": "0x551184c",
+      "prefix16": "ff4302d1fe2b00f9f85f06a9f65707a9",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 2777,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "param",
+          "type": "Solis.Photography.Data.IPhotographyTransition",
+          "metadata_type_index": 60581
+        },
+        {
+          "name": "controller",
+          "type": "Solis.Photography.PhotographyCaptureController",
+          "metadata_type_index": 68084
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_photography_player_initialize": {
+      "name": "Solis.Common.Photography.PhotographyLive3DPresenter.InitializeAsync",
+      "rva": "0x887f06c",
+      "prefix16": "ffc301d1fe5f04a9f65705a9f44f06a9",
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 3155,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "data",
+          "type": "Solis.Common.Photography.PhotographyLiveData",
+          "metadata_type_index": 68188
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_photography_end": {
+      "name": "Solis.Photography.PhotographyLivePresenter.End",
+      "rva": "0x5511fe0",
+      "prefix16": "fe0f1ff8001840f9800000b4e1031faa",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 2784,
+      "return_type": "System.Void",
+      "parameters": [],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
     }
   },
   "graphics_fields": [

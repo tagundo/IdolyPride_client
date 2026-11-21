@@ -100,13 +100,14 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
     source = SOURCE.read_text()
     selected = [method(source, name) for name in ["privateDirectory", "completedFile", "busy", "ready", "observeForegroundReadiness", "requestStart", "requestEnqueue",
                 "beginPending", "gameResumed", "gamePaused", "gameStarted", "gameStopped", "suspendForLifecycle",
-                "resumeForLifecycle", "togglePause", "requestPause", "requestResume", "focusChanged", "gameDestroyed", "cancel"]]
+                "resumeForLifecycle", "togglePause", "requestPause", "requestResume", "focusChanged", "gameDestroyed", "cancel",
+                "requestQueueRun", "bringQueueToForeground", "serverMenuOpening", "serverMenuOpenFailed", "geometryChanged"]]
     selected += [method(source, "requestStart", 1), method(source, "requestEnqueue", 1)]
     prefix = r'''package game.qualiarts.idolypride.localserver;
 import java.io.*;import java.nio.file.*;import java.lang.ref.WeakReference;import java.util.*;
 public final class ControllerHarness {
   static boolean configured=true,initialized=true,queueConfigured=true,saving,resumed,stopped=true,userPaused,allowNative=true,dismissed=true,pendingQueueRun,gameFocused,foregroundSelectionReady;
-  static int[] pending,startedOptions;static long pendingDeadline;static int starts,cancels,suspends,resumes,reason,wakes,enqueues;static boolean enqueueWasResumed;
+  static int[] pending,startedOptions,enqueuedOptions;static long pendingDeadline,menuHandoffDeadline;static int starts,cancels,suspends,resumes,reason,wakes,enqueues,queueRuns,backgroundPrepares;static boolean enqueueWasResumed,allowQueueRun=true;
   static WeakReference<Activity> game=new WeakReference<>(null);
   static JSONObject last=new JSONObject(),lastQueue=new JSONObject();static final Handler MAIN=new Handler();static final Runnable BEGIN=()->{};
   static ViewGroup overlay;static Object overlayText,overlaySave,overlayCancel,overlayPause,overlayDismiss;
@@ -127,9 +128,9 @@ public final class ControllerHarness {
   static int nativeStartV2(int n,int d,int c,int v,int a,int width,int height){starts++;startedOptions=new int[]{n,d,c,v,a,width,height};return 0;}
   static void nativeCancel(){cancels++;}static void nativeSuspend(int value){suspends++;reason=value;}
   static void nativeResume(){resumes++;}static void wake(){wakes++;}
-  static int nativeQueueRun(){return 0;}static void prepareBackground(Activity a){}
-  static int nativeQueueEnqueueV2(int n,int d,int c,int v,int a,int width,int height){enqueues++;enqueueWasResumed=resumed;return 0;}
-  static class UnifiedMP4Background {static void stopCurrent(){}static void focusLost(Activity a){}}
+  static int nativeQueueRun(){if(!allowQueueRun)return -1;queueRuns++;return 0;}static void prepareBackground(Activity a){backgroundPrepares++;}
+  static int nativeQueueEnqueueV2(int n,int d,int c,int v,int a,int width,int height){enqueues++;enqueueWasResumed=resumed;enqueuedOptions=new int[]{n,d,c,v,a,width,height};return 0;}
+  static class UnifiedMP4Background {static void stopCurrent(){}static void focusLost(Activity a){}static boolean ownsSurface(Activity a){return false;}}
   static void require(boolean b,String message){if(!b)throw new AssertionError(message);}
   interface Action {void run()throws Exception;}
   static void rejects(Action a)throws Exception {try{a.run();}catch(IOException expected){return;}throw new AssertionError("unsafe path accepted");}
@@ -180,6 +181,70 @@ public final class ControllerHarness {
     require(!foregroundSelectionReady&&!ready(),"leaving MV while focused invalidates cached eligibility");
     resumed=false;require(!ready()&&!requestEnqueue(menu,30,1,8000000)&&enqueues==1,"cold or invalid selections remain disabled");
     gameDestroyed(selected);require(!foregroundSelectionReady&&!ready(),"destroyed owner cannot keep MV eligibility");
+    // A photo/live presenter may become ready just before focus is lost, before
+    // the 400ms foreground poll has stored its first positive observation.
+    Activity photo=new Activity();game=new WeakReference<>(photo);last=new JSONObject();
+    resumed=true;stopped=false;gameFocused=false;foregroundSelectionReady=false;allowNative=true;
+    gamePaused(photo);allowNative=false;
+    require(foregroundSelectionReady&&ready(),"onPause captures a positive native MV before Unity pauses even without a focused poll");
+    int startsBeforeQueue=starts,preparesBeforeQueue=backgroundPrepares,resumesBeforeQueue=resumes;
+    menu.intent=null;
+    require(requestEnqueue(menu,60,2,0,1920,1080)&&enqueues==2&&!enqueueWasResumed,"paused cached MV accepts its exact V2 queue request");
+    require(Arrays.equals(enqueuedOptions,new int[]{60,1,2,0,192000,1920,1080}),"recommended bitrate sentinel and custom dimensions reach queue admission unchanged");
+    require(game.get()==photo&&menu.intent.target==photo.getClass()&&menu.intent.flags==3,"enqueue brings the existing live Activity forward without creating another player");
+    require(pending==null&&!pendingQueueRun&&starts==startsBeforeQueue,"enqueue does not silently start a one-shot or start the queue");
+    gameResumed(photo);beginPending();
+    require(resumes==resumesBeforeQueue+1&&starts==startsBeforeQueue,"original onResume clears the lifecycle park while native source reconstruction remains independent");
+    // The production C++ capture_resume_* tests execute the target wait and
+    // immutable admission. Here a failed native Run must not reorder the UI.
+    allowQueueRun=false;menu.intent=null;
+    require(!requestQueueRun(menu)&&menu.intent==null&&!pendingQueueRun,"a still-pending native admission cannot launch queue rendering");
+    allowQueueRun=true;allowNative=true;gamePaused(photo);allowNative=false;
+    require(requestQueueRun(menu)&&queueRuns==1&&pendingQueueRun,"persisted queue Run is accepted from the paused server Activity");
+    require(game.get()==photo&&menu.intent.target==photo.getClass()&&menu.intent.flags==3,"Run restores the same owner with reorder/singleTop");
+    beginPending();require(pendingQueueRun&&backgroundPrepares==preparesBeforeQueue,"BEGIN waits for original Activity resume before preparing a queue transport");
+    gameResumed(photo);beginPending();
+    require(!pendingQueueRun&&backgroundPrepares==preparesBeforeQueue+1&&starts==startsBeforeQueue,"BEGIN resumes the queue path without invoking a second one-shot export");
+    pendingQueueRun=true;pendingDeadline=android.os.SystemClock.now-1;
+    beginPending();require(!pendingQueueRun&&starts==startsBeforeQueue,"expired foreground bookkeeping clears without invoking a one-shot exporter");
+    gameDestroyed(photo);
+    Activity rotating=new Activity();game=new WeakReference<>(rotating);last=new JSONObject();
+    resumed=true;stopped=false;gameFocused=true;foregroundSelectionReady=false;allowNative=true;
+    gamePaused(rotating);allowNative=false;int cancelsBeforeGeometry=cancels,enqueuesBeforeGeometry=enqueues;
+    geometryChanged(rotating);
+    require(foregroundSelectionReady&&ready(),"landscape MV -> paused portrait server resize preserves the verified logical selection");
+    require(cancels==cancelsBeforeGeometry+1,"a geometry change still cancels any existing capture");
+    require(requestEnqueue(menu,30,1,16000000)&&enqueues==enqueuesBeforeGeometry+1,"retained logical selection can enqueue for native identity/source revalidation");
+    gameResumed(rotating);gameFocused=true;geometryChanged(rotating);
+    require(!foregroundSelectionReady&&!ready(),"a real foreground resize keeps the original readiness invalidation");
+    resumed=false;stopped=true;foregroundSelectionReady=false;geometryChanged(rotating);
+    require(!foregroundSelectionReady&&!ready(),"a background resize never invents a previously unverified MV");
+    resumed=true;stopped=false;serverMenuOpening(rotating);gamePaused(rotating);geometryChanged(rotating);
+    require(!foregroundSelectionReady&&!ready(),"an explicit menu handoff with native readiness false cannot fabricate an eligible MV");
+    gameResumed(rotating);
+    resumed=true;stopped=false;gameFocused=true;allowNative=true;serverMenuOpening(rotating);
+    require(menuHandoffDeadline>android.os.SystemClock.now&&foregroundSelectionReady,"menu launch captures only a real positive native selection");
+    allowNative=false;geometryChanged(rotating);
+    require(foregroundSelectionReady&&!ready(),"pre-onPause menu configuration retains logical eligibility but never makes an active invalid source ready");
+    observeForegroundReadiness(false);
+    require(foregroundSelectionReady,"a queued negative poll between menu configuration and onPause cannot erase the verified handoff selection");
+    gamePaused(rotating);geometryChanged(rotating);require(ready(),"after onPause the same verified menu handoff remains requestable");
+    gameResumed(rotating);gameFocused=true;require(menuHandoffDeadline==0,"returning to the game clears the menu-only resize exemption");
+    geometryChanged(rotating);require(!foregroundSelectionReady,"foreground resize invalidates again immediately after return");
+    allowNative=true;serverMenuOpening(rotating);allowNative=false;serverMenuOpenFailed(rotating);
+    geometryChanged(rotating);require(menuHandoffDeadline==0&&!foregroundSelectionReady,"failed menu launch cannot leave an active-window exemption");
+    allowNative=true;serverMenuOpening(rotating);allowNative=false;
+    android.os.SystemClock.now=menuHandoffDeadline+1;observeForegroundReadiness(false);
+    require(!foregroundSelectionReady,"an expired handoff cannot hide a new foreground selection failure");
+    geometryChanged(rotating);
+    require(!foregroundSelectionReady,"an uncompleted menu handoff cannot exempt foreground resizes forever");
+    menuHandoffDeadline=0;rotating.multiWindow=true;resumed=false;stopped=false;foregroundSelectionReady=true;
+    geometryChanged(rotating);require(!foregroundSelectionReady,"visible unfocused multi-window resize still invalidates the active surface");
+    stopped=true;foregroundSelectionReady=true;last.put("phase","rendering");cancelsBeforeGeometry=cancels;
+    geometryChanged(rotating);
+    require(foregroundSelectionReady&&cancels==cancelsBeforeGeometry+1&&!ready(),"background selection retention never suppresses active capture cancellation or busy ownership");
+    last=new JSONObject();allowNative=true;serverMenuOpening(rotating);gameDestroyed(rotating);
+    require(!foregroundSelectionReady&&menuHandoffDeadline==0&&!ready(),"destroy clears both logical eligibility and menu ownership");
     File root=new File(args[0]).getCanonicalFile();root.mkdirs();File out=new File(root,"exports");out.mkdir();
     require(privateDirectory(root,out.getPath()).equals(out),"private output root");
     rejects(()->privateDirectory(root,new File(root,"../elsewhere").getPath()));
@@ -269,3 +334,128 @@ public class DiagnosticsHarness {
                             capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "PASS bounded public MP4 diagnostics"
+
+
+def test_status_keeps_queue_handoffs_distinct_from_idle_or_previous_completion(tmp_path):
+    javac, java = shutil.which("javac"), shutil.which("java")
+    if not javac or not java:
+        pytest.skip("JDK required")
+    source = SOURCE.read_text()
+    production = "\n".join(method(source, name) for name in ("backgroundQueueHasWork", "statusText"))
+    resources = sorted(set(re.findall(r"R\.string\.([a-z0-9_]+)", production)))
+    declarations = "".join(f"static final int {name}={index};" for index, name in enumerate(resources, 1))
+    harness = tmp_path / "QueueStatusHarness.java"
+    harness.write_text(r'''import java.util.*;
+public final class QueueStatusHarness {
+ static boolean configured=true,saving,pendingQueueRun,mvReady;static int[] pending;static int readyCalls;
+ static JSONObject last=new JSONObject(),lastQueue=new JSONObject();
+ static final class JSONObject {
+  final Map<String,Object> values=new HashMap<>();
+  JSONObject put(String key,Object value){values.put(key,value);return this;}
+  boolean optBoolean(String key){return Boolean.TRUE.equals(values.get(key));}
+  long optLong(String key){Object value=values.get(key);return value instanceof Number?((Number)value).longValue():0;}
+  String optString(String key){return optString(key,"");}
+  String optString(String key,String fallback){Object value=values.get(key);return value instanceof String?(String)value:fallback;}
+ }
+ static final class Context {String getString(int resource,Object...args){return "resource="+resource+Arrays.toString(args);}}
+ static final class R {static final class string {''' + declarations + r'''}}
+ static boolean ready(){readyCalls++;return mvReady;}
+ static void need(boolean condition,String message){if(!condition)throw new AssertionError(message);}
+ static void expect(Context context,int resource,String message){need(statusText(context).startsWith("resource="+resource+"["),message);}
+''' + production + r'''
+ public static void main(String[]arguments){
+  Context context=new Context();
+  last.put("phase","idle").put("readiness_error","open_selected_mv_first");lastQueue.put("command_pending",true);
+  expect(context,R.string.mp4_queue_waiting_scene,"pending enqueue reports original scene preparation rather than telling the user to reopen the MV");
+  need(readyCalls==0,"a queue handoff does not consult unrelated idle selection eligibility");
+  lastQueue=new JSONObject();pendingQueueRun=true;last.put("phase","");
+  expect(context,R.string.mp4_queue_waiting_scene,"accepted queue Run reports a pending game foreground handoff");
+  pendingQueueRun=false;lastQueue.put("running",true);last.put("phase","completed");
+  expect(context,R.string.mp4_queue_waiting_scene,"the previous completed MV cannot claim the next queued MV is already complete");
+  for(String phase:new String[]{"idle","completed","failed","cancelled"}){
+   last.put("phase",phase);expect(context,R.string.mp4_queue_waiting_scene,"next-scene work takes priority over stale terminal state: "+phase);
+  }
+  last.put("phase","preparing_audio");expect(context,R.string.mp4_preparing_audio,"actual soundtrack preparation remains visible");
+  last.put("total_audio_frames",48000L).put("audio_frames",24000L);
+  expect(context,R.string.mp4_preparing_audio_progress,"actual soundtrack progress remains visible");
+  last.put("phase","rendering").put("frames",18L).put("total_frames",60L).put("width",1920L).put("height",1080L).put("fps_num",60L);
+  expect(context,R.string.mp4_rendering,"actual rendering is not relabeled as scene preparation");
+  need(statusText(context).contains("resource="+R.string.mp4_geometry+"[1920, 1080, 60]"),"actual render geometry and frame rate are retained");
+  last.put("phase","paused").put("pause_reason","user_paused");expect(context,R.string.mp4_paused,"explicit user pause remains visible");
+  last.put("pause_reason","lifecycle_background");expect(context,R.string.mp4_background_paused,"lifecycle pause remains visible");
+  last.put("phase","pausing");expect(context,R.string.mp4_pausing,"safe pause progress remains visible");
+  for(String phase:new String[]{"finishing","cancelling"}){last.put("phase",phase);expect(context,R.string.mp4_finishing,"active finalization remains visible");}
+  last.put("phase","completed");pending=new int[]{30};expect(context,R.string.mp4_preparing_audio,"a real pending single export retains its existing status");
+  saving=true;expect(context,R.string.mp4_finishing,"an active document save retains its existing status");saving=false;pending=null;
+  lastQueue=new JSONObject();last.put("phase","completed");expect(context,R.string.mp4_completed,"completion returns after all queue work ends");
+  last.put("phase","failed").put("error_code","encoder_failed");expect(context,R.string.mp4_failed,"a terminal error outside queue work is not hidden");
+  last.put("phase","cancelled");expect(context,R.string.mp4_cancelled,"a real terminal cancellation outside queue work is not hidden");
+  last.put("phase","idle");expect(context,R.string.mp4_not_ready,"an ordinary idle scene still requests the MV");
+  mvReady=true;expect(context,R.string.mp4_idle,"a genuinely ready idle MV retains the idle message");
+  configured=false;expect(context,R.string.mp4_unavailable,"an unavailable idle exporter retains its existing status");
+  System.out.println("PASS queue-aware Android MP4 status");
+ }
+}''')
+    classes = tmp_path / "classes"
+    built = subprocess.run([javac, "-J-Xmx128m", "--release", "17", "-d", str(classes), str(harness)],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stderr
+    run = subprocess.run([java, "-Xmx128m", "-cp", str(classes), "QueueStatusHarness"],
+                         capture_output=True, text=True, timeout=15)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "PASS queue-aware Android MP4 status"
+
+
+def test_server_stop_parks_native_queue_before_disabling_it_and_cancelling_session(tmp_path):
+    javac, java = shutil.which("javac"), shutil.which("java")
+    if not javac or not java:
+        pytest.skip("JDK required")
+    production = method(SOURCE.read_text(), "serverStopped")
+    harness = tmp_path / "ServerStopHarness.java"
+    harness.write_text(r'''import java.util.*;
+public final class ServerStopHarness {
+ static boolean configured,initialized,queueConfigured,foregroundSelectionReady,throwPause,queueParked;
+ static long menuHandoffDeadline;static int[] pending;static int pauseResult;
+ static final List<String> events=new ArrayList<>();static final Handler MAIN=new Handler();
+ static final class Handler {
+  final List<Runnable> work=new ArrayList<>();void post(Runnable task){work.add(task);}
+  void drain(){for(Runnable task:new ArrayList<>(work))task.run();work.clear();}
+ }
+ static int nativeQueuePause(){
+  need(configured&&initialized&&queueConfigured,"the queue pause must be accepted before its host configuration is retired");
+  events.add("pause");if(throwPause)throw new UnsatisfiedLinkError("optional addon unavailable");
+  if(pauseResult==0)queueParked=true;return pauseResult;
+ }
+ static void cancel(){events.add("cancel");}
+ static void wake(){events.add("wake");}
+ static void need(boolean value,String message){if(!value)throw new AssertionError(message);}
+ static void reset(boolean loaded,boolean queued){
+  configured=true;initialized=loaded;queueConfigured=queued;foregroundSelectionReady=true;menuHandoffDeadline=8000;
+  pending=new int[]{60,1,2};throwPause=false;queueParked=false;pauseResult=0;events.clear();MAIN.work.clear();
+ }
+''' + production + r'''
+ public static void main(String[]arguments){
+  reset(true,true);serverStopped();
+  need(events.equals(Arrays.asList("pause"))&&queueParked,"native queue is parked synchronously without waiting for the paused Unity main loop");
+  need(!configured&&!queueConfigured&&!foregroundSelectionReady&&menuHandoffDeadline==0,"server stop retires host availability and cached menu eligibility");
+  need(MAIN.work.size()==1&&pending!=null,"existing main-thread session cleanup remains deferred");
+  MAIN.drain();need(events.equals(Arrays.asList("pause","cancel","wake"))&&pending==null&&queueParked,"session cancellation follows queue parking without resuming the queue");
+  serverStopped();need(Collections.frequency(events,"pause")==1,"a repeated stop cannot call an already-retired queue");MAIN.drain();
+  reset(true,false);serverStopped();need(events.isEmpty(),"an unconfigured queue never receives JNI pause");MAIN.drain();
+  need(events.equals(Arrays.asList("cancel","wake")),"queue absence preserves existing session cleanup");
+  reset(false,true);serverStopped();need(events.isEmpty(),"an uninitialized optional native addon never receives queue pause");MAIN.drain();
+  reset(true,true);throwPause=true;serverStopped();MAIN.drain();
+  need(events.equals(Arrays.asList("pause","cancel","wake"))&&!configured&&!queueConfigured&&pending==null,"optional JNI absence cannot prevent server/session retirement");
+  reset(true,true);pauseResult=-1;serverStopped();MAIN.drain();
+  need(events.equals(Arrays.asList("pause","cancel","wake"))&&!configured&&!queueConfigured,"a rejected host pause cannot prevent safe host cleanup");
+  System.out.println("PASS queue parking before server retirement");
+ }
+}''')
+    classes = tmp_path / "classes"
+    built = subprocess.run([javac, "-J-Xmx128m", "--release", "17", "-d", str(classes), str(harness)],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stderr
+    run = subprocess.run([java, "-Xmx128m", "-cp", str(classes), "ServerStopHarness"],
+                         capture_output=True, text=True, timeout=15)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "PASS queue parking before server retirement"
