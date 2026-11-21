@@ -19,7 +19,8 @@ def main() -> None:
         raise SystemExit("Actual macOS Xcode SDKs required for UIKit compilation")
     here = Path(__file__).resolve().parent
     paths = [here / name for name in ("IdolyMP4UI.m", "IdolyMP4UI.h", "IdolySettings.m",
-                                     "IdolyEmbeddedServer.h", "IdolyNativeUI.h", "MP4FinalizationPolicy.h")]
+                                     "IdolyEmbeddedServer.h", "IdolyNativeUI.h", "MP4FinalizationPolicy.h",
+                                     "IdolyMP4Library.h", "IdolyMP4Library.m", "MP4CompletedFilePolicy.h")]
     source_hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
     architecture = "arm64" if platform.machine() == "arm64" else "x86_64"
     commands = []
@@ -30,7 +31,7 @@ def main() -> None:
         command = [compiler, "-target", target, "-isysroot", sdk_path, "-fobjc-arc", "-fblocks",
                    "-Wall", "-Wextra", "-Werror", "-Wno-deprecated-declarations",
                    "-Wno-missing-field-initializers", "-fsyntax-only", str(here / "IdolyMP4UI.m"),
-                   str(here / "IdolySettings.m")]
+                   str(here / "IdolySettings.m"),str(here / "IdolyMP4Library.m")]
         subprocess.run(command, check=True, timeout=90); commands.append(command)
     if source_hashes != {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}:
         raise SystemExit("UIKit sources changed during compilation")

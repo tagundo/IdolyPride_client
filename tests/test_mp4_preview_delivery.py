@@ -70,6 +70,31 @@ def test_android_requires_actual_builder_profile_json_pins_but_darwin_does_not(n
         delivery.mp4_native_sources(values, android=True)
 
 
+@pytest.mark.parametrize("missing", ["IdolyMP4Library.m", "IdolyMP4Library.h", "MP4CompletedFilePolicy.h"])
+def test_ios_receipt_requires_each_compiled_completed_library_source(tmp_path, monkeypatch, missing):
+    root=tmp_path / "repo";base=root / "ios-unified/native";values={}
+    for name in delivery.MP4_IOS_HOST:
+        path=base / name;path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text("actual compiled source: " + name);values[name]=delivery.sha(path)
+    monkeypatch.setattr(delivery,"ROOT",root)
+    delivery.source_pins(values,base,delivery.MP4_IOS_HOST)
+    del values[missing]
+    with pytest.raises(ValueError,match="source_closure_missing"):
+        delivery.source_pins(values,base,delivery.MP4_IOS_HOST)
+
+
+@pytest.mark.parametrize("changed", ["IdolyMP4Library.m", "IdolyMP4Library.h", "MP4CompletedFilePolicy.h"])
+def test_ios_receipt_rejects_library_bytes_changed_after_compile(tmp_path, monkeypatch, changed):
+    root=tmp_path / "repo";base=root / "ios-unified/native";values={}
+    for name in delivery.MP4_IOS_HOST:
+        path=base / name;path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text("actual compiled source: " + name);values[name]=delivery.sha(path)
+    monkeypatch.setattr(delivery,"ROOT",root)
+    (base / changed).write_text("different saved-output behavior after compile")
+    with pytest.raises(ValueError,match="source_bytes_changed"):
+        delivery.source_pins(values,base,delivery.MP4_IOS_HOST)
+
+
 def test_actual_android_native_builder_emits_all_new_compiled_and_profile_source_pins():
     builder = delivery.module("mp4_photography_android_build_contract", delivery.ROOT / "client-presentation/native/build_native.py")
     emitted = {path.relative_to(delivery.ROOT).as_posix() for path in builder.sources()}

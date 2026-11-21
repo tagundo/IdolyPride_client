@@ -19,6 +19,14 @@ FOUNDATION_EXPORT void IdolyEmbeddedServerMP4Export(void (^completion)(NSURL * _
 // Callers never select an output filename or filesystem path.
 FOUNDATION_EXPORT void IdolyEmbeddedServerMP4ExportJob(NSString * _Nullable jobID,
     void (^completion)(NSURL * _Nullable file, NSString * _Nullable error));
+// An immutable completed catalog ID, never a filename/path selected by WebKit.
+FOUNDATION_EXPORT void IdolyEmbeddedServerMP4ExportRecord(NSString *exportID,
+    void (^completion)(NSURL * _Nullable file, NSString * _Nullable error));
+// A Files/share flow pins its exact selected output until the matching owner
+// retires. A stale callback cannot release another flow or delete its source.
+FOUNDATION_EXPORT void IdolyEmbeddedServerMP4BeginSave(NSString * _Nullable jobID,NSString * _Nullable exportID,
+    void (^completion)(NSURL * _Nullable file,NSString * _Nullable error,uint64_t lease));
+FOUNDATION_EXPORT void IdolyEmbeddedServerMP4EndSave(uint64_t lease);
 // Synchronous native-only pause request before Unity's original lifecycle runs.
 // Returning to the foreground never overrides an explicit user pause.
 FOUNDATION_EXPORT void IdolyEmbeddedServerMP4SetLifecycleActive(BOOL active);

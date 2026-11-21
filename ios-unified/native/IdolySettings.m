@@ -208,6 +208,7 @@ static NSString *encode(id object) {
 @property (nonatomic,copy) NSString *launchSettingsNonce;
 @property (nonatomic,copy) NSString *launchSettingsCompletedNonce;
 @property (nonatomic,copy) NSString *launchSettingsMessage;
+@property (nonatomic,strong) id mp4SaveObserver;
 - (void)event:(NSString *)json;
 - (void)releaseWeb;
 - (void)exportPath:(NSString *)path;
@@ -235,6 +236,9 @@ static __weak IDSettingsController *launcherController;
 @implementation IDSettingsController
 - (void)viewDidLoad {
     [super viewDidLoad];
+    __weak typeof(self) weakSaveSelf=self;
+    _mp4SaveObserver=[NSNotificationCenter.defaultCenter addObserverForName:IDMP4SaveStateDidChangeNotification object:nil queue:NSOperationQueue.mainQueue
+        usingBlock:^(NSNotification *note){(void)note;[weakSaveSelf updateServerReady];}];
     self.title = localized(self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정");
     self.view.backgroundColor = UIColor.systemBackgroundColor;
     [self.navigationController setNavigationBarHidden:YES animated:NO];
@@ -310,7 +314,9 @@ static __weak IDSettingsController *launcherController;
     return button;
 }
 - (void)updateServerReady {
-    _gameStartButton.enabled = serverReady && !serverBusy && gameStartAvailable && !_launchSettingsNonce && !_launchSettingsCompletedNonce;
+    _gameStartButton.enabled = IDMP4CanCloseSettings() && serverReady && !serverBusy && gameStartAvailable && !_launchSettingsNonce && !_launchSettingsCompletedNonce;
+    _returnButton.enabled=IDMP4CanCloseSettings();
+    _returnButton.alpha=_returnButton.enabled?1.0:0.65;
     _serverStartButton.enabled = !serverReady && !serverBusy;
     [_serverStartButton setTitle:localized(serverReady ? @"서버 실행 중" : serverBusy ? @"서버 준비 중"
         : serverAttempted ? @"다시 시도" : @"서버 시작") forState:UIControlStateNormal];
@@ -419,7 +425,7 @@ static __weak IDSettingsController *launcherController;
 - (void)startGame {
     // A nonce exists only for this explicit button intent. A save, status
     // update or late ACK can never create a new intent or start Unity.
-    if (!self.launcherMode || !serverReady || serverBusy || !gameStartAvailable
+    if (!IDMP4CanCloseSettings() || !self.launcherMode || !serverReady || serverBusy || !gameStartAvailable
             || _launchSettingsNonce || _launchSettingsCompletedNonce || !_web || !self.viewIfLoaded.window) return;
     NSString *nonce = NSUUID.UUID.UUIDString;
     _launchSettingsNonce = nonce; _launchSettingsMessage = @"설정을 저장하고 있습니다…";
@@ -458,11 +464,11 @@ static __weak IDSettingsController *launcherController;
     (void)presentationController; [self releaseWeb];
 }
 - (void)closeSettings {
-    if (self.launcherMode) return; // Unity starts only through the explicit button.
+    if (self.launcherMode || !IDMP4CanCloseSettings()) return; // Save owns its source and presenter until dismissal.
     [self releaseWeb];
     [self dismissViewControllerAnimated:YES completion:nil];
 }
-- (void)dealloc { [_web.configuration.userContentController removeScriptMessageHandlerForName:@"idolyServer"]; }
+- (void)dealloc { if(_mp4SaveObserver)[NSNotificationCenter.defaultCenter removeObserver:_mp4SaveObserver]; [_web.configuration.userContentController removeScriptMessageHandlerForName:@"idolyServer"]; }
 - (void)webView:(WKWebView *)web decidePolicyForNavigationAction:(WKNavigationAction *)action
     decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     (void)web;
@@ -572,7 +578,7 @@ static __weak IDSettingsController *launcherController;
     [self presentViewController:prompt animated:YES completion:nil];
 }
 - (void)dispatchRequest:(NSDictionary *)request {
-    if ([@[@"mp4_options",@"mp4_options_save",@"mp4_start",@"mp4_status",@"mp4_pause",@"mp4_resume",@"mp4_cancel",@"mp4_save",@"mp4_enqueue",@"mp4_queue_status",@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume",@"mp4_queue_cancel",@"mp4_queue_remove",@"mp4_queue_retry",@"mp4_queue_move"] containsObject:request[@"action"]]) {
+    if ([@[@"mp4_options",@"mp4_options_save",@"mp4_start",@"mp4_status",@"mp4_completed_status",@"mp4_pause",@"mp4_resume",@"mp4_cancel",@"mp4_save",@"mp4_enqueue",@"mp4_queue_status",@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume",@"mp4_queue_cancel",@"mp4_queue_remove",@"mp4_queue_retry",@"mp4_queue_move"] containsObject:request[@"action"]]) {
         if (([@[@"mp4_start",@"mp4_enqueue",@"mp4_queue_run",@"mp4_queue_resume",@"mp4_save"] containsObject:request[@"action"]])
                 && (_pendingImport || _pendingExportRequestID || _officialPrompt || self.presentedViewController)) {
             [self localFailure:request[@"id"] message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return;
@@ -762,7 +768,7 @@ static __weak IDSettingsController *launcherController;
     if ([action isEqual:@"diagnostics_copy"]) { [self dispatchRequest:request]; return; }
     if (!encode(request)) { [self localFailure:identifier message:@"요청이 너무 큽니다."]; return; }
     NSSet *actions = [NSSet setWithArray:@[@"status",@"save_interface_language",@"save_options",@"save_presentation",@"save_playback",@"save_media", @"events_status", @"events_save",
-        @"mp4_options",@"mp4_options_save",@"mp4_start",@"mp4_status",@"mp4_pause",@"mp4_resume",@"mp4_cancel",@"mp4_save",
+        @"mp4_options",@"mp4_options_save",@"mp4_start",@"mp4_status",@"mp4_completed_status",@"mp4_pause",@"mp4_resume",@"mp4_cancel",@"mp4_save",
         @"mp4_enqueue",@"mp4_queue_status",@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume",@"mp4_queue_cancel",@"mp4_queue_remove",@"mp4_queue_retry",@"mp4_queue_move",
         @"resources_preview",@"resources_download",@"resources_cancel",@"resources_import",@"resources_export",
         @"official_inspect",@"official_fetch",@"official_apply",@"official_cancel",@"official_status",

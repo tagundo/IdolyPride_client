@@ -49,6 +49,10 @@ MP4_NATIVE = {"client-presentation/native/" + name for name in (
 # source receipt includes headers only. Keep these profile pins out of MP4_NATIVE.
 MP4_ANDROID_PROFILES = {"client-presentation/native/" + name for name in (
     "mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json", "mp4_camera_owner_profile.json")}
+MP4_IOS_HOST = {
+    "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMVEncoder.mm", "IdolyEmbeddedServer.m", "IdolySettings.m",
+    "MP4LifecyclePolicy.h", "MP4FinalizationPolicy.h", "IdolyMP4Library.m", "IdolyMP4Library.h",
+    "MP4CompletedFilePolicy.h", "../../client-presentation/native/mp4_encoder_api.h"}
 MP4_JAVA = {"android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/ServerService.java",
@@ -251,9 +255,7 @@ def ios_files(folder, source):
     native = read(folder / "device-native-build.json")
     need(native.get("codesign_strict_verified") is True and native.get("smoke_probe_only") is False
          and native.get("MachO", {}).get("platform") == 2, "ios_native_target_differs")
-    source_pins(native.get("source_sha256"), ROOT / "ios-unified/native", {
-        "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMVEncoder.mm", "IdolyEmbeddedServer.m", "IdolySettings.m", "MP4LifecyclePolicy.h", "MP4FinalizationPolicy.h",
-        "../../client-presentation/native/mp4_encoder_api.h"})
+    source_pins(native.get("source_sha256"), ROOT / "ios-unified/native", MP4_IOS_HOST)
     presentation = read(folder / "presentation-native-build.json")
     mp4_native_sources(presentation.get("source_sha256"))
     runtime = read(folder / "device-runtime-report.json")
@@ -265,7 +267,8 @@ def ios_files(folder, source):
     ui, codec = read(folder / "mp4-ui-compile.json"), read(folder / "mp4-codec-report.json")
     need(ui.get("status") == "PASS_APPLE_UIKIT_COMPILE_ONLY" and codec.get("status") == "PASS_SYNTHETIC_CODEC_ONLY"
          and codec.get("exit_code") == 0 and codec.get("codecs_required") == ["h264", "hevc"], "mp4_apple_preflight_failed")
-    source_pins(ui.get("source_sha256"), ROOT / "ios-unified/native", {"IdolyMP4UI.h", "IdolyMP4UI.m"})
+    source_pins(ui.get("source_sha256"), ROOT / "ios-unified/native", {
+        "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMP4Library.h", "IdolyMP4Library.m", "MP4CompletedFilePolicy.h"})
     source_pins(codec.get("source_sha256"), ROOT, {"ios-unified/native/IdolyMVEncoder.mm", "client-presentation/native/mp4_encoder_api.h"})
     smoke = read(folder / "simulator-smoke.json")
     need(smoke.get("status") == "PASS" and smoke.get("fresh_local_state_before_launch") is True

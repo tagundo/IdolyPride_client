@@ -124,6 +124,7 @@ def test_real_foundation_host_validates_queue_commands_and_private_configuration
 #include <dlfcn.h>
 #include <stdio.h>
 #import "MP4LifecyclePolicy.h"
+#import "IdolyMP4Library.h"
 static NSString *rootDirectory,*mp4ExportDirectory,*mp4PersistentExportDirectory,*mp4ConfiguredDirectory,*mp4ConfiguredQueueDirectory;
 static NSDictionary *mp4TitleCatalog;
 static const NSUInteger IDJSONLimit=65536;
@@ -207,7 +208,7 @@ int main(int argc,char**argv){@autoreleasepool{
    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"IdolyMP4ExportOptions.v1"];puts("PASS persistent MP4 preferences relaunch");return 0;
  }
  worker=[TestWorker new];atomic_store(&pythonReady,true);
- NSString *session=[rootDirectory stringByAppendingPathComponent:@".idoly-mp4-audio-test"];
+ NSString *session=[rootDirectory stringByAppendingPathComponent:@".idoly-mp4-audio-0123456789abcdef0123456789abcdef"];
  NSString *exports=[session stringByAppendingPathComponent:@"exports"],*library=[rootDirectory stringByAppendingPathComponent:@".idoly-mp4-library"];
  NSString *queue=[library stringByAppendingPathComponent:@"queue"],*persistent=[library stringByAppendingPathComponent:@"exports"];
  mkdirs(session);mkdirs(exports);mkdirs(library);mkdirs(queue);mkdirs(persistent);
@@ -258,8 +259,34 @@ int main(int argc,char**argv){@autoreleasepool{
  NSDictionary *badTitles=mp4SanitizeTitleCatalog(@{@"en":@{@"good":@"Readable title",@"bad_newline":@"Line\nbreak",@"bad_space":@"  ",@"bad_long":[@"a"stringByPaddingToLength:193 withString:@"a" startingAtIndex:0],@"../bad_key":@"Rejected key"}});
  assert([badTitles[@"en"]count]==1&&[badTitles[@"en"][@"good"]isEqual:@"Readable title"]);
  NSMutableDictionary *tooMany=[NSMutableDictionary new];for(unsigned i=0;i<2049;++i)tooMany[[NSString stringWithFormat:@"tln_live_%u",i]]=@"Title";assert(mp4SanitizeTitleCatalog(@{@"en":tooMany}).count==0);
- NSString *file=[persistent stringByAppendingPathComponent:@"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.mp4"];assert([@"finished"writeToFile:file atomically:NO encoding:NSUTF8StringEncoding error:NULL]);
+ NSString *file=[persistent stringByAppendingPathComponent:@"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.mp4"];assert([@"finished"writeToFile:file atomically:NO encoding:NSUTF8StringEncoding error:NULL]);assert(chmod(file.fileSystemRepresentation,0600)==0);
  __block NSURL *chosen=nil;IdolyEmbeddedServerMP4ExportJob(row[@"job_id"],^(NSURL*u,NSString*error){assert(error==nil);chosen=u;});assert([chosen.path isEqual:file]);
+ // The picker pins an immutable output. No second save or concurrent explicit
+ // queue deletion can race it, and stale dismissal cannot release a newer flow.
+ __block uint64_t lease=0;IdolyEmbeddedServerMP4BeginSave(row[@"job_id"],nil,^(NSURL*u,NSString*error,uint64_t token){assert(u&&error==nil&&token);lease=token;});
+ IdolyEmbeddedServerMP4BeginSave(nil,row[@"output_id"],^(NSURL*u,NSString*error,uint64_t token){assert(!u&&[error isEqual:@"mp4_save_busy"]&&!token);});
+ unsigned oldOperations=operations,oldStarts=starts,oldRuns=runs,oldResumes=resumes;
+ for(NSString *blocked in @[@"mp4_queue_run",@"mp4_queue_resume"]){r=request(@{@"id":@50,@"action":blocked});assert([r[@"error"][@"code"]isEqual:@"mp4_save_busy"]);}
+ r=request(@{@"id":@50,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@0});assert([r[@"error"][@"code"]isEqual:@"mp4_save_busy"]&&starts==oldStarts&&runs==oldRuns&&resumes==oldResumes);
+ r=request(@{@"id":@50,@"action":@"mp4_queue_remove",@"job_id":row[@"job_id"],@"delete_output":@YES});assert([r[@"ok"]isEqual:@NO]&&[r[@"error"][@"code"]isEqual:@"mp4_save_busy"]&&operations==oldOperations);
+ IdolyEmbeddedServerMP4EndSave(lease+1);assert(mp4SaveLease==lease);IdolyEmbeddedServerMP4EndSave(lease);assert(!mp4SaveLease);
+ IdolyEmbeddedServerMP4BeginSave(nil,row[@"output_id"],^(NSURL*u,NSString*error,uint64_t token){assert(u&&!error&&token>lease);lease=token;});IdolyEmbeddedServerMP4EndSave(lease-1);assert(mp4SaveLease==lease);IdolyEmbeddedServerMP4EndSave(lease);
+ assert([NSFileManager.defaultManager fileExistsAtPath:file]);
+ NSDictionary *catalog=request(@{@"id":@51,@"action":@"mp4_completed_status"})[@"result"];
+ assert([catalog[@"total"]isEqual:@1]&&[catalog[@"records"][0][@"export_id"]isEqual:row[@"output_id"]]&&catalog[@"records"][0][@"_root"]==nil);
+ catalog=request(@{@"id":@51,@"action":@"mp4_completed_status",@"offset":@65536})[@"result"];assert([catalog[@"offset"]isEqual:@65536]&&[catalog[@"records"]count]==0&&[catalog[@"total"]isEqual:@1]&&[catalog[@"has_more"]isEqual:@NO]);
+ for(id offset in @[@1,@65568,@YES,@(-32)])assert([request(@{@"id":@51,@"action":@"mp4_completed_status",@"offset":offset})[@"ok"]isEqual:@NO]);
+ // History and explicit Save remain available while Python/server is stopped.
+ atomic_store(&pythonReady,false);
+ assert([request(@{@"id":@52,@"action":@"mp4_completed_status"})[@"result"][@"total"]isEqual:@1]);
+ chosen=nil;IdolyEmbeddedServerMP4ExportRecord(row[@"output_id"],^(NSURL*u,NSString*error){assert(!error);chosen=u;});assert([chosen.path isEqual:file]);
+ atomic_store(&pythonReady,true);
+ // A metadata durability/ownership failure refuses capture before calling the
+ // real native Start ABI, without deleting an already completed output.
+ NSString *indexPath=[rootDirectory stringByAppendingPathComponent:@".idoly-mp4-completed/roots-v1.json"];
+ assert(chmod(indexPath.fileSystemRepresentation,0644)==0);oldStarts=starts;
+ r=request(@{@"id":@53,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@0});assert([r[@"error"][@"code"]isEqual:@"mp4_catalog_unavailable"]&&starts==oldStarts);
+ assert(chmod(indexPath.fileSystemRepresentation,0600)==0&&[NSFileManager.defaultManager fileExistsAtPath:file]);
  row[@"state"]=@"pending";chosen=nil;IdolyEmbeddedServerMP4ExportJob(row[@"job_id"],^(NSURL*u,NSString*error){assert(error);chosen=u;});assert(chosen==nil);row[@"state"]=@"completed";
  saved[@"jobs"]=@[row,row];assert([request(@{@"id":@9,@"action":@"mp4_queue_status"})[@"result"][@"available"]isEqual:@NO]);saved[@"jobs"]=@[row];saved[@"schema"]=@YES;assert([request(@{@"id":@10,@"action":@"mp4_queue_status"})[@"result"][@"available"]isEqual:@NO]);saved[@"schema"]=@1;
  NSMutableDictionary *rotated=[descriptor mutableCopy];rotated[@"epoch"]=@8;descriptor=rotated;assert([request(@{@"id":@11,@"action":@"mp4_queue_status"})[@"ok"]isEqual:@YES]);assert(configurations==2&&queueConfigurations==2);
@@ -274,7 +301,7 @@ int main(int argc,char**argv){@autoreleasepool{
                                   stderr=subprocess.STDOUT,text=True).strip()
     compiled = subprocess.run([compiler,"-isysroot",sdk,"-mmacosx-version-min=12.0",
                                "-fobjc-arc","-fblocks","-Wall","-Wextra","-Werror",
-                               "-I",str(ROOT / "ios-unified/native"),str(source),"-framework","Foundation","-o",str(output)],
+                               "-I",str(ROOT / "ios-unified/native"),str(source),str(ROOT / "ios-unified/native/IdolyMP4Library.m"),"-framework","Foundation","-o",str(output)],
                               check=False,capture_output=True,text=True,timeout=60)
     assert compiled.returncode == 0, "Foundation queue host compilation failed:\n" + compiled.stdout + compiled.stderr
     result = subprocess.run([str(output),str(tmp_path)],check=False,capture_output=True,text=True,timeout=10)

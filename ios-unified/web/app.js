@@ -613,6 +613,20 @@
     "MP4 설정을 불러오지 못했습니다.":"MP4設定を読み込めませんでした。","MP4 설정 확인 중…":"MP4設定を確認中…"
   });
   const MP4_OPTION_DEFAULTS = Object.freeze({schema:1,fps:60,video_codec:1,bitrate_mode:"recommended",video_bitrate:16000000,resolution_mode:"current",width:1920,height:1080});
+  Object.assign(UI_TRANSLATIONS.en, {
+    "보관된 영상":"Saved exports", "보관된 영상을 불러오는 중…":"Loading saved exports…",
+    "보관된 영상이 없습니다.":"No saved exports.", "영상 목록을 불러오지 못했습니다.":"Could not load saved exports.",
+    "영상 저장":"Save video", "저장 방법을 선택해 주세요.":"Choose how to save the video.",
+    "영상 저장을 열지 못했습니다. 다시 시도해 주세요.":"Could not open video saving. Try again.",
+    "이전 영상":"Previous exports", "다음 영상":"Next exports"
+  });
+  Object.assign(UI_TRANSLATIONS.ja, {
+    "보관된 영상":"保存された動画", "보관된 영상을 불러오는 중…":"保存された動画を読み込み中…",
+    "보관된 영상이 없습니다.":"保存された動画はありません。", "영상 목록을 불러오지 못했습니다.":"動画一覧を読み込めませんでした。",
+    "영상 저장":"動画を保存", "저장 방법을 선택해 주세요.":"動画の保存方法を選択してください。",
+    "영상 저장을 열지 못했습니다. 다시 시도해 주세요.":"動画の保存を開けませんでした。もう一度お試しください。",
+    "이전 영상":"前の動画", "다음 영상":"次の動画"
+  });
   const mp4Dimension = value => integer(value) && value >= 16 && value <= 4096 && value % 2 === 0;
   function validMP4ExportOptions(value) {
     return exact(value,["schema","fps","video_codec","bitrate_mode","video_bitrate","resolution_mode","width","height"])
@@ -629,10 +643,12 @@
   function validRequest(action, payload) {
     const mp4ID = value => typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
     if (["mp4_queue_status","mp4_queue_run","mp4_queue_pause","mp4_queue_resume"].includes(action)) return exact(payload, []);
+    if (action === "mp4_completed_status") return exact(payload,[]) || (exact(payload,["offset"]) && integer(payload.offset) && payload.offset <= 65536 && payload.offset % 32 === 0);
     if (["mp4_queue_cancel","mp4_queue_retry"].includes(action)) return exact(payload,["job_id"]) && mp4ID(payload.job_id);
     if (action === "mp4_queue_remove") return mp4ID(payload.job_id) && (exact(payload,["job_id"]) || (exact(payload,["job_id","delete_output"]) && payload.delete_output === true));
     if (action === "mp4_queue_move") return exact(payload,["job_id","position"]) && mp4ID(payload.job_id) && integer(payload.position) && payload.position <= 7;
-    if (action === "mp4_save") return exact(payload,[]) || (exact(payload,["job_id"]) && mp4ID(payload.job_id));
+    if (action === "mp4_save") return exact(payload,[]) || (exact(payload,["job_id"]) && mp4ID(payload.job_id))
+      || (exact(payload,["export_id"]) && mp4ID(payload.export_id));
     if (["mp4_status","mp4_pause","mp4_resume","mp4_cancel","mp4_save"].includes(action)) return exact(payload, []);
     if (action === "mp4_options") return exact(payload,[]);
     if (action === "mp4_options_save") return exact(payload,["options"]) && validMP4ExportOptions(payload.options);
@@ -866,7 +882,7 @@
       }
       if (focus && typeof el("category-"+key).focus === "function") el("category-"+key).focus();
       saveLayout();
-      if (key === "graphics") Promise.resolve().then(() => { loadMP4Options();mp4("status");mp4Queue("status"); });
+      if (key === "graphics") Promise.resolve().then(() => { loadMP4Options();mp4("status");mp4Queue("status");loadMP4Completed(); });
     }
     function initializeLayout() {
       let stored = null;
@@ -908,6 +924,8 @@
     let snapshot = null;
     let mp4Status = {phase:"idle",ready:false}, mp4Pending = false, mp4Mutating = false, mp4Feedback = "";
     let mp4QueueStatus = {available:false,running:false,phase:"idle",jobs:[]}, mp4QueuePending = false, mp4QueueFeedback = "", mp4QueueRowsKey = "";
+    let mp4Completed = {available:false,records:[],offset:0,total:0,has_more:false}, mp4CompletedLoaded = false;
+    let mp4CompletedLoading = false, mp4CompletedSaving = false, mp4CompletedFeedback = "", mp4CompletedRowsKey = "";
     let mp4OptionBase = {...MP4_OPTION_DEFAULTS}, mp4OptionsLoaded = false, mp4OptionsLoading = false, mp4OptionsVersion = 0, mp4OptionsError = "";
     const mp4EditedOptions = new Set(), mp4SavingOptions = new Set();
     const mp4OptionFields = {"mp4-fps":"fps","mp4-codec":"video_codec","mp4-bitrate-mode":"bitrate_mode","mp4-bitrate":"video_bitrate","mp4-resolution-mode":"resolution_mode","mp4-width":"width","mp4-height":"height"};
@@ -1032,6 +1050,68 @@
       el("mp4-save").hidden = queuedOutput || phase !== "completed";
       el("mp4-save").disabled = mp4Pending;
       renderMP4Queue();
+      renderMP4Completed();
+    }
+    function validMP4Completed(value,offset) {
+      if (!object(value) || value.schema !== 1 || typeof value.available !== "boolean" || value.offset !== offset
+          || !integer(value.total) || value.total > 65536 || typeof value.has_more !== "boolean"
+          || !Array.isArray(value.records) || value.records.length > 32
+          || offset + value.records.length > value.total && value.records.length !== 0
+          || value.has_more !== (offset + value.records.length < value.total)) return false;
+      const seen = new Set();
+      return value.records.every(row => {
+        if (!object(row) || Object.keys(row).some(key => !["export_id","job_id","bytes","created_ms","width","height","fps_num"].includes(key))
+            || typeof row.export_id !== "string" || !/^[0-9a-f]{32}$/.test(row.export_id) || seen.has(row.export_id)
+            || !integer(row.bytes) || row.bytes === 0 || !integer(row.created_ms)
+            || row.job_id !== undefined && (typeof row.job_id !== "string" || !/^[0-9a-f]{32}$/.test(row.job_id))
+            || row.width !== undefined && !mp4Dimension(row.width) || row.height !== undefined && !mp4Dimension(row.height)
+            || row.fps_num !== undefined && !choice(row.fps_num,[30,60])) return false;
+        seen.add(row.export_id);return true;
+      });
+    }
+    function renderMP4Completed() {
+      text("mp4-completed-feedback",t(mp4CompletedFeedback || (!mp4CompletedLoaded ? "보관된 영상을 불러오는 중…" : !mp4Completed.records.length ? "보관된 영상이 없습니다." : "")),false);
+      el("mp4-completed-previous").disabled = mp4CompletedLoading || mp4CompletedSaving || mp4Completed.offset === 0;
+      el("mp4-completed-next").disabled = mp4CompletedLoading || mp4CompletedSaving || !mp4Completed.has_more;
+      const key = JSON.stringify([mp4Completed.records,interfaceChoice,mp4CompletedSaving]);
+      if (key === mp4CompletedRowsKey) return;
+      mp4CompletedRowsKey = key;
+      const rows = mp4Completed.records.map(row => {
+        const item = document.createElement("li"), label = document.createElement("p"), save = document.createElement("button");
+        label.textContent = new Date(row.created_ms).toLocaleString(language === "system" ? undefined : language) + " · " + formatBytes(row.bytes)
+          + (row.width && row.height ? " · "+row.width+" × "+row.height : "") + (row.fps_num ? " · "+row.fps_num+" fps" : "");
+        save.type = "button";save.className = "secondary";save.textContent = t("영상 저장");save.disabled = mp4CompletedSaving;
+        const id = row.export_id;save.addEventListener("click",() => saveMP4Completed(id));item.replaceChildren(label,save);return item;
+      });
+      el("mp4-completed-rows").replaceChildren(...rows);
+    }
+    async function loadMP4Completed(offset = mp4Completed.offset) {
+      if (!visible || disposed || mp4CompletedLoading || mp4CompletedSaving || selectedCategory !== "graphics" || !el("panel-mp4").open) return;
+      const payload = {offset};if (!validRequest("mp4_completed_status",payload)) return;
+      mp4CompletedLoading = true;renderMP4Completed();const visibility = visibilityVersion;let resetPage = false;
+      try {
+        const result = await bridge.request("mp4_completed_status",payload);
+        if (!visible || disposed || visibility !== visibilityVersion) return;
+        if (!validMP4Completed(result,offset)) throw new Error("mp4_catalog_unavailable");
+        if (offset > 0 && !result.records.length && offset >= result.total) resetPage = true;
+        else {mp4Completed = result;mp4CompletedLoaded = true;mp4CompletedFeedback = "";}
+      } catch (_) {
+        if (visible && !disposed && visibility === visibilityVersion) mp4CompletedFeedback = "영상 목록을 불러오지 못했습니다.";
+      } finally {
+        mp4CompletedLoading = false;if (!disposed) renderMP4Completed();
+        if (resetPage && visible && !disposed && visibility === visibilityVersion) Promise.resolve().then(() => loadMP4Completed(0));
+      }
+    }
+    async function saveMP4Completed(id) {
+      if (!visible || disposed || mp4CompletedSaving || launchFlushing || !mp4Completed.records.some(row => row.export_id === id)) return;
+      const payload = {export_id:id};if (!validRequest("mp4_save",payload)) return;
+      mp4CompletedSaving = true;renderMP4Completed();const visibility = visibilityVersion;
+      try {
+        await bridge.request("mp4_save",payload);
+        if (visible && !disposed && visibility === visibilityVersion) mp4CompletedFeedback = "저장 방법을 선택해 주세요.";
+      } catch (_) {
+        if (visible && !disposed && visibility === visibilityVersion) mp4CompletedFeedback = "영상 저장을 열지 못했습니다. 다시 시도해 주세요.";
+      } finally { mp4CompletedSaving = false;if (!disposed) renderMP4Completed(); }
     }
     function renderMP4Queue() {
       const q = mp4QueueStatus, jobs = q.jobs, pending = jobs.filter(job => job.state === "pending").length;
@@ -1879,7 +1959,7 @@
       } finally {
         refreshing = false;
         if (!disposed) el("refresh").disabled = false;
-        if (visible && !disposed) {if (selectedCategory === "graphics") loadMP4Options();mp4("status");mp4Queue("status");}
+        if (visible && !disposed) {if (selectedCategory === "graphics") loadMP4Options();mp4("status");mp4Queue("status");loadMP4Completed();}
         schedulePoll();
       }
     }
@@ -2165,7 +2245,9 @@
     for (const action of ["start","pause","resume","cancel","save"]) el("mp4-"+action).addEventListener("click",() => mp4(action));
     for (const action of ["run","pause","resume"]) el("mp4-queue-"+action).addEventListener("click",() => mp4Queue(action));
     el("mp4-enqueue").addEventListener("click",() => mp4Queue("enqueue"));
-    el("panel-mp4").addEventListener("toggle",() => { if (selectedCategory === "graphics" && el("panel-mp4").open) loadMP4Options();mp4("status");mp4Queue("status"); });
+    el("mp4-completed-previous").addEventListener("click",() => loadMP4Completed(Math.max(0,mp4Completed.offset-32)));
+    el("mp4-completed-next").addEventListener("click",() => loadMP4Completed(mp4Completed.offset+32));
+    el("panel-mp4").addEventListener("toggle",() => { if (selectedCategory === "graphics" && el("panel-mp4").open) loadMP4Options();mp4("status");mp4Queue("status");loadMP4Completed(); });
     updateCopyButton();
     el("diagnostics-copy").addEventListener("click", copyDiagnostics);
     el("diagnostics-clear").addEventListener("click", clearDiagnostics);

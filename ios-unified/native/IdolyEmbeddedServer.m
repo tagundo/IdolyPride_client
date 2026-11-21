@@ -8,6 +8,7 @@
 #import "IdolyUnityHost.h"
 #import "GatePolicy.h"
 #import "MP4LifecyclePolicy.h"
+#import "IdolyMP4Library.h"
 #if !IDOLY_SMOKE_SIMULATOR
 #import "UnityStartupProfile.h"
 #endif
@@ -919,6 +920,25 @@ static NSDictionary *mp4QueueStatus(void) {
     status[@"jobs"] = jobs;
     return status;
 }
+static NSArray *mp4LibraryQueueJobs(void) {
+    // Cold journal inspection needs no Unity/Python callback. Its exact stable
+    // app-owned roots are the same ones validated in the private descriptor.
+    NSString *root=IDNativeDataDirectory().stringByResolvingSymlinksInPath;
+    NSString *library=[root stringByAppendingPathComponent:@".idoly-mp4-library"];
+    NSString *queue=[library stringByAppendingPathComponent:@"queue"],*exports=[library stringByAppendingPathComponent:@"exports"];
+    typedef int (*Configure)(const char *,const char *);
+    Configure configure=(Configure)dlsym(RTLD_DEFAULT,"IDMP4QueueConfigure");
+    if(configure && IDMP4PrivateDirectory(library.fileSystemRepresentation)
+            && IDMP4PrivateDirectory(queue.fileSystemRepresentation) && IDMP4PrivateDirectory(exports.fileSystemRepresentation)
+            && [library isEqual:library.stringByResolvingSymlinksInPath]
+            && (([mp4ConfiguredQueueDirectory isEqual:queue]&&[mp4PersistentExportDirectory isEqual:exports])
+                || configure(queue.fileSystemRepresentation,exports.fileSystemRepresentation)==0)) {
+        mp4PersistentExportDirectory=exports;mp4ConfiguredQueueDirectory=queue;
+        NSDictionary *status=mp4QueueStatus();
+        if([status[@"available"]isEqual:@YES])return status[@"jobs"] ?: @[];
+    }
+    return @[];
+}
 static BOOL mp4EnsureConfiguration(BOOL queueRequired, NSString **failure) {
     if (!atomic_load(&pythonReady)) { *failure = @"mp4_server_not_ready"; return NO; }
     typedef int (*Configure)(const char *,uint64_t,const char *,const char *,int);
@@ -988,6 +1008,8 @@ static NSDictionary *mp4SavedOptions(void) {
     id value = [NSUserDefaults.standardUserDefaults objectForKey:@"IdolyMP4ExportOptions.v1"];
     return mp4ValidOptions(value) ? value : mp4DefaultOptions();
 }
+static uint64_t mp4SaveLeaseGeneration,mp4SaveLease;
+static NSString *mp4SaveLeaseJob;
 void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSString *)) {
     NSData *bytes = [request dataUsingEncoding:NSUTF8StringEncoding];
     id decoded = bytes && bytes.length <= 4096 ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
@@ -1006,6 +1028,8 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
         && mp4Choice(object[@"video_codec"],@[@1,@2]);
     BOOL optionsRead = [action isEqual:@"mp4_options"] && object.count == 2;
     BOOL optionsSave = [action isEqual:@"mp4_options_save"] && object.count == 3 && mp4ValidOptions(object[@"options"]);
+    BOOL completedStatus = [action isEqual:@"mp4_completed_status"] && (object.count==2
+        || (object.count==3 && mp4Integer(object[@"offset"],65536) && [object[@"offset"]unsignedIntValue]%32==0));
     BOOL noFields = object.count == 2 && [@[@"mp4_status",@"mp4_cancel",@"mp4_pause",@"mp4_resume",@"mp4_queue_status",@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume"] containsObject:action];
     BOOL jobAction = object.count == 3 && mp4Identifier(object[@"job_id"])
         && [@[@"mp4_queue_cancel",@"mp4_queue_remove",@"mp4_queue_retry"] containsObject:action];
@@ -1016,7 +1040,7 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
     BOOL move = [action isEqual:@"mp4_queue_move"] && object.count == 4 && mp4Identifier(object[@"job_id"]) && mp4Integer(object[@"position"],7);
     BOOL valid = identifier && CFGetTypeID((__bridge CFTypeRef)identifier) != CFBooleanGetTypeID()
         && identifier.longLongValue >= 1 && identifier.longLongValue <= INT32_MAX && identifier.doubleValue == identifier.longLongValue
-        && (preset || optionsRead || optionsSave || noFields || jobAction || deleteCompleted || move);
+        && (preset || optionsRead || optionsSave || completedStatus || noFields || jobAction || deleteCompleted || move);
     void (^reply)(BOOL,NSDictionary *,NSString *) = ^(BOOL ok,NSDictionary *status,NSString *error) {
         NSString *json = JSON(ok ? @{@"id":identifier ?: @1,@"ok":@YES,@"result":status ?: @{}}
             : @{@"id":identifier ?: @1,@"ok":@NO,@"error":@{@"code":error ?: @"mp4_unavailable",@"message":error ?: @"mp4_unavailable"}});
@@ -1031,6 +1055,12 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
     }
     if (!worker) { reply(NO,nil,@"mp4_unavailable"); return; }
     [worker enqueue:^{
+        if(completedStatus) {
+            NSArray *jobs=mp4LibraryQueueJobs();NSString *error=nil;
+            NSDictionary *status=IDMP4LibraryStatus(IDNativeDataDirectory().stringByResolvingSymlinksInPath,
+                jobs,mp4PersistentExportDirectory,[object[@"offset"]unsignedIntegerValue],&error);
+            reply(status!=nil,status,status?nil:error);return;
+        }
         if ([action isEqual:@"mp4_cancel"]) {
             typedef void (*Cancel)(void); Cancel cancel = (Cancel)dlsym(RTLD_DEFAULT,"IDMP4SessionCancel");
             if (cancel) cancel(); reply(YES,mp4SessionStatus(),nil); return;
@@ -1040,6 +1070,9 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
             reply(applied,applied ? mp4SessionStatus() : nil,applied ? nil : @"mp4_unavailable"); return;
         }
         if (!start && !queueAction) { reply(YES,mp4SessionStatus(),nil); return; }
+        if(mp4SaveLease && (start || [action isEqual:@"mp4_queue_run"] || [action isEqual:@"mp4_queue_resume"])) {
+            reply(NO,nil,@"mp4_save_busy");return;
+        }
         NSString *error = nil;
         if (!mp4EnsureConfiguration(queueAction,&error)) { reply(NO,nil,error); return; }
         if (queueAction) {
@@ -1061,6 +1094,9 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
             } else {
                 typedef int (*Command)(int,const char *,int); Command command = (Command)dlsym(RTLD_DEFAULT,"IDMP4QueueCommand");
                 int operation = [action isEqual:@"mp4_queue_cancel"] ? 1 : [action isEqual:@"mp4_queue_remove"] ? 2 : [action isEqual:@"mp4_queue_retry"] ? 3 : 4;
+                if(operation==2 && mp4SaveLease && [mp4SaveLeaseJob isEqual:object[@"job_id"]]) {
+                    reply(NO,nil,@"mp4_save_busy");return;
+                }
                 if (command) accepted = command(operation,[object[@"job_id"] UTF8String],deleteCompleted ? 1 : move ? [object[@"position"] intValue] : 0);
             }
             reply(accepted == 0,accepted == 0 ? mp4QueueStatus() : nil,accepted == 0 ? nil : @"mp4_queue_busy"); return;
@@ -1068,32 +1104,57 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
         typedef int (*Start)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
         Start begin = (Start)dlsym(RTLD_DEFAULT,"IDMP4SessionStartV2");
         if (!begin) { reply(NO,nil,@"mp4_unavailable"); return; }
+        if(!IDMP4LibraryBookmark(IDNativeDataDirectory().stringByResolvingSymlinksInPath,mp4ExportDirectory,&error)) {
+            reply(NO,nil,error ?: @"mp4_catalog_unavailable");return;
+        }
         int accepted = begin([object[@"fps"] unsignedIntValue],1,[object[@"video_codec"] unsignedIntValue],[object[@"video_bitrate"] unsignedIntValue],192000,
             dimensions ? [object[@"width"] unsignedIntValue] : 0,dimensions ? [object[@"height"] unsignedIntValue] : 0);
         if (accepted != 0) { reply(NO,nil,accepted > 0 ? @"mp4_busy" : @"mp4_scene_not_ready"); return; }
         mp4SetUserPaused(NO); reply(YES,mp4SessionStatus(),nil);
     }];
 }
-void IdolyEmbeddedServerMP4ExportJob(NSString *jobID, void (^completion)(NSURL *,NSString *)) {
-    if (!worker || (jobID && !mp4Identifier(jobID))) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil,@"mp4_export_not_ready"); }); return; }
+static NSURL *mp4ResolveCompleted(NSString *jobID,NSString *exportID,NSString **error,NSString **selectedJob) {
+    NSArray *jobs=mp4LibraryQueueJobs();NSString *identifier=exportID;
+    if(jobID) {
+        for(NSDictionary *row in jobs)if([row[@"job_id"]isEqual:jobID]&&[row[@"state"]isEqual:@"completed"]){identifier=row[@"output_id"];break;}
+        if(!identifier){*error=@"mp4_export_not_ready";return nil;}
+    } else if(!identifier) {
+        NSDictionary *status=mp4SessionStatus();
+        if([status[@"phase"]isEqual:@"completed"]&&mp4Identifier(status[@"export_id"]))identifier=status[@"export_id"];
+    }
+    NSURL *file=IDMP4LibraryFile(IDNativeDataDirectory().stringByResolvingSymlinksInPath,jobs,
+        mp4PersistentExportDirectory,identifier,error);
+    if(file&&!IDMP4FinishedFile(file.URLByDeletingLastPathComponent.path.fileSystemRepresentation,file.URLByDeletingPathExtension.lastPathComponent.UTF8String))file=nil;
+    if(file&&selectedJob) {
+        NSString *chosen=file.URLByDeletingPathExtension.lastPathComponent;
+        for(NSDictionary *row in jobs)if([row[@"output_id"]isEqual:chosen]&&[row[@"state"]isEqual:@"completed"]){*selectedJob=row[@"job_id"];break;}
+    }
+    return file;
+}
+static void mp4ExportResolved(NSString *jobID,NSString *exportID,void (^completion)(NSURL *,NSString *)) {
+    if(!worker||(jobID&&!mp4Identifier(jobID))||(exportID&&!mp4Identifier(exportID))){dispatch_async(dispatch_get_main_queue(),^{completion(nil,@"mp4_export_not_ready");});return;}
     [worker enqueue:^{
-        NSDictionary *status = nil; NSString *identifier = nil, *root = nil;
-        if (jobID) {
-            NSString *error = nil;
-            if (mp4EnsureConfiguration(YES,&error)) {
-                NSDictionary *queue = mp4QueueStatus();
-                for (NSDictionary *row in queue[@"jobs"]) if ([row[@"job_id"] isEqual:jobID] && [row[@"state"] isEqual:@"completed"]) { identifier = row[@"output_id"]; break; }
-                root = mp4PersistentExportDirectory;
-            }
-        } else {
-            status = mp4SessionStatus();
-            if ([status[@"phase"] isEqual:@"completed"]) identifier = status[@"export_id"];
-            root = mp4ExportDirectory;
-        }
-        BOOL valid = mp4Identifier(identifier) && IDMP4FinishedFile(root.fileSystemRepresentation,identifier.UTF8String);
-        NSURL *url = valid ? [NSURL fileURLWithPath:[root stringByAppendingPathComponent:[identifier stringByAppendingString:@".mp4"]]] : nil;
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(url,valid ? nil : @"mp4_export_not_ready"); });
+        NSString *error=nil;NSURL *file=mp4ResolveCompleted(jobID,exportID,&error,NULL);
+        dispatch_async(dispatch_get_main_queue(),^{completion(file,file?nil:error ?: @"mp4_export_not_ready");});
     }];
+}
+void IdolyEmbeddedServerMP4ExportJob(NSString *jobID,void (^completion)(NSURL *,NSString *)) { mp4ExportResolved(jobID,nil,completion); }
+void IdolyEmbeddedServerMP4ExportRecord(NSString *exportID,void (^completion)(NSURL *,NSString *)) { mp4ExportResolved(nil,exportID,completion); }
+void IdolyEmbeddedServerMP4BeginSave(NSString *jobID,NSString *exportID,void (^completion)(NSURL *,NSString *,uint64_t)) {
+    if(!worker||(jobID&&!mp4Identifier(jobID))||(exportID&&!mp4Identifier(exportID))||(jobID&&exportID)){
+        dispatch_async(dispatch_get_main_queue(),^{completion(nil,@"mp4_export_not_ready",0);});return;
+    }
+    [worker enqueue:^{
+        if(mp4SaveLease){dispatch_async(dispatch_get_main_queue(),^{completion(nil,@"mp4_save_busy",0);});return;}
+        NSString *error=nil,*job=nil;NSURL *file=mp4ResolveCompleted(jobID,exportID,&error,&job);
+        uint64_t lease=0;
+        if(file){if(++mp4SaveLeaseGeneration==0)++mp4SaveLeaseGeneration;lease=mp4SaveLeaseGeneration;mp4SaveLease=lease;mp4SaveLeaseJob=job;}
+        dispatch_async(dispatch_get_main_queue(),^{completion(file,file?nil:error ?: @"mp4_export_not_ready",lease);});
+    }];
+}
+void IdolyEmbeddedServerMP4EndSave(uint64_t lease) {
+    if(!worker||!lease)return;
+    [worker enqueue:^{if(mp4SaveLease==lease){mp4SaveLease=0;mp4SaveLeaseJob=nil;}}];
 }
 void IdolyEmbeddedServerMP4Export(void (^completion)(NSURL *,NSString *)) { IdolyEmbeddedServerMP4ExportJob(nil,completion); }
 void IdolyEmbeddedServerCryptoSelfTest(void (^completion)(NSString *)) {

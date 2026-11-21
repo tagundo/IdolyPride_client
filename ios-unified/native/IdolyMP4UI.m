@@ -2,9 +2,17 @@
 #import "IdolyMP4UI.h"
 #import "IdolyEmbeddedServer.h"
 #import "MP4FinalizationPolicy.h"
+#import <objc/runtime.h>
 
 static NSString *IDMP4Language = @"system";
 static BOOL IDMP4FileSheetVisible;
+NSString * const IDMP4SaveStateDidChangeNotification=@"IdolyMP4SaveStateDidChange";
+BOOL IDMP4CanCloseSettings(void) { return !IDMP4FileSheetVisible; }
+static void IDMP4SetSaving(BOOL saving) {
+    if(IDMP4FileSheetVisible==saving)return;
+    IDMP4FileSheetVisible=saving;
+    [NSNotificationCenter.defaultCenter postNotificationName:IDMP4SaveStateDidChangeNotification object:nil];
+}
 static IDMP4FinalizationPolicy IDMP4Finalization;
 static void IDMP4EndFinalizationGeneration(uint64_t generation) {
     uintptr_t identifier = 0;
@@ -48,11 +56,12 @@ static UIViewController *IDMP4TopPresenter(UIViewController *root) {
     return root;
 }
 @interface IDMP4SaveDelegate : NSObject <UIDocumentPickerDelegate, UIAdaptivePresentationControllerDelegate, UIPopoverPresentationControllerDelegate>
+@property(nonatomic) uint64_t lease;
 @end
 static IDMP4SaveDelegate *IDMP4PickerDelegate;
 @implementation IDMP4SaveDelegate
 - (void)retire {
-    if (IDMP4PickerDelegate == self) { IDMP4FileSheetVisible = NO; IDMP4PickerDelegate = nil; }
+    if (IDMP4PickerDelegate == self) { IdolyEmbeddedServerMP4EndSave(_lease); IDMP4PickerDelegate = nil; IDMP4SetSaving(NO); }
 }
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     (void)controller; [self retire];
@@ -67,49 +76,98 @@ static IDMP4SaveDelegate *IDMP4PickerDelegate;
     (void)popover; [self retire];
 }
 @end
-static void IDMP4Save(UIViewController *presenter, NSString *jobID, void (^completion)(BOOL)) {
-    if (IDMP4FileSheetVisible || !presenter.viewIfLoaded.window) { completion(NO); return; }
-    IDMP4FileSheetVisible = YES;
-    IdolyEmbeddedServerMP4ExportJob(jobID, ^(NSURL *file, NSString *error) {
-        (void)error;
+static BOOL IDMP4PresenterAvailable(UIViewController *target) {
+    return target.viewIfLoaded.window && !target.isBeingDismissed && !target.isBeingPresented
+        && !target.navigationController.isBeingDismissed && !target.navigationController.isBeingPresented;
+}
+static void IDMP4AfterChoice(UIViewController *choice,UIViewController *target,
+                            IDMP4SaveDelegate *owner,void (^present)(void)) {
+    void (^ready)(void)=^{
+        if(IDMP4PickerDelegate!=owner || !IDMP4FileSheetVisible || !IDMP4PresenterAvailable(target) || target.presentedViewController){[owner retire];return;}
+        present();
+    };
+    // Dismiss only our choice, never its settings/game presenter. UIAlert's
+    // action may already be dismissing it; join that actual transition instead
+    // of racing another presentation or sleeping for an assumed animation.
+    id<UIViewControllerTransitionCoordinator> transition=choice.transitionCoordinator;
+    if(choice.isBeingDismissed && transition) {
+        BOOL joined=[transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context){(void)context;dispatch_async(dispatch_get_main_queue(),ready);}];
+        if(!joined)dispatch_async(dispatch_get_main_queue(),ready);
+    } else if(choice.presentingViewController)[choice dismissViewControllerAnimated:YES completion:ready];
+    else dispatch_async(dispatch_get_main_queue(),ready);
+}
+@interface IDMP4SaveLifetime : NSObject
+@property(nonatomic,weak) IDMP4SaveDelegate *owner;
+@end
+@implementation IDMP4SaveLifetime
+- (void)dealloc {
+    IDMP4SaveDelegate *owner=_owner;
+    dispatch_async(dispatch_get_main_queue(),^{[owner retire];});
+}
+@end
+static void IDMP4OwnPresentation(UIViewController *controller,IDMP4SaveDelegate *owner) {
+    static const char lifetimeKey;
+    IDMP4SaveLifetime *lifetime=[IDMP4SaveLifetime new];lifetime.owner=owner;
+    objc_setAssociatedObject(controller,&lifetimeKey,lifetime,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+static void IDMP4PresentOwned(UIViewController *controller,UIViewController *target,IDMP4SaveDelegate *owner) {
+    IDMP4OwnPresentation(controller,owner);
+    [target presentViewController:controller animated:YES completion:^{
+        if(!controller.presentingViewController || !controller.viewIfLoaded.window)[owner retire];
+    }];
+    // UIKit refuses an invalid presentation synchronously without necessarily
+    // invoking its completion. Do not leave the source leased in that case.
+    if(!controller.presentingViewController)[owner retire];
+}
+static void IDMP4Save(UIViewController *presenter, NSString *jobID,NSString *exportID, void (^completion)(BOOL,NSString *)) {
+    if (IDMP4FileSheetVisible) { completion(NO,@"mp4_save_busy"); return; }
+    if (!IDMP4PresenterAvailable(presenter)) { completion(NO,@"mp4_presenter_unavailable"); return; }
+    IDMP4SetSaving(YES);
+    void (^prepared)(NSURL *,NSString *,uint64_t)=^(NSURL *file, NSString *error,uint64_t lease) {
         UIViewController *target = IDMP4TopPresenter(presenter);
-        if (!file || !target.viewIfLoaded.window || target.presentedViewController) {
-            IDMP4FileSheetVisible = NO; completion(NO); return;
+        if (!file || !IDMP4PresenterAvailable(target) || target.presentedViewController) {
+            IdolyEmbeddedServerMP4EndSave(lease); IDMP4SetSaving(NO); completion(NO,error ?: @"mp4_presenter_unavailable"); return;
         }
         UIAlertController *choice = [UIAlertController alertControllerWithTitle:IDMP4Text(@"MP4 저장",@"MP4を保存",@"Save MP4")
             message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+        __weak UIAlertController *weakChoice=choice;
+        IDMP4SaveDelegate *choiceOwner=[IDMP4SaveDelegate new];choiceOwner.lease=lease;IDMP4PickerDelegate=choiceOwner;
         [choice addAction:[UIAlertAction actionWithTitle:IDMP4Text(@"파일에 저장",@"ファイルに保存",@"Save to Files")
             style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                 (void)action;
                 UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
                     initWithURL:file inMode:UIDocumentPickerModeExportToService];
-                IDMP4PickerDelegate = [IDMP4SaveDelegate new]; picker.delegate = IDMP4PickerDelegate;
-                picker.presentationController.delegate = IDMP4PickerDelegate;
-                [target dismissViewControllerAnimated:YES completion:^{ [target presentViewController:picker animated:YES completion:nil]; }];
+                IDMP4SaveDelegate *pickerOwner=[IDMP4SaveDelegate new];pickerOwner.lease=lease;IDMP4PickerDelegate=pickerOwner;picker.delegate=pickerOwner;
+                picker.presentationController.delegate=pickerOwner;
+                IDMP4AfterChoice(weakChoice,target,pickerOwner,^{ IDMP4PresentOwned(picker,target,pickerOwner); });
             }]];
         [choice addAction:[UIAlertAction actionWithTitle:IDMP4Text(@"공유",@"共有",@"Share")
             style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                 (void)action;
                 UIActivityViewController *sheet = [[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
+                IDMP4SaveDelegate *sheetOwner=[IDMP4SaveDelegate new];sheetOwner.lease=lease;IDMP4PickerDelegate=sheetOwner;
                 sheet.completionWithItemsHandler = ^(UIActivityType type, BOOL completed, NSArray *items, NSError *failure) {
-                    (void)type; (void)completed; (void)items; (void)failure; IDMP4FileSheetVisible = NO;
-                    IDMP4PickerDelegate = nil;
+                    (void)type; (void)completed; (void)items; (void)failure; [sheetOwner retire];
                 };
                 sheet.popoverPresentationController.sourceView = target.view;
                 sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(target.view.bounds),CGRectGetMaxY(target.view.bounds)-20,1,1);
                 sheet.presentationController.delegate = IDMP4PickerDelegate;
                 sheet.popoverPresentationController.delegate = IDMP4PickerDelegate;
-                [target dismissViewControllerAnimated:YES completion:^{ [target presentViewController:sheet animated:YES completion:nil]; }];
+                IDMP4AfterChoice(weakChoice,target,sheetOwner,^{ IDMP4PresentOwned(sheet,target,sheetOwner); });
             }]];
         [choice addAction:[UIAlertAction actionWithTitle:IDMP4Text(@"취소",@"キャンセル",@"Cancel")
-            style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) { (void)action; IDMP4FileSheetVisible = NO; IDMP4PickerDelegate = nil; }]];
-        IDMP4PickerDelegate = [IDMP4SaveDelegate new];
-        choice.presentationController.delegate = IDMP4PickerDelegate;
+            style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) { (void)action; [choiceOwner retire]; }]];
+        choice.presentationController.delegate = choiceOwner;
         choice.popoverPresentationController.sourceView = target.view;
-        choice.popoverPresentationController.delegate = IDMP4PickerDelegate;
+        choice.popoverPresentationController.delegate = choiceOwner;
         choice.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(target.view.bounds),CGRectGetMaxY(target.view.bounds)-20,1,1);
-        [target presentViewController:choice animated:YES completion:nil]; completion(YES);
-    });
+        IDMP4OwnPresentation(choice,choiceOwner);
+        __block BOOL replied=NO;
+        void (^finish)(BOOL)=^(BOOL shown){if(replied)return;replied=YES;if(!shown)[choiceOwner retire];completion(shown,shown?nil:@"mp4_presenter_unavailable");};
+        [target presentViewController:choice animated:YES completion:^{finish(choice.presentingViewController!=nil&&choice.viewIfLoaded.window!=nil);}];
+        if(!choice.presentingViewController)finish(NO);
+    };
+    IdolyEmbeddedServerMP4BeginSave(jobID,exportID,prepared);
 }
 
 @interface IDMP4Progress : NSObject
@@ -126,6 +184,7 @@ static void IDMP4Save(UIViewController *presenter, NSString *jobID, void (^compl
 @property(nonatomic) BOOL paused;
 @property(nonatomic) BOOL pausePending;
 @property(nonatomic) BOOL queueMode;
+@property(nonatomic,copy) NSString *completedExportID;
 - (void)show:(UIWindow *)window;
 - (void)tick;
 - (void)buttonPressed;
@@ -212,6 +271,7 @@ static IDMP4Progress *IDMP4ActiveProgress;
         owner.paused = [phase isEqual:@"paused"] || [phase isEqual:@"pausing"] || [status[@"pause_requested"] isEqual:@YES];
         BOOL completed = [phase isEqual:@"completed"], failed = [phase isEqual:@"failed"], cancelled = [phase isEqual:@"cancelled"];
         owner.completed = completed; owner.terminal = completed || failed || cancelled;
+        if(completed&&!owner.queueMode&&[status[@"export_id"]isKindOfClass:NSString.class])owner.completedExportID=status[@"export_id"];
         NSString *text = completed ? IDMP4Text(@"MP4 완료",@"MP4完了",@"MP4 complete")
             : failed ? IDMP4Text(@"MP4 실패",@"MP4に失敗",@"MP4 failed")
             : cancelled ? IDMP4Text(@"취소됨",@"キャンセル済み",@"Cancelled")
@@ -264,9 +324,7 @@ static IDMP4Progress *IDMP4ActiveProgress;
         [_timer invalidate]; _timer = nil; [_panel removeFromSuperview]; IDMP4ActiveProgress = nil;
     } else if (_completed) {
         UIViewController *presenter = IDMP4TopPresenter(_gameWindow.rootViewController);
-        if (presenter) IDMP4Save(presenter, nil, ^(BOOL presented) {
-            if (presented) { [self.panel removeFromSuperview]; IDMP4ActiveProgress = nil; }
-        });
+        if (presenter) IDMP4Save(presenter, nil, _completedExportID, ^(BOOL presented,NSString *error) { (void)presented;(void)error; });
     } else if (_terminal) {
         [_panel removeFromSuperview]; IDMP4ActiveProgress = nil;
     } else {
@@ -298,11 +356,14 @@ void IDMP4HandleRequest(NSDictionary *request, UIViewController *presenter, UIWi
     NSNumber *identifier = request[@"id"];
     if ([request[@"action"] isEqual:@"mp4_save"]) {
         NSString *jobID = [request[@"job_id"] isKindOfClass:NSString.class] ? request[@"job_id"] : nil;
+        NSString *exportID=[request[@"export_id"]isKindOfClass:NSString.class]?request[@"export_id"]:nil;
         NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"] invertedSet];
         BOOL queueJob = request.count == 3 && jobID.length == 32 && [jobID rangeOfCharacterFromSet:invalid].location == NSNotFound;
-        if (!(request.count == 2 && !request[@"job_id"]) && !queueJob) { reply(IDMP4Encode(@{@"id":identifier,@"ok":@NO,@"error":@{@"code":@"invalid_request",@"message":@"invalid_request"}})); return; }
-        IDMP4Save(presenter, jobID, ^(BOOL presented) {
-            reply(IDMP4Encode(@{@"id":identifier,@"ok":@(presented),@"result":@{@"presented":@(presented)}}));
+        BOOL catalogRecord=request.count==3&&exportID.length==32&&[exportID rangeOfCharacterFromSet:invalid].location==NSNotFound;
+        if (!(request.count == 2 && !request[@"job_id"]&&!request[@"export_id"]) && !queueJob && !catalogRecord) { reply(IDMP4Encode(@{@"id":identifier,@"ok":@NO,@"error":@{@"code":@"invalid_request",@"message":@"invalid_request"}})); return; }
+        IDMP4Save(presenter, jobID, exportID, ^(BOOL presented,NSString *error) {
+            reply(IDMP4Encode(presented?@{@"id":identifier,@"ok":@YES,@"result":@{@"presented":@YES}}
+                :@{@"id":identifier,@"ok":@NO,@"error":@{@"code":error ?: @"mp4_export_not_ready",@"message":error ?: @"mp4_export_not_ready"}}));
         }); return;
     }
     IdolyEmbeddedServerMP4Command(IDMP4Encode(request), ^(NSString *response) {
