@@ -149,7 +149,7 @@ def test_mac_optional_failure_is_visible_and_still_starts_original_runtime(tmp_p
     payload = load("macos-server/payload.py", "translation_mac_payload_start")
     monkeypatch.setitem(sys.modules, "payload", payload)
     engine = load("macos-server/engine.py", "translation_mac_engine_start")
-    events, starts = [], []
+    events, starts, failures = [], [], []
     monkeypatch.setattr(engine, "install_payload", lambda *args: None)
     def fail(*args, **kwargs):
         raise ValueError("invalid new optional package")
@@ -158,7 +158,7 @@ def test_mac_optional_failure_is_visible_and_still_starts_original_runtime(tmp_p
     def start(*args, **kwargs):
         starts.append((args, kwargs))
         return runtime
-    fake = SimpleNamespace(start=start)
+    fake = SimpleNamespace(start=start, record_startup_failure=lambda root, error, stage="catalog": failures.append((root, error, stage)))
     monkeypatch.setitem(sys.modules, "idoly_local.app_runtime", fake)
     monkeypatch.setattr(idoly_local, "app_runtime", fake, raising=False)
     controller = engine.Controller(tmp_path, tmp_path / "ServerData.zip",
@@ -168,3 +168,5 @@ def test_mac_optional_failure_is_visible_and_still_starts_original_runtime(tmp_p
     assert controller.status()["bundled_translations"] == {"state": "failed", "installed": False,
                                                           "previous_files_preserved": True}
     assert not any(event == "error" for event, fields in events)
+    assert len(failures) == 1 and failures[0][0] == tmp_path
+    assert isinstance(failures[0][1], ValueError) and failures[0][2] == "catalog"

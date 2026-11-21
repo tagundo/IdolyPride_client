@@ -15,6 +15,7 @@ import grpc
 from google.protobuf import descriptor_pb2
 
 from idoly_local import app_runtime, codec
+from idoly_local.application import Application as _RealApplication
 from idoly_local.gameplay import (repair_starter_home_positions, repair_starter_inventory,
                                  repair_starter_roster, repair_starter_card_level_mission)
 from idoly_local.profiles import new_profile
@@ -224,7 +225,13 @@ class EmbeddedRuntimeTests(unittest.TestCase):
                 body = response.read()
                 self.assertEqual(int(response.headers["Content-Length"]), len(body))
         observed = json.loads(body)
-        self.assertEqual(observed, runtime.diagnostics_snapshot())
+        # Serving this endpoint itself updates HTTP observations after the
+        # snapshot body has been encoded. Compare the otherwise stable fields.
+        current = runtime.diagnostics_snapshot()
+        observed_http = observed["runtime"].pop("http_requests")
+        current["runtime"].pop("http_requests")
+        self.assertEqual(observed, current)
+        self.assertEqual(observed_http["last_request"]["path"], "/diagnostics/runtime")
         self.assertTrue(observed["runtime"]["running"])
         self.assertIn("RPC /api.Deck/Save -> UNIMPLEMENTED", observed["runtime"]["logs"])
         self.assertTrue(any("/api.System/Check -> OK" in line for line in observed["runtime"]["logs"]))
@@ -233,6 +240,187 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertNotIn("state.db", body.decode())
         self.assertEqual(state.snapshot("sandbox"), before)
         self.assertTrue(state.authenticated(session_token, "sandbox"))
+
+    def test_startup_checks_observe_real_descriptor_master_and_owned_listeners(self):
+        runtime = self.start()
+        checks = runtime.status()["startup_checks"]
+        rows = {row["id"]: row for row in checks["checks"]}
+        self.assertEqual(checks["state"], "ready")
+        self.assertEqual(checks["scope"], "current_run")
+        self.assertIs(checks["gameplay_verified"], False)
+        self.assertEqual(rows["protocol"]["fingerprint"], self.schema.fingerprint)
+        self.assertEqual(rows["master"]["pack_count"], 1)
+        self.assertEqual(rows["master"]["pack_bytes"], 13)
+        self.assertEqual(rows["master"]["version"], "fixture-master")
+        self.assertGreater(rows["http"]["port"], 0)
+        self.assertGreater(rows["grpc"]["port"], 0)
+        self.assertEqual(rows["resources"]["state"], "missing")
+        self.assertEqual(rows["resources"]["offline"], "not_checked")
+        runtime.stop()
+        previous = app_runtime.server_settings_status(self.root)
+        self.assertEqual(previous["startup_checks"]["state"], "stopped")
+        self.assertEqual(previous["startup_checks"]["scope"], "previous_run")
+
+    def test_failed_startup_is_available_after_relaunch_without_private_paths(self):
+        (self.root / "protocol" / "idolypride-6.1.1.pb").unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.start()
+        previous = app_runtime.server_settings_status(self.root)
+        self.assertEqual(previous["startup_checks"]["state"], "blocked")
+        failure = previous["durable_history"]["last_failure"]
+        self.assertEqual(failure["stage"], "protocol")
+        self.assertEqual(failure["code"], "missing_input")
+        self.assertEqual(failure["error_type"], "FileNotFoundError")
+        text = json.dumps(previous)
+        self.assertNotIn(str(self.root), text)
+        self.assertNotIn("fixture-key", text)
+        self.assertNotIn("Starter Manager", text)
+
+    def test_http_failure_survives_normal_stop_and_next_start(self):
+        from urllib.error import HTTPError
+        runtime = self.start()
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(runtime.status()["asset_url"] + "/does-not-exist?token=private-query", timeout=2)
+        caught.exception.read()
+        caught.exception.close()
+        from time import monotonic, sleep
+        deadline = monotonic() + 2
+        failed = None
+        while monotonic() < deadline:
+            failed = runtime._history.status()["last_failure"]
+            if failed is not None:
+                break
+            sleep(.005)
+        self.assertIsNotNone(failed)
+        self.assertEqual(failed["kind"], "http_failure")
+        self.assertEqual(failed["http_status"], 404)
+        runtime.stop()
+        restarted = self.start()
+        current = restarted.status()["durable_history"]
+        self.assertEqual(current["last_failure"], failed)
+        self.assertNotEqual(current["current_run"], failed["run_id"])
+        self.assertNotIn("private-query", json.dumps(current))
+
+    def test_invalid_actual_http_readiness_json_blocks_start_and_preserves_failure(self):
+        with mock.patch("idoly_local.playback.PlaybackState.settings", return_value={"schema": 2}):
+            with self.assertRaisesRegex(ValueError, "readiness JSON"):
+                self.start()
+        previous = app_runtime.server_settings_status(self.root)
+        self.assertEqual(previous["startup_checks"]["state"], "blocked")
+        self.assertEqual(previous["durable_history"]["last_failure"]["stage"], "http")
+        self.assertEqual(previous["durable_history"]["last_failure"]["code"], "invalid_input")
+        self.assertIs(previous["startup_checks"]["gameplay_verified"], False)
+
+    def _real_user_get(self, prepared):
+        # Use the real Application's dispatch and authentication contract. The
+        # tiny listener application above only isolates unrelated startup data.
+        from idoly_local.h2_server import Context
+        application = _RealApplication.__new__(_RealApplication)
+        application.schema, application.state = prepared.schema, prepared.state
+        application.profile, application.fixtures = prepared.profile, prepared.fixtures
+        application.public_fixtures, application.media_stories = None, None
+        application.media_mode = False
+        application.master_response = prepared.master_response
+        token, _ = prepared.state.login(prepared.profile)
+        return application.handle("/api.User/Get", codec.encode(b""),
+                                  Context((("x-auth-token", token),)))
+
+    def test_queued_slot_does_not_inherit_legacy_captured_user_and_return_preserves_original(self):
+        from idoly_local.account_manager import account_command
+        from idoly_local.catalog import import_response
+        state = State(self.root / "state.db")
+        new_profile(state, self.schema, "sandbox", "Original")
+        new_profile(state, self.schema, "second-slot", "Second")
+        original_account = state.account_snapshot("sandbox")
+        original_payload = state.snapshot("sandbox")[0]
+        self.assertEqual(state.starter_version("sandbox"), 0)
+        marker = self.schema.response_type("/api.User/Get")()
+        marker.user.name = "CaptureOld"
+        raw = marker.SerializeToString()
+        source = self.root / "captured-user.pb"
+        source.write_bytes(raw)
+        import_response(source, self.root / "fixtures", self.schema, "/api.User/Get")
+        manifest = (self.root / "fixtures/manifest.json").read_bytes()
+
+        legacy = self.start()
+        original_prepared = _Application.created[-1]
+        # Explicit imported snapshots (origin zero) remain authoritative even
+        # for the original sandbox; retaining a capture never overrides SQL.
+        self.assertEqual(self._real_user_get(original_prepared), original_payload)
+        self.assertEqual(original_prepared.fixtures.get("/api.User/Get", b""), raw)
+        self.assertEqual(original_prepared.fixtures.directory, self.root / "fixtures")
+        legacy.stop()
+
+        revision = state.account_snapshot("second-slot")[1]
+        account_command(self.root, "accounts_select", {"mode": "normal", "profile": "second-slot",
+                                                      "expected_revision": revision})
+        selected = self.start()
+        second_prepared = _Application.created[-1]
+        self.assertEqual(selected.status()["profile"], "second-slot")
+        self.assertNotEqual(second_prepared.fixtures.directory, self.root / "fixtures")
+        self.assertIsNone(second_prepared.fixtures.get("/api.User/Get", b""))
+        actual = self.schema.response_type("/api.User/Get").FromString(self._real_user_get(second_prepared))
+        self.assertEqual(actual.user.name, "Second")
+        self.assertEqual((self.root / "fixtures/manifest.json").read_bytes(), manifest)
+        selected.stop()
+
+        # Clone and portable ZIP import use the same isolated selected-slot
+        # path; neither operation incorporates the legacy captured response.
+        revision = state.account_snapshot("second-slot")[1]
+        account_command(self.root, "accounts_clone", {"mode": "normal", "source_profile": "second-slot",
+            "profile": "cloned-slot", "expected_revision": revision})
+        exported = account_command(self.root, "accounts_export", {"mode": "normal", "profile": "second-slot",
+            "expected_revision": revision})
+        preview = account_command(self.root, "accounts_preview", {"path": exported["path"]})
+        account_command(self.root, "accounts_import", {"mode": "normal", "profile": "imported-slot",
+            "token": preview["token"], "replace": False, "expected_revision": None})
+        previous_directory = second_prepared.fixtures.directory
+        for slot in ("cloned-slot", "imported-slot"):
+            revision = state.account_snapshot(slot)[1]
+            account_command(self.root, "accounts_select", {"mode": "normal", "profile": slot,
+                "expected_revision": revision})
+            scoped = self.start()
+            prepared = _Application.created[-1]
+            self.assertNotEqual(prepared.fixtures.directory, previous_directory)
+            self.assertNotEqual(prepared.fixtures.directory, self.root / "fixtures")
+            actual = self.schema.response_type("/api.User/Get").FromString(self._real_user_get(prepared))
+            self.assertEqual(actual.user.name, "Second")
+            self.assertEqual((self.root / "fixtures/manifest.json").read_bytes(), manifest)
+            previous_directory = prepared.fixtures.directory
+            scoped.stop()
+
+        revision = state.account_snapshot("sandbox")[1]
+        account_command(self.root, "accounts_select", {"mode": "normal", "profile": "sandbox",
+                                                      "expected_revision": revision})
+        self.start()
+        self.assertEqual(_Application.created[-1].fixtures.directory, self.root / "fixtures")
+        self.assertEqual(self._real_user_get(_Application.created[-1]), original_payload)
+        self.assertEqual(_Application.created[-1].fixtures.get("/api.User/Get", b""), raw)
+        self.assertEqual(state.account_snapshot("sandbox"), original_account)
+        self.assertEqual((self.root / "fixtures/manifest.json").read_bytes(), manifest)
+        self.assertEqual(source.read_bytes(), raw)
+
+    def test_scoped_fixture_paths_separate_modes_and_do_not_use_profile_as_a_path(self):
+        import hashlib
+        profile = "별도 계정"
+        digest = hashlib.sha256(profile.encode("utf-8")).hexdigest()
+        ordinary = app_runtime._profile_fixture_directory(self.root, profile, "sandbox", False)
+        media = app_runtime._profile_fixture_directory(self.root, profile, "sandbox", True)
+        self.assertEqual(ordinary, self.root / "account-fixtures/normal" / digest)
+        self.assertEqual(media, self.root / "account-fixtures/media" / digest)
+        self.assertTrue(ordinary.is_dir() and media.is_dir())
+        self.assertEqual(list(ordinary.iterdir()), [])
+        self.assertEqual(list(media.iterdir()), [])
+
+    def test_scoped_fixture_symlinks_cannot_alias_another_accounts_captures(self):
+        original = self.root / "fixtures"
+        original.mkdir()
+        (original / "sentinel").write_bytes(b"preserved")
+        (self.root / "account-fixtures").symlink_to(original, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "Account fixture storage"):
+            app_runtime._profile_fixture_directory(self.root, "second-slot", "sandbox", False)
+        self.assertEqual((original / "sentinel").read_bytes(), b"preserved")
+        self.assertEqual(sorted(path.name for path in original.iterdir()), ["sentinel"])
 
     def test_stop_releases_both_ports_and_restart_preserves_snapshot(self):
         first = self.start()
@@ -377,6 +565,37 @@ class EmbeddedRuntimeTests(unittest.TestCase):
             runtime = self.start(aes_cbc=callback)
         configure.assert_called_once_with(callback)
         self.assertTrue(runtime.status()["running"])
+
+
+
+
+class RuntimeDiagnosticsPollingTests(unittest.TestCase):
+    def test_status_skips_history_and_explicit_export_copies_it_once(self):
+        from copy import deepcopy
+        runtime = app_runtime.Runtime("sandbox")
+        frames = ["Solis.Benchmark.Polling.Frame" + str(index) for index in range(16)]
+        event = {"kind": "exception", "type": "NullReferenceException", "frames": frames}
+        raw = json.dumps({"schema": 1, "source": "android-game", "events": [event]}).encode()
+        for _ in range(200):
+            runtime._diagnostics.receive(raw)
+        history_sizes = []
+        def observe(snapshot):
+            if "events" in snapshot:
+                history_sizes.append(len(snapshot["events"]))
+            return deepcopy(snapshot)
+        with mock.patch("idoly_local.diagnostics.deepcopy", side_effect=observe):
+            routine = runtime.status()
+            self.assertEqual(history_sizes, [])
+            self.assertNotIn("events", routine["client_diagnostics"])
+            exported = runtime.diagnostics_snapshot()
+            self.assertEqual(history_sizes, [200])
+        self.assertEqual(exported["runtime"], routine)
+        self.assertEqual(exported["client_diagnostics"]["stored_events"], 200)
+        self.assertEqual(exported["client_diagnostics"]["received_events"], 200)
+        self.assertEqual(len(exported["client_diagnostics"]["events"]), 200)
+        exported["client_diagnostics"]["events"][0]["frames"].clear()
+        exported["runtime"]["client_diagnostics"]["latest_exception"]["frames"].clear()
+        self.assertEqual(len(runtime.status()["client_diagnostics"]["latest_exception"]["frames"]), 16)
 
 
 if __name__ == "__main__":

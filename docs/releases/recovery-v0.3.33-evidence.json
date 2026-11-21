@@ -1,0 +1,307 @@
+{
+  "schema": 1,
+  "status": "PASS_PUBLISHED",
+  "source_commit": "b9c3e3d7ed954e0c1c9d87e1f726fb8c29a8e479",
+  "run_id": 43716026678,
+  "version": "0.3.33",
+  "ipa_version": "156.9113",
+  "tag": "local-server-v0.3.33",
+  "all_qa_passed": true,
+  "whole_API_archive_digests_verified": true,
+  "full_remote_download_SHA256_verified": true,
+  "publication_commit": "c5f299259b3009c6a5807f28b6707167c645c57d",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 332258691,
+      "sha256": "4da22d3ce26b10e40af3ce2fa37642dafac89c9fb9d1c012312ebb88c0feebb8",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-Local-Server-Android.apk"
+    },
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 331079069,
+      "sha256": "e80823e6f2ace49aacef32a39496a5ee6d7c51b10b364b41cbfede1ecdf009ab",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-Local-Server-macOS-arm64.app.zip"
+    },
+    {
+      "name": "IdolyPride-6.1.1-Unified-iOS.ipa",
+      "bytes": 525695863,
+      "sha256": "b4c8b1b5eb8a6ee43c567912ae92f33106ab5403c5916c7b340896368bde654e",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-6.1.1-Unified-iOS.ipa"
+    }
+  ],
+  "performance": {
+    "diagnostics": {
+      "median": {
+        "baseline": {
+          "cpu_microseconds_per_poll": 816.619006,
+          "wall_microseconds_per_poll": 816.6745810000009
+        },
+        "candidate": {
+          "cpu_microseconds_per_poll": 13.125007000000002,
+          "wall_microseconds_per_poll": 13.129022000001099
+        }
+      },
+      "median_speedup": {
+        "cpu_microseconds_per_poll": 62.218557750102526,
+        "wall_microseconds_per_poll": 62.20376361620329
+      },
+      "expected_history_deepcopy_calls": {
+        "baseline": {
+          "explicit_export": 2,
+          "poll": 1
+        },
+        "candidate": {
+          "explicit_export": 1,
+          "poll": 0
+        }
+      }
+    },
+    "translation": {
+      "medians": {
+        "baseline": {
+          "elapsed_seconds": 17.42680633500001,
+          "peak_rss_bytes": 192557056,
+          "validation_peak_rss_bytes": 192557056,
+          "validation_seconds": 4.788073663999995
+        },
+        "candidate": {
+          "elapsed_seconds": 17.42978083700001,
+          "peak_rss_bytes": 187711488,
+          "validation_peak_rss_bytes": 175775744,
+          "validation_seconds": 4.8279152599999975
+        }
+      },
+      "median_peak_rss_saving_bytes": 4845568,
+      "median_seconds_saved": -0.0029745020000007116
+    }
+  },
+  "input_artifacts": {
+    "portable": {
+      "source_commit": "b9c3e3d7ed954e0c1c9d87e1f726fb8c29a8e479",
+      "run_id": 43716026678,
+      "artifact_id": 14163365985,
+      "archive_bytes": 123891,
+      "archive_sha256": "3ee40e4d526222eb9254e1f458037a4b89d8674d58e51bb19cd9b86240c6cc16"
+    },
+    "performance": {
+      "source_commit": "b9c3e3d7ed954e0c1c9d87e1f726fb8c29a8e479",
+      "run_id": 43716026678,
+      "artifact_id": 14162247337,
+      "archive_bytes": 16287,
+      "archive_sha256": "8b398776a3add7f613cb1aa44f0bcf4d1884fc26c5539ca822c040550ab218ca"
+    },
+    "android": {
+      "source_commit": "b9c3e3d7ed954e0c1c9d87e1f726fb8c29a8e479",
+      "run_id": 43716026678,
+      "artifact_id": 14162399675,
+      "archive_bytes": 665798615,
+      "archive_sha256": "717a03209104293f9671cec3a43acd97b6fdbcc524e9d0797739740ef782944d"
+    },
+    "macos": {
+      "source_commit": "b9c3e3d7ed954e0c1c9d87e1f726fb8c29a8e479",
+      "run_id": 43716026678,
+      "artifact_id": 14162466962,
+      "archive_bytes": 331128153,
+      "archive_sha256": "ed545a74280fd74f3c9d9f635a711a0ffc27d80a5672772a53c1346706654088"
+    },
+    "ios-unified": {
+      "source_commit": "b9c3e3d7ed954e0c1c9d87e1f726fb8c29a8e479",
+      "run_id": 43716026678,
+      "artifact_id": 14162778725,
+      "archive_bytes": 526838161,
+      "archive_sha256": "2c9cebd1167fc0b72406a275ad0f6629f88c244fef7b15ad41abe8bbb8d695ca"
+    }
+  },
+  "release": {
+    "id": 446071682,
+    "tag_name": "local-server-v0.3.33",
+    "html_url": "https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.33",
+    "published_at": "2026-11-15T13:13:21Z",
+    "draft": false,
+    "prerelease": true
+  },
+  "report_files": {
+    "portable/portable-report.json": {
+      "bytes": 159,
+      "sha256": "6066b952f072168178afc6b8a2df0cf29d839e28d15bf4b895ad84214239a9b0"
+    },
+    "performance/diagnostics-polling.json": {
+      "bytes": 7582,
+      "sha256": "e2550affa0a6feacea2c2a782013673bf16f5785bf05b6e8bdb991fb62d27cfc"
+    },
+    "performance/inputs-report.json": {
+      "bytes": 28676,
+      "sha256": "02f73e6a4047e567429ee6bef70caa1e50bc3ef907f9962a2e0f0c53440634d3"
+    },
+    "performance/performance-report.json": {
+      "bytes": 465,
+      "sha256": "a45644e590b35cd458bd1dabaeafcf7c486d16dbc04b777433da0a562efe2476"
+    },
+    "performance/translation-startup.json": {
+      "bytes": 29074,
+      "sha256": "cd97a227f260126f09f5bf7ddf7022ab40e85e5d238b2817a4bc5f02ea1bb8a1"
+    },
+    "android/android-qa.json": {
+      "bytes": 8847,
+      "sha256": "463e0b78bfeb0bf9ab1be6b1560459de257c65923addcccfec1fe165592732c9"
+    },
+    "android/live-engine-arm64-v8a.json": {
+      "bytes": 4616,
+      "sha256": "7f1559be152016f2bd5670b34fa8375c6d6841a6fd660deb5df178f9cb6b7325"
+    },
+    "android/live-engine-x86_64.json": {
+      "bytes": 4621,
+      "sha256": "560d579f7fda7bc33e5ceed5c2e6db7b7f60da1b4950cf98700698c0aec09bd2"
+    },
+    "android/platform-report.json": {
+      "bytes": 41087,
+      "sha256": "a5282d4bb34dc3f65d21ceab6899dcb837af1244d3b0ab3275c4a403436ebcdc"
+    },
+    "android/resource-report.json": {
+      "bytes": 77,
+      "sha256": "c8a2030a6c4d64256dc680dd30ed8fd2a438b44c1794c3e7e47780832e1b91ac"
+    },
+    "macos/engine-smoke.json": {
+      "bytes": 8070,
+      "sha256": "3cab8c8e429582f4b2dae9281eadd4788145638e69455d2a942c78a8cc281b7d"
+    },
+    "macos/live-engine-macos.json": {
+      "bytes": 4454,
+      "sha256": "2faadcbbeb7e8467b75b74b5ffd3bdc3e241cc8a76349c516ba2afd599358a87"
+    },
+    "macos/mac-build-report.json": {
+      "bytes": 4737,
+      "sha256": "2eeb15116e8a91aeb3d89d61ba6e6c41254469edd4d58df50f6eadbfa4da08bc"
+    },
+    "macos/platform-report.json": {
+      "bytes": 30886,
+      "sha256": "c64f5f61a29c2898eb1f3865c8cd457a6e530476ae27ee37b0e2ff385f951133"
+    },
+    "macos/resource-report.json": {
+      "bytes": 77,
+      "sha256": "1592d21e9a4bf711667486b33de948018174ffc0bea110857bae4e6fc745a8dd"
+    },
+    "ios-unified/IdolyPride-6.1.1-Unified-iOS.report.json": {
+      "bytes": 260556,
+      "sha256": "ca887c94043a106c7140997b84dace4fdf2d8c6fddfa1aae0c7e320a1a3f940c"
+    },
+    "ios-unified/Unity-load-patch.json": {
+      "bytes": 881,
+      "sha256": "809011c892d7104ce4896969a26e87d2266b51330b0a5c69fa7c085269b158b9"
+    },
+    "ios-unified/build-environment.json": {
+      "bytes": 340,
+      "sha256": "c592399b4edfc1fb9ecafec12282e579f7de891c774ddb7ff3850c1a8d79a138"
+    },
+    "ios-unified/client-data-native-test.json": {
+      "bytes": 2797,
+      "sha256": "30754145d44aae7660f34a084bda8f8ea3a1ebcb19334910360f4f53e305d10e"
+    },
+    "ios-unified/client-language-runtime-check.json": {
+      "bytes": 1173,
+      "sha256": "33cf3360d82f5edea6864935b86ce3c7106ea49676ed52a2b1e790f0f0b310b7"
+    },
+    "ios-unified/client-languages-build.json": {
+      "bytes": 13781,
+      "sha256": "d3caea613aaecb532170ab29497d6783b5fae220bcf8d97c86047b592ca8acce"
+    },
+    "ios-unified/client-languages.json": {
+      "bytes": 111,
+      "sha256": "43ac58720748a442e2d8b1ade7572310ff6d8e8ba65fbc7e3c16c0fcdf7b01b6"
+    },
+    "ios-unified/device-native-build.json": {
+      "bytes": 5722,
+      "sha256": "b2927b8c8c2d8069db3c198a1073509ecdc595243d3b333b6cf3e0cc48725a8e"
+    },
+    "ios-unified/device-runtime-report.json": {
+      "bytes": 268840,
+      "sha256": "fd31f4806f6dad1a8ed1c5d37c73042cba4c2547273a43e421cf674026a02d5f"
+    },
+    "ios-unified/keyboard-lifecycle-native-test.json": {
+      "bytes": 2687,
+      "sha256": "b718621661f4dbeaf5fe9c5e744f43ec9a572c8ae9961ece9f1366f95d9dbafb"
+    },
+    "ios-unified/local-http-native-test.json": {
+      "bytes": 6351,
+      "sha256": "5bf4501d17a4c90dbbc743d6c28c92926792c092cac1bafd0fe039a6d7016b79"
+    },
+    "ios-unified/mac-menu-test.json": {
+      "bytes": 1537,
+      "sha256": "2e5973c0f63fbedd5dbdf6c17cf58c5e80bddaed12cb66e198b0e6edacec83ff"
+    },
+    "ios-unified/octo-budget-native-test.json": {
+      "bytes": 2102,
+      "sha256": "c837374d0a92fa2765dcb4b91f0e752ddc7d254780b543bb5249d9fe9501470f"
+    },
+    "ios-unified/probe-build.json": {
+      "bytes": 238748,
+      "sha256": "80a9f67e2a4432858df0b1e70aa7226f837c02508e5ca658dcc52c061db5c467"
+    },
+    "ios-unified/simulator-native-build.json": {
+      "bytes": 5651,
+      "sha256": "dc8cb6d33cc555924b3059d80f56dbde8213ede80644d1a89da8099648540e8c"
+    },
+    "ios-unified/simulator-runtime-report.json": {
+      "bytes": 270975,
+      "sha256": "de9f112afe53423112bd0a93618f8877378337a1f13241b8481b8860781f5422"
+    },
+    "ios-unified/simulator-smoke.json": {
+      "bytes": 44650,
+      "sha256": "0a9ac629525e9fcb40932c313f547a8d1a84278f0b26778f8631ec1ad001d3e8"
+    },
+    "ios-unified/unity-host-native-test.json": {
+      "bytes": 11212,
+      "sha256": "718d3e123df43a6ad891885fd9e47a7113166eaa0d0cf8e7c05b1d2d627d7ec9"
+    }
+  },
+  "publication_proof_artifact": {
+    "id": 14163735093,
+    "bytes": 378648,
+    "sha256": "d732d45b7c2a7d03aa51605b882afe442021eb2b5b19bba6b63d6fc93ca5767e"
+  },
+  "independent_readback": {
+    "schema": 1,
+    "status": "PASS",
+    "source_commit": "b9c3e3d7ed954e0c1c9d87e1f726fb8c29a8e479",
+    "publication_commit": "c5f299259b3009c6a5807f28b6707167c645c57d",
+    "report_files_verified": 33,
+    "complete_remote_downloads_verified": 3,
+    "range_checks": [
+      {
+        "name": "IdolyPride-Local-Server-Android.apk",
+        "url": "https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-Local-Server-Android.apk",
+        "status": 206,
+        "content_range": "bytes 0-63/332258691",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      },
+      {
+        "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+        "url": "https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-Local-Server-macOS-arm64.app.zip",
+        "status": 206,
+        "content_range": "bytes 0-63/331079069",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      },
+      {
+        "name": "IdolyPride-6.1.1-Unified-iOS.ipa",
+        "url": "https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-6.1.1-Unified-iOS.ipa",
+        "status": 206,
+        "content_range": "bytes 0-63/525695863",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      }
+    ]
+  },
+  "portable_tests": {
+    "passed": 6860,
+    "subtests_passed": 375,
+    "skipped": 123
+  },
+  "where_cause_confirmed": false,
+  "npc_enabled": false
+}

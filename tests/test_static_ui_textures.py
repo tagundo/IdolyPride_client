@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
 import json
 from pathlib import Path
@@ -45,10 +46,25 @@ def test_all_fourteen_original_texture_ids_and_gpu_formats_are_pinned():
     assert large["ios"]["stream_data"]["size"] == 935712 < 2048 * 1024 * 4
 
 
-def test_direct_texture_fingerprint_rejects_corrupted_input_before_decode():
+@pytest.mark.parametrize("platform", ("android", "ios"))
+@pytest.mark.parametrize("corruption", ("length", "digest"))
+def test_direct_texture_fingerprint_rejects_corrupted_input_before_decode(monkeypatch, platform, corruption):
     entry = textures.PROFILES[0]
+    original = b"invalid source" if corruption == "length" else b"\0" * entry[platform]["bytes"]
+    real_import = builtins.__import__
+
+    def deny_optional_decode_imports(name, *args, **kwargs):
+        if name.split(".", 1)[0] in {"attrs", "PIL", "UnityPy"}:
+            raise AssertionError("Corrupted pinned bytes must be rejected before optional imports")
+        return real_import(name, *args, **kwargs)
+
+    def deny_decode(*args, **kwargs):
+        raise AssertionError("Corrupted pinned bytes must not reach the Unity decoder")
+
+    monkeypatch.setattr(builtins, "__import__", deny_optional_decode_imports)
+    monkeypatch.setattr(textures.images, "_mini_asset", deny_decode)
     with pytest.raises(ValueError, match="fingerprint differs"):
-        textures._patch(b"invalid source", entry, "android", {"image_dir": ROOT, "encoded": {}})
+        textures._patch(original, entry, platform, {"image_dir": ROOT, "encoded": {}})
 
 
 def test_exact_translated_png_pins_are_shared_by_both_platforms():

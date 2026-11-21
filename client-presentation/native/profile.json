@@ -67,6 +67,10 @@
       {
         "file": "sound-original-pins.json",
         "sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c"
+      },
+      {
+        "file": "mp4_game_profile.json",
+        "sha256": "af2fb43fce1021f3aa4b35c8e437ccb032e7443744f08a83c5de0cde31925225"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -3116,6 +3120,500 @@
       "mode": "HOOK",
       "native_ABI": "bool(void*,const MethodInfo*)",
       "source": "local-resource-post-HTTP-reachability-pins"
+    },
+    "shared_setup": {
+      "name": "Octo.OctoManager.Setup",
+      "rva": "0x8748d88",
+      "prefix16": "fe67bca9f85f01a9f65702a9f44f03a9",
+      "module": "Octo.dll",
+      "is_static": true,
+      "parameters": [
+        {
+          "name": "settings",
+          "type": {
+            "class": "Octo.OctoFullSettings"
+          }
+        },
+        {
+          "name": "reset",
+          "type": {
+            "class": "System.Boolean"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "System.Boolean"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_is_cached": {
+      "name": "Octo.Caching.OctoCaching.IsCached",
+      "rva": "0x876be6c",
+      "prefix16": "fe0f1ff8a30000b4632880b9e4031f2a",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "bucket",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "fileName",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "item",
+          "type": {
+            "class": "Octo.Data.Item"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "Octo.Caching.CacheState"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_file_path": {
+      "name": "Octo.Caching.OctoCaching.GetFilePath",
+      "rva": "0x876be88",
+      "prefix16": "080040f9040d41f9031141f980001fd6",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "bucket",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "fileName",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "item",
+          "type": {
+            "class": "Octo.Data.Item"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "System.String"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_pre_download": {
+      "name": "Octo.Loader.OctoBaseLoader.PreDownload",
+      "rva": "0x875aa8c",
+      "prefix16": "ff8301d1fe6f01a9fa6702a9f85f03a9",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "name",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "onComplete",
+          "type": {
+            "class": "System.Action`1<Octo.DownloadError>"
+          }
+        },
+        {
+          "name": "onProgress",
+          "type": {
+            "class": "Octo.OnDownloadProgress"
+          }
+        },
+        {
+          "name": "canAutoDelete",
+          "type": {
+            "class": "System.Boolean"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "System.Void"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_downloader_update": {
+      "name": "Octo.Loader.Downloader.Update",
+      "rva": "0x8758100",
+      "prefix16": "fe57bea9f44f01a9d4c80090882a5c39",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [],
+      "return_type": {
+        "class": "System.Void"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_settings_set": {
+      "name": "Octo.OctoFullSettings.set_CachingType",
+      "rva": "0x874d34c",
+      "prefix16": "01e00039c0035fd6003c40b9c0035fd6",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "class": "Octo.CachingType"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "System.Void"
+      },
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_bundle_item": {
+      "name": "Octo.Loader.OctoAssetBundleLoader.GetItemByName",
+      "rva": "0x875a894",
+      "prefix16": "fe57bea9f44f01a9b4c800d0358d00f0",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "name",
+          "type": {
+            "class": "System.String"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "Octo.Data.Item"
+      },
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_resource_item": {
+      "name": "Octo.Loader.OctoResourceLoader.GetItemByName",
+      "rva": "0x875bc44",
+      "prefix16": "fe57bea9f44f01a9b4c800b0358d00d0",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "name",
+          "type": {
+            "class": "System.String"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "Octo.Data.Item"
+      },
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_string_new": {
+      "name": "il2cpp_string_new",
+      "rva": "0x419e3f8",
+      "prefix16": "e6270014e527001410280014ea270014",
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_resource_filename": {
+      "name": "Octo.Loader.OctoResourceLoader.GetStorageFileName",
+      "rva": "0x875bd2c",
+      "prefix16": "e00301aae1031faad33f0014fe0f1cf8",
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "mp4_presenter_update": {
+      "name": "Solis.OutGame.LivePlayerScreenPresenter.Update",
+      "rva": "0x572fe70",
+      "prefix16": "fe57bea9f44f01a9754902f0140e02d0",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 36968,
+      "return_type": "System.Void",
+      "parameters": [],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_capture_pass": {
+      "name": "VL.Rendering.VLCapturePass.Execute",
+      "rva": "0x8dfb8bc",
+      "prefix16": "ff0303d1fe5f09a9f6570aa9f44f0ba9",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "token_row": 74,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "context",
+          "type": "UnityEngine.Rendering.ScriptableRenderContext",
+          "metadata_type_index": 71554
+        },
+        {
+          "name": "renderingData",
+          "type": "UnityEngine.Rendering.Universal.RenderingData&",
+          "metadata_type_index": 44787
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_end_camera": {
+      "name": "UnityEngine.Rendering.RenderPipelineManager.EndCameraRendering",
+      "rva": "0x8fa4650",
+      "prefix16": "fe0f1df8f65701a9f44f02a9b68600d0",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 4849,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "context",
+          "type": "UnityEngine.Rendering.ScriptableRenderContext",
+          "metadata_type_index": 71554
+        },
+        {
+          "name": "camera",
+          "type": "UnityEngine.Camera",
+          "metadata_type_index": 50798
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": true
+    },
+    "mp4_graph_mode": {
+      "name": "UnityEngine.Playables.PlayableGraph.SetTimeUpdateMode",
+      "rva": "0x8fabd34",
+      "prefix16": "fe57bea9f44f01a9758600f0a26e41f9",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 5189,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "UnityEngine.Playables.DirectorUpdateMode",
+          "metadata_type_index": 54963
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_brain_delta": {
+      "name": "Cinemachine.CinemachineBrain.GetEffectiveDeltaTime",
+      "rva": "0x59e92cc",
+      "prefix16": "fe0f1df8f65701a9f44f02a9b63302d0",
+      "module": "Cinemachine.dll",
+      "token_row": 72,
+      "return_type": "System.Single",
+      "parameters": [
+        {
+          "name": "fixedDelta",
+          "type": "System.Boolean",
+          "metadata_type_index": 50428
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_core_camera": {
+      "name": "Cinemachine.CinemachineCore.UpdateVirtualCamera",
+      "rva": "0x5a11e4c",
+      "prefix16": "eb2bbb6de923016dfe1300f9f65703a9",
+      "module": "Cinemachine.dll",
+      "token_row": 709,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "vcam",
+          "type": "Cinemachine.CinemachineVirtualCameraBase",
+          "metadata_type_index": 51870
+        },
+        {
+          "name": "worldUp",
+          "type": "UnityEngine.Vector3",
+          "metadata_type_index": 77835
+        },
+        {
+          "name": "deltaTime",
+          "type": "System.Single",
+          "metadata_type_index": 72837
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_player_initialize": {
+      "name": "Solis.Common.SolisLivePlayer.InitializeAsync",
+      "rva": "0x884690c",
+      "prefix16": "ff4302d1fe2b00f9f85f06a9f65707a9",
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 1975,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "param",
+          "type": "Solis.Common.SolisLivePlayerParam",
+          "metadata_type_index": 73276
+        },
+        {
+          "name": "autoSetupBinder",
+          "type": "System.Boolean",
+          "metadata_type_index": 50428
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_photography_initialize": {
+      "name": "Solis.Photography.PhotographyLivePresenter.InitializeAsync",
+      "rva": "0x551184c",
+      "prefix16": "ff4302d1fe2b00f9f85f06a9f65707a9",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 2777,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "param",
+          "type": "Solis.Photography.Data.IPhotographyTransition",
+          "metadata_type_index": 60581
+        },
+        {
+          "name": "controller",
+          "type": "Solis.Photography.PhotographyCaptureController",
+          "metadata_type_index": 68084
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_photography_player_initialize": {
+      "name": "Solis.Common.Photography.PhotographyLive3DPresenter.InitializeAsync",
+      "rva": "0x887f06c",
+      "prefix16": "ffc301d1fe5f04a9f65705a9f44f06a9",
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 3155,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "data",
+          "type": "Solis.Common.Photography.PhotographyLiveData",
+          "metadata_type_index": 68188
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_photography_end": {
+      "name": "Solis.Photography.PhotographyLivePresenter.End",
+      "rva": "0x5511fe0",
+      "prefix16": "fe0f1ff8001840f9800000b4e1031faa",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 2784,
+      "return_type": "System.Void",
+      "parameters": [],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_brain_update": {
+      "name": "Cinemachine.CinemachineBrain.ManualUpdate",
+      "rva": "0x59e8808",
+      "prefix16": "eb2bbc6de923016dfe5702a9f44f03a9",
+      "module": "Cinemachine.dll",
+      "token_row": 71,
+      "return_type": "System.Void",
+      "parameters": [],
+      "source": "mp4-original-native-clock-camera-update",
+      "metadata_method_index": 193647,
+      "type_definition_index": 28247,
+      "registration_pointer_slot_rva": "0x9bbf318",
+      "native_abi": "void(void*,const MethodInfo*)",
+      "parameter_count": 0,
+      "method_flags": 134
+    },
+    "mp4_shader_set": {
+      "name": "VL.Rendering.VLShaderTimeManager.SetCustomTime",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25136,
+      "metadata_method_index": 173998,
+      "token_row": 109,
+      "rva": "0x8dfe698",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "time",
+          "typeindex": 72837,
+          "type": "System.Single"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 150,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa00a258",
+      "prefix16": "e80f1efcfe0700f9f44f01a9b49300d0",
+      "native_abi": "void(float,const MethodInfo*)"
+    },
+    "mp4_shader_reset": {
+      "name": "VL.Rendering.VLShaderTimeManager.ResetCustomTime",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25136,
+      "metadata_method_index": 173999,
+      "token_row": 110,
+      "rva": "0x8dfe6fc",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 150,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa00a260",
+      "prefix16": "fe0f1ef8f44f01a9b49300d0b35700b0",
+      "native_abi": "void(const MethodInfo*)"
+    },
+    "mp4_actor_process": {
+      "name": "ActorSwing.ActorSwingJob.ProcessAnimation",
+      "module": "ActorSwing.Runtime.dll",
+      "type_definition_index": 31380,
+      "metadata_method_index": 211040,
+      "token_row": 235,
+      "rva": "0x42639e0",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "stream",
+          "typeindex": 48736,
+          "type": "UnityEngine.Animations.AnimationStream"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 486,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9aa69c8",
+      "prefix16": "ee0f19fced33016deb2b026de923036d",
+      "native_abi": "void(void* unboxedJobX0,const AnimationStream56* indirectX1,const MethodInfo* X2)"
     }
   },
   "graphics_fields": [
@@ -3707,5 +4205,14 @@
     "stock_gate_proof_sha256": "af4ca9cd3384a523e73f572a3db9435e244572429f4d0889640295637ae893c2",
     "packaged_gate_proof_sha256": "b94d4d54dcd4c30ca537dfa4db24437d2574386a32378faaaa78a923e5c7baef",
     "original_packaged_native_sha256": "4517381b0dbeae559d79832797f0c57c78ba6f37cf7d3544a58d0f31f2b8def3"
+  },
+  "shared_resource_cache": {
+    "schema": 1,
+    "mode": "OctoFullCache",
+    "mode_value": 2,
+    "cache_state_latest": 3,
+    "publication": "PreDownload worker preparation then original replay on Downloader.Update",
+    "resource_representation": "raw CDN bytes, original MaskedHeaderStream preserved",
+    "device_verified": false
   }
 }

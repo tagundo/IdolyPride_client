@@ -24,11 +24,12 @@ def values_for(evidence, table):
 
 def test_event_read_export_is_optional_and_preserves_existing_table_contract():
     before = payload.TABLES
-    assert payload.payload_tables() is before and len(before) == 49
-    assert not set(before).intersection(payload.EVENT_READ_TABLES)
+    assert payload.payload_tables() is before and len(before) == 55
+    assert set(before).intersection(payload.EVENT_READ_TABLES) == {"Condition", "EventMission"}
     selected = payload.payload_tables(True)
-    assert selected[:49] == before and selected[49:] == payload.EVENT_READ_TABLES
-    assert len(selected) == len(set(selected)) == 54 and payload.TABLES == before
+    assert selected[:55] == before
+    assert selected[55:] == tuple(table for table in payload.EVENT_READ_TABLES if table not in before)
+    assert len(selected) == len(set(selected)) == 58 and payload.TABLES == before
     for value in (1, "true", None):
         with pytest.raises(TypeError):
             payload.payload_tables(value)

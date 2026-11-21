@@ -1,0 +1,122 @@
+{
+  "schema": 1,
+  "audit_status": "METADATA_AUDIT_COMPLETE",
+  "source_commit": "05bae887d306d26b88a95e27349140941b322c85",
+  "actions_run_id": 43716544403,
+  "artifact": {
+    "id": 14162508657,
+    "zip_bytes": 22548,
+    "zip_sha256": "7cac0dfb9490a9b408e9beb74c50fbe7bcf14d21d6da67154e9b36b63740df47"
+  },
+  "tool_sha256": "85393300b5d6e3894daeeb2c107ab08ac8fee65caac0750b8fbed0f9d296ec13",
+  "unitypy_version": "1.25.4",
+  "platform": "android",
+  "catalog_revision": 1087,
+  "manifest_sha256": "23b66c095821ed73cf9690c394d4acdbd2394315b39d30398d85f87a5762017a",
+  "server_data": {
+    "bytes": 191343014,
+    "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"
+  },
+  "verified_object_count": 12,
+  "verified_source_bytes": 59949526,
+  "unreadable_type_tree_count": 0,
+  "unresolved_skin_bone_slots": 0,
+  "unresolved_script_components": 0,
+  "observed_external_reference_count": 0,
+  "embedded_animator_count": 0,
+  "embedded_avatar_count": 0,
+  "renderer_blend_shape_weight_slots": 0,
+  "mesh_blend_shape_payload_inspected": false,
+  "runtime_motion_tested": false,
+  "runtime_mv_compatibility": "NOT_TESTED",
+  "npc_enabled": false,
+  "baseline_selection": {
+    "character_id": "char-skr",
+    "costume_id": "cos-skr-schl-00",
+    "hair_id": "hair-skr-schl-00"
+  },
+  "models": [
+    {
+      "role": "baseline_sakura",
+      "mapping_status": "master_confirmed",
+      "body": "mdl_chr_skr-schl-00_body",
+      "face": "mdl_chr_skr-base-00_face",
+      "hair": "mdl_chr_skr-base-00_hair",
+      "body_unique_skin_bone_names": 78,
+      "shared_baseline_bone_names": 78,
+      "missing_baseline_bone_names": 0,
+      "extra_candidate_bone_names": 0
+    },
+    {
+      "role": "satomi",
+      "character_id": "char-stm",
+      "asset_id": "stm",
+      "master_name": "橋本さとみ",
+      "master_en_name": "SATOMI HASHIMOTO",
+      "mapping_status": "master_confirmed",
+      "body": "mdl_chr_stm-idol-02_body",
+      "face": "mdl_chr_stm-base-00_face",
+      "hair": "mdl_chr_stm-base-00_hair",
+      "body_unique_skin_bone_names": 94,
+      "shared_baseline_bone_names": 78,
+      "missing_baseline_bone_names": 0,
+      "extra_candidate_bone_names": 16
+    },
+    {
+      "role": "lemon_candidate",
+      "candidate_display_name": "大須賀れもん",
+      "mapping_status": "inferred_not_verified",
+      "body": "mdl_chr_lmn-idol-00_body",
+      "face": "mdl_chr_lmn-base-00_face",
+      "hair": "mdl_chr_lmn-base-00_hair",
+      "body_unique_skin_bone_names": 70,
+      "shared_baseline_bone_names": 62,
+      "missing_baseline_skirt_bone_names": 16,
+      "extra_candidate_shirt_bone_names": 8
+    },
+    {
+      "role": "lime_candidate",
+      "candidate_display_name": "小南来夢",
+      "mapping_status": "inferred_not_verified",
+      "body": "mdl_chr_lim-idol-00_body",
+      "face": "mdl_chr_lim-base-00_face",
+      "hair": "mdl_chr_lim-base-00_hair",
+      "body_unique_skin_bone_names": 74,
+      "shared_baseline_bone_names": 62,
+      "missing_baseline_skirt_bone_names": 16,
+      "extra_candidate_shirt_chain_bone_names": 12
+    }
+  ],
+  "shared_body_script_classes": [
+    "ActorSwing.ActorSwingBreastBone",
+    "ActorSwing.ActorSwingChain",
+    "ActorSwing.ActorSwingDynamicBone",
+    "ActorSwing.ActorSwingStaticBone",
+    "VL.IK.IKBodyEffector",
+    "VL.IK.IKGoalEffector",
+    "VL.IK.IKHintEffector",
+    "VL.IK.LookAtEffector",
+    "VL.VLActorExpressionBone"
+  ],
+  "shared_face_script_classes": [
+    "Solis.Common.SolisActorTalkModel",
+    "VL.VLActorEyeHighlight",
+    "VL.VLActorFaceTargetCorrection"
+  ],
+  "each_face_skinned_renderer_count": 6,
+  "each_face_total_skin_bone_slots": 18,
+  "each_face_unique_skin_bone_names": 3,
+  "unverified_requirements": [
+    "lmn_lim_character_identity_mapping",
+    "descriptor_abi_and_actor_initialization",
+    "shared_controller_avatar_dependencies",
+    "transform_hierarchy_rest_pose_skin_bind_matrices",
+    "actual_motion_facial_and_secondary_physics",
+    "repeated_load_release_and_cache_identity",
+    "ios_platform_models"
+  ],
+  "recommended_first_candidate": "satomi",
+  "recommended_scope": "opt_in_appearance_override_for_3d_live_and_photography",
+  "prerendered_video_mv_actor_replacement": false,
+  "rig_name_markers_has_right_substring_false_positives": true
+}

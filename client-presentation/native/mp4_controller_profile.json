@@ -1,0 +1,174 @@
+{
+  "schema": 1,
+  "scope": "read-only original ARM64 static proof; game not executed",
+  "platforms": {
+    "android": {
+      "native_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+      "metadata_sha256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e",
+      "locations": {
+        "target_current": "0x923e74c",
+        "has": "0x73d7470",
+        "get": "0x73d796c",
+        "has_slot": "0x98f3058",
+        "get_slot": "0x98f3048",
+        "resolve": "0x4199f4c"
+      },
+      "prefixes": {
+        "target_current": "fe57bea9f44f01a914720090b53500b0",
+        "has": "fe0f1ef8f44f01a97464019088ea6539",
+        "get": "fe4fbfa9f30300aa001040f908d44439",
+        "resolve": "fe0f1ff865a9fe97bf3b03d5fe0741f8"
+      },
+      "slot_file_words": {
+        "has_slot": "0x9cd2e38",
+        "get_slot": "0x9cd2e40"
+      },
+      "target_current_instructions": [
+        "0x923e74c stp x30, x21, [sp, #-0x20]!",
+        "0x923e750 stp x20, x19, [sp, #0x10]",
+        "0x923e754 adrp x20, #0xa07e000",
+        "0x923e758 adrp x21, #0x98f3000",
+        "0x923e75c ldrb w8, [x20, #0x558]",
+        "0x923e760 ldr x21, [x21, #0x58]",
+        "0x923e764 mov x19, x0",
+        "0x923e768 tbnz w8, #0, #0x923e78c",
+        "0x923e76c adrp x0, #0x98f3000",
+        "0x923e770 ldr x0, [x0, #0x58]",
+        "0x923e774 bl #0x4199f4c",
+        "0x923e778 adrp x0, #0x98f3000",
+        "0x923e77c ldr x0, [x0, #0x48]",
+        "0x923e780 bl #0x4199f4c",
+        "0x923e784 mov w8, #1",
+        "0x923e788 strb w8, [x20, #0x558]",
+        "0x923e78c ldr x0, [x21]",
+        "0x923e790 bl #0x73d7470",
+        "0x923e794 tbz w0, #0, #0x923e7c4",
+        "0x923e798 adrp x8, #0x98f3000",
+        "0x923e79c ldr x8, [x8, #0x48]",
+        "0x923e7a0 ldr x0, [x8]",
+        "0x923e7a4 bl #0x73d796c",
+        "0x923e7a8 ldr w8, [x19, #0x20]",
+        "0x923e7ac cmp w8, #1",
+        "0x923e7b0 b.eq #0x923e7d4",
+        "0x923e7b4 cbnz w8, #0x923e7c4",
+        "0x923e7b8 cbz x0, #0x923e7e8",
+        "0x923e7bc ldr x0, [x0, #0x98]",
+        "0x923e7c0 b #0x923e7dc",
+        "0x923e7c4 ldp x20, x19, [sp, #0x10]",
+        "0x923e7c8 mov x0, xzr",
+        "0x923e7cc ldp x30, x21, [sp], #0x20",
+        "0x923e7d0 ret ",
+        "0x923e7d4 cbz x0, #0x923e7e8",
+        "0x923e7d8 ldr x0, [x0, #0xa0]",
+        "0x923e7dc ldp x20, x19, [sp, #0x10]",
+        "0x923e7e0 ldp x30, x21, [sp], #0x20",
+        "0x923e7e4 b #0x92367a0"
+      ],
+      "VL.VLCameraControllerSingleton`1": [],
+      "VL.Core.VLMonoBehaviourSingleton`1": [
+        {
+          "name": "get_HasInstance",
+          "static": true,
+          "return": "System.Boolean",
+          "count": 0
+        },
+        {
+          "name": "UpdateInstance",
+          "static": true,
+          "return": "System.Void",
+          "count": 0
+        },
+        {
+          "name": "get_Instance",
+          "static": true,
+          "return": "generic-parameter:4821",
+          "count": 0
+        }
+      ]
+    },
+    "ios": {
+      "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+      "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+      "locations": {
+        "target_current": "0x7bccefc",
+        "has": "0x5451310",
+        "get": "0x5451a20",
+        "has_slot": "0xa43e3a8",
+        "get_slot": "0xa43e3b0",
+        "resolve": "0x81ec204"
+      },
+      "prefixes": {
+        "target_current": "f657bda9f44f01a9fd7b02a9fd830091",
+        "has": "f44fbea9fd7b01a9fd430091f30300aa",
+        "get": "f44fbea9fd7b01a9fd430091f30300aa",
+        "resolve": "fd7bbfa9fd030091e08b0194bf3b03d5"
+      },
+      "slot_file_words": {
+        "has_slot": "0xc00a6a1b",
+        "get_slot": "0xc00a6a1d"
+      },
+      "target_current_instructions": [
+        "0x7bccefc stp x22, x21, [sp, #-0x30]!",
+        "0x7bccf00 stp x20, x19, [sp, #0x10]",
+        "0x7bccf04 stp x29, x30, [sp, #0x20]",
+        "0x7bccf08 add x29, sp, #0x20",
+        "0x7bccf0c mov x19, x0",
+        "0x7bccf10 adrp x20, #0xa921000",
+        "0x7bccf14 ldrb w8, [x20, #0xcac]",
+        "0x7bccf18 adrp x21, #0xa43e000",
+        "0x7bccf1c add x21, x21, #0x3a8",
+        "0x7bccf20 tbnz w8, #0, #0x7bccf44",
+        "0x7bccf24 adrp x0, #0xa43e000",
+        "0x7bccf28 add x0, x0, #0x3a8",
+        "0x7bccf2c bl #0x81ec204",
+        "0x7bccf30 adrp x0, #0xa43e000",
+        "0x7bccf34 add x0, x0, #0x3b0",
+        "0x7bccf38 bl #0x81ec204",
+        "0x7bccf3c mov w8, #1",
+        "0x7bccf40 strb w8, [x20, #0xcac]",
+        "0x7bccf44 ldr x0, [x21]",
+        "0x7bccf48 bl #0x5451310",
+        "0x7bccf4c cbz w0, #0x7bcd0ac",
+        "0x7bccf50 adrp x8, #0xa43e000",
+        "0x7bccf54 add x8, x8, #0x3b0",
+        "0x7bccf58 ldr x0, [x8]",
+        "0x7bccf5c bl #0x5451a20",
+        "0x7bccf60 ldr w8, [x19, #0x20]",
+        "0x7bccf64 cmp w8, #1",
+        "0x7bccf68 b.eq #0x7bccfcc",
+        "0x7bccf6c cbnz w8, #0x7bcd0ac",
+        "0x7bccf70 cbz x0, #0x7bcd0c0",
+        "0x7bccf74 ldr x20, [x0, #0x98]",
+        "0x7bccf78 adrp x19, #0xa921000",
+        "0x7bccf7c ldrb w8, [x19, #0xc9e]",
+        "0x7bccf80 tbnz w8, #0, #0x7bccf98",
+        "0x7bccf84 adrp x0, #0xa3e4000",
+        "0x7bccf88 add x0, x0, #0xe78",
+        "0x7bccf8c bl #0x81ec204",
+        "0x7bccf90 mov w8, #1",
+        "0x7bccf94 strb w8, [x19, #0xc9e]"
+      ],
+      "VL.VLCameraControllerSingleton`1": [],
+      "VL.Core.VLMonoBehaviourSingleton`1": [
+        {
+          "name": "get_HasInstance",
+          "static": true,
+          "return": "System.Boolean",
+          "count": 0
+        },
+        {
+          "name": "UpdateInstance",
+          "static": true,
+          "return": "System.Void",
+          "count": 0
+        },
+        {
+          "name": "get_Instance",
+          "static": true,
+          "return": "generic-parameter:4822",
+          "count": 0
+        }
+      ]
+    }
+  }
+}

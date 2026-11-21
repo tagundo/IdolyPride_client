@@ -1,6 +1,7 @@
 import java.security.MessageDigest
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.file.Files
 
 plugins {
     id("com.android.application")
@@ -22,6 +23,7 @@ val payloadHash = if (payloadFile.isFile) payloadFile.inputStream().use { input 
     }
     digest.digest().joinToString("") { "%02x".format(it) }
 } else "missing"
+val payloadBytes = if (payloadFile.isFile) payloadFile.length() else 0L
 val generatedAssets = layout.buildDirectory.dir("generated/serverDataAssets")
 val bundledTranslations = providers.gradleProperty("bundledTranslations").map { rootProject.file(it) }
 val bundledTranslationsHash = providers.gradleProperty("bundledTranslationsSha256").orElse("").get()
@@ -31,6 +33,14 @@ require(if (bundledTranslations.isPresent) bundledTranslationsHash.matches(Regex
     else bundledTranslationsHash.isEmpty() && bundledTranslationsBytes == 0L) {
     "bundledTranslations requires explicit SHA-256 and bytes (or omit all three properties)"
 }
+val startupTranslations = providers.gradleProperty("startupTranslations").map { rootProject.file(it) }
+val startupTranslationsHash = providers.gradleProperty("startupTranslationsSha256").orElse("").get()
+val startupTranslationsBytes = providers.gradleProperty("startupTranslationsBytes").orElse("0").get().toLong()
+require(if (startupTranslations.isPresent) startupTranslationsHash.matches(Regex("[0-9a-f]{64}"))
+    && startupTranslationsBytes in 1L..(16L * 1024 * 1024)
+    else startupTranslationsHash.isEmpty() && startupTranslationsBytes == 0L) {
+    "startupTranslations requires explicit SHA-256 and bytes (or omit all three properties)"
+}
 val prepareServerDataAssets = tasks.register<Copy>("prepareServerDataAssets") {
     inputs.file(serverData)
     inputs.property("bundledTranslations", bundledTranslations.map { it.absolutePath }.orElse(""))
@@ -39,6 +49,13 @@ val prepareServerDataAssets = tasks.register<Copy>("prepareServerDataAssets") {
     if (bundledTranslations.isPresent) {
         inputs.file(bundledTranslations)
         from(bundledTranslations) { rename { "bundledTranslations.zip" } }
+    }
+    inputs.property("startupTranslations", startupTranslations.map { it.absolutePath }.orElse(""))
+    inputs.property("startupTranslationsSha256", startupTranslationsHash)
+    inputs.property("startupTranslationsBytes", startupTranslationsBytes)
+    if (startupTranslations.isPresent) {
+        inputs.file(startupTranslations)
+        from(startupTranslations) { rename { "startupTranslations.zip" } }
     }
     from(serverData) { rename { "ServerData.zip" } }
     into(generatedAssets)
@@ -60,9 +77,27 @@ val prepareServerDataAssets = tasks.register<Copy>("prepareServerDataAssets") {
                 "Optional translation ZIP SHA-256 differs"
             }
         }
+        val receipt = startupTranslations.orNull
+        if (receipt != null) {
+            require(receipt.isFile && !Files.isSymbolicLink(receipt.toPath())
+                    && receipt.length() == startupTranslationsBytes) { "Optional startup receipt size differs" }
+            val digest = MessageDigest.getInstance("SHA-256")
+            receipt.inputStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (count > 0) digest.update(buffer, 0, count)
+                }
+            }
+            require(digest.digest().joinToString("") { "%02x".format(it) } == startupTranslationsHash) {
+                "Optional startup receipt SHA-256 differs"
+            }
+        }
         // This is generated build storage only. Omitting the property must
         // remove an optional asset staged by an earlier build.
         project.delete(generatedAssets.get().asFile.resolve("bundledTranslations.zip"))
+        project.delete(generatedAssets.get().asFile.resolve("startupTranslations.zip"))
     }
 }
 
@@ -123,12 +158,15 @@ android {
         applicationId = "game.qualiarts.idolypride.localserver"
         minSdk = 26
         targetSdk = 34
-        versionCode = providers.gradleProperty("serverVersionCode").orElse("48").get().toInt()
-        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.31").get()
+        versionCode = providers.gradleProperty("serverVersionCode").orElse("54").get().toInt()
+        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.37").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
+        buildConfigField("long", "SERVER_DATA_BYTES", "${payloadBytes}L")
         buildConfigField("String", "BUNDLED_TRANSLATIONS_SHA256", "\"$bundledTranslationsHash\"")
         buildConfigField("long", "BUNDLED_TRANSLATIONS_BYTES", "${bundledTranslationsBytes}L")
+        buildConfigField("String", "STARTUP_TRANSLATIONS_SHA256", "\"$startupTranslationsHash\"")
+        buildConfigField("long", "STARTUP_TRANSLATIONS_BYTES", "${startupTranslationsBytes}L")
     }
     buildFeatures { buildConfig = true }
     signingConfigs {

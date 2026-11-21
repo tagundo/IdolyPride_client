@@ -8,6 +8,10 @@ responsibility and must use the same transactional snapshot as this input.
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -175,8 +179,16 @@ def prepare_main_live(schema, master_dir, snapshot, quest_id, deck_number, seed)
     if type(seed) is not int or not 0 <= seed < 1 << 64:
         _fail("seed must be an unsigned 64-bit integer", RpcCode.INVALID_ARGUMENT)
     catalog = _Catalog(Path(master_dir) if master_dir is not None else None)
-    if schema.fingerprint != SCHEMA_SHA256 or catalog.version() != MASTER_VERSION:
+    if schema.fingerprint != SCHEMA_SHA256:
         _fail("the audited 6.1.1 schema and master version are required")
+    if catalog.version() != MASTER_VERSION:
+        if catalog.version() != _LATEST_MASTER_VERSION:
+            _fail("the audited 6.1.1 schema and master version are required")
+        from .public_cohort_support import require_master_cohort
+        try:
+            require_master_cohort(master_dir, "main_live")
+        except (OSError, ValueError):
+            _fail("latest public master cohort is unapproved or changed")
     if not isinstance(snapshot, schema.response_type("/api.User/Get")):
         _fail("snapshot and schema do not match")
     if not snapshot.HasField("user") or not snapshot.HasField("userPublic") or not snapshot.userPublic.publicUserId:
@@ -297,3 +309,194 @@ def prepare_main_live(schema, master_dir, snapshot, quest_id, deck_number, seed)
         prepared[table] = [base64.b64encode(message.SerializeToString(deterministic=True)).decode("ascii") for message in messages]
     return {"input_version": 1, "seed": seed, "music_id": music["id"], "proto": prepared,
             "cards": metadata, "schema_sha256": schema.fingerprint, "master_version": catalog.version()}
+
+
+_LATEST_MASTER_VERSION = "6b77e0d8a64b26d5bebd09a7c19a47f2dfad2af914c5160418aa2e7292e13a11"
+LATEST_SEMANTIC_REASONS = frozenset(("schema_changed", "version_changed", "input_invalid",
+    "dream_source_changed", "dream_setting_changed", "dream_condition_changed", "dream_manual_changed",
+    "dream_mission_changed", "dream_area_changed", "dream_quest_changed", "main_quest_changed",
+    "main_chart_changed", "main_numeric_changed", "main_card_changed", "main_skill_changed",
+    "main_model_changed", "main_membership_changed", "main_reference_missing", "main_addition_scope_changed"))
+
+
+class LatestSemanticsError(ValueError):
+    def __init__(self, scope, reason):
+        scope = scope if scope in ("dream", "main_live") else "main_live"
+        reason = reason if reason in LATEST_SEMANTIC_REASONS else "input_invalid"
+        self.code = "latest_" + scope + "_semantics_changed"
+        self.receipt = {"schema":1, "scope":scope, "status":"FAIL", "reason_code":reason}
+        super().__init__(self.code + ":" + reason)
+
+
+def _audit_need(ok, scope, reason):
+    if not ok: raise LatestSemanticsError(scope, reason)
+
+
+def _audit_canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+
+
+def _audit_read(path, maximum=64 * 1024 * 1024):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as source:
+        before = os.fstat(source.fileno())
+        if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= maximum: raise ValueError()
+        raw = source.read(maximum + 1)
+        after = os.fstat(source.fileno())
+        if len(raw) != before.st_size or (before.st_size,before.st_mtime_ns,before.st_ctime_ns) != (after.st_size,after.st_mtime_ns,after.st_ctime_ns): raise ValueError()
+        return raw
+
+
+class _AuditCatalog(_Catalog):
+    """Build-only public input reader; never reads runtime authority or State."""
+    def __init__(self, schema, directory, expected, scope):
+        super().__init__(Path(directory))
+        self.schema, self.scope, self.pins = schema, scope, {}
+        raw = _audit_read(self.directory / "!version.txt", 4096)
+        _audit_need(raw.decode("utf-8").strip() == expected, scope, "version_changed")
+        self.pins["!version.txt"] = hashlib.sha256(raw).hexdigest()
+        self.expected = expected
+
+    def version(self): return self.expected
+
+    def rows(self, table, *, required=False):
+        if table not in self.loaded:
+            from .schema import normalize_master_row
+            raw = _audit_read(self.directory / (table + ".json"))
+            def pairs(items):
+                value = {}
+                for key,item in items:
+                    if key in value: raise ValueError()
+                    value[key] = item
+                return value
+            rows = json.loads(raw, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+            _audit_need(type(rows) is list and len(rows) <= 500000 and all(type(row) is dict for row in rows), self.scope, "input_invalid")
+            descriptor = self.schema.pool.FindMessageTypeByName("master." + table)
+            self.loaded[table] = [normalize_master_row(table, row, descriptor)[0] for row in rows]
+            self.pins[table + ".json"] = hashlib.sha256(raw).hexdigest()
+        return super().rows(table, required=required)
+
+
+def _audit_wire(schema, table, rows):
+    from .schema import normalize_master_row
+    descriptor = schema.pool.FindMessageTypeByName("master." + table)
+    return sorted(hashlib.sha256(_master_message(schema, table, normalize_master_row(table,row,descriptor)[0]).SerializeToString(deterministic=True)).hexdigest() for row in rows)
+
+
+def _audit_equal(schema, table, old, new, scope, reason):
+    _audit_need(_audit_wire(schema,table,old) == _audit_wire(schema,table,new), scope, reason)
+
+
+def _audit_conditions(catalog, seeds):
+    index = catalog.ids("Condition", required=True)
+    pending, seen = list(seeds), set()
+    def strings(value):
+        if type(value) is str: yield value
+        elif type(value) is dict:
+            for item in value.values(): yield from strings(item)
+        elif type(value) is list:
+            for item in value: yield from strings(item)
+    while pending:
+        key = pending.pop()
+        if key in seen: continue
+        _audit_need(key in index and len(seen) < 100000, catalog.scope, "dream_condition_changed")
+        seen.add(key)
+        pending.extend(value for value in strings(index[key]) if value.startswith("cd-") and value not in seen)
+    return [index[key] for key in sorted(seen)]
+
+
+def _audit_receipt(scope, schema, old, latest, projection, checks):
+    for source in (old, latest):
+        for name, expected in source.pins.items():
+            _audit_need(hashlib.sha256(_audit_read(source.directory / name)).hexdigest() == expected, scope, "input_invalid")
+    return {"schema":1, "scope":scope, "status":"PASS", "schema_sha256":schema.fingerprint,
+        "legacy_master_version":MASTER_VERSION, "master_version":_LATEST_MASTER_VERSION,
+        "projection_equal":True, "external_controls_equal":True,
+        "projection_sha256":hashlib.sha256(_audit_canonical(projection)).hexdigest(), "checks":checks,
+        "input_files":{"legacy":dict(sorted(old.pins.items())),"latest":dict(sorted(latest.pins.items()))},
+        "state_changed":False,"runtime_authority_consumed":False}
+
+
+def audit_latest_main_live_semantics(schema, legacy_master_dir, latest_all_master_dir):
+    """Compare live-v5 prepared-input controls, permitting bounded new inventory."""
+    scope = "main_live"
+    try:
+        _audit_need(schema.fingerprint == SCHEMA_SHA256, scope, "schema_changed")
+        old = _AuditCatalog(schema,legacy_master_dir,MASTER_VERSION,scope)
+        latest = _AuditCatalog(schema,latest_all_master_dir,_LATEST_MASTER_VERSION,scope)
+        projection = {"ruleset":RULESET,"quests":[],"retained":{}}
+        for definition in MAIN_QUEST_DEFINITIONS:
+            first, area = validated_main_quest(old,definition)
+            second, new_area = validated_main_quest(latest,definition)
+            _audit_equal(schema,"Quest",[first],[second],scope,"main_quest_changed")
+            _audit_equal(schema,"Area",[area],[new_area],scope,"main_quest_changed")
+            for identity in (definition.chart_id,definition.reference_chart_id):
+                _audit_equal(schema,"MusicChartPattern",_chart(old,identity),_chart(latest,identity),scope,"main_chart_changed")
+            for table, identity in (("Stage",first["stageId"]),("Music",first["musicId"]),
+                                    ("Reward",definition.reward_id),("QuestPressure",first["questPressureId"])):
+                a,b = old.ids(table,required=True).get(identity), latest.ids(table,required=True).get(identity)
+                _audit_need(a is not None and b is not None,scope,"main_reference_missing")
+                _audit_equal(schema,table,[a],[b],scope,"main_quest_changed")
+            for table,identity,key in (("QuestAudienceAdvantage",first["QuestAudienceAdvantageId"],"audienceAmount"),
+                                      ("ComboAdvantage",old.ids("Music")[first["musicId"]]["comboAdvantageId"],"comboCount")):
+                a=[row for row in old.rows(table,required=True) if row.get("id")==identity]
+                b=[row for row in latest.rows(table,required=True) if row.get("id")==identity]
+                _audit_need(a and b and len({_number(row.get(key),key) for row in b})==len(b),scope,"main_numeric_changed")
+                _audit_equal(schema,table,a,b,scope,"main_numeric_changed")
+            projection["quests"].append(definition.quest_id)
+        for table in ("Setting","CardParameter","CardRarity","CardLevelRelease","CardLevel","ManagerLevel",
+                      "Consumption","QuestStaminaConsumption"):
+            a,b=old.rows(table,required=True),latest.rows(table,required=True)
+            _audit_equal(schema,table,a,b,scope,"main_numeric_changed")
+            projection["retained"][table]=_audit_wire(schema,table,a)
+        for table, ids in (("Item",{"item-card_enhance","item-photo_shooting-01"}),
+                           ("Accessory",{"ac-1-vocal-02","ac-1-visual-02"})):
+            a,b=old.ids(table,required=True),latest.ids(table,required=True)
+            _audit_need(ids <= a.keys() and ids <= b.keys(),scope,"main_reference_missing")
+            _audit_equal(schema,table,[a[key] for key in sorted(ids)],[b[key] for key in sorted(ids)],scope,"main_numeric_changed")
+        # Validate complete candidate rows before selecting their used fields;
+        # an additive record is never permission to ignore unknown JSON keys.
+        for table in ("Card", "Character", "Costume", "Hair"):
+            _audit_wire(schema,table,latest.rows(table,required=True))
+        cards, new_cards=old.ids("Card",required=True), latest.ids("Card",required=True)
+        _audit_need(cards.keys() <= new_cards.keys() and len(new_cards)-len(cards)<=1,scope,"main_addition_scope_changed")
+        _audit_equal(schema,"Card",list(cards.values()),[new_cards[key] for key in cards],scope,"main_card_changed")
+        for table in ("Skill","SkillEfficacy","SkillTrigger","SkillTarget"):
+            a,b=old.ids(table,required=True),latest.ids(table,required=True)
+            _audit_need(a.keys() <= b.keys(),scope,"main_skill_changed")
+            _audit_equal(schema,table,list(a.values()),[b[key] for key in a],scope,"main_skill_changed")
+            projection["retained"][table]=_audit_wire(schema,table,list(a.values()))
+        characters,new_characters=old.ids("Character",required=True),latest.ids("Character",required=True)
+        costumes,new_costumes=old.ids("Costume",required=True),latest.ids("Costume",required=True)
+        hairs,new_hairs=old.ids("Hair",required=True),latest.ids("Hair",required=True)
+        for a,b,limit in ((costumes,new_costumes,17),(hairs,new_hairs,45)):
+            _audit_need(a.keys() <= b.keys() and len(b)-len(a)<=limit,scope,"main_addition_scope_changed")
+        owners={row["characterId"] for row in new_cards.values()}
+        _audit_need(owners <= characters.keys() and owners <= new_characters.keys(),scope,"main_reference_missing")
+        for key in sorted(owners):
+            a,b=characters[key],new_characters[key]
+            fields=("id","assetId","characterGroupId","defaultCostumeId","defaultLiveCostumeId")
+            _audit_need({name:a.get(name,"") for name in fields}=={name:b.get(name,"") for name in fields},scope,"main_model_changed")
+            for field,index in (("costumeIds",new_costumes),("hairIds",new_hairs)):
+                first,second=a.get(field,[]),b.get(field,[])
+                _audit_need(type(first) is list and type(second) is list and set(first)<=set(second)
+                            and len(second)==len(set(second)) and all(value in index and index[value].get("characterId")==key for value in second),scope,"main_membership_changed")
+        for table,a,b,fields in (("Costume",costumes,new_costumes,("id","characterId","bodyAssetId","defaultHairId")),
+                                  ("Hair",hairs,new_hairs,("id","characterId","hairAssetId","faceAssetId","fittingCostumeId"))):
+            projection["retained"][table]={key:{field:row.get(field,"") for field in fields} for key,row in a.items()}
+            _audit_need(all({field:row.get(field,"") for field in fields}=={field:b[key].get(field,"") for field in fields} for key,row in a.items()),scope,"main_model_changed")
+        from .live_assets import _wearable
+        for key,hair in hairs.items():
+            related=[name for name,row in costumes.items() if row.get("characterId")==hair.get("characterId")]
+            _audit_need(all(_wearable(hair,name)==_wearable(new_hairs[key],name) for name in related),scope,"main_membership_changed")
+        for row in new_cards.values():
+            for slot in range(1,5):
+                identity=row.get("skillId"+str(slot),"")
+                _audit_need(not identity or identity in latest.ids("Skill"),scope,"main_reference_missing")
+        projection["retained"]["Card"]=_audit_wire(schema,"Card",list(cards.values()))
+        return _audit_receipt(scope,schema,old,latest,projection,{"old_cards_unchanged":len(cards),
+            "new_cards":len(new_cards)-len(cards),"old_costumes_preserved":len(costumes),"new_costumes":len(new_costumes)-len(costumes),
+            "old_hairs_preserved":len(hairs),"new_hairs":len(new_hairs)-len(hairs),"first_quests":3,"ruleset":RULESET})
+    except LatestSemanticsError: raise
+    except Exception:
+        raise LatestSemanticsError(scope,"input_invalid") from None

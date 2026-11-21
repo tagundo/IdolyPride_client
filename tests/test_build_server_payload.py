@@ -29,12 +29,12 @@ def missions():
 
 
 def test_payload_includes_canonical_tables_and_media_scene_definitions():
-    assert len(payload.TABLES) == len(set(payload.TABLES)) == 49
+    assert len(payload.TABLES) == len(set(payload.TABLES)) == 55
     assert payload.TABLES[39] == "Mission"
     assert payload.TABLES[40:45] == ("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression")
-    assert payload.TABLES[45:] == ("CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
+    assert payload.TABLES[45:49] == ("CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
                                   "CompanyEnjoyCharacterLevelSetting")
-    assert "Condition" not in payload.TABLES
+    assert payload.TABLES[49:] == ("LoveHomeAction", "LoveLevel", "LoveStoryEpisode", "LoveColor", "Condition", "EventMission")
 
 
 def test_pinned_external_evidence_matches_payload_contract_without_mutating_rows(missions):
@@ -149,5 +149,7 @@ def test_ios_public_catalog_is_packaged_under_separate_directory(tmp_path):
     files, summary = payload.octo_public_files(directory, platform="ios")
     assert {target for _, target in files} == {"data/public-octo-ios/settings.json", "data/public-octo-ios/manifest.pb"}
     assert summary["application_version"] == 105051 and summary["revision"] == 1159
-    with pytest.raises(ValueError, match="version"):
+    before = {path.name: path.read_bytes() for path in directory.iterdir()}
+    with pytest.raises(ValueError):
         payload.octo_public_files(directory)
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == before

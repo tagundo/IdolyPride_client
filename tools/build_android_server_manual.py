@@ -2,7 +2,7 @@
 """Build the native server with cached Android tools, without Gradle or Go.
 
 Use CPython 3.13, an exact committed source snapshot and a separately validated
-55-table public payload. Existing APKs and account files are never overwritten.
+source-pinned latest public payload. Existing APKs and account files are never overwritten.
 All Java processes are sequential, bounded and run with a single CPU/worker.
 """
 from __future__ import annotations
@@ -30,12 +30,14 @@ import zlib
 
 if __package__:
     from . import repack_android_server_python as pybundle
+    from . import latest_server_data_pin as love_payload
 else:
     import repack_android_server_python as pybundle
+    import latest_server_data_pin as love_payload
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.31", 48
+VERSION, VERSION_CODE = "0.3.32", 49
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -51,7 +53,7 @@ JAVA_ROOT = JAVA_SOURCE_ROOT + PACKAGE.replace(".", "/") + "/"
 RES_ROOT = "android-server/app/src/main/res/"
 MANIFEST = "android-server/app/src/main/AndroidManifest.xml"
 GRADLE = "android-server/app/build.gradle.kts"
-JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "CryptoBridge",
+JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "PreviousProcessExits", "CryptoBridge",
     "PresentationSettings", "PlaybackSettings", "PlaybackStorage", "RenderingExperiment",
     "LibrarySettings", "ResourceTransfers"))
 RESOURCE_FILES = (RES_ROOT + "values/strings.xml", RES_ROOT + "drawable/ic_server.xml")
@@ -80,6 +82,7 @@ ADDED_JSON_SHA256 = {
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from idoly_local import media_master_build as media_master
 from idoly_local import bundled_translations as translation_package
+from idoly_local.public_payload_transaction import TABLES as LATEST_TABLES
 # Older release assets may only be removed, never copied into a server release.
 LEGACY_PRESENTATION_ASSETS = frozenset("assets/presentation/" + name for name in
                                       ("manifest.json", "diagnostics.apk", "resources.apk"))
@@ -546,7 +549,9 @@ def manifest_xml(raw):
     return ET.tostring(tree, encoding="utf-8", xml_declaration=True)
 
 
-def build_config(payload_sha256, translations_sha256="", translations_bytes=0):
+def build_config(payload_sha256, translations_sha256="", translations_bytes=0, *, payload_bytes=0):
+    if type(payload_bytes) is not int or not 0 <= payload_bytes <= MAX_PAYLOAD:
+        raise ValueError("Explicit payload size is invalid")
     if not re.fullmatch(r"[0-9a-f]{64}", payload_sha256):
         raise ValueError("An explicit payload SHA-256 is required")
     if (type(translations_bytes) is not int or not 0 <= translations_bytes <= MAX_TRANSLATIONS
@@ -561,6 +566,7 @@ def build_config(payload_sha256, translations_sha256="", translations_bytes=0):
             f' public static final int VERSION_CODE = {VERSION_CODE};\n'
             f' public static final String VERSION_NAME = "{VERSION}";\n'
             f' public static final String SERVER_DATA_SHA256 = "{payload_sha256}";\n'
+            f' public static final long SERVER_DATA_BYTES = {payload_bytes}L;\n'
             f' public static final String BUNDLED_TRANSLATIONS_SHA256 = "{translations_sha256}";\n'
             f' public static final long BUNDLED_TRANSLATIONS_BYTES = {translations_bytes}L;\n'
             "}\n").encode()
@@ -741,6 +747,38 @@ def load_payload_inventory(path=None):
 
 
 def validate_payload(payload, expected_sha256, baseline_archive, *, catalog_inventory=None):
+    """Admit only the exact prepared native payload; no legacy/hash override path."""
+    pin = love_payload.load_pin()
+    approved = love_payload.output_pin()
+    if (type(expected_sha256) is not str or expected_sha256 != approved["sha256"]
+            or payload.stat().st_size != approved["bytes"]):
+        raise ValueError("Prepared latest payload pin differs")
+    directory = payload_directory_bounds(payload)
+    verified = love_payload.verify_payload(payload)
+    names = pin["output"]["master_json_table_names"]
+    if (pin["output"]["master_json_tables"] != 64 or len(names) != 64 or set(names) != LATEST_TABLES
+            or verified.get("master_json_tables") != 64 or verified.get("master_json_table_names") != names):
+        raise ValueError("Prepared latest payload must contain the exact 64 pinned JSON names")
+    with ZipFile(payload) as archive:
+        infos = pybundle._members(archive, pybundle.MAX_EXPANDED, member_limit=MAX_PAYLOAD_MEMBERS)
+        actual = sorted(name[len("data/master-json/"):-5] for name in infos
+                        if name.startswith("data/master-json/") and name.endswith(".json"))
+        if actual != names:
+            raise ValueError("Prepared latest payload JSON namespace differs")
+        report = json.loads(pybundle._read(archive, infos[PAYLOAD_MANIFEST], META_LIMIT), object_pairs_hook=pybundle._json_object)
+        tables = report.get("tables")
+        if (type(tables) is not dict or set(tables) != set(names)-{"LoveCatalog"}
+                or any(type(count) is not int or count < 0 for count in tables.values())):
+            raise ValueError("Prepared latest payload raw table counts differ")
+        if catalog_inventory is not None and report.get("prebuilt_catalogs") != catalog_inventory.get("prebuilt_catalogs"):
+            raise ValueError("Payload versioned public catalog provenance differs")
+    return {"sha256": approved["sha256"], "bytes": approved["bytes"], "tables": tables,
+            "master_json_table_names": names, "members": verified["entries"], "directory": directory,
+            "prebuilt_catalogs": report.get("prebuilt_catalogs"),
+            "server_data_provenance": pin["upgrade_proof"]}
+
+
+def _validate_legacy_base_structure(payload, expected_sha256, baseline_archive, *, catalog_inventory=None):
     """Preserve original public data and optionally add the frozen library catalog."""
     if (not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
             or payload.stat().st_size > MAX_PAYLOAD or pybundle.digest(payload) != expected_sha256):
@@ -1040,7 +1078,7 @@ def build(args):
         for path in (generated, classes, dex):
             path.mkdir()
         config = generated / "BuildConfig.java"
-        config.write_bytes(build_config(args.payload_sha256, translations_sha256, translations_bytes))
+        config.write_bytes(build_config(args.payload_sha256, translations_sha256, translations_bytes, payload_bytes=payload.stat().st_size))
         def run(command):
             return _run(command, root=root, env=env, cache=cache, guard=_server_stage_guard)
         compiled_res, resources = work / "compiled-res.zip", work / "resources.apk"

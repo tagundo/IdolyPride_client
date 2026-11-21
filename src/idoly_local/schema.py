@@ -10,6 +10,50 @@ from pathlib import Path
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
 
+# Verified against SolisClient a72ee470 and the 6.1.1 client descriptors: same
+# field number/type, differing only in spelling. No general case-fold fallback.
+_MASTER_FIELD_ALIASES = {
+    "BacksideQuestSetting": {
+        "questCharacterAdvantageId": ("QuestCharacterAdvantageId", 15, 9),
+        "questAudienceAdvantageId": ("QuestAudienceAdvantageId", 16, 9),
+    },
+    "TourQuestSetting": {
+        "questCharacterAdvantageId": ("QuestCharacterAdvantageId", 15, 9),
+        "questAudienceAdvantageId": ("QuestAudienceAdvantageId", 16, 9),
+    },
+    "Quest": {
+        "questCharacterAdvantageId": ("QuestCharacterAdvantageId", 26, 9),
+        "questAudienceAdvantageId": ("QuestAudienceAdvantageId", 27, 9),
+    },
+    "Music": {"is3DAvailable": ("is3dAvailable", 10, 8)},
+    "PhotoExpressionStagePosition": {"lookEffectAssetId": ("LookEffectAssetId", 16, 9)},
+    "Setting": {"photoRecipeLimit": ("PhotoRecipeLimit", 113, 3)},
+    "ShowcaseSetting": {"showcaseMysetNameLimit": ("ShowcaseMysetNameLimit", 7, 5)},
+}
+
+
+def normalize_master_row(table: str, row, descriptor) -> tuple[dict, int]:
+    if not isinstance(row, dict):
+        raise ValueError(f"Master row must be an object: {table}")
+    result = dict(row)
+    changed = 0
+    for old, (new, number, kind) in _MASTER_FIELD_ALIASES.get(table, {}).items():
+        if old not in result:
+            continue
+        field = descriptor.fields_by_name.get(new)
+        # A schema that already has this exact old field needs no alias.
+        if old in descriptor.fields_by_name:
+            continue
+        if field is None or field.number != number or field.type != kind:
+            raise ValueError(f"Verified alias does not match supplied schema: {table}.{old}")
+        if new in result or field.json_name in result:
+            raise ValueError(f"Conflicting legacy and current field names: {table}.{old}")
+        result[new] = result.pop(old)
+        changed += 1
+    return result, changed
+
+
+
 class Schema:
     def __init__(self, pool, files, fingerprint: str | None = None):
         self.pool = pool

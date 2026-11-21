@@ -8,6 +8,7 @@ from idoly_local.catalog import FixtureStore, import_response
 from idoly_local.h2_server import create_server
 
 from test_quest import game, schema
+from test_quest_catalogs import catalog_game
 
 
 def test_main_live_reads_over_encrypted_http2_preserve_profile(game, tmp_path):
@@ -63,3 +64,31 @@ def test_imported_main_live_response_keeps_fixture_precedence(game, tmp_path):
             pytest.fail("Unexpected application failure: " + str(code))
 
     assert application.handle(path, codec.encode(b""), Context()) == captured.SerializeToString()
+
+
+def test_all_nonmain_catalogs_over_actual_encrypted_rpc_preserve_profile(catalog_game, tmp_path):
+    quest, state, directory, _, token = catalog_game
+    before = state.snapshot("player")
+    application = Application(quest.schema, state, FixtureStore(tmp_path / "fixtures", quest.schema),
+                              profile="player", master_dir=directory)
+    server = create_server(application, port=0).start()
+    try:
+        with grpc.insecure_channel(f"127.0.0.1:{server.port}") as channel:
+            grpc.channel_ready_future(channel).result(timeout=3)
+            for route in ("ListDaily", "ListContest", "ListTower", "TowerTop"):
+                path = "/api.Quest/" + route
+                call = channel.unary_unary(path, request_serializer=codec.encode,
+                                          response_deserializer=codec.decode)
+                with pytest.raises(grpc.RpcError) as failure:
+                    call(b"", timeout=3)
+                assert failure.value.code() == grpc.StatusCode.UNAUTHENTICATED
+                with pytest.raises(grpc.RpcError) as failure:
+                    call(b"\xff", metadata=(("x-auth-token", token),), timeout=3)
+                assert failure.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+                result = call(b"", metadata=(("x-auth-token", token),), timeout=3)
+                assert result == quest.handle(path, b"")
+                assert quest.schema.response_type(path).FromString(result).ListFields()
+            assert state.snapshot("player") == before
+            assert state.authenticated(token, "player")
+    finally:
+        server.stop()

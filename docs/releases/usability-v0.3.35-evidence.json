@@ -1,0 +1,641 @@
+{
+  "schema": 1,
+  "status": "PASS_PUBLISHED",
+  "version": "0.3.35",
+  "build": 52,
+  "ipa_version": "156.9115",
+  "source_commit": "ce5b3551a059544a8b7ac3a985b577cc1f338c2e",
+  "publication_commit": "6f1531033b3085ed5b0357261b6e09cf51c3293a",
+  "run_id": 43753600993,
+  "release": {
+    "id": 446325193,
+    "tag_name": "local-server-v0.3.35",
+    "html_url": "https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.35",
+    "published_at": "2026-11-15T19:59:04Z",
+    "draft": false,
+    "prerelease": true
+  },
+  "proof_archive": {
+    "artifact_id": 14177952290,
+    "bytes": 1149677,
+    "sha": "a4aa372b04b60e3a3252beec750cb1feba286ee8d1d4369bddd624d724539cbb",
+    "source": "ce5b3551a059544a8b7ac3a985b577cc1f338c2e",
+    "run": 43753600993
+  },
+  "tests": {
+    "portable_passed": 7654,
+    "portable_skipped": 165,
+    "subtests_passed": 375,
+    "mandatory_actual_master_contracts": 3
+  },
+  "performance": {
+    "diagnostics": {
+      "median": {
+        "baseline": {
+          "cpu_microseconds_per_poll": 997.2458460000001,
+          "wall_microseconds_per_poll": 997.3625809999974
+        },
+        "candidate": {
+          "cpu_microseconds_per_poll": 15.274987999999995,
+          "wall_microseconds_per_poll": 15.279354999996997
+        }
+      },
+      "median_speedup": {
+        "cpu_microseconds_per_poll": 65.28619505298468,
+        "wall_microseconds_per_poll": 65.2751756209731
+      },
+      "expected_history_deepcopy_calls": {
+        "baseline": {
+          "explicit_export": 2,
+          "poll": 1
+        },
+        "candidate": {
+          "explicit_export": 1,
+          "poll": 0
+        }
+      }
+    },
+    "translation": {
+      "medians": {
+        "baseline": {
+          "elapsed_seconds": 20.710259084,
+          "peak_rss_bytes": 192581632,
+          "validation_peak_rss_bytes": 192581632,
+          "validation_seconds": 5.677234638000016
+        },
+        "candidate": {
+          "elapsed_seconds": 20.544355759000013,
+          "peak_rss_bytes": 187813888,
+          "validation_peak_rss_bytes": 175882240,
+          "validation_seconds": 5.669890245000005
+        }
+      },
+      "median_peak_rss_saving_bytes": 4767744,
+      "median_seconds_saved": 0.16590332499998794
+    }
+  },
+  "artifacts": [
+    {
+      "id": 752172495,
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 332303435,
+      "sha256": "0e46e8fa9c3b8217ca255354d8910441a981c476b760e8eda04436efcfc0ba5f",
+      "API_digest": "sha256:0e46e8fa9c3b8217ca255354d8910441a981c476b760e8eda04436efcfc0ba5f",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Server-Android.apk",
+      "full_API_download_SHA256_verified": true
+    },
+    {
+      "id": 752173191,
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 331119630,
+      "sha256": "cffbdf5d4c54dd7ffa9962e7ab6ef027e90ae3dcb8a9cea91afdaaddcf006be7",
+      "API_digest": "sha256:cffbdf5d4c54dd7ffa9962e7ab6ef027e90ae3dcb8a9cea91afdaaddcf006be7",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "full_API_download_SHA256_verified": true
+    },
+    {
+      "id": 752173887,
+      "name": "IdolyPride-6.1.1-Unified-iOS.ipa",
+      "bytes": 525737381,
+      "sha256": "e9b40fdf699c5084cc1d429f6dec67c87ece5fba22a87cb867045f6294897893",
+      "API_digest": "sha256:e9b40fdf699c5084cc1d429f6dec67c87ece5fba22a87cb867045f6294897893",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-6.1.1-Unified-iOS.ipa",
+      "full_API_download_SHA256_verified": true
+    },
+    {
+      "id": 752175288,
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+      "bytes": 164276861,
+      "sha256": "3cffdcdf99b48eb5819b8639b3a31bfa43f4ae5cc1c092bb5dbd984a6c080543",
+      "API_digest": "sha256:3cffdcdf99b48eb5819b8639b3a31bfa43f4ae5cc1c092bb5dbd984a6c080543",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+      "full_API_download_SHA256_verified": true
+    },
+    {
+      "id": 752175588,
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+      "bytes": 164260477,
+      "sha256": "2bd373fbee1435c45000088fbf7996cbea8d577bf6015085e8c1101d82130baf",
+      "API_digest": "sha256:2bd373fbee1435c45000088fbf7996cbea8d577bf6015085e8c1101d82130baf",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+      "full_API_download_SHA256_verified": true
+    },
+    {
+      "id": 752175917,
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "bytes": 165128829,
+      "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e",
+      "API_digest": "sha256:44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "full_API_download_SHA256_verified": true
+    },
+    {
+      "id": 752176338,
+      "name": "IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+      "bytes": 150132823,
+      "sha256": "d872903da8d79bf4a255888f9d5a952198ff47268cfcf7c35e8ac437b56e72a1",
+      "API_digest": "sha256:d872903da8d79bf4a255888f9d5a952198ff47268cfcf7c35e8ac437b56e72a1",
+      "download_url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+      "full_API_download_SHA256_verified": true
+    }
+  ],
+  "companion_origins": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "version": "0.3.31",
+      "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+      "publication_commit": "3b2c73b51931bb7be031c37c9d55297505fb88e1",
+      "bytes": 165128829,
+      "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e"
+    },
+    {
+      "name": "IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+      "version": "0.3.31",
+      "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+      "publication_commit": "7fcc9f8661b5158cf66d93e9c307607db2c2ee43",
+      "bytes": 150132823,
+      "sha256": "d872903da8d79bf4a255888f9d5a952198ff47268cfcf7c35e8ac437b56e72a1"
+    }
+  ],
+  "ios": {
+    "order": [
+      "ko",
+      "en",
+      "ja",
+      "en",
+      "ko"
+    ],
+    "preserved_app_container": true,
+    "language_saves": [
+      {
+        "language": "ko",
+        "run_index": 0,
+        "save": {
+          "ack_correlated": true,
+          "ack_effective_language": "ko",
+          "ack_id": 17,
+          "ack_language": "en",
+          "acknowledged": true,
+          "current_language": "ko",
+          "effective_language": "ko",
+          "feedback_source": "options-save-feedback",
+          "feedback_state": "saved",
+          "form_feedback_saved": true,
+          "message_success": true,
+          "next_language": "en",
+          "options_fields_reenabled": true,
+          "persisted_language": "en",
+          "request_action": "save_options",
+          "request_id": 17,
+          "request_language": "en",
+          "request_observed": true,
+          "save_trigger": "change-autosave",
+          "server_effective_matches": true,
+          "server_language_matches": true,
+          "server_status_received": true,
+          "timed_out": false
+        }
+      },
+      {
+        "language": "en",
+        "run_index": 1,
+        "save": {
+          "ack_correlated": true,
+          "ack_effective_language": "en",
+          "ack_id": 8,
+          "ack_language": "ja",
+          "acknowledged": true,
+          "current_language": "en",
+          "effective_language": "en",
+          "feedback_source": "options-save-feedback",
+          "feedback_state": "saved",
+          "form_feedback_saved": true,
+          "message_success": true,
+          "next_language": "ja",
+          "options_fields_reenabled": true,
+          "persisted_language": "ja",
+          "request_action": "save_options",
+          "request_id": 8,
+          "request_language": "ja",
+          "request_observed": true,
+          "save_trigger": "change-autosave",
+          "server_effective_matches": true,
+          "server_language_matches": true,
+          "server_status_received": true,
+          "timed_out": false
+        }
+      },
+      {
+        "language": "ja",
+        "run_index": 2,
+        "save": {
+          "ack_correlated": true,
+          "ack_effective_language": "ja",
+          "ack_id": 8,
+          "ack_language": "en",
+          "acknowledged": true,
+          "current_language": "ja",
+          "effective_language": "ja",
+          "feedback_source": "options-save-feedback",
+          "feedback_state": "saved",
+          "form_feedback_saved": true,
+          "message_success": true,
+          "next_language": "en",
+          "options_fields_reenabled": true,
+          "persisted_language": "en",
+          "request_action": "save_options",
+          "request_id": 8,
+          "request_language": "en",
+          "request_observed": true,
+          "save_trigger": "change-autosave",
+          "server_effective_matches": true,
+          "server_language_matches": true,
+          "server_status_received": true,
+          "timed_out": false
+        }
+      },
+      {
+        "language": "en",
+        "run_index": 3,
+        "save": {
+          "ack_correlated": true,
+          "ack_effective_language": "en",
+          "ack_id": 8,
+          "ack_language": "ko",
+          "acknowledged": true,
+          "current_language": "en",
+          "effective_language": "en",
+          "feedback_source": "options-save-feedback",
+          "feedback_state": "saved",
+          "form_feedback_saved": true,
+          "message_success": true,
+          "next_language": "ko",
+          "options_fields_reenabled": true,
+          "persisted_language": "ko",
+          "request_action": "save_options",
+          "request_id": 8,
+          "request_language": "ko",
+          "request_observed": true,
+          "save_trigger": "change-autosave",
+          "server_effective_matches": true,
+          "server_language_matches": true,
+          "server_status_received": true,
+          "timed_out": false
+        }
+      },
+      {
+        "language": "ko",
+        "run_index": 4,
+        "save": {
+          "ack_correlated": true,
+          "ack_effective_language": "ko",
+          "ack_id": 9,
+          "ack_language": "ko",
+          "acknowledged": true,
+          "current_language": "ko",
+          "effective_language": "ko",
+          "feedback_source": "options-save-feedback",
+          "feedback_state": "saved",
+          "form_feedback_saved": true,
+          "message_success": true,
+          "next_language": "ko",
+          "options_fields_reenabled": true,
+          "persisted_language": "ko",
+          "request_action": "save_options",
+          "request_id": 9,
+          "request_language": "ko",
+          "request_observed": true,
+          "save_trigger": "change-autosave",
+          "server_effective_matches": true,
+          "server_language_matches": true,
+          "server_status_received": true,
+          "timed_out": false
+        }
+      }
+    ],
+    "settings_web": {
+      "buffer_4096_present": true,
+      "content_width": 402,
+      "data_store_reused": true,
+      "evaluation_completed": true,
+      "evaluation_started": true,
+      "evaluation_succeeded": true,
+      "forms_present": true,
+      "launcher_document_marker_absent": true,
+      "launcher_store_nonpersistent": true,
+      "menu_store_nonpersistent": true,
+      "navigation_file_url": true,
+      "navigation_loading": false,
+      "navigation_progress": 1,
+      "no_horizontal_overflow": true,
+      "ready": true,
+      "scale_2_present": true,
+      "select_count": 11,
+      "timed_out": false,
+      "viewport_width": 402,
+      "web_attached": true,
+      "web_found": true,
+      "web_view_recreated": true
+    },
+    "zip_roundtrip": {
+      "backend_ready": true,
+      "backend_success": true,
+      "button_restored": true,
+      "copied_bytes": 5842291,
+      "copied_sha256": "84f3ca5ddc6eea5722a942783af2316d59115354019572da22c2da9a4732632f",
+      "copy_bytes_match": true,
+      "copy_source_distinct": true,
+      "dismissed_programmatically": true,
+      "dom_completed": true,
+      "elapsed_seconds": 10.435043500000006,
+      "export_accepted": true,
+      "export_archive_complete": true,
+      "export_ready": true,
+      "exported_files": 0,
+      "failed_files": 0,
+      "import_reply_accepted": true,
+      "imported_files": 0,
+      "native_copy_queued": true,
+      "owned_copy_found": true,
+      "performed": true,
+      "picker_detached": true,
+      "picker_import_mode": true,
+      "picker_presented": true,
+      "picker_single_selection": true,
+      "scope": "stock-simulator",
+      "selection_delegate_invoked": true,
+      "selection_trigger": "delegate-callback",
+      "source_bytes": 5842291,
+      "source_copy_sha256_match": true,
+      "source_preserved": true,
+      "source_sha256": "84f3ca5ddc6eea5722a942783af2316d59115354019572da22c2da9a4732632f",
+      "timed_out": false,
+      "total_bytes": 5842291,
+      "upstream_requests_unchanged": true,
+      "wk_import_dispatched": true
+    },
+    "game_start_barrier": {
+      "cold_while_settings_flush_held": true,
+      "game_button_disabled_during_flush": true,
+      "settings_flush_called_once": true,
+      "unsolicited_settings_ack_ignored": true,
+      "settings_flush_released_before_forward": true
+    },
+    "gameplay_tested": false,
+    "physical_device_tested": false,
+    "livecontainer_filestap_tested": false
+  },
+  "readback": {
+    "schema": 1,
+    "status": "PASS",
+    "source_commit": "ce5b3551a059544a8b7ac3a985b577cc1f338c2e",
+    "publication_commit": "6f1531033b3085ed5b0357261b6e09cf51c3293a",
+    "report_files_verified": 41,
+    "complete_remote_downloads_verified": 3,
+    "full_release_asset_API_downloads_verified": 7,
+    "android_languages_verified": [
+      "ja",
+      "en"
+    ],
+    "ios_cold_launches_verified": 5,
+    "range_checks": [
+      {
+        "name": "IdolyPride-Local-Server-Android.apk",
+        "url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Server-Android.apk",
+        "status": 206,
+        "content_range": "bytes 0-63/332303435",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      },
+      {
+        "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+        "url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Server-macOS-arm64.app.zip",
+        "status": 206,
+        "content_range": "bytes 0-63/331119630",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      },
+      {
+        "name": "IdolyPride-6.1.1-Unified-iOS.ipa",
+        "url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-6.1.1-Unified-iOS.ipa",
+        "status": 206,
+        "content_range": "bytes 0-63/525737381",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      },
+      {
+        "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+        "url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+        "status": 206,
+        "content_range": "bytes 0-63/164276861",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      },
+      {
+        "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+        "url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+        "status": 206,
+        "content_range": "bytes 0-63/164260477",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      },
+      {
+        "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+        "url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+        "status": 206,
+        "content_range": "bytes 0-63/165128829",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      },
+      {
+        "name": "IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+        "url": "https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+        "status": 206,
+        "content_range": "bytes 0-63/150132823",
+        "received_bytes": 64,
+        "zip_prefix": true,
+        "anonymous": true
+      }
+    ],
+    "mandatory_real_master_contracts_verified": 3,
+    "proof_archive": {
+      "artifact_id": 14177952290,
+      "bytes": 1149677,
+      "sha": "a4aa372b04b60e3a3252beec750cb1feba286ee8d1d4369bddd624d724539cbb",
+      "source": "ce5b3551a059544a8b7ac3a985b577cc1f338c2e",
+      "run": 43753600993
+    }
+  },
+  "metadata_files": {
+    "portable/portable-report.json": {
+      "bytes": 881,
+      "sha256": "844ac977f54b4ee3c3e3d5c1779c9ba68481009adb296b1de2329615378c6b5f"
+    },
+    "portable/preference-contracts.xml": {
+      "bytes": 680,
+      "sha256": "9681797af24c86222020233d4182e58d18f4579690a11930ab8923ab3ab8c075"
+    },
+    "portable/preference-inputs-report.json": {
+      "bytes": 29019,
+      "sha256": "ed41bb0fafc2da14f3de5731f842add0646ccc8d4e6d10fda5b5b19426e04f78"
+    },
+    "portable/preference-references.json": {
+      "bytes": 379,
+      "sha256": "e7463df8fce5c20b609cd09f502ecadefbf1784cde41d7a9bf0475b4b7279d01"
+    },
+    "performance/diagnostics-polling.json": {
+      "bytes": 7589,
+      "sha256": "fe043ad099f2020e94a5e39b1404e8ee7e13e3733bce84bcd2a521a467cbe5f8"
+    },
+    "performance/inputs-report.json": {
+      "bytes": 29019,
+      "sha256": "ed41bb0fafc2da14f3de5731f842add0646ccc8d4e6d10fda5b5b19426e04f78"
+    },
+    "performance/performance-report.json": {
+      "bytes": 465,
+      "sha256": "37fda9958bae088c046b38a7b53cb8547fe61c3b9e1d74a2b7b3c439be928614"
+    },
+    "performance/translation-startup.json": {
+      "bytes": 29063,
+      "sha256": "a2ea75914c47869ee7d672360058596f10643ce41362c29ceeb7f0fd7a740ece"
+    },
+    "android/android-qa.json": {
+      "bytes": 8847,
+      "sha256": "e141774d36ada2da3d810875efb632157c467dfbe8bd826311d496d460134f9c"
+    },
+    "android/live-engine-arm64-v8a.json": {
+      "bytes": 4616,
+      "sha256": "7f1559be152016f2bd5670b34fa8375c6d6841a6fd660deb5df178f9cb6b7325"
+    },
+    "android/live-engine-x86_64.json": {
+      "bytes": 4621,
+      "sha256": "560d579f7fda7bc33e5ceed5c2e6db7b7f60da1b4950cf98700698c0aec09bd2"
+    },
+    "android/platform-report.json": {
+      "bytes": 41430,
+      "sha256": "785232f6b0b970dde1d3046c633c12aafcaa9719f614c5896570cd0804e98469"
+    },
+    "android/resource-report.json": {
+      "bytes": 77,
+      "sha256": "334a52a0834b2c70dbe979839657be8cab20b348048660a7915e1d4834c65f88"
+    },
+    "macos/engine-smoke.json": {
+      "bytes": 8070,
+      "sha256": "143aefbfa55424b8286b8cee785561cbb935c9b23e3e70f9647d577fcee013a7"
+    },
+    "macos/live-engine-macos.json": {
+      "bytes": 4454,
+      "sha256": "2faadcbbeb7e8467b75b74b5ffd3bdc3e241cc8a76349c516ba2afd599358a87"
+    },
+    "macos/mac-build-report.json": {
+      "bytes": 4737,
+      "sha256": "25bc9348151694cf3e14f2e98711213ff96f1b1f7055d94d0620695e3e2f959d"
+    },
+    "macos/platform-report.json": {
+      "bytes": 31229,
+      "sha256": "0e88228a88cf6387d1d70f541e1b0242e0b025cbc9e9110f7a6ddcd68a7451ec"
+    },
+    "macos/resource-report.json": {
+      "bytes": 77,
+      "sha256": "1a01228726b2fe04ec9a1f26b2f45d62ea775094fbab1cd918a2710182152ebb"
+    },
+    "android-clients/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.provenance.json": {
+      "bytes": 1824941,
+      "sha256": "727df273816e34fcd73a28b6b014d0456d2a7dd24a41f704fa1eb7d9e1f25abd"
+    },
+    "android-clients/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.provenance.json": {
+      "bytes": 564556,
+      "sha256": "1b5882e0300f0a21e04880f47462b185cffbf74f88f8df9ce906fdf1cc16a782"
+    },
+    "android-clients/android-clients-report.json": {
+      "bytes": 12682,
+      "sha256": "5a6518a82cd6ff9bb1551eb438cb61e8fb20bc4859e36d72e8be91b76e22c157"
+    },
+    "android-clients/diagnostics-feature.provenance.json": {
+      "bytes": 9099,
+      "sha256": "6750426a105ebce54f159983121db476d7004205143f2e753967d2414df1bb33"
+    },
+    "android-clients/native/build-receipt.json": {
+      "bytes": 7090,
+      "sha256": "6263393e5805f06222534a1a5ffe7d95250e7c6f90c55bb7a024ecdbebee6860"
+    },
+    "ios-unified/IdolyPride-6.1.1-Unified-iOS.report.json": {
+      "bytes": 261016,
+      "sha256": "c13815ad792ff6008ccb8adcefdede49e3c6d0c2a1af881dd406717b4bc52f11"
+    },
+    "ios-unified/Unity-load-patch.json": {
+      "bytes": 881,
+      "sha256": "809011c892d7104ce4896969a26e87d2266b51330b0a5c69fa7c085269b158b9"
+    },
+    "ios-unified/build-environment.json": {
+      "bytes": 340,
+      "sha256": "75d1fad94f86153b65ac727c4a29d0517d178bcf946e0669afbf63d86b072f4d"
+    },
+    "ios-unified/client-data-native-test.json": {
+      "bytes": 2797,
+      "sha256": "30754145d44aae7660f34a084bda8f8ea3a1ebcb19334910360f4f53e305d10e"
+    },
+    "ios-unified/client-language-runtime-check.json": {
+      "bytes": 1173,
+      "sha256": "33cf3360d82f5edea6864935b86ce3c7106ea49676ed52a2b1e790f0f0b310b7"
+    },
+    "ios-unified/client-languages-build.json": {
+      "bytes": 13781,
+      "sha256": "d3caea613aaecb532170ab29497d6783b5fae220bcf8d97c86047b592ca8acce"
+    },
+    "ios-unified/client-languages.json": {
+      "bytes": 111,
+      "sha256": "43ac58720748a442e2d8b1ade7572310ff6d8e8ba65fbc7e3c16c0fcdf7b01b6"
+    },
+    "ios-unified/device-native-build.json": {
+      "bytes": 5722,
+      "sha256": "a7bd4bbb654e248daac34c8df43b0260032916bcfb195a910f475e9108f9bf29"
+    },
+    "ios-unified/device-runtime-report.json": {
+      "bytes": 269807,
+      "sha256": "655f6b7276ebe1e90d280b70c2c2743edd2da555e4f998e5ff279f99f0880a0d"
+    },
+    "ios-unified/keyboard-lifecycle-native-test.json": {
+      "bytes": 2687,
+      "sha256": "b718621661f4dbeaf5fe9c5e744f43ec9a572c8ae9961ece9f1366f95d9dbafb"
+    },
+    "ios-unified/local-http-native-test.json": {
+      "bytes": 6335,
+      "sha256": "4a19333fa2c41cd77df4561321394ed545867db6edae62cc4a42cef67a8432d4"
+    },
+    "ios-unified/mac-menu-test.json": {
+      "bytes": 1537,
+      "sha256": "2e5973c0f63fbedd5dbdf6c17cf58c5e80bddaed12cb66e198b0e6edacec83ff"
+    },
+    "ios-unified/octo-budget-native-test.json": {
+      "bytes": 2102,
+      "sha256": "c837374d0a92fa2765dcb4b91f0e752ddc7d254780b543bb5249d9fe9501470f"
+    },
+    "ios-unified/probe-build.json": {
+      "bytes": 239136,
+      "sha256": "7572afc4ab577c94680e0615d58993a1350f15207fb5cd4d86944da997a3dfd9"
+    },
+    "ios-unified/simulator-native-build.json": {
+      "bytes": 5651,
+      "sha256": "d2e0d07e2e7009fa24a907f572541873798c4f42c6f5d473dbfac3e8a9cadc9b"
+    },
+    "ios-unified/simulator-runtime-report.json": {
+      "bytes": 271942,
+      "sha256": "250634814d50f7839e3d677ddf3e3144f7db5c10d5ef3b8e87fc8c067c05064c"
+    },
+    "ios-unified/simulator-smoke.json": {
+      "bytes": 35288,
+      "sha256": "1bddddb87f92e71a8f1918128c618526523f95abd1fa06ae05bdd27ea2259d4d"
+    },
+    "ios-unified/unity-host-native-test.json": {
+      "bytes": 11212,
+      "sha256": "718d3e123df43a6ad891885fd9e47a7113166eaa0d0cf8e7c05b1d2d627d7ec9"
+    }
+  }
+}

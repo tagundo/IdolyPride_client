@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 
@@ -148,6 +150,54 @@ class AssetHTTPTests(unittest.TestCase):
                 self.request("/master/table.db", headers={"Range": value})
             self.assertEqual(caught.exception.code, 416)
             self.assertEqual(caught.exception.headers["Content-Range"], "bytes */10")
+
+    def test_files_serve_when_host_mime_database_is_sandbox_denied(self):
+        # Match PlayCover: the host MIME database exists, but opening it is
+        # denied. A fresh stdlib guess_type() really fails in this condition.
+        blocked = self.parent / "host-mime.types"
+        blocked.write_text("image/png png\n")
+        self.assertTrue(blocked.is_file())
+        payloads = {
+            "picture.PNG": (b"\x89PNG\r\n\x1a\n", "image/png"),
+            "picture.jpeg": (b"\xff\xd8\xff\xd9", "image/jpeg"),
+            "config.json": (b'{"enabled":true}', "application/json"),
+            "archive.pack": (b"\x00\xff\x80\x01", "application/octet-stream"),
+            "opaque.unknown": (b"\x00\xfe\x80", "application/octet-stream"),
+        }
+        for name, (body, _) in payloads.items():
+            (self.root / name).write_bytes(body)
+        with mock.patch.object(mimetypes, "knownfiles", [str(blocked)]), \
+                mock.patch.object(mimetypes, "inited", False), \
+                mock.patch.object(mimetypes, "_db", None), \
+                mock.patch.object(mimetypes, "open", create=True,
+                    side_effect=PermissionError(1, "Operation not permitted", str(blocked))) as mime_open:
+            with self.assertRaises(PermissionError):
+                mimetypes.guess_type("table.db")
+            mime_open.assert_called_once()
+            self.assertEqual(mime_open.call_args.args, (str(blocked),))
+            # Neither global entry point may be used by any file response.
+            with mock.patch.object(mimetypes, "init", side_effect=AssertionError("host MIME lookup")) as init, \
+                    mock.patch.object(mimetypes, "guess_type", side_effect=AssertionError("host MIME lookup")) as guess:
+                with self.request("/master/table.db") as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.read(), b"0123456789")
+                    self.assertEqual(response.headers["Content-Type"], "application/octet-stream")
+                with self.request("/master/table.db", method="HEAD") as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.headers["Content-Length"], "10")
+                    self.assertEqual(response.read(), b"")
+                with self.request("/master/table.db", headers={"Range": "bytes=2-4"}) as response:
+                    self.assertEqual(response.status, 206)
+                    self.assertEqual(response.headers["Content-Range"], "bytes 2-4/10")
+                    self.assertEqual(response.read(), b"234")
+                for name, (body, mime_type) in payloads.items():
+                    with self.subTest(name=name), self.request("/" + name) as response:
+                        self.assertEqual(response.status, 200)
+                        self.assertEqual(response.headers["Content-Type"], mime_type)
+                        self.assertEqual(response.read(), body)
+                init.assert_not_called()
+                guess.assert_not_called()
+            self.assertEqual(mime_open.call_count, 1)
 
     def test_missing_directories_traversal_and_symlink_escape(self):
         for path in ["/", "/master", "/missing", "/../private.txt", "/%2e%2e/private.txt",

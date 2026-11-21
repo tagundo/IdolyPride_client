@@ -1,0 +1,398 @@
+#!/usr/bin/env python3
+"""Compose an integrated iOS app using streamed, source-pinned public inputs."""
+from __future__ import annotations
+import argparse
+from datetime import date as calendar_date
+import copy
+import hashlib
+import importlib.util
+import os
+import json
+from pathlib import Path
+import plistlib
+import re
+import struct
+from zipfile import ZipFile, ZipInfo, ZIP_STORED, ZIP_DEFLATED
+from packaging_common import *
+
+HERE = Path(__file__).resolve().parent
+LOAD_PATH = '@rpath/IdolyEmbeddedServer.framework/IdolyEmbeddedServer'
+UNITY = 'Frameworks/UnityFramework.framework/UnityFramework'
+PRESENTATION = 'Frameworks/IdolyPresentation.dylib'
+PACKAGED_SERVER_DATA = {'pin':'../data/latest-server-data-pin.json','policy':'latest-cohort-overlay-v1'}
+KOREAN_MASTER_REFRESH = {'pin':'../data/korean-master-data-pin.json','policy':'korean-master-refresh-v1'}
+
+def candidate_bundle_version():
+    value=os.environ.get('IDOLY_RELEASE_VERSION')
+    if value is None:return '156.9117'
+    require(re.fullmatch(r'20\d{2}\.\d{2}\.\d{2}\.[1-9]\d{0,2}',value) is not None,'Invalid candidate release date version')
+    year,month,day,sequence=map(int,value.split('.'));calendar_date(year,month,day)
+    return f'{year}.{month:02}{day:02}.{sequence}'
+
+
+def _packaging_manifest(manifest):
+    if manifest is None:
+        manifest=json.loads((HERE/'runtime_inputs.json').read_text())
+        require(manifest.get('packaged_server_data')==PACKAGED_SERVER_DATA,'Pinned upgraded server data is required')
+        require(manifest.get('korean_master_refresh')==KOREAN_MASTER_REFRESH,'Pinned Korean master refresh is required')
+    return manifest
+
+
+def _packaged_pin_module():
+    spec=importlib.util.spec_from_file_location('ios_packaged_latest_server_data_pin',HERE.parent/'tools/latest_server_data_pin.py')
+    module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
+def _korean_pin_module():
+    spec=importlib.util.spec_from_file_location('ios_packaged_korean_master_pin',HERE.parent/'tools/korean_server_data_pin.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module
+
+
+def server_data_provenance(server_data, manifest, proof_path=None, korean_proof_path=None):
+    # Explicit synthetic manifests remain useful to the portable packaging
+    # fixtures. CLI/default production manifests always require the static pin.
+    if 'packaged_server_data' not in manifest:
+        verify_file(server_data,manifest['inputs']['server_data'])
+        return None
+    require(manifest['packaged_server_data']==PACKAGED_SERVER_DATA,'Packaged server data policy differs')
+    verifier=_packaged_pin_module()
+    require(manifest['inputs']['server_data']==verifier.base_pin(),'Server data base pin differs')
+    if 'korean_master_refresh' not in manifest:
+        verify_file(server_data,verifier.output_pin())
+    verifier.verify_source_pointer()
+    if 'korean_master_refresh' not in manifest:
+        verifier.verify_payload(server_data)
+    require(proof_path is not None,'Server data upgrade proof is required')
+    proof_path=Path(proof_path)
+    require(regular(proof_path).st_size<=512*1024,'Server data upgrade proof exceeds bound')
+    proof=json.loads(proof_path.read_bytes(),object_pairs_hook=_json_pairs,
+        parse_constant=lambda _: (_ for _ in ()).throw(ValueError('Nonfinite server data proof')))
+    original_proof=verifier.verify_upgrade_proof(proof)
+    if 'korean_master_refresh' not in manifest:
+        return original_proof
+    require(manifest['korean_master_refresh']==KOREAN_MASTER_REFRESH,'Korean master refresh policy differs')
+    korean=_korean_pin_module()
+    require(korean_proof_path is not None,'Korean master refresh proof is required')
+    korean_proof_path=Path(korean_proof_path)
+    require(0 < regular(korean_proof_path).st_size <= 512*1024,'Korean master refresh proof exceeds bound')
+    korean_proof=json.loads(korean_proof_path.read_bytes(),object_pairs_hook=_json_pairs,
+        parse_constant=lambda _: (_ for _ in ()).throw(ValueError('Nonfinite Korean master proof')))
+    korean.verify_refresh_proof(korean_proof)
+    require(korean_proof['base_payload']==verifier.output_pin(),'Korean master original payload differs')
+    verify_file(server_data,korean.output_pin())
+    korean.verify_payload(server_data)
+    return {'schema':1,'policy':'korean-master-refresh-v1','original_cohort':original_proof,
+            'korean_master_refresh':korean_proof}
+
+
+
+def _json_pairs(items):
+    value = {}
+    for key, item in items:
+        require(key not in value, 'Duplicate client-language JSON key')
+        value[key] = item
+    return value
+
+
+def _language_json(raw):
+    require(isinstance(raw, bytes) and 0 < len(raw) <= 256 * 1024, 'Client-language metadata exceeds bound')
+    value = json.loads(raw, object_pairs_hook=_json_pairs,
+                       parse_constant=lambda _: (_ for _ in ()).throw(ValueError('Non-finite client-language value')))
+    require(type(value) is dict, 'Client-language metadata must be an object')
+    return value
+
+
+def client_language_files(archive_path, descriptor_path, manifest):
+    if archive_path is None and descriptor_path is None:
+        require('stock_ipa' not in manifest['inputs'], 'Client-language package is required')
+        return {}, None
+    require(archive_path is not None and descriptor_path is not None, 'Client-language package and descriptor are both required')
+    archive_path, descriptor_path = Path(archive_path), Path(descriptor_path)
+    require(regular(descriptor_path).st_size <= 256 * 1024, 'Client-language descriptor exceeds bound')
+    descriptor = _language_json(descriptor_path.read_bytes())
+    require(set(descriptor) == {'schema', 'bytes', 'sha256'} and type(descriptor['schema']) is int
+            and descriptor['schema'] == 1 and type(descriptor['bytes']) is int
+            and 0 < descriptor['bytes'] <= manifest['capacity'].get('max_client_languages_bytes', 256 * 1024**2)
+            and isinstance(descriptor['sha256'], str) and re.fullmatch('[0-9a-f]{64}', descriptor['sha256']),
+            'Client-language descriptor identity differs')
+    verify_file(archive_path, descriptor)
+    # Import the same bounded, build-independent manifest validator used by the
+    # embedded worker without requiring an installed developer package.
+    spec = importlib.util.spec_from_file_location('idoly_client_data_packaging', HERE.parent / 'src/idoly_local/ios_client_data.py')
+    validator = importlib.util.module_from_spec(spec); spec.loader.exec_module(validator)
+    with ZipFile(archive_path) as archive:
+        info = archive.getinfo('manifest.json')
+        require(info.file_size <= validator.MAX_MANIFEST, 'Client-language manifest exceeds bound')
+        language = validator.validate_manifest(_language_json(archive.read(info)))
+        source = language['source']
+        for field, key in (('base_ipa_sha256', 'base_ipa'), ('stock_ipa_sha256', 'stock_ipa'), ('english_ui_sha256', 'english_ui')):
+            if key in manifest['inputs']:
+                require(source[field] == manifest['inputs'][key]['sha256'], 'Client-language source pin differs')
+        expected = {'manifest.json': None}
+        for code in ('ja', 'ko', 'en'):
+            for row in language['languages'][code].values():
+                if row['source'] == 'archive': expected[row['member']] = row
+        infos = archive.infolist()
+        require(len(infos) == len(expected) and {i.filename for i in infos} == set(expected), 'Client-language archive inventory differs')
+        require(sum(i.file_size for i in infos) <= validator.MAX_EXPANDED, 'Client-language expanded capacity exceeded')
+        for info in infos:
+            safe_name(info.filename)
+            mode = info.external_attr >> 16
+            require(not info.flag_bits & 1 and info.compress_type in (ZIP_STORED, ZIP_DEFLATED)
+                    and (mode & 0o170000) in (0, 0o100000) and not mode & 0o111,
+                    'Client-language archive must contain only nonexecutable data')
+            row = expected[info.filename]
+            if row is not None: require(info.file_size == row['bytes'], 'Client-language archive member size differs')
+    files = {'LocalServer/client-languages.zip': archive_path, 'LocalServer/client-languages.json': descriptor_path}
+    return files, {'descriptor': descriptor, 'manifest': language}
+
+
+def stage_base_data(base_ipa, output, language, manifest):
+    require(base_ipa is not None, 'Simulator language preparation requires the pinned base IPA Data')
+    verify_file(base_ipa, manifest['inputs']['base_ipa'])
+    wanted = {**language['common'], **{name: row for name, row in language['languages']['ko'].items() if row['source'] == 'base'}}
+    total = 0
+    with ZipFile(base_ipa) as archive:
+        infos = archive.infolist()
+        require(len(infos) <= manifest['capacity']['max_archive_entries'] and len({i.filename for i in infos}) == len(infos), 'Base Data inventory differs')
+        for info in infos:
+            safe_name(info.filename.rstrip('/'))
+            require(not info.flag_bits & 1 and (info.external_attr >> 16 & 0o170000) != 0o120000, 'Invalid base Data archive member')
+        apps = [i.filename[:-len('Info.plist')] for i in infos if i.filename.startswith('Payload/') and i.filename.endswith('.app/Info.plist') and i.filename.count('/') == 2]
+        require(len(apps) == 1, 'Expected exactly one base app bundle')
+        app = apps[0]
+        actual = {i.filename[len(app):] for i in infos if i.filename.startswith(app + 'Data/') and not i.is_dir()}
+        require(actual == set(language['common']) | set(language['languages']['ko']), 'Simulator Data inventory differs from the client-language manifest')
+        for name, row in sorted(wanted.items()):
+            safe_name(name); info = archive.getinfo(app + name)
+            require(info.file_size == row['bytes'], 'Simulator Data member size differs')
+            destination = Path(output) / name; destination.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as incoming, destination.open('xb') as outgoing:
+                stream_copy(incoming, outgoing, row['bytes'], row['sha256'])
+            destination.chmod(0o644); total += row['bytes']
+    return {'files': len(wanted), 'bytes': total, 'nonexecutable_data_only': True,
+            'source_base_sha256': manifest['inputs']['base_ipa']['sha256']}
+
+
+def runtime_files(root, target, manifest):
+    root = Path(root); require(regular(root / 'runtime-report.json').st_size <= 4 * 1024**2, 'Runtime report exceeds bound'); report = json.loads((root / 'runtime-report.json').read_text())
+    require(report['target'] == target and report['python_abi'] == '3.13' and report['protobuf_implementation'] == 'python' and report['frameworks_codesign_verify_passed'] is True, 'Runtime report target differs')
+    files = {}
+    require(not any(p.is_symlink() for p in root.rglob('*')), 'Runtime must not contain symlinks')
+    for relative, row in report['files'].items():
+        safe_name(relative); path = root / relative; require(path.resolve().is_relative_to(root.resolve()), 'Runtime path escapes root'); verify_file(path, row); files[relative] = path
+    actual = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and str(p.relative_to(root)) != 'runtime-report.json'}
+    require(actual == set(files) and sum(p.stat().st_size for p in files.values()) <= manifest['capacity']['max_runtime_bytes'], 'Runtime inventory differs')
+    audit_frameworks(root / 'Frameworks', target, require_signature=True)
+    for module, row in report['extension_mappings'].items():
+        fwork = files[row['fwork']]; origin = files[row['origin']]
+        require(fwork.read_text().strip() == row['binary'] and origin.read_text().strip() == row['fwork'] and row['binary'] in files, 'Native .fwork/.origin mapping differs')
+    require(not any(n.endswith(('.so','.dylib','.dll')) for n in files), 'Loose new native modules are forbidden')
+    return files, report
+
+
+def startup_translation_files(archive_path, metadata_path):
+    """Carry only an explicitly pinned optional public receipt in the app."""
+    if archive_path is None and metadata_path is None:
+        return {}, {}, None
+    require(archive_path is not None and metadata_path is not None, 'Startup receipt and metadata are both required')
+    archive_path, metadata_path = Path(archive_path), Path(metadata_path)
+    before = regular(metadata_path)
+    require(0 < before.st_size <= 4096, 'Startup receipt metadata exceeds bound')
+    raw = metadata_path.read_bytes()
+    require(stamp(before) == stamp(regular(metadata_path)), 'Startup receipt metadata changed')
+    metadata = _language_json(raw)
+    require(set(metadata) == {'schema','platform','sha256','bytes'}
+            and type(metadata['schema']) is int and metadata['schema'] == 1 and metadata['platform'] == 'ios'
+            and type(metadata['bytes']) is int and 0 < metadata['bytes'] <= 16 * 1024**2
+            and type(metadata['sha256']) is str and re.fullmatch('[0-9a-f]{64}',metadata['sha256']),
+            'Startup receipt pin differs')
+    verify_file(archive_path,metadata)
+    spec = importlib.util.spec_from_file_location('idoly_startup_receipt_packaging', HERE.parent/'src/idoly_local/startup_receipt.py')
+    inspector = importlib.util.module_from_spec(spec); spec.loader.exec_module(inspector)
+    inspected = inspector.inspect_startup_receipt(archive_path, expected_sha256=metadata['sha256'],
+        expected_bytes=metadata['bytes'], platform='ios')
+    require(inspected.get('available') is True, 'Startup receipt envelope differs')
+    return {'LocalServer/startupTranslations.zip':archive_path}, {'LocalServer/startupTranslations.json':raw}, metadata
+
+
+def bundle_files(runtime_root, native_framework, server_data, translations, target, manifest, web_root=None, *, allow_unsigned_native=False, client_languages=None, client_languages_metadata=None, server_data_upgrade_proof=None,server_data_korean_refresh_proof=None,startup_translations=None,startup_translations_metadata=None):
+    files, runtime = runtime_files(runtime_root, target, manifest)
+    data_provenance=server_data_provenance(server_data,manifest,server_data_upgrade_proof,server_data_korean_refresh_proof)
+    verify_file(translations, manifest['inputs']['translations'])
+    native_framework = Path(native_framework); require(native_framework.name == 'IdolyEmbeddedServer.framework' and not native_framework.is_symlink(), 'Exact embedded server framework required')
+    info = plistlib.loads((native_framework / 'Info.plist').read_bytes()); require(info.get('CFBundleExecutable') == 'IdolyEmbeddedServer', 'Native framework executable differs')
+    native = audit_macho(native_framework / 'IdolyEmbeddedServer', target, require_signature=not allow_unsigned_native)
+    for arch in native['slices']:
+        require(arch['install_name'] == LOAD_PATH, 'Embedded framework install name differs')
+        for dependency in arch['dependencies']:
+            require(dependency.startswith(('/usr/lib/','/System/Library/Frameworks/')) or dependency in ('@rpath/Python.framework/Python','@loader_path/../IdolyPresentation.dylib','@rpath/IdolyPresentation.dylib'), 'Unresolved embedded framework dependency')
+    for p in native_framework.rglob('*'):
+        require(not p.is_symlink(), 'Native framework contains a symlink')
+        if p.is_file():
+            relative = 'Frameworks/IdolyEmbeddedServer.framework/' + str(p.relative_to(native_framework)); require(relative not in files, 'Native framework overlaps runtime'); files[relative] = p
+    files['LocalServer/ServerData.zip'] = Path(server_data); files['LocalServer/bundledTranslations.zip'] = Path(translations)
+    language_files, language_proof = client_language_files(client_languages, client_languages_metadata, manifest)
+    files.update(language_files)
+    web = Path(web_root or HERE / 'web'); require({p.name for p in web.iterdir() if p.is_file()} == {'index.html','styles.css','app.js'}, 'Bundled settings inventory differs')
+    for name in ('index.html','styles.css','app.js'):
+        p = web / name; require(regular(p).st_size <= 256 * 1024, 'Settings file exceeds bound'); files['LocalServer/settings/' + name] = p
+    t = manifest['inputs']['translations']; metadata = {'schema':1,'platform':'ios','sha256':t['sha256'],'bytes':t['bytes']}
+    generated = {'LocalServer/bundledTranslations.json':(json.dumps(metadata,indent=2)+'\n').encode()}
+    startup_files, startup_generated, startup_proof = startup_translation_files(startup_translations,startup_translations_metadata)
+    files.update(startup_files); generated.update(startup_generated)
+    if data_provenance is not None:
+        payload_pin = (_korean_pin_module() if 'korean_master_refresh' in manifest else _packaged_pin_module()).payload_pin()
+        raw_pin = (json.dumps(payload_pin, indent=2) + '\n').encode()
+        require(0 < len(raw_pin) <= 4096, 'Bundled payload pin exceeds bound')
+        generated['LocalServer/payload-pin.json'] = raw_pin
+    require(len(files) <= manifest['capacity']['max_archive_entries'], 'Unified app inventory exceeds bound')
+    return files, generated, {'runtime':runtime,'native':native,'client_languages':language_proof,'server_data_provenance':data_provenance,'startup_translations':startup_proof}
+
+
+def verify_unity_patch(incoming, patched, original_sha256):
+    """Compare all bytes, allowing only one exact zero-padding load command."""
+    head = incoming.read(32); require(len(head) == 32 and head[:4] == b'\xcf\xfa\xed\xfe', 'Expected original ARM64 Unity Mach-O')
+    cpu, old_count, old_size = struct.unpack_from('<I', head, 4)[0], struct.unpack_from('<I',head,16)[0], struct.unpack_from('<I',head,20)[0]
+    require(cpu == ARM64 and 0 < old_size <= MAX_COMMANDS, 'Original Unity header differs')
+    command_path = LOAD_PATH.encode() + b'\0'; length = (24 + len(command_path) + 7) & ~7; added = (struct.pack('<6I',0xC,length,24,0,0,0) + command_path).ljust(length,b'\0')
+    old_prefix = head + incoming.read(old_size + length); require(len(old_prefix) == 32 + old_size + length and not any(old_prefix[32 + old_size:]), 'New load command is not in original zero padding')
+    cursor = 32; section_offsets = []
+    for _ in range(old_count):
+        require(cursor + 8 <= 32 + old_size, 'Malformed original Unity command')
+        command,size = struct.unpack_from('<II',old_prefix,cursor); require(size >= 8 and size % 8 == 0 and cursor + size <= 32 + old_size, 'Malformed original Unity command size')
+        if command == 0x19:
+            require(size >= 72, 'Malformed Unity segment'); sections = struct.unpack_from('<I',old_prefix,cursor + 64)[0]; require(size == 72 + sections * 80, 'Malformed Unity sections')
+            for index in range(sections):
+                at = cursor + 72 + index * 80; amount = struct.unpack_from('<Q',old_prefix,at + 40)[0]; offset = struct.unpack_from('<I',old_prefix,at + 48)[0]; flags = struct.unpack_from('<I',old_prefix,at + 64)[0] & 0xFF
+                if amount and offset and flags not in (1,12,18): section_offsets.append(offset)
+        cursor += size
+    require(cursor == 32 + old_size and section_offsets and 32 + old_size + length <= min(section_offsets), 'Added Unity command overlaps original section data')
+    expected = bytearray(old_prefix); struct.pack_into('<II',expected,16,old_count + 1,old_size + length); expected[32 + old_size:] = added
+    with Path(patched).open('rb') as replacement:
+        require(replacement.read(len(expected)) == expected, 'Patched Unity changed existing load commands or added a different command')
+        old_hash = hashlib.sha256(old_prefix); new_hash = hashlib.sha256(expected); size = len(old_prefix)
+        while block := incoming.read(CHUNK):
+            require(replacement.read(len(block)) == block, 'Patched Unity changed code or original SDK bytes'); old_hash.update(block); new_hash.update(block); size += len(block)
+        require(replacement.read(1) == b'' and old_hash.hexdigest() == original_sha256, 'Original Unity size/SHA differs')
+    return {'original_sha256':old_hash.hexdigest(),'patched_sha256':new_hash.hexdigest(),'bytes':size,'changed_ranges':[[16,24],[32 + old_size,32 + old_size + length]],'load_path':LOAD_PATH,'code_moved':False,'all_other_Unity_bytes_equal':True}
+
+
+def stage_app(runtime_root,native_framework,server_data,translations,output,*,target='simulator',manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,base_ipa=None,server_data_upgrade_proof=None,server_data_korean_refresh_proof=None,startup_translations=None,startup_translations_metadata=None):
+    manifest = _packaging_manifest(manifest); require(target == 'simulator', 'Stage-only app is reserved for the Simulator probe'); output = Path(output); require(not output.exists(), 'Fresh prepared app output required')
+    files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,target,manifest,web_root,allow_unsigned_native=True,client_languages=client_languages,client_languages_metadata=client_languages_metadata,server_data_upgrade_proof=server_data_upgrade_proof,server_data_korean_refresh_proof=server_data_korean_refresh_proof,startup_translations=startup_translations,startup_translations_metadata=startup_translations_metadata); output.mkdir(parents=True)
+    for name,path in files.items():
+        dest = output / name; dest.parent.mkdir(parents=True,exist_ok=True)
+        with path.open('rb') as incoming,dest.open('xb') as outgoing: stream_copy(incoming,outgoing,regular(path).st_size)
+        dest.chmod(regular(path).st_mode & 0o777)
+    for name,raw in generated.items():
+        dest = output / name; dest.parent.mkdir(parents=True,exist_ok=True); dest.write_bytes(raw)
+    data = stage_base_data(base_ipa,output,proofs['client_languages']['manifest'],manifest) if proofs['client_languages'] else None
+    report = {'schema':1,'target':target,'prepared_app':str(output),'files':len(files)+len(generated)+(data['files'] if data else 0),'client_languages':proofs['client_languages'],'base_Data':data,'executable_and_Info_provided_by_probe':True,'actual_simulator_execution':False,'native_signing_deferred_to_probe':True}
+    if proofs['startup_translations'] is not None: report['startup_translations']=proofs['startup_translations']
+    return report
+
+
+def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,translations,output,*,source_commit,manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,server_data_upgrade_proof=None,server_data_korean_refresh_proof=None,startup_translations=None,startup_translations_metadata=None,stock_ipa=None,presentation_library=None,presentation_plan=None):
+    manifest = _packaging_manifest(manifest); require(re.fullmatch('[0-9a-f]{40}',source_commit or ''), 'Exact unified source commit required'); verify_file(base_ipa,manifest['inputs']['base_ipa'])
+    output = Path(output); partial = output.with_suffix(output.suffix + '.partial'); require(not output.exists() and not partial.exists(), 'Fresh unified IPA output required')
+    files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,'device',manifest,web_root,client_languages=client_languages,client_languages_metadata=client_languages_metadata,server_data_upgrade_proof=server_data_upgrade_proof,server_data_korean_refresh_proof=server_data_korean_refresh_proof,startup_translations=startup_translations,startup_translations_metadata=startup_translations_metadata)
+    fresh = any(value is not None for value in (stock_ipa,presentation_library,presentation_plan))
+    require(not fresh or all(value is not None for value in (stock_ipa,presentation_library,presentation_plan)),
+            'Stock IPA, fresh presentation library and plan are all required')
+    if fresh:
+        from presentation_candidate import verify as verify_fresh_presentation
+        require('stock_ipa' in manifest['inputs'], 'Fresh presentation requires an explicit stock IPA pin')
+        verify_file(stock_ipa,manifest['inputs']['stock_ipa'])
+        unity = verify_fresh_presentation(stock_ipa,patched_unity,presentation_plan,presentation_library)
+    max_bytes = manifest['capacity']['max_ipa_bytes']; original_sha = {}; expected = {}; output.parent.mkdir(parents=True,exist_ok=True)
+    with ZipFile(base_ipa) as source:
+        infos = source.infolist(); require(len(infos) <= manifest['capacity']['max_archive_entries'] and len({i.filename for i in infos}) == len(infos), 'Original IPA inventory differs')
+        for info in infos:
+            safe_name(info.filename.rstrip('/')); require(not info.flag_bits & 1 and (info.external_attr >> 16 & 0o170000) != 0o120000, 'Invalid original IPA member')
+        matches = [i.filename[:-len('Info.plist')] for i in infos if i.filename.startswith('Payload/') and i.filename.endswith('.app/Info.plist') and i.filename.count('/') == 2]
+        require(len(matches) == 1, 'Expected exactly one app bundle'); app = matches[0]
+        all_data_rows = {**proofs['client_languages']['manifest']['common'], **proofs['client_languages']['manifest']['languages']['ko']} if proofs['client_languages'] else {}
+        data_rows = {name: row for name, row in all_data_rows.items() if row.get('source', 'base') == 'base'}
+        if data_rows:
+            actual_data = {i.filename[len(app):] for i in infos if i.filename.startswith(app + 'Data/') and not i.is_dir()}
+            require(actual_data == set(all_data_rows), 'Base Data inventory differs from client-language manifest')
+        require(source.getinfo(app + 'Info.plist').file_size <= 128 * 1024, 'Original Info.plist exceeds bound')
+        info_raw = source.read(app + 'Info.plist'); info = plistlib.loads(info_raw); info.update(UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,CFBundleVersion=candidate_bundle_version(),CFBundleDisplayName='아이프라 로컬',IdolyUnifiedLoopbackOrigin='http://127.0.0.1:8080')
+        generated['Info.plist'] = plistlib.dumps(info,fmt=plistlib.FMT_BINARY)
+        if fresh:
+            require(source.getinfo(app + UNITY).file_size == unity['bytes'], 'Restocked Unity file layout differs')
+            require(source.getinfo(app + PRESENTATION).file_size > 0, 'Expected existing presentation bridge')
+            from presentation_candidate import verify_base_delta
+            with source.open(app + UNITY) as incoming:
+                unity['previous_base_preservation'] = verify_base_delta(incoming,patched_unity,
+                    manifest['inputs']['original_unity']['sha256'],presentation_plan)
+        else:
+            with source.open(app + UNITY) as incoming: unity = verify_unity_patch(incoming,patched_unity,manifest['inputs']['original_unity']['sha256'])
+        audit_macho(patched_unity,'device',maximum=256 * 1024**2)
+        expanded = sum(i.file_size for i in infos) + sum(regular(p).st_size for p in files.values()) + sum(len(v) for v in generated.values())
+        if fresh: expanded += regular(presentation_library).st_size - source.getinfo(app + PRESENTATION).file_size
+        require(expanded <= manifest['capacity']['max_expanded_bytes'], 'Unified IPA expanded capacity exceeded')
+        require(sum(i.compress_size for i in infos) + sum(regular(p).st_size for p in files.values())
+                + (regular(presentation_library).st_size if fresh else 0) + 4 * 1024**2 <= max_bytes, 'Unified IPA capacity preflight exceeded')
+        require(not any(app + name in source.namelist() for name in files), 'Added runtime overlaps original game data')
+        with ZipFile(partial,'x',allowZip64=False) as destination:
+            for entry in infos:
+                info_copy = copy.copy(entry); name = entry.filename; target_hash = hashlib.sha256()
+                if name == app + UNITY:
+                    with Path(patched_unity).open('rb') as incoming,destination.open(info_copy,'w') as outgoing: actual = stream_copy(incoming,outgoing,entry.file_size,unity['patched_sha256'])
+                    with source.open(entry) as incoming:
+                        for block in iter(lambda:incoming.read(CHUNK),b''): target_hash.update(block)
+                    original_sha[name] = target_hash.hexdigest()
+                elif fresh and name == app + PRESENTATION:
+                    with Path(presentation_library).open('rb') as incoming,destination.open(info_copy,'w') as outgoing:
+                        actual = stream_copy(incoming,outgoing,regular(presentation_library).st_size,
+                                             unity['presentation_library']['sha256'])
+                    with source.open(entry) as incoming:
+                        for block in iter(lambda:incoming.read(CHUNK),b''): target_hash.update(block)
+                    original_sha[name] = target_hash.hexdigest()
+                elif name == app + 'Info.plist':
+                    destination.writestr(info_copy,generated['Info.plist']); actual = hashlib.sha256(generated['Info.plist']).hexdigest(); original_sha[name] = hashlib.sha256(info_raw).hexdigest()
+                else:
+                    with source.open(entry) as incoming,destination.open(info_copy,'w') as outgoing: actual = stream_copy(incoming,outgoing,entry.file_size)
+                    original_sha[name] = actual
+                relative = name[len(app):]
+                if relative in data_rows:
+                    require(entry.file_size == data_rows[relative]['bytes'] and actual == data_rows[relative]['sha256'], 'Base Data SHA differs from client-language manifest')
+                expected[name] = actual; require(destination.fp.tell() <= max_bytes, 'Unified IPA capacity exceeded')
+            for name,path in sorted(files.items()):
+                entry = ZipInfo(app + name); entry.compress_type = ZIP_STORED if name.endswith('.zip') else ZIP_DEFLATED; entry.external_attr = (regular(path).st_mode & 0xFFFF) << 16
+                with path.open('rb') as incoming,destination.open(entry,'w') as outgoing: expected[entry.filename] = stream_copy(incoming,outgoing,regular(path).st_size)
+                require(destination.fp.tell() <= max_bytes, 'Unified IPA capacity exceeded')
+            for name,raw in generated.items():
+                if name == 'Info.plist': continue
+                entry = ZipInfo(app + name); entry.compress_type = ZIP_DEFLATED; destination.writestr(entry,raw); expected[entry.filename] = hashlib.sha256(raw).hexdigest()
+    require(regular(partial).st_size <= max_bytes, 'Unified IPA final capacity exceeded')
+    with ZipFile(partial) as archive:
+        require(set(archive.namelist()) == set(expected), 'Unified output inventory differs')
+        for name,wanted in expected.items():
+            h = hashlib.sha256()
+            with archive.open(name) as incoming:
+                for block in iter(lambda:incoming.read(CHUNK),b''): h.update(block)
+            require(h.hexdigest() == wanted, 'Unified output member SHA/CRC differs')
+    os.link(partial,output); partial.unlink()
+    report = {'schema':1,'source_commit':source_commit,'base_ipa_sha256':manifest['inputs']['base_ipa']['sha256'],'output_bytes':regular(output).st_size,'output_sha256':sha_file(output),'member_sha256':expected,'original_member_sha256':original_sha,'original_members_preserved_except_Unity_header_and_Info':True,'original_SDK_members_unchanged':True,'Unity_patch':unity,'client_languages':proofs['client_languages'],'runtime_target':'device','runtime_framework_count':len(proofs['runtime']['frameworks']),'max_stream_chunk_bytes':CHUNK,'capacity_bytes':max_bytes,'actual_device_or_PlayCover_execution':False,'requires_user_sideload_resigning':True}
+    if fresh:
+        report['original_members_preserved_except_Unity_header_and_Info'] = False
+        report['original_members_preserved_except'] = [UNITY,PRESENTATION,'Info.plist']
+        report['fresh_presentation_source_build'] = unity['presentation_library']
+    if proofs['server_data_provenance'] is not None: report['server_data_provenance']=proofs['server_data_provenance']
+    if proofs['startup_translations'] is not None: report['startup_translations']=proofs['startup_translations']
+    output.with_suffix('.report.json').write_text(json.dumps(report,indent=2)+'\n'); return report
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__); p.add_argument('--runtime-root',type=Path,required=True); p.add_argument('--native-framework',type=Path,required=True); p.add_argument('--server-data',type=Path,required=True); p.add_argument('--server-data-upgrade-proof',type=Path); p.add_argument('--server-data-korean-refresh-proof',type=Path); p.add_argument('--startup-translations',type=Path); p.add_argument('--startup-translations-metadata',type=Path); p.add_argument('--translations',type=Path,required=True); p.add_argument('--output',type=Path,required=True); p.add_argument('--client-languages',type=Path); p.add_argument('--client-languages-metadata',type=Path); p.add_argument('--stage-only',action='store_true'); p.add_argument('--target',choices=tuple(PLATFORMS),default='device'); p.add_argument('--base-ipa',type=Path); p.add_argument('--patched-unity',type=Path); p.add_argument('--source-commit'); p.add_argument('--stock-ipa',type=Path); p.add_argument('--presentation-library',type=Path); p.add_argument('--presentation-plan',type=Path); a = p.parse_args()
+    if a.stage_only: report = stage_app(a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,target=a.target,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata,base_ipa=a.base_ipa,server_data_upgrade_proof=a.server_data_upgrade_proof,server_data_korean_refresh_proof=a.server_data_korean_refresh_proof,startup_translations=a.startup_translations,startup_translations_metadata=a.startup_translations_metadata)
+    else:
+        require(a.target == 'device' and a.base_ipa and a.patched_unity and a.source_commit, 'Device IPA requires exact source, base IPA and patched Unity')
+        report = package(a.base_ipa,a.patched_unity,a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,source_commit=a.source_commit,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata,server_data_upgrade_proof=a.server_data_upgrade_proof,server_data_korean_refresh_proof=a.server_data_korean_refresh_proof,startup_translations=a.startup_translations,startup_translations_metadata=a.startup_translations_metadata,stock_ipa=a.stock_ipa,presentation_library=a.presentation_library,presentation_plan=a.presentation_plan)
+    print(json.dumps({'status':'PASS_PREPARED_UNIFIED_IOS_PACKAGE','output':str(a.output),'physical_execution_verified':False}))
+if __name__ == '__main__': main()

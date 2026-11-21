@@ -1,0 +1,49 @@
+{
+  "android_audit_run": 43950088986,
+  "ios_audit_run": 43946084857,
+  "objects": [
+    {
+      "name": "love_label_koi",
+      "path_id": 935,
+      "platform": "android",
+      "raw_base64": "AAAAAIMBAAAAAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAAAAAAAAAtQIAAAAAAAAAAAA/AAAAPwAAAD8AAAA/AAAAQgAAAAAAAABCAAAAQgAAAD8AAAA/",
+      "sha256": "cd74807fca2b8e5c561c28fc15615c4b64b6f97e9da8b23b495fb7212b1f16a0"
+    },
+    {
+      "name": "love_label_koi",
+      "path_id": 251370,
+      "platform": "ios",
+      "raw_base64": "AAAAAAaKAQAAAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAAAAAAAAAxf8CAAAAAAAAAAA/AAAAPwAAAD8AAAA/AAAAQgAAAAAAAABCAAAAQgAAAD8AAAA/",
+      "sha256": "27181f442ff15fce8493d10564b115e75bb16e0afc2dbdc14748c53128ffe4c5"
+    },
+    {
+      "name": "love_label_shi",
+      "path_id": 849,
+      "platform": "android",
+      "raw_base64": "AAAAAFgAAAAAAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAAAAAAAAAtQIAAAAAAAAAAAA/AAAAPwAAAD8AAAA/AAAAAAAAAAAAAABCAAAAQgAAAD8AAAA/",
+      "sha256": "3f1edd90e9d074168b9377af51bbcb822d15e52177d998eddf9fac9c01af457c"
+    },
+    {
+      "name": "love_label_shi",
+      "path_id": 231861,
+      "platform": "ios",
+      "raw_base64": "AAAAAEhhAAAAAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAAAAAAAAAxf8CAAAAAAAAAAA/AAAAPwAAAD8AAAA/AAAAAAAAAAAAAABCAAAAQgAAAD8AAAA/",
+      "sha256": "08479eb31ff6e4c083ec658646706dd6fe2ca15ca9f33fd8676ca213f668d50f"
+    },
+    {
+      "name": "love_label_mo",
+      "path_id": 939,
+      "platform": "android",
+      "raw_base64": "AAAAAGgAAAAAAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAAAAAAAAAtQIAAAAAAAAAAAA/AAAAPwAAAD8AAAA/AAAAwgAAAAAAAABCAAAAQgAAAD8AAAA/",
+      "sha256": "a7e435d3000878f8e268a9db2d920443bed136ac28abb904110994dfa8406934"
+    },
+    {
+      "name": "love_label_mo",
+      "path_id": 253735,
+      "platform": "ios",
+      "raw_base64": "AAAAAI5qAAAAAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAAAAAAAAAxf8CAAAAAAAAAAA/AAAAPwAAAD8AAAA/AAAAwgAAAAAAAABCAAAAQgAAAD8AAAA/",
+      "sha256": "405a65bd45c8fc6b9def4cc5bd50d7950d5b1f63d93b860b363d09b6f0ce7c9f"
+    }
+  ],
+  "schema": 1
+}

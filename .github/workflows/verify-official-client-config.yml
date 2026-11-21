@@ -1,0 +1,74 @@
+name: Verify original public official client configuration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/verify-official-client-config.yml
+      - tools/extract_official_client_config.py
+      - tests/test_extract_official_client_config.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: official-public-config-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  extract-public-config:
+    # Original inputs are draft-release assets. GitHub requires write-scoped
+    # contents permission even to GET those existing files; this job sends no
+    # release/tag/upload mutation requests.
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare original metadata inspection tools
+        run: sdkmanager 'build-tools;34.0.0'
+      - name: Install parser test dependency
+        run: python -m pip install 'pytest==8.4.2'
+      - name: Require bounded public-config parser contracts
+        run: python -m pytest -q tests/test_extract_official_client_config.py
+      - name: Read pinned original public client archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/idoly-public-originals"
+          gh api repos/tagundo/IdolyPride_client/releases/assets/725761399 --header 'Accept: application/octet-stream' > "$RUNNER_TEMP/idoly-public-originals/original.ipa"
+          gh api repos/tagundo/IdolyPride_client/releases/assets/725772331 --header 'Accept: application/octet-stream' > "$RUNNER_TEMP/idoly-public-originals/original.xapk"
+      - name: Verify source pins and extract public Firebase project settings
+        run: >-
+          python tools/extract_official_client_config.py
+          --ipa "$RUNNER_TEMP/idoly-public-originals/original.ipa"
+          --xapk "$RUNNER_TEMP/idoly-public-originals/original.xapk"
+          --build-tools "$ANDROID_HOME/build-tools/34.0.0"
+          --output "$RUNNER_TEMP/idoly-public-config/public-client-config.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-public-client-config-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-public-config/public-client-config.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove disposable original client inputs
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/idoly-public-originals"

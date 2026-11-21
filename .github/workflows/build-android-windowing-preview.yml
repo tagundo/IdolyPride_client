@@ -1,0 +1,116 @@
+name: Build Android fold-window preview (APK-only draft)
+
+on:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/build-android-windowing-preview.yml
+      - tools/stage_android_windowing_preview.py
+      - tests/test_android_windowing_delivery.py
+  workflow_dispatch:
+    inputs:
+      upload_draft:
+        description: Stage only this source-bound APK draft; never publish or replace prior assets
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-windowing-preview-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      SOURCE_SHA: ${{ github.sha }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout the exact triggering application source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Test draft-only delivery guards
+        run: |
+          python -m pip install --disable-pip-version-check pytest==8.4.2
+          python -B -m pytest -q -p no:cacheprovider tests/test_android_windowing_delivery.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install exact SDK and NDK tools
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264'
+      - name: Fetch the pinned three original clients, server and dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Reuse only the immutable input fetch; no old-source staging/IPA path.
+        run: python -B tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/windowing-inputs"
+      - name: Rebuild current native bridge and signed three-language APK
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir "$RUNNER_TEMP/windowing-native" "$RUNNER_TEMP/windowing-output"
+          python -B client-presentation/native/build_native.py --source-commit "$SOURCE_SHA" \
+            --ndk "$ANDROID_HOME/ndk/26.3.11579264" --cache-dir "$RUNNER_TEMP/windowing-native-deps" \
+            --output "$RUNNER_TEMP/windowing-native/libidoly_presentation.so"
+          umask 077
+          # Repository's intentionally public development key/password.
+          printf '%s\n' android > "$RUNNER_TEMP/windowing-development-password.txt"
+          python -B tools/package_android_unified.py --prototype \
+            --source-root "$PWD" --source-commit "$SOURCE_SHA" \
+            --client-apk "$RUNNER_TEMP/windowing-inputs/client-ko.apk" \
+            --client-ja-apk "$RUNNER_TEMP/windowing-inputs/client-ja.apk" \
+            --client-en-apk "$RUNNER_TEMP/windowing-inputs/client-en.apk" \
+            --server-apk "$RUNNER_TEMP/windowing-inputs/server.apk" \
+            --chaquopy-jar "$RUNNER_TEMP/windowing-inputs/chaquopy.jar" \
+            --apkeditor "$RUNNER_TEMP/windowing-inputs/APKEditor.jar" \
+            --android-jar "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" --jdk-bin "$JAVA_HOME/bin" \
+            --keystore android-diagnostics/local-diagnostics-development.keystore \
+            --password-file "$RUNNER_TEMP/windowing-development-password.txt" \
+            --native-bridge "$RUNNER_TEMP/windowing-native/libidoly_presentation.so" \
+            --native-receipt "$RUNNER_TEMP/windowing-native/build-receipt.json" \
+            --output "$RUNNER_TEMP/windowing-output/IdolyPride-Unified-2026.11.20.1-prototype.apk"
+          python -B tools/stage_android_windowing_preview.py checksums \
+            --source "$SOURCE_SHA" --directory "$RUNNER_TEMP/windowing-output"
+          test -z "$(git status --porcelain)"
+      - name: Keep APK and preservation/signature/windowing proof independently of draft staging
+        id: apk_artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-windowing-preview-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windowing-output
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+      - name: Create or verify only the new exact-source APK draft and read back every asset
+        if: ${{ success() && (github.event_name == 'push' || inputs.upload_draft) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_ARTIFACT_URL: ${{ steps.apk_artifact.outputs.artifact-url }}
+        run: >-
+          python -B tools/stage_android_windowing_preview.py stage
+          --source "$SOURCE_SHA" --directory "$RUNNER_TEMP/windowing-output"
+          --work "$RUNNER_TEMP/windowing-draft-staging"
+      - name: Keep source/draft/asset readback receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-windowing-draft-proof-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windowing-draft-staging/draft-staging-proof.json
+          if-no-files-found: ignore
+          retention-days: 14

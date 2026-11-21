@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>IDOLY PRIDE 로컬 설정</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">IDOLY PRIDE · LOCAL</p><h1>서버 설정</h1></div>
+      <div class="header-actions"><label class="interface-language"><span>서버 화면 언어</span><select id="interface_language"><option value="system">기기 언어</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="en">English</option></select></label><button id="refresh" type="button" class="secondary">새로고침</button></div>
+    </header>
+    <section class="overview" aria-labelledby="server-heading">
+      <div class="section-title"><h2 id="server-heading">서버 상태</h2><span id="server-state" class="badge">확인 중</span></div>
+      <p id="server-summary">기기에 저장된 설정을 불러옵니다.</p>
+      <p id="restart-notice" class="notice" hidden>게임 시작 전의 변경은 ‘게임 시작’ 때 적용됩니다. 게임 시작 후의 감상 모드·언어 변경은 다음 앱 실행부터 적용됩니다.</p>
+      <details id="help-server-guide" class="server-guide help-details"><summary>서버 메뉴 안내</summary><p class="hint">앱을 열면 이 서버 메뉴가 먼저 표시됩니다. 서버가 준비되면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 이 메뉴를 다시 엽니다. Mac에서는 앱 메뉴의 ‘로컬 서버 설정…’ 또는 ⌘⇧,도 사용할 수 있습니다.</p></details>
+    </section>
+    <p id="message" class="message" role="status" aria-live="polite" hidden></p>
+    <div class="settings-shell">
+      <nav class="category-navigation" role="tablist" aria-label="설정 분류">
+        <button id="category-console" type="button" role="tab" aria-controls="category-panel-console" aria-selected="true">콘솔</button>
+        <button id="category-server" type="button" role="tab" aria-controls="category-panel-server" aria-selected="false" tabindex="-1">서버 설정</button>
+        <button id="category-users" type="button" role="tab" aria-controls="category-panel-users" aria-selected="false" tabindex="-1">유저 관리</button>
+        <button id="category-content" type="button" role="tab" aria-controls="category-panel-content" aria-selected="false" tabindex="-1">콘텐츠</button>
+        <button id="category-graphics" type="button" role="tab" aria-controls="category-panel-graphics" aria-selected="false" tabindex="-1">그래픽</button>
+      </nav>
+      <div class="settings-content">
+        <div id="category-panel-console" class="category-page" role="tabpanel" aria-labelledby="category-console">
+    <section class="wide" aria-labelledby="diagnostics-heading">
+      <details id="panel-diagnostics" class="card-panel">
+        <summary class="panel-summary"><h2 id="diagnostics-heading">서버 연결·자료 검사·진단</h2></summary>
+        <div class="panel-body">
+      <div class="section-title"><div class="actions"><button id="diagnostics-copy" type="button" class="secondary">진단 전체 복사</button><button id="diagnostics-clear" type="button" class="secondary">이전 오류 기록 지우기</button></div></div>
+      <p id="diagnostics-copy-feedback" class="hint copy-feedback" role="status" aria-live="polite" hidden></p>
+      <details><summary>서버 준비 검사</summary><pre id="startup-checks">서버 준비 검사를 기다리고 있습니다.</pre></details>
+      <p id="history-summary" class="hint">저장된 최근 오류가 없습니다.</p>
+      <p id="diagnostic-summary">게임 진단 대기 중</p>
+      <details><summary>상태·최근 기록 보기</summary><pre id="diagnostics" tabindex="0">기록 없음</pre></details>
+            </div>
+      </details>
+    </section>
+        </div>
+        <div id="category-panel-server" class="category-page" role="tabpanel" aria-labelledby="category-server" hidden>
+    <section aria-labelledby="options-heading">
+      <details id="panel-options" class="card-panel" open>
+        <summary class="panel-summary"><h2 id="options-heading">감상 모드·게임 언어</h2></summary>
+        <div class="panel-body">
+
+
+      <form id="options-form">
+        <fieldset id="options-fields" disabled>
+          <label class="switch"><span>감상 모드 · 전체 해금</span><input id="media_mode" type="checkbox"></label>
+          <label class="switch"><span>없는 리소스 자동 받기</span><input id="download_missing_resources" type="checkbox"></label>
+          <label class="row"><span>게임 언어</span><select id="language"><option value="ko">한국어</option><option value="ja">日本語</option><option value="en">English</option></select></label>
+          <p id="options-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+          <button id="options-save-retry" type="button" class="secondary" hidden>다시 시도</button>
+        </fieldset>
+      </form>
+      <p id="effective-options" class="hint">현재 적용 값 확인 중</p>
+            <details id="help-options" class="help-details"><summary>도움말</summary>
+          <p class="hint">설정은 자동으로 저장됩니다. 게임 시작 전에 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.</p>
+          <p class="hint">화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요. 서버 화면 언어는 선택하면 바로 적용되고 저장됩니다.</p>
+        </details>
+        </div>
+      </details>
+    </section>
+
+    <section class="wide" aria-labelledby="resources-heading">
+      <details id="panel-resources" class="card-panel">
+        <summary class="panel-summary"><h2 id="resources-heading">iOS 리소스 보관</h2></summary>
+        <div class="panel-body">
+      <div class="section-title"><span id="resource-state" class="badge">대기</span></div>
+
+      <label class="row"><span>동시 다운로드</span><select id="parallelism"><option value="1">1개</option><option value="2">2개</option><option value="4" selected>4개 · 기본</option><option value="8">8개</option></select></label>
+      <div class="actions"><button id="resources-preview" type="button" class="secondary" disabled>목록·용량 확인</button><button id="resources-download" type="button" disabled>전체 리소스 받기</button></div>
+      <progress id="resource-progress" max="1" value="0" aria-label="리소스 작업 진행률" hidden></progress>
+      <p id="resource-summary" class="resource-text">서버 상태를 확인하고 있습니다.</p>
+      <p id="resource-detail" class="hint"></p>
+      <div class="actions"><button id="resources-import" type="button" class="secondary" disabled>ZIP 가져오기</button><button id="resources-export" type="button" class="secondary" disabled>ZIP 내보내기</button><button id="resources-cancel" type="button" class="secondary danger" disabled>작업 취소</button></div>
+
+            <details id="help-resources" class="help-details"><summary>도움말</summary>
+          <p class="hint">받은 파일은 크기·MD5를 검증해 기기에 보관합니다. 중단 후 다시 받으면 검증된 파일을 재사용합니다.</p>
+          <p class="hint">iOS 게임 리소스 ZIP을 선택하면 파일을 검증해 이 앱에 보관합니다. 완료 후 게임 시작을 누르세요. 직접 압축을 풀 필요는 없습니다. 내보내기에는 현재 보관된 파일만 포함됩니다.</p>
+        </details>
+        </div>
+      </details>
+    </section>
+        </div>
+        <div id="category-panel-users" class="category-page" role="tabpanel" aria-labelledby="category-users" hidden>
+    <section class="wide" aria-labelledby="accounts-heading">
+      <details id="panel-accounts" class="card-panel">
+        <summary class="panel-summary"><h2 id="accounts-heading">유저 관리</h2></summary>
+        <div class="panel-body">
+      <div class="section-title"><button id="accounts-refresh" type="button" class="secondary" disabled>계정 목록 불러오기</button></div>
+
+
+
+
+      <p id="accounts-summary" class="account-text">계정 목록을 불러오면 관리할 수 있습니다.</p>
+      <fieldset id="accounts-fields" disabled>
+        <label class="row"><span>관리할 계정</span><select id="accounts-current"><option value="">계정 없음</option></select></label>
+        <p id="accounts-user-detail" class="account-text hint"></p>
+        <div class="actions"><button id="accounts-select" type="button">해당 모드의 다음 계정으로 선택</button><button id="accounts-export" type="button" class="secondary">계정 ZIP 내보내기</button><button id="accounts-clone" type="button" class="secondary">아래 이름으로 복제</button></div>
+        <div class="actions"><button id="accounts-previous" type="button" class="secondary">이전 계정 목록</button><button id="accounts-next" type="button" class="secondary">다음 계정 목록</button></div>
+        <details>
+          <summary>계정 생성·복제</summary>
+          <label class="row"><span>계정 종류</span><select id="accounts-mode"><option value="normal">일반 모드</option><option value="media">감상 모드</option></select></label>
+          <label class="row"><span>새 저장 슬롯 이름</span><input id="accounts-new-profile" type="text" maxlength="64" autocomplete="off"></label>
+          <label class="row"><span>매니저 이름 · 새 계정 생성 시</span><input id="accounts-manager-name" type="text" maxlength="10" value="매니저" autocomplete="off"></label>
+          <button id="accounts-create" type="button">새 계정 만들기</button>
+        </details>
+        <details open>
+          <summary>계정 백업 가져오기</summary>
+          <button id="accounts-preview" type="button" class="secondary">계정 ZIP 선택·검사</button>
+          <pre id="accounts-preview-detail" hidden></pre>
+          <label class="switch"><span>선택한 계정에 덮어쓰기 · 기존 상태의 복구점 자동 생성</span><input id="accounts-replace" type="checkbox"></label>
+
+          <p class="hint important">검사 후 가져오기를 눌러야 계정이 바뀝니다.</p>
+          <button id="accounts-import" type="button" disabled>검사한 계정 가져오기</button>
+        </details>
+        <details>
+          <summary>이전 상태로 복원</summary>
+          <label class="row"><span>자동 복구점</span><select id="accounts-restore-point"><option value="">복구점 없음</option></select></label>
+
+          <div class="actions"><button id="accounts-restore" type="button" class="secondary">선택한 복구점으로 복원</button><button id="accounts-restore-previous" type="button" class="secondary">이전 복구점 목록</button><button id="accounts-restore-next" type="button" class="secondary">다음 복구점 목록</button></div>
+        </details>
+      </fieldset>
+      <progress id="accounts-progress" max="1" value="0" aria-label="계정 작업 진행률" hidden></progress>
+      <p id="accounts-feedback" class="hint" role="status" aria-live="polite"></p>
+            <details id="help-accounts" class="help-details"><summary>도움말</summary>
+          <p class="hint">계정 ZIP에는 계정 진행·보유 항목·게임 설정을 보관합니다. 게임 리소스 ZIP과는 별개입니다.</p>
+          <p class="hint">로컬 계정 이름은 저장 슬롯 이름입니다. 복제·가져오기는 게임 내 ID와 매니저 이름을 그대로 유지합니다.</p>
+          <p class="hint">계정 선택은 다음 서버 시작에 적용됩니다. 게임을 시작한 뒤 활성 계정을 복원하려면 앱을 완전히 종료하고 다시 열어 주세요.</p>
+          <p class="hint">계정 선택은 해당 모드의 저장 슬롯을 바꿉니다. 사용할 일반·감상 모드도 위 설정에서 확인해 주세요.</p>
+          <p class="hint">덮어쓰지 않으면 ‘새 저장 슬롯 이름’으로 가져옵니다. 선택한 ZIP은 검사만으로 계정을 바꾸지 않습니다.</p>
+          <p class="hint">복원할 계정과 복구점의 계정이 같아야 합니다. 복원 직전 상태도 새 복구점으로 남깁니다.</p>
+        </details>
+        </div>
+      </details>
+    </section>
+
+    <section class="wide" aria-labelledby="official-heading">
+      <details id="panel-official" class="card-panel">
+        <summary class="panel-summary"><h2 id="official-heading">일본 공식 계정 가져오기 · 현재 작동하지 않음</h2></summary>
+        <div class="panel-body">
+      <div class="section-title"><span id="official-state" class="badge">현재 작동하지 않음</span></div>
+
+
+      <p class="hint important">일본 공식 계정 가져오기는 현재 작동하지 않습니다.</p>
+      <div class="actions"><button id="official-inspect" type="button" disabled>인계 정보 확인</button><button id="official-fetch" type="button" disabled>공식 인계 로그인·내려받기</button><button id="official-cancel" type="button" class="secondary" disabled>공식 계정 작업 취소</button></div>
+      <progress id="official-progress" max="1" aria-label="공식 계정 작업 진행률" hidden></progress>
+      <p id="official-feedback" class="hint" role="status" aria-live="polite">일본 공식 계정 가져오기는 현재 작동하지 않습니다.</p>
+      <p id="official-preview" class="account-text" hidden></p>
+      <fieldset id="official-fields" disabled>
+        <label class="row"><span>새 저장 슬롯 이름</span><input id="official-profile" type="text" maxlength="64" autocomplete="off"></label>
+        <label class="switch"><span>기존 일반 계정 덮어쓰기 · 위 ‘관리할 계정’에서 대상을 선택하세요</span><input id="official-replace" type="checkbox"></label>
+        <p id="official-target" class="hint"></p>
+        <button id="official-apply" type="button" disabled>받은 데이터를 일반 계정으로 저장</button>
+      </fieldset>
+
+            <details id="help-official" class="help-details"><summary>도움말</summary>
+          <p class="hint">일본 공식 계정 가져오기는 현재 작동하지 않습니다. 기존 일본 공식 계정의 인계 정보를 확인한 뒤, 별도 버튼으로 공식 인계 로그인과 데이터 내려받기를 진행합니다.</p>
+          <p class="hint">인계 ID·비밀번호는 앱의 보안 입력창에서만 입력합니다. 입력한 정보는 제출하거나 취소하면 지웁니다.</p>
+          <p class="hint">기본값은 새 일반 계정으로 저장입니다. 덮어쓰기 전 상태는 복구점으로 보관합니다. 저장 후 위 유저 관리에서 일반 계정을 선택하고 감상 모드를 꺼 주세요.</p>
+        </details>
+        </div>
+      </details>
+    </section>
+        </div>
+        <div id="category-panel-content" class="category-page" role="tabpanel" aria-labelledby="category-content" hidden>
+    <section class="wide" aria-labelledby="events-heading">
+      <details id="panel-events" class="card-panel">
+        <summary class="panel-summary"><h2 id="events-heading">모시코이 이벤트 설정</h2></summary>
+        <div class="panel-body">
+      <div class="section-title"><span id="events-state" class="badge">확인 중</span></div>
+
+
+      <form id="events-form"><fieldset id="events-fields" disabled>
+        <label class="row"><span>설정할 계정 종류</span><select id="events-mode"><option value="normal">일반 모드</option><option value="media">감상 모드</option></select></label>
+        <p id="events-media-policy" class="notice" hidden>감상 계정은 처음에 모든 이벤트가 켜집니다.</p>
+        <div class="actions event-bulk"><button id="events-enable-all" type="button">모두 활성화</button><button id="events-disable-all" type="button" class="secondary">모두 비활성화</button></div>
+        <div id="events-list" class="event-list" role="group" aria-label="모시코이 여러 이벤트 선택"></div>
+        <details id="events-period-editor" class="event-period-editor"><summary>이벤트별 기간 조정</summary>
+        <label class="row"><span>설정할 이벤트</span><select id="events-choice"><option value="">지원 목록 없음</option></select></label>
+        <label class="switch"><span>다음 서버 시작에 이 이벤트 사용</span><input id="events-enabled" type="checkbox"></label>
+        <label class="row"><span>시작 시각 · 기기 현지 시간</span><input id="events-start" type="datetime-local" step="60"></label>
+        <label class="row"><span>종료 시각 · 기기 현지 시간</span><input id="events-end" type="datetime-local" step="60"></label>
+        </details>
+        <p class="hint">끄더라도 진행은 유지됩니다.</p>
+        <p id="events-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+        <button id="events-save-retry" type="button" class="secondary" hidden>다시 시도</button>
+      </fieldset></form>
+      <p id="events-effective" class="account-text hint">현재 적용 값은 서버 준비 후 표시됩니다.</p>
+      <p id="events-next" class="account-text hint"></p>
+
+            <details id="help-events" class="help-details"><summary>도움말</summary>
+          <p class="hint">지원 목록에서 이벤트와 기간을 설정합니다. 설정만 자동 저장하며 이벤트 시작·진행 초기화·보상 지급을 실행하지 않습니다.</p>
+          <p id="events-period-hint" class="hint">처음 켜면 현재 기기 시각부터 30일을 제안합니다. 직접 바꿀 수 있으며 최대 366일입니다. 이 기간은 로컬 설정이며 원본 이벤트 기간이 아닙니다.</p>
+          <p id="events-detail" class="hint"></p>
+        </details>
+        </div>
+      </details>
+    </section>
+
+    <section aria-labelledby="media-heading">
+      <details id="panel-media" class="card-panel" open>
+        <summary class="panel-summary"><h2 id="media-heading">MV·의상 목록</h2></summary>
+        <div class="panel-body">
+
+      <form id="media-form">
+        <fieldset id="media-fields" disabled>
+          <label class="switch"><span>영상 MV 숨기기</span><input id="hide_video_mv" type="checkbox"></label>
+          <label class="row"><span>MV 정렬</span><select id="mv_sort"><option value="recent">최신순</option><option value="old">오래된 순</option><option value="title">이름순</option><option value="id">ID순</option></select></label>
+          <label class="row"><span>의상 정렬</span><select id="outfit_sort"><option value="original">원본</option><option value="recent">최신순</option><option value="old">오래된 순</option><option value="title">이름순</option><option value="id">ID순</option></select></label>
+          <p id="media-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+          <button id="media-save-retry" type="button" class="secondary" hidden>다시 시도</button>
+        </fieldset>
+      </form>
+      <p id="media-effective" class="hint">목록 설정은 다음 앱 실행부터 적용됩니다.</p>
+            </div>
+      </details>
+    </section>
+        </div>
+        <div id="category-panel-graphics" class="category-page" role="tabpanel" aria-labelledby="category-graphics" hidden>
+    <section class="wide" aria-labelledby="graphics-heading">
+      <details id="panel-graphics" class="card-panel" open>
+        <summary class="panel-summary"><h2 id="graphics-heading">그래픽·촬영 화면</h2></summary>
+        <div class="panel-body">
+      <div class="section-title"><span id="graphics-state" class="badge">대기</span></div>
+      <form id="presentation-form">
+        <fieldset id="presentation-fields" disabled>
+          <label class="switch"><span>사용자 그래픽 설정</span><input id="custom_graphics" type="checkbox"></label>
+          <div class="grid">
+            <label class="row"><span>그래픽 품질</span><select id="quality"><option value="0">원본 유지 (0)</option><option value="10">낮음 (10)</option><option value="20">중간 (20)</option><option value="30">높음 (30)</option><option value="40">최고 (40)</option><option value="100">촬영용 (100)</option></select></label>
+            <label class="row"><span>목표 프레임 수</span><select id="target_fps"><option value="0">원본 유지 (0)</option><option value="30">30 fps</option><option value="60">60 fps</option><option value="90">90 fps</option><option value="120">120 fps</option></select></label>
+            <div class="row numeric-row"><span>3D 렌더 배율</span><span class="numeric-control"><select id="render_scale_preset" aria-label="3D 렌더 배율 선택"><option value="0.25">0.25배</option><option value="0.5">0.5배</option><option value="0.75">0.75배</option><option value="1">1배 (기본)</option><option value="1.25">1.25배</option><option value="1.5">1.5배</option><option value="2">2배</option><option value="custom">직접 입력</option></select><input id="render_scale" aria-label="3D 렌더 배율 직접 입력 값" type="number" min="0.25" max="2" step="any" inputmode="decimal"></span></div>
+            <div class="row numeric-row"><span>렌더 버퍼 최대 크기</span><span class="numeric-control"><select id="max_buffer_pixel_preset" aria-label="렌더 버퍼 최대 크기 선택"><option value="720">720 px</option><option value="1080">1080 px</option><option value="1440">1440 px</option><option value="1920">1920 px</option><option value="2560">2560 px</option><option value="3840">3840 px</option><option value="4096">4096 px (기본)</option><option value="custom">직접 입력</option></select><input id="max_buffer_pixel" aria-label="렌더 버퍼 최대 크기 직접 입력 값" type="number" min="256" max="4096" step="2" inputmode="numeric"></span></div>
+            <label class="row"><span>가장자리 다듬기</span><select id="anti_aliasing"><option value="-1">원본 유지 (-1)</option><option value="0">끔 (0)</option><option value="1">FXAA (1)</option><option value="2">SMAA (2)</option></select></label>
+            <label class="row"><span>캐릭터 그림자</span><select id="shadow_resolution"><option value="0">원본 유지 (0)</option><option value="512">512</option><option value="1024">1024</option><option value="2048">2048</option><option value="4096">4096</option></select></label>
+          </div>
+          <label class="switch"><span>촬영·360 화면 확장</span><input id="expand_photography" type="checkbox"></label>
+
+          <p id="presentation-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+          <button id="presentation-save-retry" type="button" class="secondary" hidden>다시 시도</button>
+        </fieldset>
+      </form>
+
+            <details id="help-graphics" class="help-details"><summary>도움말</summary>
+          <p class="hint">화면 확장은 그래픽 설정과 독립적으로 적용됩니다. 목표 프레임 수는 실제 성능을 보장하지 않습니다.</p>
+          <p id="graphics-detail" class="hint">게임 적용 상태 확인 중</p>
+        </details>
+        </div>
+      </details>
+    </section>
+
+    <section class="wide" aria-labelledby="mp4-heading">
+      <details id="panel-mp4" class="card-panel" open>
+        <summary class="panel-summary"><h2 id="mp4-heading">MV를 MP4로 내보내기</h2></summary>
+        <div class="panel-body">
+          <p class="hint">게임에서 3D MV를 연 뒤 이 메뉴를 여세요.</p>
+          <p id="mp4-summary" role="status" aria-live="polite">3D MV 준비 대기</p>
+          <fieldset id="mp4-fields">
+            <label class="row"><span>MP4 프레임 수</span><select id="mp4-fps"><option value="30">30 fps</option><option value="60" selected>60 fps</option></select></label>
+            <label class="row"><span>영상 코덱</span><select id="mp4-codec"><option value="1">H.264</option><option value="2">HEVC</option></select></label>
+            <label class="row"><span>출력 크기</span><select id="mp4-resolution-mode"><option value="current" selected>현재 렌더 크기</option><option value="custom">직접 입력</option></select></label>
+            <div id="mp4-dimensions" hidden>
+              <label class="row"><span>가로 (픽셀)</span><input id="mp4-width" type="number" min="16" max="4096" step="2" value="1920" inputmode="numeric"></label>
+              <label class="row"><span>세로 (픽셀)</span><input id="mp4-height" type="number" min="16" max="4096" step="2" value="1080" inputmode="numeric"></label>
+            </div>
+            <label class="row"><span>영상 비트레이트</span><select id="mp4-bitrate-mode"><option value="recommended" selected>권장값 자동 계산</option><option value="custom">직접 입력</option></select></label>
+            <label id="mp4-custom-bitrate" class="row" hidden><span>비트레이트 (Mbps)</span><input id="mp4-bitrate" type="number" min="0.1" max="200" step="0.01" value="16" inputmode="decimal"></label>
+            <p id="mp4-recommendation" class="hint" role="status" aria-live="polite"></p>
+            <p class="hint">선택한 크기와 화면비로 여백 없이 촬영합니다.</p>
+          </fieldset>
+          <p id="mp4-options-feedback" class="hint" role="status" aria-live="polite"></p>
+          <p class="hint">MV를 모은 뒤 큐를 실행하세요.</p>
+          <div class="actions"><button id="mp4-queue-run" type="button" disabled>큐 실행</button><button id="mp4-enqueue" type="button" class="secondary" disabled>현재 MV 추가</button><button id="mp4-queue-pause" type="button" class="secondary" hidden>큐 일시 정지</button><button id="mp4-queue-resume" type="button" class="secondary" hidden>큐 계속하기</button></div>
+          <p id="mp4-queue-summary" role="status" aria-live="polite">등록한 작업이 없습니다.</p>
+          <p id="mp4-queue-feedback" class="hint" role="status" aria-live="polite"></p>
+          <ol id="mp4-queue-jobs" class="mp4-jobs" aria-label="MP4 작업 목록"></ol>
+          <section aria-labelledby="mp4-completed-title"><h3 id="mp4-completed-title">보관된 영상</h3><p id="mp4-completed-feedback" class="hint" role="status" aria-live="polite"></p><ol id="mp4-completed-rows" class="mp4-jobs" aria-label="보관된 영상"></ol><div class="actions"><button id="mp4-completed-previous" type="button" class="secondary" disabled>이전 영상</button><button id="mp4-completed-next" type="button" class="secondary" disabled>다음 영상</button></div></section>
+          <p class="hint">앱을 나가면 멈추고 돌아오면 이어집니다.</p>
+          <progress id="mp4-progress" max="1" value="0" aria-label="MP4 진행률" hidden></progress>
+          <p id="mp4-feedback" class="hint" role="status" aria-live="polite"></p>
+          <details><summary>현재 MV 바로 내보내기</summary><div class="actions"><button id="mp4-start" type="button" disabled>MP4 내보내기</button><button id="mp4-pause" type="button" class="secondary" hidden>일시 정지</button><button id="mp4-resume" type="button" class="secondary" hidden>계속하기</button><button id="mp4-cancel" type="button" class="secondary" disabled>취소</button><button id="mp4-save" type="button" class="secondary" hidden>MP4 저장·공유</button></div></details>
+          <details id="help-mp4" class="help-details"><summary>도움말</summary><p class="hint">현재 렌더 크기로 프레임과 음원을 내보냅니다.</p></details>
+        </div>
+      </details>
+    </section>
+    <section aria-labelledby="playback-heading">
+      <details id="panel-playback" class="card-panel" open>
+        <summary class="panel-summary"><h2 id="playback-heading">MV 재생</h2></summary>
+        <div class="panel-body">
+      <div class="section-title"><span id="playback-state" class="badge">대기</span></div>
+      <form id="playback-form">
+        <fieldset id="playback-fields" disabled>
+          <label class="switch"><span>화면 회전 후 재생 시작</span><input id="wait_for_orientation" type="checkbox" checked></label>
+
+          <p id="playback-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+          <button id="playback-save-retry" type="button" class="secondary" hidden>다시 시도</button>
+        </fieldset>
+      </form>
+            <details id="help-playback" class="help-details"><summary>도움말</summary>
+          <p class="hint">기본값은 켜짐입니다. 화면이 가로 방향으로 바뀔 때까지 기다립니다.</p>
+        </details>
+        </div>
+      </details>
+    </section>
+        </div>
+      </div>
+    </div>
+    <footer>설정은 이 기기에 저장됩니다.</footer>
+  </main>
+</body>
+</html>

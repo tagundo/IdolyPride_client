@@ -249,6 +249,30 @@ def test_pinned_rules_are_disjoint_and_bounded_to_the_audited_baseline():
     assert all(isinstance(identity, str) and identity for identity in rules.NO_REWARD_STORIES | rules.FREE_STONE_STORIES)
 
 
+def test_version_guard_accepts_only_explicit_legacy_and_approved_latest_cohorts(game, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    reader, state, master, *_ = game
+    before = dump(state)
+    calls = []
+    monkeypatch.setitem(sys.modules, "idoly_local.public_cohort_support", SimpleNamespace(
+        require_master_cohort=lambda directory, feature: calls.append((directory, feature))))
+    reader._version()
+    assert calls == []
+    (master / "!version.txt").write_text(rules.LATEST_MASTER_VERSION)
+    reader._version()
+    assert calls == [(master, "story_reads")]
+    for error in (ValueError("unapproved"), FileNotFoundError("missing")):
+        monkeypatch.setitem(sys.modules, "idoly_local.public_cohort_support", SimpleNamespace(
+            require_master_cohort=lambda *_: (_ for _ in ()).throw(error)))
+        with pytest.raises(RpcFailure):
+            reader._version()
+    (master / "!version.txt").write_text("future-master")
+    with pytest.raises(RpcFailure):
+        reader._version()
+    assert dump(state) == before
+
+
 def test_actual_pinned_catalog_master_and_rewards(tmp_path):
     """Optional local public artifacts independently cover every supported ID."""
     from idoly_local.story_catalog import StoryCatalog

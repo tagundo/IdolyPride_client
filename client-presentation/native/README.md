@@ -125,3 +125,45 @@ temporary fields/TLS if an original IL2CPP call unwinds; no libc++ shared
 library is required. Dynamic dependencies are ShadowHook, dl, m and libc. The parent
 addon builder owns signing and APK packaging. No runtime/device verification
 or installer is included in these native tests.
+
+
+## Shared resource reads in unified applications
+
+The unified server configures a fresh app-private request/response directory and
+epoch before starting Unity. Android arms the five SDK cache hooks in ShadowHook's
+post-library-init callback; iOS uses the signed offline gateway plan. The public
+static `OctoManager.Setup(OctoFullSettings, bool)` selects `OctoFullCache=2` with
+the original byte setter. Standalone clients without broker configuration retain
+the original SDK setup.
+
+`PreDownload` captures strong handles on the SDK thread. A native worker sends an
+80-byte identity request to the private broker and polls its bounded response.
+The Python worker resolves only the active manifest and verifies/downloads one
+canonical raw file. A named symlink preserves the SDK bucket, MD5 filename and
+resource extension. Native checks its inode, size, readonly mode, single link,
+mtime and ctime without hashing on Unity's thread. `Downloader.Update` replays
+the original `PreDownload` and releases handles on that same SDK thread.
+The original bundle header decoder and local `file://` resource readers remain
+in use; no replacement loader or permanent SDK cache copy is needed on this path.
+
+The first implementation admits up to **8192** distinct published identities and
+**32** private view prefixes per process, with **64** pending requests. Published
+index entries are never evicted, so an earlier `Latest` result retains its path
+through asynchronous loading. Prefix deduplication keeps the index below3MiB.
+A new server epoch rejects old responses and drains captured arguments through
+the original fallback on the SDK thread. Already published exact-content paths
+remain usable for pending file-path continuations.
+
+When admission limits, unsupported metadata, a failed broker request or the
+five-minute request deadline prevent sharing, the original HTTP/cache path is
+used. That fallback can retain a separate SDK copy. This is a bounded shared-read
+implementation, not a claim that every file in an unlimited catalog is shared.
+Native diagnostics include `index_entries`, `index_limit`, `pending_limit`,
+`capacity_fallbacks`, preparation/replay/fallback counts and readiness.
+
+Reproduce the Android library using `build_native.py --output <library>
+--source-commit <exact-base-commit> --ndk <NDK26.3.11579264>`. The receipt records
+all source hashes before/after compilation, dependency pins and16KiB ELF alignment.
+Host tests use actual native queue/IPC/replay code with fake IL2CPP handles and a
+real manifest-controlled Python broker. Physical-device and LiveContainer/PlayCover
+validation remain separate requirements.

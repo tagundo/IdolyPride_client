@@ -10,6 +10,8 @@ OR setting requires the same area and a date after 2025-06-23 15:00 UTC.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 
 from .gameplay import _Catalog
 from .rpc import RpcCode, RpcFailure
@@ -30,6 +32,27 @@ def _identity(value):
     return isinstance(value, str) and bool(value)
 
 
+def _projection(area, quests):
+    return {"schema": 1, "area": {key: area.get(key) for key in ("id", "type", "questIds")},
+        "quests": [{key: quests[identity].get(key) for key in ("id", "areaId")}
+                   for identity in area["questIds"]]}
+
+
+def _projection_sha256(area, quests):
+    raw = json.dumps(_projection(area, quests), sort_keys=True, ensure_ascii=False,
+                     separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _latest_pin(version):
+    from . import latest_cohort_pins as pins
+    values = getattr(pins, "PROJECTION_SHA256", None)
+    digest = values.get("media_access") if type(values) is dict else None
+    _need(version == pins.MASTER_VERSION and type(digest) is str and len(digest) == 64
+          and all(character in "0123456789abcdef" for character in digest))
+    return digest
+
+
 @dataclass(frozen=True)
 class MediaAccessPlan:
     master_version: str
@@ -45,10 +68,19 @@ def prepare_media_access(master_dir):
     """Validate only the real target area and its real quest references.
 
     This does not evaluate other acquisition conditions or grant a broader
-    progression prefix. The fixed condition is pinned to this master version.
+    progression prefix. The legacy condition keeps its original version; latest uses the separately
+    approved semantic projection and exact public-file cohort.
     """
     catalog = _Catalog(master_dir)
-    _need(catalog.version() == MASTER_VERSION)
+    version = catalog.version()
+    latest_pin = None
+    if version != MASTER_VERSION:
+        latest_pin = _latest_pin(version)
+        from .public_cohort_support import require_master_cohort
+        try:
+            require_master_cohort(master_dir, "media_access")
+        except (OSError, ValueError):
+            _need(False)
     area = catalog.ids("Area", required=True).get(PHOTOGRAPHY_AREA_ID)
     _need(area is not None and type(area.get("type")) is int and area["type"] == 1)
     quest_ids = area.get("questIds")
@@ -58,7 +90,9 @@ def prepare_media_access(master_dir):
     quests = catalog.ids("Quest", required=True)
     _need(all(identity in quests and quests[identity].get("areaId") == PHOTOGRAPHY_AREA_ID
               for identity in quest_ids))
-    return MediaAccessPlan(MASTER_VERSION, PHOTOGRAPHY_AREA_ID, tuple(quest_ids))
+    if latest_pin is not None:
+        _need(_projection_sha256(area, quests) == latest_pin)
+    return MediaAccessPlan(version, PHOTOGRAPHY_AREA_ID, tuple(quest_ids))
 
 
 def apply_media_access(snapshot, plan):
@@ -72,8 +106,16 @@ def apply_media_access(snapshot, plan):
     This advances the ordinary Home main-area frontier; the media runtime must
     use its non-reward lesson view rather than ordinary area-001 lesson logic.
     """
-    _need(isinstance(plan, MediaAccessPlan) and plan.master_version == MASTER_VERSION
-          and plan.area_id == PHOTOGRAPHY_AREA_ID and bool(plan.quest_ids))
+    _need(isinstance(plan, MediaAccessPlan) and plan.area_id == PHOTOGRAPHY_AREA_ID
+          and bool(plan.quest_ids))
+    if plan.master_version != MASTER_VERSION:
+        digest = _latest_pin(plan.master_version)
+        _need(isinstance(plan.quest_ids, (tuple, list))
+              and all(_identity(identity) for identity in plan.quest_ids)
+              and len(set(plan.quest_ids)) == len(plan.quest_ids))
+        area = {"id": plan.area_id, "type": 1, "questIds": list(plan.quest_ids)}
+        quests = {identity: {"id": identity, "areaId": plan.area_id} for identity in plan.quest_ids}
+        _need(_projection_sha256(area, quests) == digest)
     _need(getattr(getattr(snapshot, "DESCRIPTOR", None), "full_name", None) == "api.UserGetResponse"
           and snapshot.HasField("user"))
     seen, target = set(), None

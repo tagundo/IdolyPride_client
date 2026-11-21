@@ -334,9 +334,20 @@ class PublicCache:
         finally: os.close(fd)
 
 
-def staging_placement(root, output_parent, ram_root, *, all_tmpfs=False):
+def staging_placement(root, output_parent, ram_root, *, all_tmpfs=False, hosted_disk_staging=False):
     """Placement changes storage location, never the root or memory reserve."""
     root, output_parent, ram_root = map(Path, (root, output_parent, ram_root))
+    if hosted_disk_staging:
+        if os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted" or all_tmpfs:
+            raise ValueError("Hosted disk staging requires an explicit GitHub-hosted runner")
+        if ram_root.resolve(strict=True) != output_parent.resolve(strict=True):
+            raise ValueError("Hosted disk staging must use the output-parent filesystem")
+        required = 2 * MAX_APK + 32 * 1024 * 1024 + limits.MIN_ROOT_FREE
+        if (shutil.disk_usage(root).free < limits.MIN_ROOT_FREE
+                or shutil.disk_usage(output_parent).free < required):
+            raise ValueError("Insufficient hosted disk staging space while preserving reserves")
+        return {"all_tmpfs": False, "hosted_disk_staging": True, "max_full_apks": 2,
+                "ram_required_bytes": 0, "disk_required_bytes": required}
     if ram_root.resolve(strict=True) != Path("/dev/shm"):
         raise ValueError("The approved RAM staging directory is required")
     ram_output = output_parent.resolve(strict=True).is_relative_to(ram_root.resolve(strict=True))
@@ -355,7 +366,7 @@ def staging_placement(root, output_parent, ram_root, *, all_tmpfs=False):
     return {"all_tmpfs": all_tmpfs, "max_full_apks": 2, "ram_required_bytes": required}
 
 
-def build(args):
+def build(args, *, resource_guard=None):
     os.umask(0o077); root = ROOT; source, feature, output = map(Path, (args.source, args.feature_apk, args.output))
     proof = output.with_suffix(".provenance.json")
     if output.exists() or proof.exists() or output.suffix != ".apk" or output.resolve() in (source.resolve(), feature.resolve()):
@@ -396,16 +407,18 @@ def build(args):
     cache.register(editor, EDITOR_SHA256)
     cache.register(sdk/"lib/apksigner.jar",limits.PUBLIC_INPUT_HASHES["signer-jar"])
     ram_root=Path(args.ram_directory).resolve(strict=True)
-    placement = staging_placement(root, output.parent, ram_root, all_tmpfs=getattr(args, "all_tmpfs", False))
+    placement = staging_placement(root, output.parent, ram_root, all_tmpfs=getattr(args, "all_tmpfs", False),
+                                  hosted_disk_staging=getattr(args, "hosted_disk_staging", False))
+    check_resources = limits._resource_guard if resource_guard is None else resource_guard
     env = dict(os.environ, MALLOC_ARENA_MAX="2")
     for name in ("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "JAVA_OPTS"): env.pop(name, None)
     stages = []
     def run(command):
         for p in list(cache.files): cache.advise(p)
-        tick = time.monotonic(); value = limits._run(command, root=root, env=env, timeout=60)
+        tick = time.monotonic(); value = limits._run(command, root=root, env=env, timeout=60, guard=check_resources)
         stages.append({"tool": Path(str(command[0])).name, "seconds": round(time.monotonic()-tick,3)}); return value
     signer = [jdk / "java", *addon.JAVA_FLAGS, "-jar", sdk / "lib/apksigner.jar"]
-    preflight = limits._resource_guard(root)
+    preflight = check_resources(root)
     verification = run([*signer,"verify","--verbose","--print-certs",source]).decode()
     if (re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([a-f0-9]{64})$",verification,re.M)!=[CERTIFICATE]
             or not any("Verified using v"+str(n)+" scheme (APK Signature Scheme v"+str(n)+"): true" in verification for n in (2,3))):
@@ -451,9 +464,11 @@ def build(args):
         static_parts, static_ui_report = static_ui_members(base, ui_language,
             existing_replacements=existing_replacements)
         existing_replacements.update(static_parts)
-        from idoly_local.static_ui_images import android_members as static_image_members
+        from idoly_local.static_ui_images import (LOGO_ANDROID_MEMBER, LOGO_LAYOUT_POLICY,
+            android_members as static_image_members)
         image_parts, static_images_report = static_image_members(base, language=ui_language,
-            image_dir=getattr(args, "image_dir", None) or ROOT / "client-presentation/images/ko")
+            image_dir=getattr(args, "image_dir", None) or ROOT / "client-presentation/images/ko",
+            existing_replacements=existing_replacements)
         from idoly_local.static_ui_textures import android_members as static_texture_members
         texture_parts, texture_report = static_texture_members(base, language=ui_language,
             image_dir=getattr(args, "image_dir", None) or ROOT / "client-presentation/images/ko")
@@ -461,7 +476,14 @@ def build(args):
             raise ValueError("Sprite and direct texture replacements overlap")
         image_parts.update(texture_parts)
         static_images_report["direct_textures"] = texture_report
-        if existing_replacements.keys() & image_parts.keys():
+        overlap=existing_replacements.keys() & image_parts.keys()
+        logo=static_images_report.get("logo_layout",{})
+        composed={row["member"]:row for row in logo.get("members",[])}
+        if overlap and (logo.get("policy")!=LOGO_LAYOUT_POLICY or overlap!={LOGO_ANDROID_MEMBER}
+                or set(composed)!={LOGO_ANDROID_MEMBER}
+                or any(composed[name].get("input_sha256")!=hashlib.sha256(existing_replacements[name]).hexdigest()
+                       or composed[name].get("output_sha256")!=hashlib.sha256(image_parts[name]).hexdigest()
+                       or composed[name].get("only_three_position_size_spans_changed") is not True for name in overlap)):
             raise ValueError("Static image and text/font resource replacements overlap")
         existing_replacements.update(image_parts)
         gc.collect()
@@ -469,7 +491,7 @@ def build(args):
     added_dex = next_dex(infos); additions[added_dex] = dex
     if additions.keys() & infos.keys(): raise ValueError("Standalone additions collide with original members")
     output.parent.mkdir(parents=True,exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".presentation-full-",dir=output.parent) as td, tempfile.TemporaryDirectory(prefix="idoly-presentation-full-",dir=args.ram_directory) as rd:
+    with tempfile.TemporaryDirectory(prefix=".presentation-full-",dir=output.parent) as td, tempfile.TemporaryDirectory(prefix="idoly-presentation-full-",dir=ram_root) as rd:
         work, ram = Path(td), Path(rd); cache.owned.update((work, ram))
         resource_input, decoded, rebuilt = work/"resource-input.apk", work/"decoded", work/"resource-rebuilt.apk"
         write_resource_input(source,resource_input)
@@ -514,7 +536,7 @@ def build(args):
             verify_local_resource_output(z, transport_report)
         final_tree=run([sdk/"aapt2","dump","xmltree","--file","AndroidManifest.xml",signed]).decode()
         if compiled_tree(old_tree)!=compiled_tree(final_tree,remove_provider=True):raise ValueError("Signed manifest changed")
-        postflight=limits._resource_guard(root)
+        postflight=check_resources(root)
         if postflight["oom_kill"]!=preflight["oom_kill"]:raise ValueError("OOM counter changed")
         if addon.frozen_sources(args.source_commit, extra=(*TRANSPORT_SOURCES, *STATIC_UI_SOURCES,
                 "client-presentation/build_full_client.py", "tools/build_android_server_manual.py",
@@ -559,6 +581,7 @@ def main():
         parser.add_argument("--"+name,required=True,type=Path)
     parser.add_argument("--source-commit",required=True)
     parser.add_argument("--all-tmpfs", action="store_true", help="Keep output and at most two full staged APKs inside /dev/shm; root/memory guards remain unchanged")
+    parser.add_argument("--hosted-disk-staging", action="store_true", help="Explicit GitHub-hosted runner only: stage both APKs on the output-parent disk, preserving reserves")
     parser.add_argument("--native-library",type=Path,
         help="Use a native library with an adjacent exact-source build-receipt.json; otherwise retain the source-bound feature native")
     parser.add_argument("--font-file",type=Path,help="Audited Pretendard JP input; required by the font-aware native profile")

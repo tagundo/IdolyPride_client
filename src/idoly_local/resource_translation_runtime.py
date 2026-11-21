@@ -6,6 +6,7 @@ Only a small public-data fingerprint and revision are persisted, never a player.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 import hashlib
 import json
 import os
@@ -20,9 +21,32 @@ from zipfile import BadZipFile
 from google.protobuf.message import DecodeError
 
 from .octo_manifest import Database
-from .resource_translation import ResourceTranslation
+from .resource_translation import load_resource_translation
 
 _LOCK = threading.Lock()
+# Exact immutable wire results only, never parsed mutable databases or players.
+_REVISION_CACHE = OrderedDict()
+_REVISION_CACHE_BYTES = 16 * 1024 * 1024
+_REVISION_CACHE_ENTRIES = 4
+
+
+def _revision_key(path, fingerprint, preserve_original, sdk_identity_compat, previous):
+    if type(preserve_original) is not bool:
+        return None
+    parser = Database.FromString
+    return (str(path.absolute()), Database, getattr(parser, "__func__", parser), fingerprint,
+            preserve_original, sdk_identity_compat,
+            None if previous is None else (previous["fingerprint"], previous["revision"]))
+
+
+def _remember_revision(key, result):
+    if key is None or type(result[0]) is not bytes or len(result[0]) > _REVISION_CACHE_BYTES:
+        return
+    _REVISION_CACHE[key] = result
+    _REVISION_CACHE.move_to_end(key)
+    while (len(_REVISION_CACHE) > _REVISION_CACHE_ENTRIES
+           or sum(len(row[0]) for row in _REVISION_CACHE.values()) > _REVISION_CACHE_BYTES):
+        _REVISION_CACHE.popitem(last=False)
 
 
 def _pairs(items):
@@ -55,19 +79,48 @@ def _state(path):
     return value
 
 
-def pin_manifest_revision(raw, state_path, *, language, preserve_original=False):
+def pin_manifest_revision(raw, state_path, *, language, preserve_original=False,
+                          sdk_identity_compat=False):
     """Return (complete manifest, accepts older revisions), with atomic state."""
     if language not in ("ja", "ko", "en"):
         raise ValueError("Unknown resource language")
-    database = Database.FromString(raw)
-    fingerprint = hashlib.sha256(language.encode("ascii") + b"\0" + raw).hexdigest()
+    if type(sdk_identity_compat) is not bool:
+        raise ValueError("SDK identity compatibility must be a boolean")
+    identity = hashlib.sha256()
+    if sdk_identity_compat:
+        # A cached revision from the old, overlong SDK object names must receive
+        # a complete update once, even though the packaged resource bytes match.
+        identity.update(b"octo-sdk-six-byte-object-name-v1\0")
+    identity.update(language.encode("ascii"))
+    identity.update(b"\0")
+    identity.update(raw)
+    fingerprint = identity.hexdigest()
     state_path = Path(state_path)
     with _LOCK:
         previous = _state(state_path)
-        if previous is None and preserve_original:
-            return raw, False
-        revision = (previous["revision"] if previous and previous["fingerprint"] == fingerprint
-                    else max(database.revision, previous["revision"] + 1 if previous else database.revision))
+        key = _revision_key(state_path, fingerprint, preserve_original, sdk_identity_compat, previous) if type(raw) is bytes else None
+        cached = _REVISION_CACHE.get(key) if key is not None else None
+        if cached is not None:
+            _REVISION_CACHE.move_to_end(key)
+            return cached
+    # Parsing stays outside the lock. A concurrent writer is re-read below;
+    # cached bytes never excuse an invalid or changed on-disk revision record.
+    database = Database.FromString(raw)
+    minimum_revision = database.revision + int(sdk_identity_compat)
+    with _LOCK:
+        previous = _state(state_path)
+        key = _revision_key(state_path, fingerprint, preserve_original, sdk_identity_compat, previous) if type(raw) is bytes else None
+        cached = _REVISION_CACHE.get(key) if key is not None else None
+        if cached is not None:
+            _REVISION_CACHE.move_to_end(key)
+            return cached
+        if previous is None and preserve_original and not sdk_identity_compat:
+            result = (raw, False)
+            _remember_revision(key, result)
+            return result
+        revision = (max(minimum_revision, previous["revision"])
+                    if previous and previous["fingerprint"] == fingerprint
+                    else max(minimum_revision, previous["revision"] + 1 if previous else minimum_revision))
         if revision > 2**31 - 1:
             raise ValueError("Resource language revision is exhausted")
         state = {"schema": 1, "fingerprint": fingerprint, "revision": revision}
@@ -89,7 +142,12 @@ def pin_manifest_revision(raw, state_path, *, language, preserve_original=False)
             for row in rows:
                 if row.state != 4:
                     row.state = 2
-        return database.SerializeToString(deterministic=True), True
+        result = (database.SerializeToString(deterministic=True), True)
+        # Only a committed-state key can authorize this result. Remembering
+        # the previous key would skip recreating a removed/restored state file.
+        committed = _revision_key(state_path, fingerprint, preserve_original, sdk_identity_compat, state) if type(raw) is bytes else None
+        _remember_revision(committed, result)
+        return result
 
 
 def select_resource_translation(original, data_dir, cache_root, *, language, platform):
@@ -100,12 +158,14 @@ def select_resource_translation(original, data_dir, cache_root, *, language, pla
         from .bundled_translations import resolve_translation_root
         directory = resolve_translation_root(cache_root, platform=platform) / language / platform
         if directory.exists():
-            layer = ResourceTranslation(directory, original, language=language)
+            layer = load_resource_translation(directory, original, language=language,
+                data_dir=data_dir, platform=platform)
     raw = original if layer is None else layer.manifest
     try:
         raw, compatible = pin_manifest_revision(raw,
             Path(data_dir) / ("client-resource-revision-" + platform + ".json"),
-            language=language, preserve_original=layer is None)
+            language=language, preserve_original=layer is None,
+            sdk_identity_compat=layer is not None)
         return raw, layer, compatible
     except BaseException:
         if layer is not None:
@@ -132,13 +192,17 @@ def validate_prepared_translations(directory, data_dir, *, platform):
         if not selected.exists():
             continue
         try:
-            layer = ResourceTranslation(selected, original, language=language)
+            layer = load_resource_translation(selected, original, language=language,
+                data_dir=data_dir, platform=platform)
         except (DecodeError, BadZipFile, zlib.error, UnicodeError, RecursionError):
             raise ValueError("Prepared language resource format is invalid") from None
         try:
             results[language] = dict(layer.report["coverage"])
         finally:
             layer.close()
+            # Do not retain this report/manifest while the next constructor
+            # allocates its two complete parsed catalogs.
+            del layer
     if not results:
         raise ValueError("Prepared package contains no compatible language resources")
     return results

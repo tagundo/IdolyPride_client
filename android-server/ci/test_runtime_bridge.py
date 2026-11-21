@@ -259,11 +259,13 @@ class InstallationTests(unittest.TestCase):
 def test_start_forwards_download_and_media_policies_without_reordering_existing_options(
         monkeypatch, tmp_path, options, expected_download, expected_media, expected_live, positional):
     java = ModuleType("java")
-    classes = []
+    classes, copied, installed = [], [], []
+    payload_sha256, payload_bytes = "a" * 64, 123456
+    assets = object()
     def jclass(name):
         classes.append(name)
         if name.endswith(".BuildConfig"):
-            return SimpleNamespace(SERVER_DATA_SHA256="a" * 64)
+            return SimpleNamespace(SERVER_DATA_SHA256=payload_sha256, SERVER_DATA_BYTES=payload_bytes)
         if name.endswith(".CryptoBridge"):
             return SimpleNamespace(aesCbc=lambda encrypt, key, iv, payload: payload)
         raise AssertionError("Unexpected Java class")
@@ -272,8 +274,13 @@ def test_start_forwards_download_and_media_policies_without_reordering_existing_
     monkeypatch.setenv("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "upb")
     monkeypatch.setattr(bridge, "_RUNTIME", None)
     monkeypatch.setattr(bridge, "_LAST_STATUS", {"running": False})
-    monkeypatch.setattr(bridge, "_copy_asset", lambda *_args: None)
-    monkeypatch.setattr(bridge, "install_bundle", lambda _bundle, files, _digest: files / "data")
+    def copy_asset(source, target, digest):
+        copied.append((source, target, digest))
+    def install_bundle(bundle, files, digest, size):
+        installed.append((bundle, files, digest, size))
+        return files / "data"
+    monkeypatch.setattr(bridge, "_copy_asset", copy_asset)
+    monkeypatch.setattr(bridge, "install_bundle", install_bundle)
     starts = []
     runtime = ModuleType("idoly_local.app_runtime")
     def start_runtime(data, **kwargs):
@@ -283,12 +290,16 @@ def test_start_forwards_download_and_media_policies_without_reordering_existing_
     monkeypatch.setitem(sys.modules, "idoly_local.app_runtime", runtime)
     logs = []
     if positional:
-        result = bridge.start(str(tmp_path), object(), SimpleNamespace(log=logs.append),
+        result = bridge.start(str(tmp_path), assets, SimpleNamespace(log=logs.append),
                               str(tmp_path / "native"), expected_live, expected_download, expected_media)
     else:
-        result = bridge.start(str(tmp_path), object(), SimpleNamespace(log=logs.append),
+        result = bridge.start(str(tmp_path), assets, SimpleNamespace(log=logs.append),
                               native_library_dir=str(tmp_path / "native"), **options)
     assert json.loads(result)["running"] is True
+    bundle = tmp_path / "bundled-server-data.zip"
+    assert copied == [(assets, bundle, payload_sha256)]
+    assert installed == [(bundle, tmp_path, payload_sha256, payload_bytes)]
+    assert type(installed[0][3]) is int
     assert len(starts) == 1
     data, kwargs = starts[0]
     assert data == tmp_path / "data" and kwargs["profile"] == "sandbox"

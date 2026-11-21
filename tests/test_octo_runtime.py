@@ -331,10 +331,14 @@ def test_ios_catalog_requires_its_own_archive_version_and_keeps_android_cache_se
     android, _ = write_archive(tmp_path / "public-octo")
     ios, original = write_archive(tmp_path / "public-octo-ios", revision=1159, platform="ios")
     assert load_octo_archive(tmp_path / "public-octo-ios", platform="ios") == (ios, original)
-    with pytest.raises(ValueError, match="version"):
+    before = {str(path.relative_to(tmp_path)): path.read_bytes()
+              for path in tmp_path.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError):
         load_octo_archive(tmp_path / "public-octo-ios")
-    with pytest.raises(ValueError, match="version"):
+    with pytest.raises(ValueError):
         load_octo_archive(tmp_path / "public-octo", platform="ios")
+    assert {str(path.relative_to(tmp_path)): path.read_bytes()
+            for path in tmp_path.rglob("*") if path.is_file()} == before
     gateway, tracker = create_octo_gateway(tmp_path, "http://127.0.0.1:8080",
                                            platform="ios", aes_cbc=aes)
     try:

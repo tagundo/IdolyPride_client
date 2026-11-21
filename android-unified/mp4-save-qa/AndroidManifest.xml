@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="game.qualiarts.idolypride.mp4saveqa">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35" />
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.CREATE_DOCUMENT" />
+            <category android:name="android.intent.category.OPENABLE" />
+            <data android:mimeType="video/mp4" />
+        </intent>
+    </queries>
+    <application android:label="@string/qa_app_name" android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:debuggable="true" android:allowBackup="false" android:extractNativeLibs="true">
+        <activity android:name="game.qualiarts.idolypride.localserver.SaveProbeActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

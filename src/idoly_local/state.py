@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+import json
 import re
 import secrets
 import sqlite3
@@ -10,6 +12,32 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+
+
+# Explicitly owned account tables; sessions are deliberately never portable.
+_ACCOUNT_TABLES_V1 = (
+    ("profiles", ("name", "server_id", "public_id"), ("name",)),
+    ("snapshots", ("profile", "response", "schema_sha256"), ("profile",)),
+    ("profile_settings", ("profile", "response", "schema_sha256"), ("profile",)),
+    ("starter_profiles", ("profile", "version"), ("profile",)),
+    ("profile_lesson_progress", ("profile", "response", "schema_sha256"), ("profile",)),
+    ("preference_receipts", ("profile", "path", "request_id", "request_sha256", "schema_sha256", "response"),
+     ("profile", "path", "request_id")),
+    ("main_live_attempts", ("profile", "request_id", "request_sha256", "path", "schema_sha256", "master_version",
+                            "ruleset", "seed", "started_time", "response"), ("profile", "request_id")),
+)
+_ACCOUNT_TABLES = _ACCOUNT_TABLES_V1 + (
+    ("profile_love_progress", ("profile", "love_id", "response", "schema_sha256", "ruleset_sha256"),
+     ("profile", "love_id")),
+)
+_ACCOUNT_MAX_BYTES = 64 * 1024 * 1024
+_ACCOUNT_MAX_ROWS = 20000
+
+
+def _portable_value(value):
+    if type(value) is bytes:
+        return {"$bytes": base64.b64encode(value).decode("ascii")}
+    raise ValueError("Account values must be SQLite scalar values")
 
 
 class AttemptConflict(ValueError):
@@ -52,6 +80,15 @@ class State:
                     response BLOB NOT NULL,
                     schema_sha256 TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS preference_receipts (
+                    profile TEXT NOT NULL REFERENCES profiles(name),
+                    path TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    request_sha256 TEXT NOT NULL,
+                    schema_sha256 TEXT NOT NULL,
+                    response BLOB NOT NULL,
+                    PRIMARY KEY(profile, path, request_id)
+                );
                 CREATE TABLE IF NOT EXISTS main_live_attempts (
                     profile TEXT NOT NULL REFERENCES profiles(name),
                     request_id TEXT NOT NULL,
@@ -64,6 +101,14 @@ class State:
                     started_time INTEGER NOT NULL,
                     response BLOB NOT NULL,
                     PRIMARY KEY(profile, request_id)
+                );
+                CREATE TABLE IF NOT EXISTS profile_love_progress (
+                    profile TEXT NOT NULL REFERENCES profiles(name),
+                    love_id TEXT NOT NULL,
+                    response BLOB NOT NULL,
+                    schema_sha256 TEXT NOT NULL,
+                    ruleset_sha256 TEXT NOT NULL,
+                    PRIMARY KEY(profile, love_id)
                 );
             """)
         path.chmod(0o600)
@@ -143,6 +188,8 @@ class State:
             db.execute("DELETE FROM profile_lesson_progress WHERE profile=?", (profile,))
             # Request identities belong to this snapshot/account, not its name.
             db.execute("DELETE FROM main_live_attempts WHERE profile=?", (profile,))
+            db.execute("DELETE FROM preference_receipts WHERE profile=?", (profile,))
+            db.execute("DELETE FROM profile_love_progress WHERE profile=?", (profile,))
 
     def snapshot(self, profile: str) -> tuple[bytes, str] | None:
         with self.connect() as db:
@@ -227,6 +274,50 @@ class State:
                 master_version, ruleset, str(seed), started_time, response))
         return response
 
+    def mutate_preference_snapshot(self, profile: str, schema_sha256: str, request_id: str,
+                                   request_sha256: str, path: str, callback) -> bytes:
+        """Commit a toggle and its retry response in the same transaction.
+
+        The callback returns (snapshot_bytes, response_bytes). An exact retry
+        returns the original response without running the toggle, including
+        after another preference changed or the server restarted. Snapshot
+        replacement clears only this profile's receipts.
+        """
+        self.live_request_id(request_id)
+        if (not isinstance(request_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", request_sha256) is None
+                or not isinstance(schema_sha256, str) or not schema_sha256
+                or not isinstance(path, str)
+                or re.fullmatch(r"/api\.[A-Za-z][A-Za-z0-9]*/[A-Za-z][A-Za-z0-9]*", path) is None
+                or not callable(callback)):
+            raise ValueError("Preference request context and callback are required")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?",
+                             (profile,)).fetchone()
+            if row is None or row["schema_sha256"] != schema_sha256:
+                raise ValueError("Local profile has no snapshot for this schema")
+            old = db.execute(
+                "SELECT request_sha256,schema_sha256,response FROM preference_receipts "
+                "WHERE profile=? AND path=? AND request_id=?", (profile, path, request_id)).fetchone()
+            if old is not None:
+                if old["request_sha256"] != request_sha256:
+                    raise AttemptConflict("Preference request identity was reused for different input")
+                if old["schema_sha256"] != schema_sha256:
+                    raise ValueError("Cached preference response uses a different schema")
+                return bytes(old["response"])
+            original = bytes(row["response"])
+            result = callback(original)
+            if (not isinstance(result, tuple) or len(result) != 2
+                    or not all(isinstance(value, bytes) for value in result)):
+                raise ValueError("Preference mutation must return snapshot and response bytes")
+            payload, response = result
+            if payload != original:
+                db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
+            db.execute("INSERT INTO preference_receipts VALUES (?,?,?,?,?,?)",
+                       (profile, path, request_id, request_sha256, schema_sha256, response))
+        return response
+
     def mutate_lesson_snapshot(self, profile: str, schema_sha256: str, callback) -> tuple[bytes, bytes]:
         """Update a snapshot and its local lesson clock in one transaction.
 
@@ -271,6 +362,66 @@ class State:
                            "ON CONFLICT(profile) DO UPDATE SET response=excluded.response,"
                            "schema_sha256=excluded.schema_sha256", (profile, progress, schema_sha256))
         return payload, progress
+
+    @staticmethod
+    def _love_id(love_id):
+        if type(love_id) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", love_id) is None:
+            raise ValueError("love_identifier_invalid")
+
+    def has_love_progress(self, profile: str) -> bool:
+        with self.connect() as db:
+            return db.execute("SELECT 1 FROM profile_love_progress WHERE profile=? LIMIT 1", (profile,)).fetchone() is not None
+
+    def love_progress(self, profile: str, love_id: str) -> tuple[bytes, str, str] | None:
+        """Read one explicit event state without inventing an initial route."""
+        self._love_id(love_id)
+        with self.connect() as db:
+            db.execute("BEGIN")
+            size = db.execute("SELECT length(response) FROM profile_love_progress WHERE profile=? AND love_id=?",
+                              (profile, love_id)).fetchone()
+            if size is None: return None
+            if not 0 < size[0] <= 128*1024: raise ValueError("love_progress_bound")
+            row = db.execute("SELECT response,schema_sha256,ruleset_sha256 FROM profile_love_progress "
+                             "WHERE profile=? AND love_id=?", (profile, love_id)).fetchone()
+        return bytes(row["response"]), row["schema_sha256"], row["ruleset_sha256"]
+
+    def mutate_love_snapshot(self, profile: str, schema_sha256: str, love_id: str,
+                             ruleset_sha256: str, callback) -> tuple[bytes, bytes]:
+        """Commit User.Get and one event's bounded JSON state together.
+
+        The Love service validates its private state format and owns choices,
+        timers and rewards. State binds both records to the same protocol and
+        ruleset, preserves opaque bytes, and rolls back both on callback error.
+        """
+        self._love_id(love_id)
+        if (any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                for value in (schema_sha256, ruleset_sha256)) or not callable(callback)):
+            raise ValueError("love_context_invalid")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?", (profile,)).fetchone()
+            if row is None or row["schema_sha256"] != schema_sha256:
+                raise ValueError("love_snapshot_schema_differs")
+            size = db.execute("SELECT length(response) FROM profile_love_progress WHERE profile=? AND love_id=?",
+                              (profile, love_id)).fetchone()
+            if size is not None and not 0 < size[0] <= 128*1024: raise ValueError("love_progress_bound")
+            old = db.execute("SELECT response,schema_sha256,ruleset_sha256 FROM profile_love_progress "
+                             "WHERE profile=? AND love_id=?", (profile, love_id)).fetchone()
+            if old is not None and (old["schema_sha256"] != schema_sha256 or old["ruleset_sha256"] != ruleset_sha256):
+                raise ValueError("love_progress_context_differs")
+            original = bytes(row["response"])
+            progress = bytes(old["response"]) if old is not None else None
+            result = callback(original, progress)
+            if (type(result) is not tuple or len(result) != 2 or any(type(value) is not bytes for value in result)
+                    or len(result[0]) > 32*1024*1024 or not 0 < len(result[1]) <= 128*1024):
+                raise ValueError("love_mutation_invalid")
+            payload, updated = result
+            if payload != original: db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
+            if progress is None or updated != progress:
+                db.execute("INSERT INTO profile_love_progress VALUES (?,?,?,?,?) ON CONFLICT(profile,love_id) "
+                           "DO UPDATE SET response=excluded.response,schema_sha256=excluded.schema_sha256,"
+                           "ruleset_sha256=excluded.ruleset_sha256", (profile, love_id, updated, schema_sha256, ruleset_sha256))
+        return payload, updated
 
     def starter_version(self, profile: str) -> int | None:
         """Return zero for an explicit import, positive for a known starter.
@@ -362,3 +513,160 @@ class State:
             return db.execute("SELECT 1 FROM sessions WHERE token_hash=? AND profile=? AND expires_at>?", (
                 token_hash, profile, int(time.time()),
             )).fetchone() is not None
+
+
+    @staticmethod
+    def account_bytes(bundle: dict) -> bytes:
+        """Canonical transport bytes preserve opaque protobuf BLOBs exactly."""
+        State.validate_account(bundle)
+        return json.dumps(bundle, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                          allow_nan=False, default=_portable_value).encode("utf-8")
+
+    @staticmethod
+    def account_revision(bundle: dict) -> str:
+        return hashlib.sha256(State.account_bytes(bundle)).hexdigest()
+
+    @staticmethod
+    def validate_account(bundle: dict) -> None:
+        """Validate the fixed local schema, never accepting table/column SQL."""
+        if (type(bundle) is not dict or set(bundle) != {"schema", "profile", "tables"}
+                or type(bundle["schema"]) is not int or bundle["schema"] not in (1, 2)
+                or type(bundle["profile"]) is not str or not bundle["profile"]
+                or len(bundle["profile"].encode("utf-8")) > 256
+                or type(bundle["tables"]) is not dict
+                or set(bundle["tables"]) != {row[0] for row in (_ACCOUNT_TABLES_V1 if bundle["schema"] == 1 else _ACCOUNT_TABLES)}):
+            raise ValueError("account_bundle_schema_invalid")
+        total, count = 0, 0
+        for table, columns, primary in (_ACCOUNT_TABLES_V1 if bundle["schema"] == 1 else _ACCOUNT_TABLES):
+            rows = bundle["tables"][table]
+            if type(rows) is not list or len(rows) > _ACCOUNT_MAX_ROWS:
+                raise ValueError("account_rows_bound")
+            if table == "profiles" and len(rows) != 1 or len(primary) == 1 and len(rows) > 1:
+                raise ValueError("account_singleton_row_invalid")
+            seen, order = set(), []
+            for row in rows:
+                count += 1
+                if type(row) is not dict or set(row) != set(columns):
+                    raise ValueError("account_columns_invalid")
+                if row["name" if table == "profiles" else "profile"] != bundle["profile"]:
+                    raise ValueError("account_profile_binding_invalid")
+                for key, value in row.items():
+                    if key == "response":
+                        if (type(value) is not bytes or len(value) > (128*1024 if table == "profile_love_progress" else 32*1024*1024)
+                                or table == "profile_love_progress" and not value):
+                            raise ValueError("account_blob_invalid")
+                        total += len(value)
+                    elif key in ("version", "started_time"):
+                        if type(value) is not int or not 0 <= value < (1 << 63):
+                            raise ValueError("account_integer_invalid")
+                    else:
+                        if type(value) is not str or len(value.encode("utf-8")) > 4096:
+                            raise ValueError("account_text_invalid")
+                        total += len(value.encode("utf-8"))
+                        if key in ("schema_sha256", "request_sha256", "ruleset_sha256") and re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                            raise ValueError("account_fingerprint_invalid")
+                        if key == "love_id": State._love_id(value)
+                        if key in ("server_id", "public_id") and (not value or len(value.encode("utf-8")) > 256):
+                            raise ValueError("account_identity_invalid")
+                identity = tuple(row[key] for key in primary)
+                if identity in seen:
+                    raise ValueError("account_duplicate_row")
+                seen.add(identity); order.append(identity)
+            if order != sorted(order):
+                raise ValueError("account_row_order_invalid")
+        if count > _ACCOUNT_MAX_ROWS or total > _ACCOUNT_MAX_BYTES:
+            raise ValueError("account_extent_bound")
+
+    @staticmethod
+    def upgrade_account(bundle: dict) -> dict:
+        """Accept a verified v1 archive without inventing event progress."""
+        State.validate_account(bundle)
+        if bundle["schema"] == 2: return bundle
+        return {"schema": 2, "profile": bundle["profile"],
+                "tables": {**bundle["tables"], "profile_love_progress": []}}
+
+    @staticmethod
+    def _account_rows(db, profile: str) -> dict | None:
+        expected = {row[0] for row in _ACCOUNT_TABLES} | {"sessions"}
+        present = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+        if present != expected:
+            raise ValueError("account_database_schema_differs")
+        for table, columns, _primary in _ACCOUNT_TABLES:
+            if tuple(row[1] for row in db.execute("PRAGMA table_info(" + table + ")")) != columns:
+                raise ValueError("account_database_schema_differs")
+        if db.execute("SELECT 1 FROM profiles WHERE name=?", (profile,)).fetchone() is None:
+            return None
+        tables, total_rows, total_bytes = {}, 0, 0
+        for table, columns, primary in _ACCOUNT_TABLES:
+            key = "name" if table == "profiles" else "profile"
+            count = db.execute("SELECT COUNT(*) FROM " + table + " WHERE " + key + "=?", (profile,)).fetchone()[0]
+            total_rows += count
+            if total_rows > _ACCOUNT_MAX_ROWS:
+                raise ValueError("account_rows_bound")
+            if "response" in columns:
+                size, maximum = db.execute("SELECT COALESCE(SUM(length(response)),0),COALESCE(MAX(length(response)),0) FROM "
+                                           + table + " WHERE profile=?", (profile,)).fetchone()
+                total_bytes += size
+                if maximum > (128*1024 if table == "profile_love_progress" else 32*1024*1024) or total_bytes > _ACCOUNT_MAX_BYTES:
+                    raise ValueError("account_extent_bound")
+            sql = "SELECT " + ",".join(columns) + " FROM " + table + " WHERE " + key + "=? ORDER BY " + ",".join(primary)
+            tables[table] = [dict(row) for row in db.execute(sql, (profile,))]
+        result = {"schema": 2, "profile": profile, "tables": tables}
+        State.validate_account(result)
+        return result
+
+    def account_snapshot(self, profile: str) -> tuple[dict, str] | None:
+        """Capture every owned account table in one consistent SQLite snapshot."""
+        with self.connect() as db:
+            db.execute("BEGIN")
+            bundle = self._account_rows(db, profile)
+            return (bundle, self.account_revision(bundle)) if bundle is not None else None
+
+    def account_profiles(self, *, offset=0, limit=24) -> tuple[int, list[str]]:
+        if type(offset) is not int or not 0 <= offset <= 100000 or type(limit) is not int or not 1 <= limit <= 24:
+            raise ValueError("account_page_invalid")
+        with self.connect() as db:
+            db.execute("BEGIN")
+            count = db.execute("SELECT COUNT(*) FROM profiles").fetchone()[0]
+            names = [row[0] for row in db.execute("SELECT name FROM profiles ORDER BY name LIMIT ? OFFSET ?", (limit, offset))]
+        return count, names
+
+    def replace_account(self, profile: str, bundle: dict, *, expected_revision=None, before_replace=None, after_commit=None) -> str:
+        """Atomically install all account rows and invalidate only its sessions.
+
+        A current revision is mandatory for replacement. The backup callback
+        runs under the same write lock and must finish before any row changes.
+        Errors roll back every target table; unrelated accounts are untouched.
+        """
+        bundle = self.upgrade_account(bundle)
+        if type(profile) is not str or not profile or len(profile.encode("utf-8")) > 256:
+            raise ValueError("account_target_invalid")
+        with self.connect() as db:
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("BEGIN IMMEDIATE")
+            old = self._account_rows(db, profile)
+            if old is None:
+                if expected_revision is not None:
+                    raise ValueError("account_target_missing")
+            elif (type(expected_revision) is not str or self.account_revision(old) != expected_revision):
+                raise ValueError("account_revision_conflict")
+            if old is not None and before_replace is not None:
+                before_replace(old, self.account_revision(old))
+            db.execute("DELETE FROM sessions WHERE profile=?", (profile,))
+            for table, _columns, _primary in reversed(_ACCOUNT_TABLES):
+                key = "name" if table == "profiles" else "profile"
+                db.execute("DELETE FROM " + table + " WHERE " + key + "=?", (profile,))
+            for table, columns, _primary in _ACCOUNT_TABLES:
+                key = "name" if table == "profiles" else "profile"
+                sql = "INSERT INTO " + table + "(" + ",".join(columns) + ") VALUES (" + ",".join("?" for _ in columns) + ")"
+                for row in bundle["tables"][table]:
+                    db.execute(sql, tuple(profile if column == key else row[column] for column in columns))
+            current = self._account_rows(db, profile)
+            revision = self.account_revision(current)
+            if after_commit is not None:
+                # Opt-in callers need to distinguish a successful SQL commit
+                # from a later connection-release error. Legacy callers retain
+                # the normal context-manager commit behavior.
+                db.commit()
+                after_commit(revision)
+            return revision

@@ -108,8 +108,15 @@ class StoryReads:
         self.event_fixture = event_fixture
 
     def _version(self):
-        if self.schema.fingerprint != rules.SCHEMA_SHA256 or self.catalog.version() != rules.MASTER_VERSION:
+        if (self.schema.fingerprint != rules.SCHEMA_SHA256
+                or self.catalog.version() not in (rules.MASTER_VERSION, rules.LATEST_MASTER_VERSION)):
             _fail("Story read rules require their audited schema and master version")
+        if self.catalog.version() == rules.LATEST_MASTER_VERSION:
+            try:
+                from .public_cohort_support import require_master_cohort
+                require_master_cohort(self.catalog.directory, "story_reads")
+            except (ImportError, OSError, ValueError):
+                _fail("Story read rules require the approved public master cohort")
 
     def _list(self, path):
         # Resolve the profile override inside the snapshot transaction. b'' is

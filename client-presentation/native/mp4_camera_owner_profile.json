@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "platforms": {
+    "android": {
+      "schema": 1,
+      "platform": "android",
+      "sources": {
+        "native_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+        "metadata_sha256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e"
+      },
+      "component_get_component": {
+        "type": "UnityEngine.Component",
+        "name": "GetComponent",
+        "parameter_count": 1,
+        "static": false,
+        "rva": "0x8f7c604",
+        "prefix": "fe57bea9f44f01a9f5870090a8e647f9",
+        "return": "UnityEngine.Component",
+        "parameters": [
+          {
+            "name": "type",
+            "type": "System.Type",
+            "metadata_type_index": 76354
+          }
+        ],
+        "metadata_method_index": 164656,
+        "token_row": 3164,
+        "module": "UnityEngine.CoreModule.dll",
+        "registration_pointer_slot": "0xa01ee60",
+        "native_abi": "void*(void*,void*,const MethodInfo*)"
+      },
+      "controller_type": {
+        "type": "VL.Rendering.VLSRPCameraController",
+        "rva": "0x9e00ff0",
+        "prefix": "ab6f0000000000000000120000000000",
+        "metadata_type_index": 77664,
+        "metadata_type_definition_index": 28587
+      },
+      "fields": {
+        "controller_camera": {
+          "owner": "VL.Rendering.VLSRPCameraController",
+          "name": "_mainCamera",
+          "offset": 80,
+          "type": "UnityEngine.Camera",
+          "metadata_field_index": 129547
+        },
+        "brain_camera": {
+          "owner": "Cinemachine.CinemachineBrain",
+          "name": "m_OutputCamera",
+          "offset": 80,
+          "type": "UnityEngine.Camera",
+          "metadata_field_index": 128077
+        },
+        "timeline_output_tracks": {
+          "owner": "UnityEngine.Timeline.TimelineAsset",
+          "name": "m_CacheOutputTracks",
+          "offset": 48,
+          "type": "UnityEngine.Timeline.TrackAsset[]",
+          "metadata_field_index": 135380
+        }
+      },
+      "scope": {
+        "game_executed": false,
+        "runtime_verified": false,
+        "receiver": "Already verified selected timeline CinemachineBrain.OutputCamera only",
+        "result": "Must be a live original VLSRPCameraController whose mainCamera is that same Camera",
+        "controller_creation": false
+      }
+    },
+    "ios": {
+      "schema": 1,
+      "platform": "ios",
+      "sources": {
+        "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+        "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda"
+      },
+      "component_get_component": {
+        "type": "UnityEngine.Component",
+        "name": "GetComponent",
+        "parameter_count": 1,
+        "static": false,
+        "rva": "0x7849ac4",
+        "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+        "return": "UnityEngine.Component",
+        "parameters": [
+          {
+            "name": "type",
+            "type": "System.Type",
+            "metadata_type_index": 76225
+          }
+        ],
+        "metadata_method_index": 165081,
+        "token_row": 3169,
+        "module": "UnityEngine.CoreModule.dll",
+        "registration_pointer_slot": "0xa788d88",
+        "native_abi": "void*(void*,void*,const MethodInfo*)"
+      },
+      "controller_type": {
+        "type": "VL.Rendering.VLSRPCameraController",
+        "rva": "0xa56abd0",
+        "prefix": "dc6f0000000000000000120000000000",
+        "metadata_type_index": 77537,
+        "metadata_type_definition_index": 28636
+      },
+      "fields": {
+        "controller_camera": {
+          "owner": "VL.Rendering.VLSRPCameraController",
+          "name": "_mainCamera",
+          "offset": 80,
+          "type": "UnityEngine.Camera",
+          "metadata_field_index": 129759
+        },
+        "brain_camera": {
+          "owner": "Cinemachine.CinemachineBrain",
+          "name": "m_OutputCamera",
+          "offset": 80,
+          "type": "UnityEngine.Camera",
+          "metadata_field_index": 128291
+        },
+        "timeline_output_tracks": {
+          "owner": "UnityEngine.Timeline.TimelineAsset",
+          "name": "m_CacheOutputTracks",
+          "offset": 48,
+          "type": "UnityEngine.Timeline.TrackAsset[]",
+          "metadata_field_index": 135564
+        }
+      },
+      "scope": {
+        "game_executed": false,
+        "runtime_verified": false,
+        "receiver": "Already verified selected timeline CinemachineBrain.OutputCamera only",
+        "result": "Must be a live original VLSRPCameraController whose mainCamera is that same Camera",
+        "controller_creation": false
+      }
+    }
+  }
+}

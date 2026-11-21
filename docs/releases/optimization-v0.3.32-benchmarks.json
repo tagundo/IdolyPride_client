@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "source_commit": "7f4244f146a07c35cafcdacf1e5caef949cd1d1c",
+  "baseline_commit": "50e349f4db6db0d3122bdc09c3b06307145f814f",
+  "run_id": 43710465014,
+  "performance_artifact_id": 14160367654,
+  "performance_archive_sha256": "810c21fb8219c8be9c4526b01485cecd96b3746dab3f40fc26041dccee482872",
+  "reports": {
+    "diagnostics": {
+      "name": "diagnostics-polling.json",
+      "bytes": 7571,
+      "sha256": "e33135586eed06f595bae5757175bf5fbbe3ff5568111f98194aaaac341da295"
+    },
+    "translation": {
+      "name": "translation-startup.json",
+      "bytes": 29067,
+      "sha256": "3dbef9c3a440e106e81216304fa1e669dbe90aae4455fa97a7f7870aad2d1106"
+    }
+  },
+  "diagnostics": {
+    "scope": "synthetic 200 events x 16 frames; actual Runtime.status; 1000 polls, 3 fresh processes per source",
+    "median": {
+      "baseline": {
+        "cpu_microseconds_per_poll": 1009.24495,
+        "wall_microseconds_per_poll": 1009.2977040000051
+      },
+      "candidate": {
+        "cpu_microseconds_per_poll": 15.311375999999994,
+        "wall_microseconds_per_poll": 15.317085000006612
+      }
+    },
+    "median_speedup": {
+      "cpu_microseconds_per_poll": 65.91471269466575,
+      "wall_microseconds_per_poll": 65.89358902164278
+    },
+    "output_hashes_equal": true
+  },
+  "translation": {
+    "scope": "pure Python protobuf; pinned public iOS inputs; shared validation/revision slice, no Unity/listener/account",
+    "inputs": {
+      "server_data": {
+        "bytes": 191343014,
+        "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"
+      },
+      "translations": {
+        "bytes": 125717042,
+        "sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72"
+      }
+    },
+    "medians": {
+      "baseline": {
+        "elapsed_seconds": 20.62430033199999,
+        "peak_rss_bytes": 192593920,
+        "validation_peak_rss_bytes": 192593920,
+        "validation_seconds": 5.735619759000002
+      },
+      "candidate": {
+        "elapsed_seconds": 20.855918814999995,
+        "peak_rss_bytes": 187723776,
+        "validation_peak_rss_bytes": 175845376,
+        "validation_seconds": 5.75168968700001
+      }
+    },
+    "same_semantics": true
+  },
+  "whole_game_FPS_measured": false,
+  "whole_app_startup_measured": false,
+  "publication_commit": "5eb868ca2860ecaa092d70977eb1b0d7c92b2759",
+  "release_proof_artifact": {
+    "id": 14160504012,
+    "bytes": 378039,
+    "sha256": "b6f18a7683835d4a7ffffb4d31cb66786aa09a6f917895730e512ba3ef00eca4"
+  },
+  "anonymous_download_checks_verified": true
+}

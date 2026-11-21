@@ -1,0 +1,144 @@
+name: Verify offline MP4 codecs (synthetic media only)
+
+on:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/verify-mp4-codecs.yml
+      - .github/workflows/build-mp4-preview.yml
+      - tools/stage_mp4_preview.py
+      - tests/test_mp4_preview_delivery.py
+      - client-presentation/native/mp4_encoder_api.h
+      - client-presentation/native/mp4_android_encoder.hpp
+      - ios-unified/native/IdolyMVEncoder.mm
+      - ios-unified/native/IdolyMVEncoderPolicy.h
+      - ios-unified/native/IdolyMP4UI.*
+      - ios-unified/native/build_native.py
+      - ios-unified/native/test_mp4_ui_compile.py
+      - ios-unified/native/test_mv_encoder.py
+      - ios-unified/native/tests/MVEncoderIntegration.mm
+      - ios-unified/native/tests/mv_encoder_policy_test.c
+      - android-unified/src/main/java/game/qualiarts/idolypride/localserver/mp4/OfflineMp4Encoder.java
+      - android-unified/src/main/java/game/qualiarts/idolypride/localserver/mp4/OfflineMp4Math.java
+      - android-unified/src/main/java/game/qualiarts/idolypride/localserver/mp4/Mp4AudioTimeline.java
+      - android-unified/src/main/java/game/qualiarts/idolypride/localserver/mp4/AacPrimingProbe.java
+      - android-unified/mp4-qa/**
+      - tools/build_android_mp4_qa.py
+      - tests/test_android_mp4_codec_qa.py
+      - tests/test_android_mp4_encoder.py
+      - tests/test_android_mp4_timeline.py
+      - tests/test_android_mp4_jni.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mp4-codecs-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  apple-codecs:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile device and Simulator targets; encode and independently decode H.264, HEVC and AAC on macOS
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          python -B ios-unified/native/test_mv_encoder.py \
+            --output-directory "$RUNNER_TEMP/idoly-mp4-encoder-proof" \
+            2>&1 | tee "$RUNNER_TEMP/idoly-mp4-apple.log"
+          test -z "$(git status --porcelain)"
+      - name: Retain Apple codec reports and small synthetic MP4 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-mp4-codec-proof-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/idoly-mp4-encoder-proof
+            ${{ runner.temp }}/idoly-mp4-apple.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  android-codecs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify standalone builder and strict result gates
+        run: |
+          python -m pip install --disable-pip-version-check pytest==8.4.2
+          python -B -m pytest -q -p no:cacheprovider tests/test_android_mp4_codec_qa.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install exact standalone Java codec probe tools
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Require an independent AAC decoder
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version
+      - name: Require KVM for the disposable codec emulator
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Build the isolated codec QA APK using the current production Java encoder
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          python -B tools/build_android_mp4_qa.py \
+            --output-directory "$RUNNER_TEMP/idoly-mp4-android-proof" --android-sdk "$ANDROID_HOME"
+          test -z "$(git status --porcelain)"
+      - name: Encode and independently decode on Android; fail on missing, stale or failed required cases
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          cores: 2
+          ram-size: 4096M
+          disk-size: 4G
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on
+          disable-linux-hw-accel: false
+          disable-animations: true
+          emulator-boot-timeout: 1200
+          script: >-
+            python -B tools/build_android_mp4_qa.py --run-device --timeout 600
+            --output-directory "$RUNNER_TEMP/idoly-mp4-android-proof" --android-sdk "$ANDROID_HOME"
+      - name: Retain Android codec reports and small synthetic MP4 evidence even after failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-mp4-codec-proof-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/idoly-mp4-android-proof
+          if-no-files-found: warn
+          retention-days: 14

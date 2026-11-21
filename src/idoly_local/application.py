@@ -21,7 +21,8 @@ class Application:
     def __init__(self, schema, state: State, fixtures, profile="local", master_response: bytes | None = None,
                  master_dir=None, *, experimental_main_live=False, live_engine=None,
                  dream_catalog_path=None, pvp_catalog_path=None,
-                 photo_scene_access=None, photo_image_urls=None, media_mode=False, media_settings=None):
+                 photo_scene_access=None, photo_image_urls=None, media_mode=False, media_settings=None,
+                 event_settings=None, love_display_text=None):
         if type(experimental_main_live) is not bool:
             raise ValueError("Experimental main live must be an explicit boolean")
         if type(media_mode) is not bool:
@@ -69,8 +70,12 @@ class Application:
         from .appearance import Appearance
         from .profile_names import ProfileNames
         from .profile_messages import ProfileMessages
+        from .profile_emblems import ProfileEmblems
+        from .profile_preferences import ProfilePreferences
+        from .photo_preferences import PhotoPreferences
         from .profile_favorites import ProfileFavorites
         from .profile_top import ProfileTop
+        from .profile_directory import ProfileDirectory
         from .card_level_missions import CardLevelMissions
         from .dream import Dream
         from .pvp import Pvp
@@ -87,7 +92,13 @@ class Application:
         self.appearance = Appearance(schema, state, profile, master_dir)
         self.profile_names = ProfileNames(schema, state, profile)
         self.profile_messages = ProfileMessages(schema, state, profile)
+        self.profile_emblems = ProfileEmblems(schema, state, profile, master_dir)
+        self.profile_preferences = ProfilePreferences(schema, state, profile, master_dir)
+        self.photo_preferences = PhotoPreferences(schema, state, profile)
         self.profile_favorites = ProfileFavorites(schema, state, profile, master_dir)
+        from .love import Love
+        self.love = Love(schema, state, profile, master_dir, event_settings=event_settings,
+                         media_mode=media_mode, display_text=love_display_text)
         self.dream = Dream(schema, state, profile, master_dir, catalog_path=dream_catalog_path)
         self.pvp = Pvp(schema, state, profile, master_dir, catalog_path=pvp_catalog_path)
         self.photo_shootings = PhotoShootings(schema, state, profile, master_dir,
@@ -107,6 +118,8 @@ class Application:
                                  lessons=None if media_mode else self.lessons, stories=self.stories,
                                  story_extra_fixture=self._story_extra_fixture, dream=self.dream)
         self.profile_top = ProfileTop(schema, state, profile, self.gameplay.catalog)
+        self.profile_directory = ProfileDirectory(schema, state, profile, self.gameplay.catalog,
+                                                  self.profile_preferences)
         self.card_level_missions = CardLevelMissions(schema, state, profile, master_dir)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
         self.tutorial_messages = TutorialMessages(schema, state, profile, master_dir)
@@ -127,6 +140,52 @@ class Application:
             return None
         from .story_reads import _private_story_permissions
         return _private_story_permissions(self.schema, self.fixtures, "/api.Story/ListEvent")
+
+    def _fill_love_home(self, raw):
+        """Apply only configured Love fields; otherwise preserve captured wire bytes."""
+        result = self.schema.response_type("/api.Home/Enter").FromString(raw)
+        if "loveInfo" not in result.DESCRIPTOR.fields_by_name:
+            return raw
+        info = self.love.home_info()
+        changed = False
+        # Only explicit local sidecar ownership can replace a captured delta.
+        # Imported UserLove rows without that state retain their original policy.
+        common_field = result.DESCRIPTOR.fields_by_name.get("commonResponse")
+        if common_field is not None and "updatedData" in common_field.message_type.fields_by_name:
+            update = result.commonResponse.updatedData
+            if "loves" in update.DESCRIPTOR.fields_by_name:
+                owned = [row for row in update.loves
+                         if self.state.love_progress(self.profile, row.loveId) is not None]
+                if owned:
+                    from .rpc import RpcFailure
+                    snapshot = self.state.snapshot(self.profile)
+                    if snapshot is None or snapshot[1] != self.schema.fingerprint:
+                        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local Love account snapshot is not ready")
+                    current = self.schema.response_type("/api.User/Get").FromString(snapshot[0])
+                    by_id = {row.loveId: row for row in current.loves}
+                    for row in owned:
+                        if row.loveId not in by_id:
+                            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local Love progress is inconsistent")
+                        if row.SerializeToString() != by_id[row.loveId].SerializeToString():
+                            row.CopyFrom(by_id[row.loveId])
+                            changed = True
+        event_field = result.DESCRIPTOR.fields_by_name.get("eventInfo")
+        has_events = event_field is not None and "loveEventInfos" in event_field.message_type.fields_by_name
+        if info is None:
+            if result.loveInfo.SerializeToString():
+                result.ClearField("loveInfo")
+                result.loveInfo.SetInParent()
+                changed = True
+            if has_events and result.eventInfo.loveEventInfos:
+                result.eventInfo.ClearField("loveEventInfos")
+                changed = True
+            return result.SerializeToString() if changed else raw
+        love, events = info
+        result.loveInfo.CopyFrom(love)
+        if has_events:
+            result.eventInfo.ClearField("loveEventInfos")
+            result.eventInfo.loveEventInfos.extend(events)
+        return result.SerializeToString()
 
     def handle(self, path, raw, context):
         method = self.schema.methods.get(path)
@@ -189,11 +248,38 @@ class Application:
                 context.abort(RpcCode.FAILED_PRECONDITION, "Media story catalog is not ready")
             if media_response is not None:
                 return media_response
+        # An explicit imported User.Get is authoritative account data. Never
+        # replay a legacy capture over it, including when replacing sandbox.
+        # Other capture-backed routes retain their documented replay behavior.
+        if path == "/api.User/Get" and (self.state.starter_version(self.profile) == 0
+                or self.state.has_love_progress(self.profile)):
+            snapshot = self.state.snapshot(self.profile)
+            if snapshot is None or snapshot[1] != self.schema.fingerprint:
+                context.abort(RpcCode.FAILED_PRECONDITION, "Imported local profile is not ready for this schema")
+            return snapshot[0]
         # Media ownership is the dedicated database's live state. Captured
         # account responses must not shadow it or undo a media selection.
+        if path.startswith("/api.Love/"):
+            from .rpc import RpcFailure
+            try:
+                response = self.love.handle(path, plain)
+            except RpcFailure as failure:
+                context.abort(failure.code, failure.details)
+            except ValueError:
+                context.abort(RpcCode.FAILED_PRECONDITION, "Local Love catalog is not ready")
+            if response is not None:
+                return response
         response = None if self.media_mode else self.fixtures.get(path, plain)
         if response is not None:
-            return response
+            if path != "/api.Home/Enter":
+                return response
+            from .rpc import RpcFailure
+            try:
+                return self._fill_love_home(response)
+            except RpcFailure as failure:
+                context.abort(failure.code, failure.details)
+            except (ValueError, DecodeError):
+                context.abort(RpcCode.FAILED_PRECONDITION, "Local Love Home data is not ready")
         if path == "/api.User/Get":
             snapshot = self.state.snapshot(self.profile)
             if snapshot is not None:
@@ -209,6 +295,8 @@ class Application:
                 if captured is not None:
                     return captured
             response = self.gameplay.handle(path, plain)
+            if response is not None and path == "/api.Home/Enter":
+                response = self._fill_love_home(response)
             if response is not None and self.media_stories is not None and path == "/api.Home/Enter":
                 home = response_type.FromString(response)
                 self.media_stories.fill_home(home)
@@ -247,10 +335,23 @@ class Application:
                 response = self.profile_names.handle(path, plain)
             if response is None:
                 response = self.profile_messages.handle(path, plain)
+            if response is None and path == "/api.Photo/SwitchLock":
+                request_ids = [value for key, value in context.invocation_metadata()
+                               if key == "x-app-request-id"]
+                if len(request_ids) != 1:
+                    raise RpcFailure(RpcCode.INVALID_ARGUMENT,
+                                     "One x-app-request-id is required for a photo toggle")
+                response = self.photo_preferences.handle(path, plain, request_id=request_ids[0])
+            if response is None:
+                response = self.profile_preferences.handle(path, plain)
+            if response is None:
+                response = self.profile_emblems.handle(path, plain)
             if response is None:
                 response = self.profile_favorites.handle(path, plain)
             if response is None:
                 response = self.profile_top.handle(path, plain)
+            if response is None:
+                response = self.profile_directory.handle(path, plain)
             if response is None:
                 response = self.card_level_missions.handle(path, plain)
             if response is None and self.main_lives is not None:

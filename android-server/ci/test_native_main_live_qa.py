@@ -75,6 +75,19 @@ class ModeDevice(Device):
         self.mode = False
         self.forget_mode = False
 
+    def capture(self, stage):
+        captured = super().capture(stage)
+        if stage.startswith(("48-main-live-find-", "48-main-live-checked-")):
+            hierarchy = qa.ET.Element("hierarchy")
+            qa.ET.SubElement(hierarchy, "node", {
+                "text": "첫 메인 라이브 실험 기능 사용",
+                "class": "android.widget.CheckBox", "checkable": "true",
+                "enabled": "true", "checked": str(self.mode).lower(),
+                "bounds": "[55,700][1025,800]",
+            })
+            return hierarchy
+        return captured
+
     def tap(self, text, stage):
         if text == "첫 메인 라이브 실험 기능 사용":
             assert self.process and not self.running
@@ -209,14 +222,15 @@ def test_snapshot_protected_state_or_cached_receipt_damage_cannot_produce_succes
     capture = device.capture
 
     def corrupt(stage):
-        capture(stage)
+        captured = capture(stage)
         if stage != "53-main-live-cached":
-            return
+            return captured
         if damage == "snapshot": final.balance.freeBalance += 50
         elif damage == "unknown": final.DiscardUnknownFields()
         elif damage == "clock": clock[0] = (b"changed lesson clock", clock[0][1])
         elif damage == "cached-seed-time-response": attempts[0] = ("different seed/time/response",)
         else: preserved[damage] = "changed"
+        return captured
 
     monkeypatch.setattr(device, "capture", corrupt)
     with pytest.raises(RuntimeError):

@@ -1,0 +1,136 @@
+name: Verify Android account import native candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/verify-android-account-import.yml
+      - android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-android-account-import-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  IDOLY_RELEASE_BUILD: '54'
+
+# Exact Android build/emulator gates from release-all-platforms, artifact only.
+# Existing draft input downloads need write-scoped contents permission.
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GRADLE_OPTS: '-Dorg.gradle.workers.max=1 -Dorg.gradle.jvmargs=-Xmx1536m'
+    steps:
+      - name: Label internal artifacts with the current Seoul date
+        run: echo "IDOLY_RELEASE_VERSION=$(TZ=Asia/Seoul date +%Y.%m.%d).1" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install locked dependencies and pinned Android toolchain
+        run: |
+          uv sync --locked --all-extras --python 3.13
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264'
+      - name: Build signed ARM64 server and separate x86_64 QA server
+        run: >-
+          uv run --locked python tools/release_platform_builds.py
+          --platform android --source-commit "$GITHUB_SHA"
+          --work "$RUNNER_TEMP/idoly-android-work"
+          --output "$RUNNER_TEMP/idoly-android-build"
+      - name: Enable acceleration for the disposable CI emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-idoly-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Exercise actual x86_64 server UI and encrypted RPCs
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # Public per-app LocaleManager preferences require Android 13+.
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_4
+          cores: 2
+          ram-size: 4096M
+          disk-size: 4G
+          emulator-boot-timeout: 1200
+          disable-linux-hw-accel: false
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: >-
+            uv run --locked python tools/release_platform_builds.py
+            --platform android-qa --source-commit "$GITHUB_SHA"
+            --inputs "$RUNNER_TEMP/idoly-android-build"
+            --work "$RUNNER_TEMP/idoly-android-qa"
+            --output "$RUNNER_TEMP/idoly-android-final"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: verified-android-account-import-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-android-final
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Retain small Android launcher visual evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verified-android-account-import-ui-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/idoly-android-qa/qa/00-interface-*.png
+            ${{ runner.temp }}/idoly-android-qa/qa/00-interface-*.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/02-interface-running-*.png
+            ${{ runner.temp }}/idoly-android-qa/qa/02-interface-running-*.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/02-running.png
+            ${{ runner.temp }}/idoly-android-qa/qa/02-running.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/04-stopped.png
+            ${{ runner.temp }}/idoly-android-qa/qa/04-stopped.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/75-account-provider-before.png
+            ${{ runner.temp }}/idoly-android-qa/qa/75-account-provider-after.png
+            ${{ runner.temp }}/idoly-android-qa/qa/76-account-preview-timeout.png
+          if-no-files-found: warn
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: verified-android-account-import-diagnostics-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/idoly-android-work/**/*.json
+            ${{ runner.temp }}/idoly-android-work/gradle-*.log
+            ${{ runner.temp }}/idoly-android-build/build-failure.json
+            ${{ runner.temp }}/idoly-android-final/build-failure.json
+            ${{ runner.temp }}/idoly-android-qa/emulator-QA.log
+            ${{ runner.temp }}/idoly-android-qa/qa/*.json
+            ${{ runner.temp }}/idoly-android-qa/qa/*.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/*logcat.txt
+          if-no-files-found: warn
+          retention-days: 14

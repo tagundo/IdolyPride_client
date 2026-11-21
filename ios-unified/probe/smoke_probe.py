@@ -1,0 +1,3648 @@
+#!/usr/bin/env python3
+"""Run the integrated server's fake Unity host in one disposable iOS Simulator.
+
+Actual execution requires macOS/Xcode. Portable tests mock simulator control;
+they do not establish simulator, device, game, or PlayCover compatibility.
+Only a UUID returned by this invocation's `simctl create` may be changed.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime
+import hashlib
+from http.client import HTTPConnection, HTTPException
+import json
+import math
+import os
+from pathlib import Path
+import plistlib
+import re
+import select
+import socket
+import signal
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from zipfile import BadZipFile, ZipFile
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
+PROBE_SOURCE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROBE_SOURCE_DIR))
+from ui_test_driver import (ProbePromptCancelDriver, DriverError, ERROR_CODES as UI_DRIVER_ERRORS,
+    DIAGNOSTIC_CHECKS as UI_DIAGNOSTIC_CHECKS, DIAGNOSTIC_TYPES as UI_DIAGNOSTIC_TYPES,
+    DIAGNOSTIC_TOKEN_KINDS as UI_DIAGNOSTIC_TOKEN_KINDS, PHASE_MARKERS as UI_PHASE_MARKERS)
+
+
+BUNDLE_ID = "game.qualiarts.idolypride.iosprobe"
+PROBE_EXECUTABLE = "IdolyEmbeddedProbe"
+# ServerData archives contain a data/ root; the installer removes that prefix
+# when creating the writable core directory. The probe reads the archive itself.
+DESCRIPTOR_MEMBER = "data/protocol/idolypride-6.1.1.pb"
+MAX_JSON = 64 * 1024
+MAX_DESCRIPTOR = 16 * 1024 * 1024
+MAX_RESPONSE = 4 * 1024 * 1024
+MAX_COMMAND_OUTPUT = 2 * 1024 * 1024
+MAX_TOOL_DETAIL = 8 * 1024
+RPC_PATHS = ("/api.System/Check", "/api.Auth/Login", "/api.Home/Enter")
+MASTER_RPC_PATH = "/api.Master/Get"
+MASTER_ORIGIN = "http://127.0.0.1:8080"
+MAX_MASTER_FILE = 64 * 1024 * 1024
+MAX_SDK_BYTES = 16 * 1024 * 1024
+SDK_MANIFEST_PATH = "/v2/pub/a/212/v/105051/list/0"
+SDK_URL_FORMAT = MASTER_ORIGIN + "/octo/{v}/{type}/{o}/{g}"
+LANGUAGE_ORDER = ("ko", "en", "ja")
+MATRIX_LANGUAGES = ("ko", "en", "ja", "en", "ko")
+# One bounded wall-clock budget includes simulator boot/install, the public
+# XCTest cancel flow and all five cold app processes. Individual operation and
+# native UI deadlines remain smaller; a relaunch never resets this deadline.
+MAX_PROBE_SECONDS = 1200
+CANARY_PATHS = ("Data/resources.assets", "Data/Managed/Metadata/global-metadata.dat")
+MAX_CANARY_BYTES = 128 * 1024 * 1024
+HOST_TRUE_FIELDS = ("installed", "entry_captured", "host_ready", "started", "unity_window_bound",
+    "bundle_match_before", "bundle_match_after", "first_warmup_bundle_match", "sigpipe_ignored_before_server")
+HOST_FALSE_FIELDS = ("launching", "failed")
+UNITY_HOST_ERROR_CODES = frozenset(("sigpipe_guard_failed", "warmup_order_or_bundle_mismatch", "entry_capture_rejected",
+    "smoke_hooks_missing", "runtime_initialized_before_host", "host_main_repeated", "host_application_main_failed",
+    "install_rejected", "unattested_unified_host", "framework_entry_abi_mismatch", "framework_entry_origin_mismatch",
+    "start_rejected", "selected_bundle_mismatch", "runtime_initialized_before_selection", "cached_bundle_root_mismatch",
+    "embedded_start_failed", "embedded_verification_failed"))
+HOST_ONCE_FIELDS = ("application_main_calls", "runtime_start_calls", "warmup_calls")
+HOST_EVENT_FIELDS = ("queued_events", "delivered_events", "lifecycle_forwarded")
+HOST_PROBE_TRUE_FIELDS = ("constructor_installed_before_c_main", "host_hooks_registered", "host_delegate_owned",
+    "cold_before_game_start", "canaries_match", "game_window_distinct", "game_window_key",
+    "host_delegate_window_is_game", "placeholder_hidden", "prelaunch_server_healthy", "prelaunch_runtime_cold")
+HOST_PROBE_COUNTS = ("application_main_adapter_calls", "original_run_main_calls",
+    "runtime_count_before_game_start", "warmup_count_before_game_start")
+LANGUAGE_CYCLE_FLAGS = ("acknowledged", "dom_language_matches", "native_title_matches",
+    "native_game_button_matches", "native_status_label_matches", "native_server_button_matches",
+    "game_select_unchanged", "persisted_game_language_unchanged")
+LANGUAGE_SAVE_FLAGS = ("acknowledged", "options_fields_reenabled", "message_success", "form_feedback_saved",
+    "request_observed", "ack_correlated", "server_status_received", "server_language_matches", "server_effective_matches")
+LAUNCH_SETTINGS_FLAGS = ("cold_while_settings_flush_held", "game_button_disabled_during_flush",
+    "settings_flush_called_once", "unsolicited_settings_ack_ignored", "settings_flush_released_before_forward")
+SETTINGS_WEB_BOOL_FIELDS = ("web_found", "timed_out", "evaluation_succeeded", "ready", "forms_present",
+    "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "document_complete",
+    "options_fields_enabled", "presentation_fields_enabled", "bridge_reply_present", "error_is_wk_domain",
+    "navigation_loading", "navigation_file_url", "web_attached", "evaluation_started", "evaluation_completed",
+    "data_store_reused", "launcher_store_nonpersistent", "menu_store_nonpersistent", "web_view_recreated", "launcher_document_marker_absent")
+SIGPIPE_PHASES = ("before_server", "before_game_worker")
+SIGPIPE_FLAGS = ("sigaction_read", "sigpipe_ignored", "socketpair_created", "peer_closed", "write_epipe", "process_survived")
+# A well-formed unknown protobuf varint makes empty requests exercise AES too.
+PUBLIC_PROBE_FIELD = b"\xc0\xa3\x09\x01"  # field 19000, wire type 0, value 1
+LAUNCHER_FAILURE_CODES = frozenset((
+    "premature_launch_not_ignored", "server_left_ready_before_launch",
+    "unity_started_before_launch_button", "ready_launcher_not_visible",
+    "ready_launcher_flags_differ", "ready_launch_button_missing",
+    "ready_launch_button_ambiguous", "ready_launch_button_disabled",
+    "ready_launch_button_title_differs", "ready_launch_action_missing",
+    "ready_launch_action_not_dispatched", "launch_settings_barrier_failed",
+    "early_status_correlation_failed", "server_not_ready_before_capture", "ready_capture_restarted_server",
+    "settings_menu_open_failed", "settings_menu_not_presented", "settings_menu_controls_or_layout_failed",
+    "settings_web_readiness_or_layout_failed", "settings_return_action_failed", "settings_menu_not_dismissed",
+    "final_report_write_failed",
+    "keyboard_before_capture_failed", "keyboard_before_launch_failed",
+    "keyboard_during_init_failed", "keyboard_after_init_failed",
+    "keyboard_precreated_instance_not_reused",
+    "native_header_layout_failed", "native_header_restore_failed",
+    "settings_diagnostics_copy_failed", "settings_zip_import_picker_failed", "settings_zip_roundtrip_failed",
+    "settings_account_management_failed", "settings_account_fixture_failed", "settings_official_prompt_failed",
+    "host_constructor_not_installed", "host_hooks_registration_failed", "host_cold_start_failed",
+    "unity_window_handoff_failed", "language_cache_identity_failed", "sigpipe_probe_failed",
+    "sigpipe_before_server_failed", "sigpipe_before_game_failed",
+    "unity_host_failed", "unity_host_probe_failed", "language_interface_cycle_failed", "language_save_failed",
+    "language_canaries_invalid", "language_canaries_mismatch", "language_matrix_failed", "language_relaunch_mismatch",
+    "octo_budget_registration_failed", "octo_budget_preinit_failed", "octo_budget_original_failed", "octo_budget_queued_work_failed",
+))
+NATIVE_CHECKPOINT_STAGES = frozenset((
+    "settings_zip_import_begin", "settings_zip_import_before_script", "settings_zip_import_script_submitted", "settings_zip_import_script_completed", "settings_zip_import_before_presenter", "settings_zip_import_after_presenter", "settings_zip_import_picker_attached", "settings_zip_import_before_cancel", "settings_zip_import_after_cancel", "settings_zip_import_before_dismiss", "settings_zip_import_after_dismiss", "settings_zip_import_dismiss_completed", "settings_zip_import_picker_detached", "settings_zip_import_before_restore_script", "settings_zip_import_restore_submitted", "settings_zip_import_restore_completed", "settings_zip_import_finished", "settings_zip_import_timeout",
+    "delegate_entered", "window_ready", "server_starting", "server_ready",
+    "unity_requests_captured", "premature_launch_checked", "launch_action_requested",
+    "launch_action_dispatched", "unity_forwarded", "status_received", "crypto_received",
+    "loopback_checked", "report_written", "settings_menu_requested", "settings_return_requested",
+    "settings_return_observed", "settings_return_timeout", "settings_menu_dismissed",
+    "keyboard_before_capture_checked", "keyboard_before_launch_checked",
+    "keyboard_during_init_checked", "keyboard_after_init_checked",
+    "native_header_checked",
+    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_progress", "settings_zip_roundtrip_checked", "settings_account_management_checked", "settings_official_prompt_checked",
+    "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
+    "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
+    "settings_account_management_entered", "settings_account_fixture_loaded", "settings_account_status_requested",
+    "settings_account_status_received", "settings_account_script_dispatched", "settings_account_script_started",
+    "settings_account_management_progress", "settings_account_management_finished", "settings_account_management_timeout",
+))
+KEYBOARD_PHASES = ("before_capture", "before_launch", "during_init", "after_init")
+KEYBOARD_BOOL_FIELDS = ("ready", "returned_nil", "returned_initialized_field", "returned_same_field")
+KEYBOARD_INT_FIELDS = ("phase", "original_calls", "field_creation_count")
+KEYBOARD_LIFECYCLE_COUNTERS = ("initialize_calls", "original_initialize_calls", "reused_existing_calls")
+HEADER_PHASES = ("current", "wide", "ultrawide", "restored")
+HEADER_BOOL_FIELDS = ("header_found", "actions_found", "title_found", "status_found", "hint_found",
+                      "nav_bar_hidden", "header_inside", "controls_inside", "row_no_overlap", "button_titles_fit")
+HEADER_FONT_FIELDS = ("button_min_font", "title_font", "status_font", "hint_font")
+HEADER_NUMBER_FIELDS = ("root_width", "root_height", "header_width", "header_height", "actions_width",
+                        "min_button_height", *HEADER_FONT_FIELDS)
+HTTP_READINESS_URL = "http://127.0.0.1:8080/client/playback"
+DIAGNOSTICS_COPY_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatched", "completed",
+                                "feedback_success", "pasteboard_matches", "clipboard_seeded", "clipboard_cleared")
+ZIP_IMPORT_PASS_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatched", "button_disabled_while_pending",
+    "picker_presented", "single_selection", "delegate_is_settings", "cancel_delegate_invoked",
+    "dismissed_programmatically", "dismissal_completion_observed", "transition_idle_before_restore", "picker_detached", "button_restored")
+ZIP_IMPORT_SERVER_FLAGS = ("grpc_connected_after_cancel", "assets_connected_after_cancel")
+ZIP_ROUNDTRIP_FLAGS = ("export_accepted", "export_ready", "export_archive_complete", "wk_import_dispatched",
+    "picker_presented", "picker_import_mode", "picker_single_selection", "selection_delegate_invoked",
+    "dismissed_programmatically", "dismissal_completion_observed", "transition_idle_before_restore", "picker_detached", "import_reply_accepted", "native_copy_queued",
+    "copy_bytes_match", "owned_copy_found", "copy_source_distinct", "source_preserved", "source_copy_sha256_match",
+    "backend_ready", "backend_success", "dom_completed", "button_restored", "upstream_requests_unchanged")
+ZIP_ROUNDTRIP_COUNTS = ("source_bytes", "copied_bytes", "total_bytes", "exported_files", "imported_files", "failed_files")
+OCTO_BUDGET_SECONDS = ("original_seconds", "effective_seconds", "cache_wait_seconds")
+OCTO_BUDGET_PROBE_SECONDS = ("during_original_seconds", "first_queued_seconds", "last_snapshot")
+OCTO_BUDGET_PROBE_BOOLS = ("apis_registered", "prepared_without_managed_callbacks", "during_original_configured",
+    "configured_before_first_queued_work", "queued_work_on_main_thread", "class_initialized")
+OCTO_BUDGET_PROBE_COUNTERS = ("initializations", "reads", "writes", "first_queued_snapshot_count",
+                             "writes_before_initialization")
+OCTO_BUDGET_ERROR_CODES = frozenset(("api_origin_mismatch", "not_prepared", "unattested_loopback",
+    "wrong_thread", "incomplete_apis", "runtime_unavailable", "invalid_assemblies", "image_mismatch",
+    "class_mismatch", "field_mismatch", "field_not_static", "type_mismatch", "unexpected_value", "readback_mismatch"))
+CHECKPOINT_READ_CODES = frozenset((
+    "invalid_bounded_file", "file_changed_while_opening", "file_changed_while_reading",
+    "json_size_bound", "duplicate_json_key", "nonfinite_json", "invalid_json", "json_object_required",
+))
+
+
+class ProbeError(ValueError):
+    """A bounded, credential-free failure code suitable for the JSON audit."""
+
+
+def require(value, code):
+    if not value:
+        raise ProbeError(code)
+
+
+def read_bounded(path, maximum):
+    path = Path(path)
+    before = path.lstat()
+    require(stat.S_ISREG(before.st_mode) and 0 < before.st_size <= maximum,
+            "invalid_bounded_file")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        require(stat.S_ISREG(opened.st_mode) and 0 < opened.st_size <= maximum,
+                "invalid_bounded_file")
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            error = ProbeError("file_changed_while_opening")
+            error.regular_replacement = True
+            raise error
+        require((before.st_size, before.st_mtime_ns) == (opened.st_size, opened.st_mtime_ns),
+                "file_changed_while_opening")
+        with os.fdopen(fd, "rb", closefd=False) as incoming:
+            raw = incoming.read(maximum + 1)
+        after = os.fstat(fd)
+        require(len(raw) == before.st_size and after.st_size == before.st_size
+                and after.st_mtime_ns == before.st_mtime_ns,
+                "file_changed_while_reading")
+        return raw
+    finally:
+        os.close(fd)
+
+
+def parse_json(raw, maximum=MAX_JSON):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            require(key not in result, "duplicate_json_key")
+            result[key] = value
+        return result
+    def nonfinite(_value):
+        raise ProbeError("nonfinite_json")
+    require(0 < len(raw) <= maximum, "json_size_bound")
+    try:
+        value = json.loads(raw, object_pairs_hook=pairs, parse_constant=nonfinite)
+    except (UnicodeError, json.JSONDecodeError, RecursionError):
+        raise ProbeError("invalid_json") from None
+    require(type(value) is dict, "json_object_required")
+    return value
+
+
+def write_audit(path, report):
+    raw = (json.dumps(report, separators=(",", ":"), sort_keys=True, allow_nan=False) + "\n").encode()
+    require(len(raw) <= MAX_JSON, "audit_size_bound")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    require(not path.exists() and not path.is_symlink(), "fresh_audit_path_required")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as output:
+        output.write(raw)
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _simctl_error(code, arguments, stdout=None, stderr=None):
+    error = ProbeError(code)
+    # Only installation/launch of this invocation's disposable public probe
+    # can contribute tool diagnostics. Do not copy command arguments or
+    # output from simulator discovery and unrelated host surfaces.
+    if arguments and arguments[0] in ("install", "launch"):
+        detail = {"action": arguments[0]}
+        for name, value in (("stdout", stdout), ("stderr", stderr)):
+            if type(value) is bytes:
+                text = value[:MAX_TOOL_DETAIL].decode("utf-8", errors="replace")
+                truncated = len(value) > MAX_TOOL_DETAIL
+            elif type(value) is str:
+                text, truncated = value[:MAX_TOOL_DETAIL], len(value) > MAX_TOOL_DETAIL
+            else:
+                text, truncated = "", False
+            # Bound the escaped JSON too, including hostile control bytes or
+            # invalid UTF-8; the entire detail remains below eight KiB.
+            while len(json.dumps(text, ensure_ascii=True)) > MAX_TOOL_DETAIL // 2 - 256:
+                text = text[:len(text) // 2]
+                truncated = True
+            detail[name] = text
+            detail[name + "_truncated"] = truncated
+        error.tool_detail = detail
+    return error
+
+
+def _simctl(arguments, timeout):
+    try:
+        result = subprocess.run(["/usr/bin/xcrun", "simctl", *arguments],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as error:
+        raise _simctl_error("simctl_timeout", arguments, error.stdout, error.stderr) from None
+    if len(result.stdout) > MAX_COMMAND_OUTPUT or len(result.stderr) > MAX_COMMAND_OUTPUT:
+        raise _simctl_error("simctl_output_bound", arguments, result.stdout, result.stderr)
+    if result.returncode != 0:
+        raise _simctl_error("simctl_failed", arguments, result.stdout, result.stderr)
+    return result.stdout
+
+
+def discover(device_type, runtime, remaining):
+    types = parse_json(_simctl(["list", "devicetypes", "--json"], remaining()), MAX_COMMAND_OUTPUT)
+    runtimes = parse_json(_simctl(["list", "runtimes", "--json"], remaining()), MAX_COMMAND_OUTPUT)
+    choices = [item for item in runtimes.get("runtimes", [])
+               if type(item) is dict and item.get("isAvailable") is True
+               and str(item.get("identifier", "")).startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
+    if runtime is not None:
+        choices = [item for item in choices if item.get("identifier") == runtime]
+    require(bool(choices), "available_ios_runtime_required")
+    def version(item):
+        value = str(item.get("version", ""))
+        require(bool(re.fullmatch(r"\d+(?:\.\d+){0,3}", value)), "invalid_runtime_version")
+        return tuple(map(int, value.split(".")))
+    chosen_runtime = max(choices, key=version)
+    numbers = version(chosen_runtime)
+    require(len(numbers) <= 3 and all(0 <= number <= 255 for number in numbers), "invalid_runtime_version")
+    numbers = (*numbers, *(0 for _ in range(3 - len(numbers))))
+    runtime_version = (numbers[0] << 16) | (numbers[1] << 8) | numbers[2]
+    def compatible(item):
+        minimum, maximum = item.get("minRuntimeVersion", 0), item.get("maxRuntimeVersion", 0xFFFFFFFF)
+        return (type(minimum) is int and type(maximum) is int
+                and minimum <= runtime_version <= maximum)
+    choices = [item for item in types.get("devicetypes", []) if type(item) is dict
+               and str(item.get("identifier", "")).startswith(("com.apple.CoreSimulator.SimDeviceType.iPhone-",
+                                                               "com.apple.CoreSimulator.SimDeviceType.iPad-"))
+               and compatible(item)]
+    if device_type is not None:
+        choices = [item for item in choices if item.get("identifier") == device_type]
+    else:
+        choices = [item for item in choices if ".iPhone-" in item["identifier"]]
+    require(bool(choices), "ios_device_type_required")
+    preferred = ("iPhone-16-Pro", "iPhone-15-Pro", "iPhone-14-Pro")
+    rank = lambda item: next((i for i, suffix in enumerate(preferred)
+                             if item["identifier"].endswith("." + suffix)), len(preferred))
+    chosen_type = min(choices, key=rank)
+    return chosen_type["identifier"], chosen_runtime["identifier"]
+
+
+def boot_created_simulator(created, remaining):
+    _simctl(["boot", created], remaining())
+    # A cold first boot can take longer than one bounded simctl invocation.
+    # Timing out that observer does not cancel the owned Simulator's boot.
+    while True:
+        try:
+            _simctl(["bootstatus", created, "-b"], remaining())
+            return
+        except ProbeError as error:
+            if str(error) != "simctl_timeout":
+                raise
+            remaining()  # The original overall deadline remains authoritative.
+
+
+def load_schema(app):
+    from idoly_local.schema import Schema
+    payload = Path(app) / "LocalServer" / "ServerData.zip"
+    require(payload.is_file() and not payload.is_symlink(), "public_server_payload_required")
+    with ZipFile(payload) as archive:
+        members = [item for item in archive.infolist() if item.filename == DESCRIPTOR_MEMBER]
+        require(len(members) == 1 and 0 < members[0].file_size <= MAX_DESCRIPTOR,
+                "bounded_public_descriptor_required")
+        with archive.open(members[0]) as incoming:
+            raw = incoming.read(MAX_DESCRIPTOR + 1)
+        require(len(raw) == members[0].file_size, "descriptor_extent_differs")
+    with tempfile.TemporaryDirectory(prefix="idoly-ios-probe-schema-") as directory:
+        target = Path(directory) / "public.pb"
+        target.write_bytes(raw)
+        schema = Schema.from_descriptor_set(target)
+    for path in (*RPC_PATHS, MASTER_RPC_PATH):
+        schema.method(path)
+    return schema, hashlib.sha256(raw).hexdigest()
+
+
+def language_paths(language, run_index=None):
+    require(type(language) is str and language in LANGUAGE_ORDER, "language_relaunch_mismatch")
+    if run_index is None: run_index = MATRIX_LANGUAGES.index(language)
+    require(type(run_index) is int and 0 <= run_index < len(MATRIX_LANGUAGES)
+            and MATRIX_LANGUAGES[run_index] == language, "language_relaunch_mismatch")
+    stem = ("embedded-probe", "embedded-language-en", "embedded-language-ja",
+            "embedded-language-en-return", "embedded-language-ko-return")[run_index]
+    return tuple(stem + suffix + ".json" for suffix in ("", "-status", "-checkpoint"))
+
+
+def language_observation_paths(language, run_index=None):
+    paths=language_paths(language,run_index)
+    stem=paths[2].removesuffix("-checkpoint.json")
+    return (*paths,stem+"-heartbeat.json",stem+"-account-progress.json")
+
+
+def _hex_digest(value):
+    return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _validate_language_evidence(host, probe, cycle, saved, language, run_index=None):
+    require(type(language) is str and language in LANGUAGE_ORDER, "language_relaunch_mismatch")
+    if run_index is None: run_index = MATRIX_LANGUAGES.index(language)
+    require(type(run_index) is int and 0 <= run_index < len(MATRIX_LANGUAGES)
+            and MATRIX_LANGUAGES[run_index] == language, "language_relaunch_mismatch")
+    require(type(host) is dict and type(host.get("schema")) is int and host["schema"] == 1
+            and host.get("strategy") == "unity-as-library"
+            and all(host.get(key) is True for key in HOST_TRUE_FIELDS)
+            and all(host.get(key) is False for key in HOST_FALSE_FIELDS)
+            and all(type(host.get(key)) is int and host[key] == 1 for key in HOST_ONCE_FIELDS)
+            and all(type(host.get(key)) is int and 0 <= host[key] <= 32 for key in HOST_EVENT_FIELDS)
+            and host.get("consumed_bundle_language") == language
+            and "error" in host and host["error"] is None, "unity_host_failed")
+    require(type(probe) is dict and type(probe.get("schema")) is int and probe["schema"] == 1
+            and type(probe.get("run_index")) is int and probe["run_index"] == run_index
+            and probe.get("expected_language") == language and probe.get("consumed_bundle_language") == language
+            and all(probe.get(key) is True for key in HOST_PROBE_TRUE_FIELDS)
+            and all(type(probe.get(key)) is int and probe[key] == wanted for key,wanted in
+                (("application_main_adapter_calls",1),("original_run_main_calls",0),
+                 ("runtime_count_before_game_start",0),("warmup_count_before_game_start",0)))
+            and _hex_digest(probe.get("canary_source_sha256")), "unity_host_probe_failed")
+    sigpipe = probe.get("sigpipe")
+    require(type(sigpipe) is dict and set(sigpipe) == set(SIGPIPE_PHASES), "sigpipe_probe_failed")
+    for phase in SIGPIPE_PHASES:
+        sample = sigpipe[phase]
+        require(type(sample) is dict and type(sample.get("schema")) is int and sample["schema"] == 1
+                and all(sample.get(key) is True for key in SIGPIPE_FLAGS)
+                and sample.get("main_thread") is (phase == "before_server"), "sigpipe_probe_failed")
+    require(probe.get("cache_return") is (run_index >= 3) and probe.get("cache_identity_recorded") is True
+            and "cache_files_same_identity" in probe
+            and probe["cache_files_same_identity"] is (True if run_index >= 3 else None),
+            "language_cache_identity_failed")
+    canaries = probe.get("canaries")
+    require(type(canaries) is dict and set(canaries) == set(CANARY_PATHS), "unity_host_probe_failed")
+    for path in CANARY_PATHS:
+        row = canaries[path]
+        require(type(row) is dict and _hex_digest(row.get("expected_sha256"))
+                and row.get("actual_sha256") == row["expected_sha256"]
+                and type(row.get("expected_bytes")) is int and 1 <= row["expected_bytes"] <= MAX_CANARY_BYTES
+                and type(row.get("actual_bytes")) is int and row["actual_bytes"] == row["expected_bytes"],
+                "unity_host_probe_failed")
+    require(type(cycle) is list and len(cycle) == 3, "language_interface_cycle_failed")
+    for row, wanted in zip(cycle,("ja","en","ko")):
+        require(type(row) is dict and row.get("language") == wanted
+                and type(row.get("ack_id")) is int and 1 <= row["ack_id"] <= 2**31-1
+                and all(row.get(key) is True for key in LANGUAGE_CYCLE_FLAGS), "language_interface_cycle_failed")
+    next_language = ("en","ja","en","ko","ko")[run_index]
+    require(type(saved) is dict and saved.get("current_language") == language
+            and saved.get("next_language") == next_language and saved.get("persisted_language") == next_language
+            and saved.get("effective_language") == language and saved.get("save_trigger") == "change-autosave"
+            and saved.get("feedback_source") == "options-save-feedback" and saved.get("feedback_state") == "saved"
+            and saved.get("request_action") == "save_options" and saved.get("request_language") == next_language
+            and saved.get("ack_language") == next_language and saved.get("ack_effective_language") == language
+            and saved.get("timed_out") is False
+            and type(saved.get("request_id")) is int and saved["request_id"] == saved.get("ack_id")
+            and type(saved.get("ack_id")) is int and 1 <= saved["ack_id"] <= 2**31-1
+            and all(saved.get(key) is True for key in LANGUAGE_SAVE_FLAGS), "language_save_failed")
+    return {"language":language,"run_index":run_index,"unity_host":unity_host_observation(host),
+        "unity_host_probe":unity_host_probe_observation(probe),
+        "interface_language_cycle":interface_language_observation(cycle),"language_save":language_save_observation(saved)}
+
+
+def validate_language_relaunch_report(native, expected_language, *, run_index=None):
+    checked = validate_report(native)
+    return _validate_language_evidence(checked["server_status"]["unity_host"], checked["unity_host_probe"],
+        checked["interface_language_cycle"], checked["language_save"], expected_language, run_index)
+
+
+def validate_language_matrix_report(value):
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"] == 2
+            and value.get("order") == list(MATRIX_LANGUAGES) and value.get("preserved_app_container") is True
+            and type(value.get("reports")) is list and len(value["reports"]) == 5, "language_matrix_failed")
+    reports = []
+    for run_index,(row,language) in enumerate(zip(value["reports"],MATRIX_LANGUAGES)):
+        require(type(row) is dict and row.get("language") == language
+                and type(row.get("run_index")) is int and row["run_index"] == run_index, "language_matrix_failed")
+        reports.append(_validate_language_evidence(row.get("unity_host"),row.get("unity_host_probe"),
+            row.get("interface_language_cycle"),row.get("language_save"),language,run_index))
+    return {"schema":2,"order":list(MATRIX_LANGUAGES),"preserved_app_container":True,"reports":reports}
+
+
+def load_language_canaries(app, descriptor_sha256):
+    raw = read_bounded(Path(app)/"probe-language-canaries.json",MAX_JSON)
+    value = parse_json(raw)
+    require(type(value.get("schema")) is int and value["schema"] == 1
+            and value.get("bundle_id") == "local.idoly.client-data"
+            and all(_hex_digest(value.get(key)) for key in
+                    ("client_archive_sha256","client_manifest_sha256","descriptor_sha256"))
+            and value["descriptor_sha256"] == descriptor_sha256, "language_canaries_invalid")
+    languages = value.get("languages")
+    require(type(languages) is dict and set(languages) == set(LANGUAGE_ORDER), "language_canaries_invalid")
+    clean = {key:value[key] for key in ("schema","bundle_id","client_archive_sha256",
+                                       "client_manifest_sha256","descriptor_sha256")}
+    clean["languages"] = {}
+    for language in LANGUAGE_ORDER:
+        rows = languages[language]
+        require(type(rows) is dict and set(rows) == set(CANARY_PATHS), "language_canaries_invalid")
+        clean["languages"][language] = {}
+        for path in CANARY_PATHS:
+            row = rows[path]
+            require(type(row) is dict and type(row.get("bytes")) is int and 1 <= row["bytes"] <= MAX_CANARY_BYTES
+                    and _hex_digest(row.get("sha256")), "language_canaries_invalid")
+            clean["languages"][language][path] = {"bytes":row["bytes"],"sha256":row["sha256"]}
+    return clean,hashlib.sha256(raw).hexdigest()
+
+
+def compare_language_canaries(summary, expected_language, canaries, source_sha256):
+    require(summary.get("language") == expected_language
+            and summary["unity_host_probe"]["canary_source_sha256"] == source_sha256,
+            "language_canaries_mismatch")
+    for path in CANARY_PATHS:
+        row = summary["unity_host_probe"]["canaries"][path]
+        expected = canaries["languages"][expected_language][path]
+        require(row["expected_sha256"] == expected["sha256"] and row["expected_bytes"] == expected["bytes"],
+                "language_canaries_mismatch")
+
+
+def unity_host_observation(value):
+    if type(value) is not dict: return {}
+    clean = {key:value[key] for key in (*HOST_TRUE_FIELDS,*HOST_FALSE_FIELDS) if type(value.get(key)) is bool}
+    for key in (*HOST_ONCE_FIELDS,*HOST_EVENT_FIELDS):
+        if type(value.get(key)) is int and 0 <= value[key] <= 32: clean[key] = value[key]
+    if type(value.get("schema")) is int and value["schema"] == 1: clean["schema"] = 1
+    if value.get("strategy") == "unity-as-library": clean["strategy"] = "unity-as-library"
+    if value.get("consumed_bundle_language") in LANGUAGE_ORDER:
+        clean["consumed_bundle_language"] = value["consumed_bundle_language"]
+    if "error" in value and value["error"] is None: clean["error"] = None
+    elif type(value.get("error")) is str and value["error"] in UNITY_HOST_ERROR_CODES: clean["error"] = value["error"]
+    return clean
+
+
+def sigpipe_observation(value):
+    if type(value) is not dict: return {}
+    clean = {}
+    for phase in SIGPIPE_PHASES:
+        row = value.get(phase)
+        if type(row) is not dict: continue
+        sample = {key:row[key] for key in (*SIGPIPE_FLAGS,"main_thread") if type(row.get(key)) is bool}
+        if type(row.get("schema")) is int and row["schema"] == 1: sample["schema"] = 1
+        if sample: clean[phase] = sample
+    return clean
+
+
+def unity_host_probe_observation(value):
+    if type(value) is not dict: return {}
+    clean = {key:value[key] for key in HOST_PROBE_TRUE_FIELDS if type(value.get(key)) is bool}
+    for key in HOST_PROBE_COUNTS:
+        if type(value.get(key)) is int and 0 <= value[key] <= 32: clean[key] = value[key]
+    if type(value.get("run_index")) is int and 0 <= value["run_index"] <= 4: clean["run_index"] = value["run_index"]
+    for key in ("cache_return", "cache_identity_recorded"):
+        if type(value.get(key)) is bool: clean[key] = value[key]
+    if "cache_files_same_identity" in value and (type(value["cache_files_same_identity"]) is bool
+            or value["cache_files_same_identity"] is None):
+        clean["cache_files_same_identity"] = value["cache_files_same_identity"]
+    if type(value.get("schema")) is int and value["schema"] == 1: clean["schema"] = 1
+    for key in ("expected_language","consumed_bundle_language"):
+        if value.get(key) in LANGUAGE_ORDER: clean[key] = value[key]
+    if _hex_digest(value.get("canary_source_sha256")): clean["canary_source_sha256"] = value["canary_source_sha256"]
+    pipe = sigpipe_observation(value.get("sigpipe"))
+    if pipe: clean["sigpipe"] = pipe
+    raw = value.get("canaries")
+    if type(raw) is dict:
+        rows = {}
+        for path in CANARY_PATHS:
+            row = raw.get(path)
+            if type(row) is not dict: continue
+            sample = {key:row[key] for key in ("expected_sha256","actual_sha256") if _hex_digest(row.get(key))}
+            for key in ("expected_bytes","actual_bytes"):
+                if type(row.get(key)) is int and 0 <= row[key] <= MAX_CANARY_BYTES: sample[key] = row[key]
+            if sample: rows[path] = sample
+        if rows: clean["canaries"] = rows
+    return clean
+
+
+def interface_language_observation(value):
+    if type(value) is not list: return []
+    clean = []
+    for row in value[:3]:
+        if type(row) is not dict: continue
+        sample = {key:row[key] for key in LANGUAGE_CYCLE_FLAGS if type(row.get(key)) is bool}
+        if row.get("language") in LANGUAGE_ORDER: sample["language"] = row["language"]
+        if type(row.get("ack_id")) is int and 1 <= row["ack_id"] <= 2**31-1: sample["ack_id"] = row["ack_id"]
+        if sample: clean.append(sample)
+    return clean
+
+
+def language_save_observation(value):
+    if type(value) is not dict: return {}
+    clean = {key:value[key] for key in LANGUAGE_SAVE_FLAGS if type(value.get(key)) is bool}
+    if value.get("save_trigger") == "change-autosave": clean["save_trigger"] = "change-autosave"
+    if value.get("feedback_source") == "options-save-feedback": clean["feedback_source"] = "options-save-feedback"
+    if value.get("feedback_state") in ("ready","pending","saving","saved","invalid","failed","unknown"):
+        clean["feedback_state"] = value["feedback_state"]
+    if value.get("request_action") in ("save_options","unknown"): clean["request_action"] = value["request_action"]
+    if type(value.get("timed_out")) is bool: clean["timed_out"] = value["timed_out"]
+    if type(value.get("observer_matches_current_handler")) is bool:clean["observer_matches_current_handler"]=value["observer_matches_current_handler"]
+    for key in ("current_language","next_language","persisted_language","effective_language","request_language","ack_language","ack_effective_language","selected_language"):
+        if value.get(key) in (*LANGUAGE_ORDER,"unknown"): clean[key] = value[key]
+    for key in ("request_id","ack_id"):
+        if type(value.get(key)) is int and 1 <= value[key] <= 2**31-1: clean[key] = value[key]
+    return clean
+
+
+def language_observation(value):
+    if type(value) is not dict: return {}
+    status = value.get("server_status")
+    host = value.get("unity_host")
+    if type(host) is not dict and type(status) is dict: host = status.get("unity_host")
+    clean = {}
+    for key,raw,project in (("unity_host",host,unity_host_observation),
+            ("unity_host_probe",value.get("unity_host_probe"),unity_host_probe_observation),
+            ("interface_language_cycle",value.get("interface_language_cycle"),interface_language_observation),
+            ("language_save",value.get("language_save"),language_save_observation)):
+        sample = project(raw)
+        if sample: clean[key] = sample
+    return clean
+
+
+
+def server_gate_observation(value):
+    """Preserve small gate scalar types while excluding raw native errors."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    for key in ("hook_installed", "python_initialized"):
+        item = value.get(key)
+        if type(item) is bool or (type(item) is int and item in (0,1)):
+            clean[key] = item
+    for key in ("captured", "forwarded", "attempts"):
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= 16:
+            clean[key] = item
+    if "error" in value:
+        clean["error"] = None if value["error"] is None else "non_null"
+    return clean
+
+
+def validate_report(value):
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"] == 1,
+            "probe_schema_differs")
+    require(type(value.get("original_called")) is int and value["original_called"] == 1
+            and value.get("main_thread") is True and value.get("application_argument_matches") is True
+            and value.get("command_completion_main_thread") is True,
+            "unity_original_gate_failed")
+    status, ports, crypto = (value.get(key) for key in ("server_status", "ports", "commoncrypto"))
+    require(all(type(item) is dict for item in (status, ports, crypto)), "probe_fields_missing")
+    require(type(status.get("schema")) is int and status["schema"] == 1
+            and type(status.get("phase")) is int and status["phase"] == 4
+            and status.get("hook_installed") is True and status.get("python_initialized") is True
+            and status.get("error") is None
+            and all(type(status.get(key)) is int and status[key] == 1
+                    for key in ("captured", "forwarded", "attempts")),
+            "embedded_server_not_ready")
+    budget, budget_probe = status.get("octo_budget"), value.get("octo_budget_probe")
+    require(type(budget_probe) is dict and budget_probe.get("prepared_without_managed_callbacks") is True,
+            "octo_budget_preinit_failed")
+    require(budget_probe.get("apis_registered") is True, "octo_budget_registration_failed")
+    require(type(budget_probe.get("during_original_seconds")) in (int,float)
+            and math.isfinite(budget_probe["during_original_seconds"])
+            and budget_probe["during_original_seconds"] == 10
+            and budget_probe.get("during_original_configured") is False, "octo_budget_original_failed")
+    require(all(budget_probe.get(key) is True for key in
+                ("configured_before_first_queued_work", "queued_work_on_main_thread", "class_initialized"))
+            and all(type(budget_probe.get(key)) in (int,float) and math.isfinite(budget_probe[key])
+                    and budget_probe[key] == 330 for key in ("first_queued_seconds", "last_snapshot"))
+            and all(type(budget_probe.get(key)) is int and budget_probe[key] == wanted for key,wanted in
+                (("initializations",1),("reads",2),("writes",1),("first_queued_snapshot_count",1),
+                 ("writes_before_initialization",0))),
+            "octo_budget_queued_work_failed")
+    require(type(budget) is dict and type(budget.get("schema")) is int and budget["schema"] == 1
+            and budget.get("status") == "configured" and budget.get("prepared") is True
+            and budget.get("configured") is True and budget.get("scope") == "unified-loopback"
+            and "error" in budget and budget["error"] is None
+            and all(type(budget.get(key)) in (int,float) and math.isfinite(budget[key]) and budget[key] == wanted
+                    for key,wanted in (("original_seconds",10),("effective_seconds",330),("cache_wait_seconds",300))),
+            "octo_budget_queued_work_failed")
+    http = status.get("http_readiness")
+    require(type(http) is dict and type(http.get("schema")) is int and http["schema"] == 1
+            and http.get("ok") is True and http.get("transport") == "NSURLSession"
+            and http.get("url") == HTTP_READINESS_URL
+            and type(http.get("http_status")) is int and http["http_status"] == 200
+            and http.get("error_code") == "none" and http.get("body_is_json") is True
+            and type(http.get("received_bytes")) is int and 1 <= http["received_bytes"] <= 16384
+            and http.get("worker_main_thread") is False
+            and "ns_error_domain" in http and http["ns_error_domain"] is None
+            and "ns_error_code" in http and http["ns_error_code"] is None,
+            "native_http_readiness_failed")
+    header = value.get("native_header")
+    require(type(header) is dict and header.get("owned_root_only") is True, "native_header_layout_failed")
+    require(header.get("restore_succeeded") is True, "native_header_restore_failed")
+    for name in HEADER_PHASES:
+        sample = header.get(name)
+        require(type(sample) is dict and all(sample.get(key) is True for key in HEADER_BOOL_FIELDS)
+                and type(sample.get("button_count")) is int and sample["button_count"] == 2
+                and all(type(sample.get(key)) in (int, float) and 0 < sample[key] <= 16384
+                        and math.isfinite(sample[key]) for key in HEADER_NUMBER_FIELDS), "native_header_layout_failed")
+        require(sample["header_width"] <= sample["root_width"]
+                and sample["actions_width"] <= sample["header_width"]
+                and sample["header_height"] <= sample["root_height"]
+                and sample["min_button_height"] >= 44, "native_header_layout_failed")
+        if name in ("current", "restored"):
+            require(all(sample[key] >= floor for key, floor in zip(HEADER_FONT_FIELDS, (16, 20, 16, 12))),
+                    "native_header_layout_failed")
+    current, wide, ultra, restored = (header[name] for name in HEADER_PHASES)
+    require(wide["root_width"] == 1920 and wide["root_height"] == 1080
+            and wide["button_min_font"] >= 20 and wide["status_font"] >= 20
+            and ultra["root_width"] == 3840 and ultra["root_height"] == 2160
+            and ultra["button_min_font"] >= 40 and ultra["status_font"] >= 40
+            and all(wide[key] > current[key] and ultra[key] > wide[key] for key in HEADER_FONT_FIELDS),
+            "native_header_layout_failed")
+    require(all(abs(restored[key] - current[key]) <= 0.1
+                for key in ("root_width", "root_height", *HEADER_FONT_FIELDS)), "native_header_restore_failed")
+    expected_lifecycle = {"installed":True, "strategy":"reuse-existing", "initialize_calls":1,
+                          "original_initialize_calls":0, "reused_existing_calls":1}
+    lifecycle = status.get("keyboard_lifecycle")
+    require(status.get("keyboard_ready") is True and type(lifecycle) is dict
+            and all(type(lifecycle.get(key)) is type(wanted) and lifecycle[key] == wanted
+                    for key, wanted in expected_lifecycle.items()), "keyboard_after_init_failed")
+    keyboard = value.get("keyboard")
+    require(type(keyboard) is dict, "keyboard_evidence_missing")
+    expected_keyboard = {
+        "before_capture": {"ready":False, "phase":2, "returned_nil":False,
+                           "returned_initialized_field":True, "returned_same_field":True,
+                           "original_calls":1, "field_creation_count":1},
+        "before_launch": {"ready":False, "phase":2, "returned_nil":False,
+                          "returned_initialized_field":True, "returned_same_field":True,
+                          "original_calls":2, "field_creation_count":1},
+        "during_init": {"ready":False, "phase":4, "returned_nil":False,
+                        "returned_initialized_field":True, "returned_same_field":True,
+                        "original_calls":3, "field_creation_count":1},
+        "after_init": {"ready":True, "phase":4, "returned_nil":False,
+                       "returned_initialized_field":True, "returned_same_field":True,
+                       "original_calls":4, "field_creation_count":1},
+    }
+    for name, expected in expected_keyboard.items():
+        observed = keyboard.get(name)
+        require(type(observed) is dict and all(type(observed.get(key)) is type(wanted)
+                and observed[key] == wanted for key, wanted in expected.items()),
+                "keyboard_" + name + "_failed")
+        expected = dict(expected_lifecycle)
+        if name in ("before_capture", "before_launch"):
+            expected.update(installed=False, initialize_calls=0, reused_existing_calls=0)
+        seen_lifecycle = observed.get("lifecycle")
+        require(type(seen_lifecycle) is dict and all(type(seen_lifecycle.get(key)) is type(wanted)
+                and seen_lifecycle[key] == wanted for key, wanted in expected.items()),
+                "keyboard_" + name + "_failed")
+    host_probe = value.get("unity_host_probe")
+    expected_language = host_probe.get("expected_language") if type(host_probe) is dict else None
+    language_summary = _validate_language_evidence(status.get("unity_host"), host_probe,
+        value.get("interface_language_cycle"), value.get("language_save"), expected_language,
+        host_probe.get("run_index") if type(host_probe) is dict else None)
+    data = status.get("client_data")
+    require(type(data) is dict and data.get("selected") is True
+            and data.get("language") == expected_language
+            and data.get("bundle_identifier") == "local.idoly.client-data", "client_language_selection_failed")
+    require(status.get("launch_requested") is True and status.get("launch_prepared") is True
+            and status.get("launcher_visible") is False, "launcher_handoff_failed")
+    launcher = value.get("launcher")
+    require(type(launcher) is dict, "launcher_evidence_missing")
+    require(type(launcher.get("premature_phase")) is int and launcher["premature_phase"] == 1
+            and type(launcher.get("premature_original_called")) is int
+            and launcher["premature_original_called"] == 0
+            and launcher.get("premature_launch_requested") is False,
+            "premature_launch_not_ignored")
+    early = value.get("early_status")
+    require(type(early) is dict and type(early.get("id")) is int and early["id"] == 2718
+            and early.get("ok") is True and early.get("state") == "starting" and early.get("running") is False
+            and type(early.get("phase")) is int and early["phase"] == 1
+            and type(early.get("captured")) is int and early["captured"] == 1
+            and early.get("completion_main_thread") is True, "early_status_correlation_failed")
+    require(type(launcher.get("startup_evidence_version")) is int and launcher["startup_evidence_version"] == 2
+            and type(launcher.get("premature_captured")) is int and launcher["premature_captured"] == 1
+            and launcher.get("server_ready_before_runtime") is True
+            and type(launcher.get("cold_original_called")) is int and launcher["cold_original_called"] == 0
+            and type(launcher.get("cold_attempts")) is int and launcher["cold_attempts"] == 1
+            and launcher.get("host_capture_once") is True, "server_not_ready_before_capture")
+    require(type(launcher.get("ready_phase")) is int and launcher["ready_phase"] == 2
+            and type(launcher.get("ready_captured")) is int and launcher["ready_captured"] == 1
+            and type(launcher.get("ready_original_called")) is int and launcher["ready_original_called"] == 0
+            and launcher.get("ready_launch_requested") is False
+            and launcher.get("ready_launch_prepared") is False
+            and type(launcher.get("ready_observations")) is int and launcher["ready_observations"] >= 2
+            and type(launcher.get("ready_wait_seconds")) in (int, float)
+            and 5.0 <= launcher["ready_wait_seconds"] <= 60.0,
+            "unity_started_before_launch_button")
+    require(launcher.get("ready_launcher_visible") is True and launcher.get("ready_button_found") is True
+            and launcher.get("ready_button_enabled") is True
+            and launcher.get("ready_button_kind") == "UIButton"
+            and launcher.get("ready_button_title") in ("게임 시작", "ゲーム開始", "Start Game"), "ready_launch_control_failed")
+    require(all(launcher.get(key) is True for key in LAUNCH_SETTINGS_FLAGS), "launch_settings_barrier_failed")
+    require(launcher.get("button_action_dispatched") is True
+            and launcher.get("button_control_event") == "touch-up-inside"
+            and type(launcher.get("button_dispatch_count")) is int and launcher["button_dispatch_count"] == 1
+            and launcher.get("duplicate_launch_called") is True
+            and launcher.get("forwarded_after_button") is True, "explicit_launch_action_failed")
+    corner = value.get("corner_gesture")
+    require(type(corner) is dict and corner.get("game_window_key") is True
+            and type(corner.get("matching_count")) is int and corner["matching_count"] == 1
+            and corner.get("recognizer_name") == "idoly.server-menu-corner"
+            and type(corner.get("one_finger_count")) is int and corner["one_finger_count"] == 1
+            and type(corner.get("three_finger_count")) is int and corner["three_finger_count"] == 0
+            and type(corner.get("minimum_press_seconds")) in (int, float) and corner["minimum_press_seconds"] == 2.0
+            and type(corner.get("allowable_movement_points")) in (int, float) and corner["allowable_movement_points"] == 12.0
+            and corner.get("delegate_present") is True and corner.get("delays_touches_began") is False
+            and corner.get("delays_touches_ended") is False and corner.get("cancels_touches_in_view") is True,
+            "corner_gesture_configuration_failed")
+    require(type(ports.get("grpc")) is int and ports["grpc"] == 50051
+            and type(ports.get("assets")) is int and ports["assets"] == 8080
+            and ports.get("grpc_connect") is True and ports.get("assets_connect") is True,
+            "embedded_listener_probe_failed")
+    require(crypto.get("nist_aes128_cbc") is True and crypto.get("nist_aes256_cbc") is True,
+            "commoncrypto_fixture_failed")
+    native_crypto = value.get("native_crypto")
+    require(value.get("crypto_completion_main_thread") is True and type(native_crypto) is dict
+            and all(native_crypto.get(key) is True for key in
+                    ("ok", "nist_encrypt", "nist_decrypt", "invalid_iv_rejected"))
+            and native_crypto.get("worker_main_thread") is False,
+            "python_commoncrypto_bridge_failed")
+    host = value.get("host_status")
+    require(type(host) is dict and host.get("ok") is True
+            and type(host.get("id")) is int and host["id"] == 1, "native_status_command_failed")
+    result = host.get("result")
+    require(type(result) is dict and result.get("state") == "ready" and result.get("running") is True
+            and result.get("last_error") is None, "python_host_not_ready")
+    runtime = result.get("runtime")
+    require(type(runtime) is dict and runtime.get("running") is True
+            and runtime.get("grpc_address") == "127.0.0.1:50051"
+            and runtime.get("asset_url") == "http://127.0.0.1:8080", "python_host_listeners_differ")
+    menu = value.get("menu_lifetime")
+    require(type(menu) is dict and all(menu.get(key) is True for key in (
+        "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
+        "server_control_found", "server_control_disabled_while_running",
+        "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
+        "grpc_connected_after_close", "assets_connected_after_close")), "settings_menu_lifetime_failed")
+    require(menu.get("return_button_kind") == "UIButton" and menu.get("server_button_kind") == "UIButton"
+            and menu.get("return_control_event") == "touch-up-inside", "settings_menu_lifetime_failed")
+    copied = menu.get("diagnostics_copy")
+    require(type(copied) is dict and all(copied.get(key) is True for key in DIAGNOSTICS_COPY_BOOL_FIELDS)
+            and copied.get("timed_out") is False and type(copied.get("text_bytes")) is int
+            and 1 <= copied["text_bytes"] <= 32768, "settings_diagnostics_copy_failed")
+    zipped = menu.get("zip_import_picker")
+    require(type(zipped) is dict and zipped.get("scope") == "stock-simulator"
+            and zipped.get("cancel_trigger") == "delegate-callback" and zipped.get("timed_out") is False
+            and all(zipped.get(key) is True for key in ZIP_IMPORT_SERVER_FLAGS)
+            and type(zipped.get("observations")) is int and 1 <= zipped["observations"] <= 200
+            and type(zipped.get("elapsed_seconds")) in (int, float)
+            and math.isfinite(zipped["elapsed_seconds"]) and 0 <= zipped["elapsed_seconds"] <= 60
+            and type(zipped.get("passes")) is list and len(zipped["passes"]) == 2
+            and all(type(sample) is dict and all(sample.get(key) is True for key in ZIP_IMPORT_PASS_BOOL_FIELDS)
+                    and type(sample.get("document_picker_mode")) is int and sample["document_picker_mode"] == 0
+                    for sample in zipped["passes"]), "settings_zip_import_picker_failed")
+    roundtrip = validate_zip_roundtrip(menu.get("zip_roundtrip"), language_summary["run_index"])
+    accounts = validate_account_management(menu.get("account_management"), language_summary["run_index"])
+    official_prompt = validate_official_prompt(menu.get("official_prompt"), language_summary["run_index"])
+    width, window_width = menu.get("frame_width"), menu.get("window_width")
+    require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (width, window_width))
+            and abs(width - window_width) <= 2, "settings_menu_width_failed")
+    dismissal = menu_close_observation(menu.get("dismiss_observation"))
+    require(all(dismissal.get(key) is False for key in (
+        "presented_controller_remaining", "settings_controller_still_presented", "settings_view_attached", "timed_out"))
+        and dismissal.get("game_window_key") is True and dismissal.get("observations", 0) >= 1
+        and "wait_seconds" in dismissal, "settings_menu_dismissal_evidence_failed")
+    web = menu.get("web")
+    require(type(web) is dict and all(web.get(key) is True for key in (
+        "web_found", "evaluation_succeeded", "ready", "forms_present", "scale_2_present", "buffer_4096_present",
+        "no_horizontal_overflow", "navigation_file_url", "web_attached", "evaluation_started", "evaluation_completed",
+        "data_store_reused", "launcher_store_nonpersistent", "menu_store_nonpersistent", "web_view_recreated", "launcher_document_marker_absent"))
+        and web.get("navigation_loading") is False and type(web.get("navigation_progress")) in (int,float)
+        and web["navigation_progress"] == 1.0 and web.get("timed_out") is False, "settings_web_readiness_or_layout_failed")
+    viewport, content = web.get("viewport_width"), web.get("content_width")
+    require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (viewport, content))
+            and content <= viewport + 2 and type(web.get("select_count")) is int and 4 <= web["select_count"] <= 100,
+            "settings_web_metrics_failed")
+    after = menu.get("host_status_after_close")
+    after_result = after.get("result") if type(after) is dict else None
+    after_runtime = after_result.get("runtime") if type(after_result) is dict else None
+    require(type(after) is dict and type(after.get("id")) is int and after["id"] == 2 and after.get("ok") is True
+            and type(after_result) is dict and after_result.get("state") == "ready"
+            and after_result.get("running") is True and after_result.get("last_error") is None
+            and type(after_runtime) is dict and after_runtime.get("running") is True
+            and after_runtime.get("grpc_address") == "127.0.0.1:50051"
+            and after_runtime.get("asset_url") == "http://127.0.0.1:8080", "server_stopped_after_menu_close")
+    # Copy only public, explicitly checked fields into the audit.
+    return {"schema": 1, "original_called": 1, "main_thread": True,
+            "application_argument_matches": True, "command_completion_main_thread": True,
+            "crypto_completion_main_thread": True,
+            "native_crypto": {"ok": True, "nist_encrypt": True, "nist_decrypt": True,
+                              "invalid_iv_rejected": True, "worker_main_thread": False},
+            "keyboard": keyboard_observation(keyboard),
+            "octo_budget_probe": octo_budget_probe_observation(budget_probe),
+            "unity_host_probe":language_summary["unity_host_probe"],
+            "interface_language_cycle":language_summary["interface_language_cycle"],
+            "language_save":language_summary["language_save"],
+            "native_header": header_observation(header),
+            "early_status": {key: early[key] for key in (
+                "id", "ok", "state", "running", "phase", "captured", "completion_main_thread")},
+            "launcher": {key: launcher[key] for key in (
+                "premature_phase", "premature_original_called", "premature_launch_requested", "premature_captured",
+                "startup_evidence_version", "server_ready_before_runtime", "cold_original_called", "cold_attempts", "host_capture_once",
+                "ready_phase", "ready_captured", "ready_original_called", "ready_launch_requested", "ready_launch_prepared",
+                "ready_observations", "ready_wait_seconds", "ready_launcher_visible", "ready_button_found",
+                "ready_button_enabled", "ready_button_title", "ready_button_kind", "button_action_dispatched",
+                "button_control_event", "button_dispatch_count", "duplicate_launch_called", "forwarded_after_button", *LAUNCH_SETTINGS_FLAGS)},
+            "corner_gesture": {key: corner[key] for key in (
+                "game_window_key", "matching_count", "recognizer_name", "one_finger_count", "three_finger_count", "minimum_press_seconds",
+                "allowable_movement_points", "delegate_present", "delays_touches_began",
+                "delays_touches_ended", "cancels_touches_in_view")},
+            "server_status": {**{key: status[key] for key in
+                ("schema", "phase", "hook_installed", "python_initialized", "captured", "forwarded", "attempts",
+                 "launch_requested", "launch_prepared", "launcher_visible")},
+                 "keyboard_lifecycle":keyboard_lifecycle_observation(lifecycle), "keyboard_ready":True,
+                 "http_readiness":http_readiness_observation(http),
+                 "octo_budget":octo_budget_observation(budget),
+                 "unity_host":language_summary["unity_host"],
+                 "client_data":{key: data[key] for key in ("selected", "language", "bundle_identifier")}},
+            "menu_lifetime": {**{key: menu[key] for key in (
+                "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
+                "server_control_found", "server_control_disabled_while_running",
+                "return_button_kind", "server_button_kind", "return_control_event",
+                "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
+                "grpc_connected_after_close", "assets_connected_after_close", "frame_width", "window_width")},
+                "dismiss_observation":dismissal, "diagnostics_copy":diagnostics_copy_observation(copied),
+                "zip_import_picker":zip_import_observation(zipped), "zip_roundtrip":roundtrip, "account_management":accounts, "official_prompt":official_prompt,
+                "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
+                    "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
+                    "viewport_width", "content_width", "select_count", "navigation_loading", "navigation_file_url",
+                    "web_attached", "navigation_progress", "evaluation_started", "evaluation_completed", "data_store_reused",
+                    "launcher_store_nonpersistent", "menu_store_nonpersistent", "web_view_recreated", "launcher_document_marker_absent")},
+                "host_status_after_close": {"id":2,"ok":True,"result":{"state":"ready","running":True,
+                    "runtime":{key:after_runtime[key] for key in ("running","grpc_address","asset_url")}}}},
+            "ports": {key: ports[key] for key in ("grpc", "assets", "grpc_connect", "assets_connect")},
+            "commoncrypto": {"nist_aes128_cbc": True, "nist_aes256_cbc": True},
+            "host_status": {"id": 1, "ok": True, "result": {"state": "ready", "running": True,
+                "runtime": {key: runtime[key] for key in ("running", "grpc_address", "asset_url")}}}}
+
+
+
+UI_TEST_SOURCE_PATHS = ("ui_test_driver.py", "ui-tests/CancelDriverHost.swift", "ui-tests/OfficialPromptCancelTests.swift",
+    "ui-tests/IdolyProbeCancelUITests.xcodeproj/project.pbxproj",
+    "ui-tests/IdolyProbeCancelUITests.xcodeproj/xcshareddata/xcschemes/IdolyProbeCancelUITests.xcscheme")
+UI_TEST_IDENTIFIER = "IdolyProbeCancelUITests/OfficialPromptCancelTests/testCancelExistingProbePrompt"
+
+
+def official_ui_source_pins():
+    try:
+        return {name:hashlib.sha256(read_bounded(PROBE_SOURCE_DIR/name,256*1024)).hexdigest() for name in UI_TEST_SOURCE_PATHS}
+    except (OSError,ProbeError):
+        raise ProbeError("official_ui_test_sources_unavailable") from None
+
+
+def validate_official_ui_proof(value, *, expected_simulator=None):
+    fail="official_ui_test_evidence_failed"
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"]==1
+        and value.get("status")=="PASS" and value.get("execution")=="public_xctest"
+        and value.get("test_identifier")==UI_TEST_IDENTIFIER
+        and type(value.get("tests")) is int and value["tests"]==1
+        and type(value.get("failures")) is int and value["failures"]==0
+        and type(value.get("skipped")) is int and value["skipped"]==0
+        and value.get("actual_cancel_tap") is True and value.get("ready_marker_observed") is True,fail)
+    identifier=value.get("simulator_udid")
+    require(type(identifier) is str and re.fullmatch(r"[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}",identifier)
+        and (expected_simulator is None or identifier==expected_simulator),fail)
+    pins=official_ui_source_pins()
+    source_hash=hashlib.sha256(json.dumps(pins,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    require(type(value.get("source_pins")) is dict and value["source_pins"]==pins and value.get("source_sha256")==source_hash
+        and all(_hex_digest(value.get(key)) for key in ("xctestrun_sha256","xcresult_summary_sha256","xcresult_tests_sha256")),fail)
+    return {key:value[key] for key in ("schema","status","execution","simulator_udid","test_identifier","tests","failures",
+        "skipped","actual_cancel_tap","ready_marker_observed","source_pins","source_sha256","xctestrun_sha256",
+        "xcresult_summary_sha256","xcresult_tests_sha256")}
+
+
+def _poll_official_ui_driver(driver):
+    try:
+        state=driver.poll()
+    except DriverError as error:
+        raise ProbeError(error.code if error.code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed") from None
+    require(type(state) is dict and state.get("phase") in ("building","running","passed","failed")
+        and type(state.get("ready")) is bool,"official_ui_test_driver_failed")
+    if state["phase"]=="failed":
+        code=state.get("error_code")
+        raise ProbeError(code if type(code) is str and code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed")
+    return state
+
+
+def official_ui_build_metadata(value):
+    """Project only fixed pre-input schema metadata, never paths or plist values."""
+    fail="official_ui_metadata_invalid"
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"]==1
+        and value.get("scope")=="pre-input-generated-xctestrun" and type(value.get("check")) is str and value["check"] in UI_DIAGNOSTIC_CHECKS,fail)
+    clean={key:value[key] for key in ("schema","scope","check")}
+    for key in ("all_xctestrun_count","candidate_count","configuration_count","target_count"):
+        if key in value:
+            require(type(value[key]) is int and 0<=value[key]<=129,fail);clean[key]=value[key]
+    if "plist_bytes" in value:
+        require(type(value["plist_bytes"]) is int and 1<=value["plist_bytes"]<=262144,fail);clean["plist_bytes"]=value["plist_bytes"]
+    if "plist_sha256" in value:
+        require(_hex_digest(value["plist_sha256"]),fail);clean["plist_sha256"]=value["plist_sha256"]
+    if "format_version_type" in value:
+        require(type(value["format_version_type"]) is str and value["format_version_type"] in UI_DIAGNOSTIC_TYPES,fail);clean["format_version_type"]=value["format_version_type"]
+    if "format_version" in value:
+        observed=value["format_version"];require(observed is None or (type(observed) is int and observed in (1,2)),fail);clean["format_version"]=observed
+    for key in ("blueprint_matches","is_ui_test_bundle"):
+        if key in value:
+            require(type(value[key]) is bool,fail);clean[key]=value[key]
+    for group,names in (("paths",("test_host","test_bundle","dummy_app")),("bundles",("runner","dummy"))):
+        if group not in value:continue
+        require(type(value[group]) is dict,fail);clean[group]={}
+        for name in names:
+            if name not in value[group]:continue
+            row=value[group][name];require(type(row) is dict,fail)
+            if group=="paths":
+                require(type(row.get("type")) is str and row["type"] in UI_DIAGNOSTIC_TYPES
+                    and type(row.get("token_kind")) is str and row["token_kind"] in UI_DIAGNOSTIC_TOKEN_KINDS
+                    and type(row.get("owned")) is bool and "exists" in row and (row["exists"] is None or type(row["exists"]) is bool),fail)
+                clean[group][name]={key:row[key] for key in ("type","token_kind","owned","exists")}
+            else:
+                require(type(row.get("bundle_matches")) is bool and type(row.get("platforms_type")) is str and row["platforms_type"] in UI_DIAGNOSTIC_TYPES
+                    and type(row.get("platforms_exact")) is bool,fail)
+                clean[group][name]={key:row[key] for key in ("bundle_matches","platforms_type","platforms_exact")}
+    require(len(json.dumps(clean,separators=(",",":"),sort_keys=True).encode())<=8192,fail)
+    return clean
+
+
+def official_ui_failure_observation(value):
+    if type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1 or value.get("scope") != "owned-public-xctest-failure":
+        return {}
+    clean={"schema":1,"scope":"owned-public-xctest-failure"}
+    if value.get("phase") in ("building","testing","waiting_native_report","summary","tests","unknown"):clean["phase"]=value["phase"]
+    if type(value.get("error_code")) is str and value["error_code"] in UI_DRIVER_ERRORS:clean["error_code"]=value["error_code"]
+    for key in ("ready_marker_observed","test_spawned"):
+        if type(value.get(key)) is bool:clean[key]=value[key]
+    for key,minimum,maximum in (("child_pid",1,2**31-1),("child_exit_code",-255,255)):
+        observed=value.get(key)
+        if observed is None or type(observed) is int and minimum<=observed<=maximum:clean[key]=observed
+    elapsed=value.get("phase_elapsed_seconds")
+    if type(elapsed) in (int,float) and math.isfinite(elapsed) and 0<=elapsed<=900:clean["phase_elapsed_seconds"]=elapsed
+    markers=value.get("markers")
+    if type(markers) is dict:clean["markers"]={key:markers[key] for key in UI_PHASE_MARKERS.values() if type(markers.get(key)) is bool}
+    return clean
+
+
+STARTUP_FAILURE_FILE = "ios-startup-failure.json"
+STARTUP_FAILURE_MAX = 16 * 1024
+STARTUP_FAILURE_STAGES = frozenset(("catalog", "resources", "storage", "runtime"))
+STARTUP_FAILURE_CODES = frozenset(("permission_denied", "missing_input", "address_in_use", "insufficient_space", "invalid_input", "internal_error"))
+STARTUP_FAILURE_TYPES = frozenset(("PermissionError", "FileNotFoundError", "OSError", "ValueError", "RuntimeError", "TypeError", "AttributeError", "ImportError", "ModuleNotFoundError", "KeyError", "IndexError", "LookupError", "UnicodeError", "UnicodeDecodeError", "OperationalError", "DatabaseError", "RpcFailure", "OtherError"))
+STARTUP_FAILURE_FILES = frozenset(('__init__.py', 'account_manager.py', 'app_runtime.py', 'appearance.py', 'application.py', 'assets.py', 'bundled_translations.py', 'card_level_missions.py', 'card_progression.py', 'catalog.py', 'codec.py', 'company.py', 'diagnostics.py', 'dream.py', 'dream_capture.py', 'event_settings.py', 'excursion.py', 'gameplay.py', 'h2_server.py', 'home_talk.py', 'initial_inventory.py', 'ios_client_data.py', 'ios_host.py', 'language_settings.py', 'latest_cohort_pins.py', 'lessons.py', 'live_accessories.py', 'live_assets.py', 'live_engine.py', 'live_input.py', 'live_rejection_diagnostics.py', 'love.py', 'love_catalog.py', 'love_compatibility_pins.py', 'main_live.py', 'master_sort.py', 'media_access.py', 'media_outfit_policy.py', 'media_panorama.py', 'media_profile.py', 'media_runtime.py', 'media_scenes.py', 'media_settings.py', 'media_stories.py', 'mp4_audio_broker.py', 'mp4_audio_bundle.py', 'octo_cache.py', 'octo_http.py', 'octo_manifest.py', 'octo_runtime.py', 'official_account.py', 'official_account_config.py', 'official_import.py', 'official_roots.py', 'official_transport.py', 'panorama_rules.py', 'photo_names.py', 'photo_preferences.py', 'photo_shooting.py', 'playback.py', 'preference_master_data.py', 'presentation.py', 'profile_directory.py', 'profile_emblems.py', 'profile_favorites.py', 'profile_layout.py', 'profile_messages.py', 'profile_names.py', 'profile_preferences.py', 'profile_top.py', 'public_cohort_support.py', 'public_payload.py', 'public_payload_transaction.py', 'pvp.py', 'quest.py', 'render_probe.py', 'resource_archive.py', 'resource_library.py', 'resource_routes.py', 'resource_translation.py', 'resource_translation_cache.py', 'resource_translation_runtime.py', 'rpc.py', 'runtime_history.py', 'schema.py', 'shared_resource_broker.py', 'shared_resource_store.py', 'shared_resource_views.py', 'social.py', 'startup_cache.py', 'startup_receipt.py', 'startup_checks.py', 'state.py', 'story_catalog.py', 'story_read_rules.py', 'story_reads.py', 'tutorial_messages.py', 'tutorial_progression.py', 'tutorial_replay.py', 'wardrobe_diagnostics.py'))
+
+
+def _startup_function(value):
+    return type(value) is str and len(value) <= 80 and value.isascii() and (value.isidentifier() or value in ("<module>", "<listcomp>", "<dictcomp>", "<setcomp>", "<genexpr>", "<lambda>"))
+
+
+def startup_failure_observation(value):
+    if (type(value) is not dict or not {"schema", "scope", "stage", "error_code", "error_type", "frames"} <= value.keys()
+            or value.keys() - {"schema", "scope", "stage", "error_code", "error_type", "frames", "errno"}
+            or type(value.get("schema")) is not int or value["schema"] != 1 or value.get("scope") != "ios-startup-failure"
+            or type(value.get("stage")) is not str or value["stage"] not in STARTUP_FAILURE_STAGES
+            or type(value.get("error_code")) is not str or value["error_code"] not in STARTUP_FAILURE_CODES
+            or type(value.get("error_type")) is not str or value["error_type"] not in STARTUP_FAILURE_TYPES or type(value.get("frames")) is not list or len(value["frames"]) > 8):
+        return {}
+    frames = []
+    for row in value["frames"]:
+        if (type(row) is not dict or set(row) != {"file", "function", "line"} or type(row.get("file")) is not str or row["file"] not in STARTUP_FAILURE_FILES
+                or not _startup_function(row.get("function")) or type(row.get("line")) is not int or not 1 <= row["line"] <= 1000000):
+            return {}
+        frames.append({key: row[key] for key in ("file", "function", "line")})
+    result = {"schema": 1, "scope": "ios-startup-failure", "stage": value["stage"], "error_code": value["error_code"],
+              "error_type": value["error_type"], "frames": frames}
+    if "errno" in value:
+        if type(value["errno"]) is not int or not 0 <= value["errno"] <= 4096:
+            return {}
+        result["errno"] = value["errno"]
+    return result
+
+
+def read_startup_failure(container):
+    missing = {"schema": 1, "scope": "ios-startup-failure", "available": False, "read_code": "startup_diagnostic_missing"}
+    try:
+        root = Path(container)
+        require(root.is_absolute(), "invalid_startup_diagnostic")
+        for part in (root, root / "Library", root / "Library/Application Support", root / "Library/Application Support/IdolyPrideLocal"):
+            require(stat.S_ISDIR(part.lstat().st_mode), "invalid_startup_diagnostic")
+        path = root / "Library/Application Support/IdolyPrideLocal" / STARTUP_FAILURE_FILE
+        before = path.lstat()
+        require(before.st_nlink == 1, "invalid_startup_diagnostic")
+        raw = read_bounded(path, STARTUP_FAILURE_MAX)
+        after = path.lstat()
+        require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns), "invalid_startup_diagnostic")
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                require(key not in result, "invalid_startup_diagnostic")
+                result[key] = value
+            return result
+        value = json.loads(raw, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        observed = startup_failure_observation(value)
+        require(observed, "invalid_startup_diagnostic")
+        return {**observed, "available": True}
+    except FileNotFoundError:
+        return missing
+    except (OSError, ValueError, TypeError, RecursionError):
+        return {**missing, "read_code": "startup_diagnostic_invalid"}
+
+
+ZIP_PROGRESS_PHASES = frozenset(("status_requested", "export_requested", "export_waiting", "export_ready",
+    "source_hashing", "import_control_waiting", "picker_waiting", "selection_dispatched", "dismiss_waiting", "import_waiting",
+    "import_ready", "dom_waiting", "copy_hashing", "finished", "failed", "timed_out"))
+ZIP_PROGRESS_FLAGS = ("export_accepted", "export_ready", "export_archive_complete", "wk_import_dispatched",
+    "picker_presented", "selection_delegate_invoked", "dismissal_completion_observed", "transition_idle_before_restore", "backend_ready", "backend_success", "dom_completed",
+    "button_restored", "source_copy_sha256_match", "timed_out")
+ZIP_PROGRESS_BACKEND_STATES = frozenset(("pending", "running", "export_ready", "completed", "partial", "cancelled", "failed"))
+
+
+def zip_progress_observation(value):
+    """Keep only finite phase/counter evidence; omit file, UI and account data."""
+    if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1
+            or type(value.get("phase")) is not str or value["phase"] not in ZIP_PROGRESS_PHASES):
+        return {}
+    result = {"schema": 1, "phase": value["phase"]}
+    for key in ZIP_PROGRESS_FLAGS:
+        if type(value.get(key)) is bool:
+            result[key] = value[key]
+    for key in ("observations", "exported_files", "imported_files", "failed_files", "copied_bytes", "total_bytes"):
+        limit = 1024 ** 4 if key.endswith("bytes") else (1000 if key == "observations" else 1000000)
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= limit:
+            result[key] = item
+    elapsed = value.get("elapsed_seconds")
+    if type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 <= elapsed <= 120:
+        result["elapsed_seconds"] = elapsed
+    backend = value.get("backend_state")
+    if type(backend) is str and backend in ZIP_PROGRESS_BACKEND_STATES:
+        result["backend_state"] = backend
+    return result
+
+
+PROCESS_SAMPLE_ERRORS = frozenset(("not_attempted", "not_macos", "launch_pid_missing", "checkpoint_pid_differs",
+    "owned_container_invalid", "owned_executable_invalid", "process_identity_differs", "sample_spawn_failed",
+    "owned_bundle_query_timeout", "owned_bundle_query_failed", "owned_bundle_query_output_invalid",
+    "owned_preparation_io_failed", "owned_preparation_parse_failed", "owned_preparation_exception",
+    "process_query_timeout", "process_query_failed", "process_output_invalid", "process_output_encoding_invalid",
+    "process_output_shape_differs", "process_pid_differs", "process_path_not_absolute", "process_path_differs",
+    "process_path_resolution_failed", "process_path_resolves_elsewhere", "process_start_parse_failed",
+    "process_launch_interval_invalid", "process_start_outside_launch",
+    "process_kernel_query_timeout", "process_kernel_query_failed", "process_kernel_output_invalid",
+    "process_kernel_encoding_invalid",
+    "sample_failed", "sample_timed_out", "sample_output_missing", "main_thread_not_found", "identity_changed", "none"))
+PROCESS_SAMPLE_FLAGS = ("attempted", "available", "launch_pid_matched", "executable_verified", "identity_stable",
+    "main_thread_found", "truncated", "timed_out")
+PROCESS_SAMPLE_MODULES = frozenset((PROBE_EXECUTABLE, "IdolyEmbeddedServer", "Python", "UIKit", "UIKitCore", "WebKit",
+    "JavaScriptCore", "Foundation", "CoreFoundation", "GraphicsServices", "QuartzCore", "CoreGraphics",
+    "UIFoundation", "FileProvider", "FileProviderUI", "DocumentManager", "DocumentManagerCore",
+    "DocumentManagerUICore", "ExtensionFoundation", "CoreServices", "FrontBoardServices", "BoardServices",
+    "RunningBoardServices", "CFNetwork", "Network", "XPC", "libxpc.dylib", "dyld", "libobjc.A.dylib",
+    "libdispatch.dylib", "libsystem_kernel.dylib", "libsystem_pthread.dylib", "libsystem_platform.dylib",
+    "libsystem_c.dylib", "libsystem_malloc.dylib", "libsystem_blocks.dylib", "libsystem_trace.dylib"))
+PROCESS_SAMPLE_SYMBOL_PREFIXES = ("mach_", "__mach_", "__ulock_", "__psynch_", "__pthread_", "_pthread_",
+    "pthread_", "__semwait_", "__CF", "CF", "__NS", "NS", "-[NS", "+[NS", "-[UI", "+[UI", "UI", "_UI",
+    "-[WK", "+[WK", "WK", "-[DOC", "+[DOC", "DOC", "-[FP", "+[FP", "FP", "WebKit::", "IPC::", "WTF::", "CA::", "CG", "-[CA", "dispatch_", "_dispatch_",
+    "__dispatch_", "dlopen", "dyld", "start", "_dyld_", "objc_", "_objc_", "-[IDSettingsController ",
+    "-[IDProbeCoordinator ", "Probe", "IDNative", "Idoly", "IDUnity", "IDClient", "IDKeyboard", "IDOcto",
+    "_Py", "Py", "___", "__block_", "_Block_", "xpc_", "_xpc_", "__XPC", "+[ID")
+PROCESS_SAMPLE_EXACT_SYMBOLS = frozenset(("semaphore_wait_trap","semaphore_timedwait_trap",
+    "_os_unfair_lock_lock_slow","__DISPATCH_WAIT_FOR_QUEUE__","fsync","__fsync","read","__read",
+    "write","__write","open","__open","close","__close","kevent","__kevent","kevent64","__kevent64",
+    "poll","__poll","select","__select","nanosleep","__nanosleep","usleep","__workq_kernreturn"))
+PROCESS_SAMPLE_MAX_BYTES = 256 * 1024
+PROCESS_SAMPLE_MAX_FRAMES = 48
+# A separate isolated child bounds the public Darwin kernel query. Never load
+# an FFI library in the probe controller or accept an argv[0] display as an image.
+PROCESS_PIDPATH_CHILD = (
+    "import ctypes,os,sys;"
+    "p=sys.argv[1];"
+    "sys.exit(2) if not (p.isascii() and p.isdecimal() and 1<=int(p)<=2147483647) else None;"
+    "lib=ctypes.CDLL('/usr/lib/libproc.dylib',use_errno=True);"
+    "fn=lib.proc_pidpath;fn.argtypes=[ctypes.c_int,ctypes.c_void_p,ctypes.c_uint32];fn.restype=ctypes.c_int;"
+    "buf=ctypes.create_string_buffer(4096);count=fn(int(p),buf,4096);raw=buf.value;"
+    "sys.exit(2) if not (0<count<=4096 and 0<len(raw)<4096 and raw.startswith(b'/') "
+    "and b'\\n' not in raw and b'\\r' not in raw) else None;"
+    "sys.exit(0 if os.write(1,raw)==len(raw) else 3)")
+PROCESS_SAMPLE_CHILD = ("import os,resource,sys;resource.setrlimit(resource.RLIMIT_FSIZE,(262144,262144));"
+    "os.execv('/usr/bin/sample',['/usr/bin/sample',sys.argv[1],'1','10','-mayDie','-file',sys.argv[2]])")
+
+
+def process_sample_observation(value):
+    """The only retained sample content is a finite, known-module main stack."""
+    if type(value) is not dict or value.get("schema") != 1 or type(value.get("schema")) is not int:
+        return {}
+    result = {"schema":1, "scope":"owned-disposable-simulator-process"}
+    for key in PROCESS_SAMPLE_FLAGS:
+        if type(value.get(key)) is bool: result[key] = value[key]
+    error = value.get("error_code")
+    if type(error) is str and error in PROCESS_SAMPLE_ERRORS: result["error_code"] = error
+    for key,maximum in (("sample_seconds",1),("sample_output_bytes",PROCESS_SAMPLE_MAX_BYTES),
+                        ("thread_count",1024),("frame_count",PROCESS_SAMPLE_MAX_FRAMES)):
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= maximum: result[key] = item
+    frames = []
+    rows = value.get("frames")
+    if type(rows) is list:
+        for row in rows[:PROCESS_SAMPLE_MAX_FRAMES]:
+            if type(row) is not dict: continue
+            module, symbol, count = row.get("module"), row.get("symbol"), row.get("samples")
+            if (type(module) is not str or module not in PROCESS_SAMPLE_MODULES or type(symbol) is not str
+                    or not 1 <= len(symbol) <= 160 or not (symbol in PROCESS_SAMPLE_EXACT_SYMBOLS
+                        or symbol.startswith(PROCESS_SAMPLE_SYMBOL_PREFIXES))
+                    or not re.fullmatch(r"[A-Za-z0-9_:.+$@? \[\]<>~(),&*=-]+",symbol)
+                    or type(count) is not int or not 0 <= count <= 1000000): continue
+            frames.append({"module":module,"symbol":symbol,"samples":count})
+    result["frames"] = frames
+    result["modules"] = sorted({row["module"] for row in frames})
+    result["frame_count"] = len(frames)
+    return result
+
+
+def parse_process_sample(raw, *, truncated=False):
+    if type(raw) is not bytes or len(raw) > PROCESS_SAMPLE_MAX_BYTES:
+        return process_sample_observation({"schema":1,"main_thread_found":False,"frames":[]})
+    frames = []; inside = False; found = False; threads = 0
+    for line in raw.decode("utf-8","replace").splitlines():
+        if "Thread_" in line and "(in " not in line:
+            threads = min(1024,threads+1)
+            inside = bool(re.fullmatch(r"[\s+!|:]*\d+\s+Thread_\d+\s+DispatchQueue_\d+:\s+com\.apple\.main-thread\s+\(serial\)\s*",line))
+            found = found or inside
+            continue
+        if not inside or len(frames) >= PROCESS_SAMPLE_MAX_FRAMES: continue
+        match = re.fullmatch(r"[\s+!|:]*(\d{1,9})\s+(.+?)\s+\(in ([^)]+)\)(?:\s+\+\s+\d+)?(?:\s+\[[^\]]+\])?\s*",line)
+        if match:
+            count,symbol,module = match.groups()
+            projected = process_sample_observation({"schema":1,"frames":[{"module":module,"symbol":symbol,"samples":int(count)}]})
+            frames.extend(projected["frames"])
+    return process_sample_observation({"schema":1,"main_thread_found":found,"frames":frames,
+        "thread_count":threads,"sample_output_bytes":len(raw),"truncated":truncated})
+
+
+def fit_process_sample_audit(report):
+    sample = report.get("process_sample")
+    if type(sample) is not dict: return
+    def size(): return len(json.dumps(report,separators=(",",":"),sort_keys=True,allow_nan=False).encode())+1
+    while size()>MAX_JSON and sample.get("frames"):
+        frames=sample["frames"]
+        # Keep both the top wait and initiating callers when trimming is needed.
+        frames.pop(len(frames)//2)
+        sample["frame_count"]=len(frames);sample["truncated"]=True
+        sample["modules"]=sorted({row["module"] for row in frames})
+    if size()>MAX_JSON: report.pop("process_sample",None)
+
+
+def process_sample_summary(value):
+    clean = process_sample_observation(value)
+    return {key:clean[key] for key in ("schema","scope",*PROCESS_SAMPLE_FLAGS,"error_code","sample_seconds",
+        "sample_output_bytes","thread_count","frame_count") if key in clean}
+
+
+PREPARE_STAGES=frozenset(("not_attempted","source_image","validate_container","bundle_query",
+    "validate_bundle","bundle_info","source_recheck","installed_image","complete"))
+
+
+def process_attestation_observation(value):
+    if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"]!=1
+            or type(value.get("stage")) is not str or value["stage"] not in PREPARE_STAGES
+            or type(value.get("error_code")) is not str or value["error_code"] not in PROCESS_SAMPLE_ERRORS): return {}
+    result={"schema":1,"stage":value["stage"],"error_code":value["error_code"]}
+    if type(value.get("attempts")) is int and 0<=value["attempts"]<=2:result["attempts"]=value["attempts"]
+    for key in ("post_launch_retry","available"):
+        if type(value.get(key)) is bool:result[key]=value[key]
+    return result
+
+
+def process_exit_observation(value):
+    """Only Darwin's owned-launch exit status; never process arguments/logs."""
+    if type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1: return {}
+    state=value.get("state");code=value.get("error_code")
+    if state not in ("unsupported","armed","unavailable","exited"): return {}
+    if code not in ("none","unsupported","registration_failed","identity_changed","read_failed","event_invalid"): return {}
+    clean={"schema":1,"source":"darwin-kqueue","state":state,"error_code":code}
+    if state=="exited" and code=="none":
+        status=value.get("wait_status")
+        if type(status) is not int or not 0<=status<=65535: return {}
+        if os.WIFEXITED(status): clean.update(wait_status=status,exit_code=os.WEXITSTATUS(status))
+        elif os.WIFSIGNALED(status): clean.update(wait_status=status,signal=os.WTERMSIG(status))
+        else: return {}
+    return clean
+
+
+def process_termination_summary(value):
+    if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"]!=1
+            or value.get("scope")!="owned-disposable-simulator-process" or value.get("reason")!="confirmed_esrch"):
+        return {}
+    result={"schema":1,"scope":"owned-disposable-simulator-process","reason":"confirmed_esrch"}
+    for key in ("launch_ack_matched","executable_verified_before_exit","start_identity_verified_before_exit","raw_logs_retained"):
+        if type(value.get(key)) is bool: result[key]=value[key]
+    for key,low,high in (("pid",1,2**31-1),("confirmed_absence_observations",2,2),("matching_record_count",0,2)):
+        if type(value.get(key)) is int and low<=value[key]<=high: result[key]=value[key]
+    observer=process_exit_observation(value.get("exit_observer"))
+    if observer: result["exit_observer"]=observer
+    return result
+
+
+def safe_failure_summary(report):
+    """One fixed scalar CI line; never dump arbitrary reports or UI logs."""
+    code=report.get("error")
+    clean={"schema":1,"scope":"owned-simulator-failure","error_code":code if type(code) is str and code in (UI_DRIVER_ERRORS | LAUNCHER_FAILURE_CODES | {"owned_probe_process_exited"}) else "probe_failed"}
+    index=report.get("failed_run_index")
+    if type(index) is int and 0<=index<=4:clean["run_index"]=index
+    sample=process_sample_summary(report.get("process_sample"))
+    if sample:clean["process_sample"]=sample
+    attestation=process_attestation_observation(report.get("process_attestation"))
+    if attestation:clean["process_attestation"]=attestation
+    terminated=process_termination_summary(report.get("process_termination"))
+    if terminated:clean["process_termination"]=terminated
+    checkpoint=report.get("native_checkpoint")
+    if type(checkpoint) is dict:
+        native={}
+        if type(checkpoint.get("stage")) is str and checkpoint["stage"] in NATIVE_CHECKPOINT_STAGES:native["stage"]=checkpoint["stage"]
+        for key,minimum,maximum in (("phase",0,4),("process_id",1,2**31-1),("main_heartbeat_count",0,100000),("checkpoint_count",0,100000)):
+            value=checkpoint.get(key)
+            if type(value) is int and minimum<=value<=maximum:native[key]=value
+        for key in ("main_thread_checkpoint","launch_requested","launch_prepared","keyboard_ready","launcher_visible"):
+            if type(checkpoint.get(key)) is bool:native[key]=checkpoint[key]
+        for key in ("checkpoint_age_seconds","status_age_seconds","report_age_seconds","main_elapsed_seconds"):
+            value=checkpoint.get(key)
+            if type(value) in (int,float) and math.isfinite(value) and 0<=value<=3600:native[key]=value
+        gate=server_gate_observation(checkpoint.get("server_gate"))
+        if gate:native["server_gate"]=gate
+        language=checkpoint.get("language_observation")
+        if type(language) is dict:
+            save=language_save_observation(language.get("language_save"))
+            if save:native["language_save"]=save
+        progress=zip_progress_observation(checkpoint.get("zip_roundtrip_progress"))
+        if progress:native["zip_roundtrip_progress"]=progress
+        heartbeat=checkpoint.get("independent_heartbeat")
+        if type(heartbeat) is dict and heartbeat.get("main_thread_heartbeat") is True:
+            projected={"main_thread_heartbeat":True}
+            for key,bound in (("process_id",2**31-1),("main_heartbeat_count",100000),("resident_bytes",64*1024**3),("footprint_bytes",64*1024**3)):
+                if type(heartbeat.get(key)) is int and 0<=heartbeat[key]<=bound:projected[key]=heartbeat[key]
+            for key in ("main_elapsed_seconds","age_seconds"):
+                item=heartbeat.get(key)
+                if type(item) in (int,float) and math.isfinite(item) and 0<=item<=3600:projected[key]=item
+            native["independent_heartbeat"]=projected
+        account=checkpoint.get("account_management_progress")
+        if type(account) is dict:
+            projected={}
+            if account.get("phase") in ("entered","fixture_loaded","status_requested","status_received","script_dispatched","script_started","finished","timeout","none","seed-source","seed-target","export","preview","pending","original"):projected["phase"]=account["phase"]
+            if account.get("last_action") in (*ACCOUNT_UI_ACTIONS,"none"):projected["last_action"]=account["last_action"]
+            if type(account.get("observations")) is int and 0<=account["observations"]<=2000:projected["observations"]=account["observations"]
+            if projected:native["account_management_progress"]=projected
+        clean["native"]=native
+    startup=report.get("host_startup_failure")
+    if type(startup) is dict and startup.get("available") is True:
+        observed=startup_failure_observation({key:value for key,value in startup.items() if key != "available"})
+        if observed:clean["host_startup_failure"]=observed
+    elif type(startup) is dict and startup.get("read_code") in ("startup_diagnostic_missing", "startup_diagnostic_invalid"):
+        clean["host_startup_failure"]={"available":False,"read_code":startup["read_code"]}
+    driver=official_ui_failure_observation(report.get("xctest_failure"))
+    if driver:clean["xctest"]=driver
+    try:clean["source_sha256"]=hashlib.sha256(json.dumps(official_ui_source_pins(),sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    except ProbeError:pass
+    return clean
+
+
+OFFICIAL_PROMPT_FLAGS = ("button_found", "enabled_before", "click_dispatched", "empty_web_payload", "prompt_presented",
+    "field_count_two", "secure_password_field", "platform_actions_present", "cancel_action_present", "synthetic_inputs_set",
+    "cancel_ack_observed", "fields_cleared", "web_reply_cancelled", "prompt_detached", "official_job_absent_before",
+    "official_job_absent_after", "account_data_unchanged", "runtime_identity_unchanged", "completed")
+
+
+def official_prompt_observation(value):
+    if type(value) is not dict: return {}
+    clean = {key:value[key] for key in (*OFFICIAL_PROMPT_FLAGS, "performed", "timed_out", "credential_submission_performed")
+             if type(value.get(key)) is bool}
+    for key, expected in (("scope","stock-simulator"),("ui_trigger","dom-click"),
+                          ("cancel_trigger","public-xctest-tap"),("reason","first-cold-run-only")):
+        if value.get(key) == expected: clean[key] = expected
+    seconds = value.get("elapsed_seconds")
+    if type(seconds) in (int,float) and math.isfinite(seconds) and 0 <= seconds <= 30: clean["elapsed_seconds"] = seconds
+    if type(value.get("ui_test")) is dict:
+        try: clean["ui_test"]=validate_official_ui_proof(value["ui_test"])
+        except ProbeError: pass
+    return clean
+
+
+def validate_official_prompt(value, run_index):
+    fail = "settings_official_prompt_failed"
+    require(type(value) is dict,fail)
+    if run_index != 0:
+        require(value == {"performed":False,"reason":"first-cold-run-only"} and type(value.get("performed")) is bool,fail)
+        return dict(value)
+    require(value.get("performed") is True and value.get("scope") == "stock-simulator"
+        and value.get("ui_trigger") == "dom-click" and value.get("cancel_trigger") == "public-xctest-tap"
+        and value.get("timed_out") is False and value.get("credential_submission_performed") is False
+        and all(value.get(key) is True for key in OFFICIAL_PROMPT_FLAGS)
+        and type(value.get("elapsed_seconds")) in (int,float) and math.isfinite(value["elapsed_seconds"])
+        and 0 <= value["elapsed_seconds"] <= 30,fail)
+    validate_official_ui_proof(value.get("ui_test"))
+    return official_prompt_observation(value)
+
+
+ACCOUNT_TABLES = ("profiles", "snapshots", "profile_settings", "starter_profiles",
+                  "profile_lesson_progress", "preference_receipts", "main_live_attempts", "profile_love_progress")
+ACCOUNT_BLOB_TABLES = ("snapshots", "profile_settings", "profile_lesson_progress",
+                       "preference_receipts", "main_live_attempts")
+ACCOUNT_UI_FLAGS = ("management_controls_ready", "inactive_clone_created", "export_reply_correlated",
+    "active_account_replace_rejected", "new_import_completed", "automatic_restore_point_created",
+    "inactive_replace_completed", "restore_revision_matches", "next_start_selection_saved",
+    "original_selection_saved", "feedback_present", "fields_reenabled", "native_copy_queued",
+    "native_copy_bytes_match")
+ACCOUNT_NATIVE_FLAGS = ("export_picker_presented", "export_picker_cancelled", "archive_copy_sha256_verified",
+    "next_selection_pending_only", "original_runtime_preserved", "listeners_survived")
+ACCOUNT_STATE_FLAGS = ("all_eight_tables_nonempty", "archive_all_tables_exact", "new_import_all_tables_exact",
+    "restored_all_tables_exact", "unknown_response_blobs_exact", "love_progress_bytes_exact", "source_account_preserved",
+    "original_account_preserved", "original_sessions_preserved", "source_session_preserved",
+    "target_session_invalidated", "original_selection_restored")
+ACCOUNT_UI_ACTIONS = ("accounts_status", "accounts_clone", "accounts_status", "accounts_export",
+    "accounts_preview", "accounts_import", "accounts_import", "accounts_status",
+    "accounts_preview", "accounts_import", "accounts_restore", "accounts_select", "accounts_select")
+
+
+def _normalized_account(bundle):
+    from copy import deepcopy
+    from idoly_local.state import State
+    value = deepcopy(bundle)
+    value["profile"] = "normalized"
+    for table, rows in value["tables"].items():
+        for row in rows:
+            row["name" if table == "profiles" else "profile"] = "normalized"
+    return State.account_bytes(value)
+
+
+class AccountFixtureHarness:
+    """Two explicit fixtures in inactive profiles of this invocation's owned Simulator.
+
+    This is test-only SQLite fixture production, never a product server command
+    and never evidence of actual game progression or Files row interaction.
+    """
+    def __init__(self, container, schema, *, descriptor_sha256, nonce=None):
+        candidate=Path(container)
+        require(candidate.is_absolute() and candidate.is_dir() and not candidate.is_symlink(),"settings_account_fixture_failed")
+        self.container = candidate.resolve(strict=True)
+        self.documents = self.container/"Documents"
+        self.documents.mkdir(exist_ok=True)
+        require(self.documents.is_dir() and not self.documents.is_symlink(),"settings_account_fixture_failed")
+        self.root = self.container/"Library/Application Support/IdolyPrideLocal"
+        self.schema = schema
+        # Package bytes and the canonical descriptor identity are separate:
+        # Schema sorts FileDescriptorSet entries for its account fingerprint.
+        require(_hex_digest(descriptor_sha256), "settings_account_fixture_failed")
+        self.descriptor_sha256 = descriptor_sha256
+        self.nonce = nonce if nonce is not None else uuid.uuid4().hex
+        require(type(self.nonce) is str and re.fullmatch(r"[0-9a-f]{32}", self.nonce), "settings_account_fixture_failed")
+        self.source = "probe-acct-" + self.nonce[:12] + "-clone"
+        self.target = "probe-acct-" + self.nonce[:12] + "-import"
+        self.input = self.documents/"probe-account-fixture.json"
+        self.request = self.documents/"embedded-probe-account-seed.json"
+        self.ack = self.documents/"embedded-probe-account-seed-ack.json"
+        self.archive = self.documents/("probe-account-" + self.nonce + ".zip")
+        for path in (self.input, self.request, self.ack, self.archive):
+            require(not path.exists() and not path.is_symlink(), "settings_account_fixture_failed")
+        self._write(self.input, {"schema": 1, "nonce": self.nonce})
+        self.created_ns = self.input.stat().st_mtime_ns
+        self.done, self.mode = {}, None
+        self.source_bundle = self.target_bundle = self.original_bundle = None
+        self.original_sessions = None
+        self.source_token = self.target_token = None
+        self.import_exact = False
+
+    @staticmethod
+    def _write(path, value):
+        raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        require(len(raw) <= 8192 and not path.is_symlink(), "settings_account_fixture_failed")
+        temporary = path.with_name("." + path.name + "." + uuid.uuid4().hex + ".tmp")
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+            require(not path.is_symlink(), "settings_account_fixture_failed")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _state(self, mode):
+        from idoly_local.state import State
+        path = self.root/("media-state.db" if mode == "media" else "state.db")
+        require(path.is_file() and not path.is_symlink() and path.stat().st_nlink == 1,
+                "settings_account_fixture_failed")
+        return State(path)
+
+    @staticmethod
+    def _sessions(state, profile):
+        with state.connect() as db:
+            return [tuple(row) for row in db.execute(
+                "SELECT token_hash,profile,expires_at FROM sessions WHERE profile=? ORDER BY token_hash", (profile,))]
+
+    def _fixture(self, state, profile, phase):
+        from copy import deepcopy
+        from idoly_local.state import State
+        from google.protobuf import message_factory
+        found = state.account_snapshot(profile)
+        require(found is not None, "settings_account_fixture_failed")
+        bundle, revision = found
+        bundle = deepcopy(bundle)
+        tables = bundle["tables"]
+        require(set(tables) == set(ACCOUNT_TABLES)
+                and all(row["schema_sha256"] == self.schema.fingerprint
+                    for rows in tables.values() for row in rows if "schema_sha256" in row),
+                "settings_account_fixture_failed")
+        suffix = PUBLIC_PROBE_FIELD if phase == "source" else PUBLIC_PROBE_FIELD[:-1] + b"\x02"
+        require(19000 not in self.schema.response_type("/api.User/Get").DESCRIPTOR.fields_by_number,
+                "settings_account_fixture_failed")
+        response = self.schema.response_type("/api.User/Get").FromString(tables["snapshots"][0]["response"])
+        if phase == "target": response.user.name = "ProbeB"
+        tables["snapshots"][0]["response"] = response.SerializeToString() + suffix
+        if not tables["starter_profiles"]:
+            tables["starter_profiles"] = [{"profile": profile, "version": 0}]
+        descriptors = {
+            "profile_settings": self.schema.request_type("/api.Home/Login").DESCRIPTOR.fields_by_name["settingInfo"].message_type,
+            "profile_lesson_progress": self.schema.response_type("/api.Activity/ReceiveLessonReward").DESCRIPTOR.fields_by_name["progress"].message_type,
+        }
+        for table, descriptor in descriptors.items():
+            require(19000 not in descriptor.fields_by_number, "settings_account_fixture_failed")
+            message = message_factory.GetMessageClass(descriptor)
+            raw = tables[table][0]["response"] if tables[table] else message().SerializeToString()
+            message.FromString(raw + suffix)
+            tables[table] = [{"profile": profile, "response": raw + suffix, "schema_sha256": self.schema.fingerprint}]
+        request_base = 8800000000000000001 if phase == "source" else 8800000000000000003
+        for table, path, index in (("preference_receipts", "/api.Photo/SwitchLock", 0),
+                                   ("main_live_attempts", "/api.Quest/Start", 1)):
+            message = self.schema.response_type(path)
+            require(19000 not in message.DESCRIPTOR.fields_by_number, "settings_account_fixture_failed")
+            row = {"profile": profile, "path": path, "request_id": str(request_base + index),
+                "request_sha256": hashlib.sha256((self.nonce + phase + table).encode()).hexdigest(),
+                "schema_sha256": self.schema.fingerprint, "response": message().SerializeToString() + suffix}
+            if table == "main_live_attempts":
+                row.update(master_version="probe-owned-account-fixture", ruleset="probe-account-state-v1",
+                           seed="17", started_time=1700000000000)
+            tables[table].append(row)
+            columns = ("profile", "path", "request_id") if table == "preference_receipts" else ("profile", "request_id")
+            tables[table].sort(key=lambda item: tuple(item[key] for key in columns))
+        # Love progress is strict JSON, not protobuf. Preserve its original
+        # whitespace bytes independently from the five protobuf unknown fields.
+        love = {"schema":1,"love_id":"love-23-0514","player_name":"ProbeA" if phase=="source" else "ProbeB",
+            "registered_ms":1,"exp":0,"lesson_anchor_ms":1,"last_play_ms":1,
+            "path":["love-event-story-love-23-0514-001"],"choices":{},"past_choices":{},"current":None,
+            "saves":[],"promotion_day":"2026-11-16","promotion_used":0}
+        love_raw=(json.dumps(love,sort_keys=True,indent=2)+"\n").encode()
+        from idoly_local.love import validate_progress
+        validate_progress(love_raw,love["love_id"])
+        tables["profile_love_progress"]=[{"profile":profile,"love_id":love["love_id"],"response":love_raw,
+            "schema_sha256":self.schema.fingerprint,"ruleset_sha256":hashlib.sha256(b"probe-owned-love-json-v1").hexdigest()}]
+        State.validate_account(bundle)
+        require(bundle.get("schema")==2 and all(tables[table] for table in ACCOUNT_TABLES), "settings_account_fixture_failed")
+        state.replace_account(profile, bundle, expected_revision=revision)
+        actual = state.account_snapshot(profile)
+        require(actual[0] == bundle, "settings_account_fixture_failed")
+        return actual
+
+    def process(self):
+        from idoly_local.account_manager import selection_status
+        try:
+            info = self.request.lstat()
+        except FileNotFoundError:
+            return
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and 0 < info.st_size <= 8192
+                and info.st_mtime_ns >= self.created_ns, "settings_account_fixture_failed")
+        raw = read_bounded(self.request, 8192)
+        request = parse_json(raw, 8192)
+        phase = request.get("phase")
+        require(phase in ("source", "target"), "settings_account_fixture_failed")
+        fingerprint = hashlib.sha256(raw).hexdigest()
+        if phase in self.done:
+            require(self.done[phase] == fingerprint, "settings_account_fixture_failed")
+            return
+        require(phase == ("source" if not self.done else "target"), "settings_account_fixture_failed")
+        require(set(request) == {"schema", "run_index", "nonce", "phase", "mode", "profile", "active_profile"}
+                and type(request.get("schema")) is int and request["schema"] == 1
+                and type(request.get("run_index")) is int and request["run_index"] == 0
+                and request.get("nonce") == hashlib.sha256((self.nonce + ":" + phase).encode()).hexdigest()[:32]
+                and request.get("mode") in ("normal", "media")
+                and request.get("profile") == (self.source if phase == "source" else self.target)
+                and request.get("active_profile") == "sandbox", "settings_account_fixture_failed")
+        mode = request["mode"]
+        require(self.mode in (None, mode) and self.root.is_dir() and not self.root.is_symlink()
+                and hashlib.sha256(read_bounded(self.root/"protocol/idolypride-6.1.1.pb", MAX_DESCRIPTOR)).hexdigest()
+                    == self.descriptor_sha256
+                and selection_status(self.root)["selected"][mode] == "sandbox", "settings_account_fixture_failed")
+        require(not self.ack.exists() and not self.ack.is_symlink(), "settings_account_fixture_failed")
+        self.mode = mode
+        state = self._state(mode)
+        current = state.account_snapshot("sandbox")
+        require(current is not None, "settings_account_fixture_failed")
+        if phase == "source":
+            self.original_bundle = current
+            self.original_sessions = self._sessions(state, "sandbox")
+            self.source_bundle = self._fixture(state, self.source, phase)
+            self.source_token, _identity = state.login(self.source)
+            bundle, revision = self.source_bundle
+        else:
+            require(state.account_snapshot("sandbox") == self.original_bundle, "settings_account_fixture_failed")
+            imported = state.account_snapshot(self.target)
+            self.import_exact = imported is not None and _normalized_account(imported[0]) == _normalized_account(self.source_bundle[0])
+            require(self.import_exact and self._sessions(state, self.target) == [], "settings_account_fixture_failed")
+            self.target_bundle = self._fixture(state, self.target, phase)
+            self.target_token, _identity = state.login(self.target)
+            bundle, revision = self.target_bundle
+        require(not self.ack.exists() and not self.ack.is_symlink(), "settings_account_fixture_failed")
+        ack = {"schema": 1, "ready": True, "phase": phase, "nonce": request["nonce"], "profile": request["profile"],
+            "mode": mode, "request_sha256": fingerprint, "bundle_revision": revision,
+            "normalized_sha256": hashlib.sha256(_normalized_account(bundle)).hexdigest(),
+            "table_rows": {table: len(bundle["tables"][table]) for table in ACCOUNT_TABLES},
+            "unknown_tables": list(ACCOUNT_BLOB_TABLES)}
+        self._write(self.ack, ack)
+        self.done[phase] = fingerprint
+
+    def verify_persisted(self):
+        from idoly_local.account_manager import selection_status
+        require(set(self.done) == {"source", "target"}, "settings_account_fixture_failed")
+        state = self._state(self.mode)
+        source, target = state.account_snapshot(self.source), state.account_snapshot(self.target)
+        checks = {"source_all_tables_persisted": source == self.source_bundle,
+            "restored_all_tables_persisted": target == self.target_bundle,
+            "source_session_preserved": state.authenticated(self.source_token,self.source),
+            "target_session_invalidated": not state.authenticated(self.target_token,self.target),
+            "love_progress_bytes_persisted": source[0]["tables"]["profile_love_progress"] == self.source_bundle[0]["tables"]["profile_love_progress"]
+                and target[0]["tables"]["profile_love_progress"] == self.target_bundle[0]["tables"]["profile_love_progress"],
+            "original_selection_preserved": selection_status(self.root)["selected"][self.mode] == "sandbox"}
+        require(all(type(value) is bool and value is True for value in checks.values()), "settings_account_fixture_failed")
+        return {"schema":1,"observer":"runner-sqlite-after-five-cold-runs","seed_fixture_used":True,
+            "gameplay_tested":False,"checks":checks,"normalized_source_sha256":hashlib.sha256(_normalized_account(source[0])).hexdigest(),
+            "normalized_restored_sha256":hashlib.sha256(_normalized_account(target[0])).hexdigest()}
+
+    def verify(self, native):
+        import base64
+        from idoly_local.account_manager import selection_status
+        from idoly_local.state import State
+        require(set(self.done) == {"source", "target"} and self.mode is not None,
+                "settings_account_fixture_failed")
+        info = self.archive.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and 0 < info.st_size <= 128*1024**2,
+                "settings_account_fixture_failed")
+        fd = os.open(self.archive, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            sha = hashlib.file_digest(stream, "sha256").hexdigest()
+            stream.seek(0)
+            with ZipFile(stream) as archive:
+                members = archive.infolist()
+                require(len(members) == 2 and {row.filename for row in members} == {"manifest.json", "account.json"}
+                        and all(0 < row.file_size <= (16384 if row.filename == "manifest.json" else 96*1024**2)
+                                for row in members), "settings_account_fixture_failed")
+                manifest = parse_json(archive.read("manifest.json"), 16384)
+                account_bytes = archive.read("account.json")
+            after = os.fstat(stream.fileno())
+            require((before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns) ==
+                    (after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns),
+                    "settings_account_fixture_failed")
+        require(sha == native.get("archive_sha256") and before.st_size == native.get("archive_bytes")
+                and type(manifest.get("schema")) is int and manifest["schema"] == 2
+                and manifest.get("kind") == "idoly-local-account" and manifest.get("mode") == self.mode
+                and manifest.get("profile") == self.source and manifest.get("account_bytes") == len(account_bytes)
+                and manifest.get("account_sha256") == hashlib.sha256(account_bytes).hexdigest(),
+                "settings_account_fixture_failed")
+        def unpack(value):
+            if type(value) is dict and set(value) == {"$bytes"}:
+                return base64.b64decode(value["$bytes"], validate=True)
+            return value
+        archived = json.loads(account_bytes, object_hook=unpack)
+        require(type(archived.get("schema")) is int and archived["schema"]==2 and set(archived.get("tables",{}))==set(ACCOUNT_TABLES),
+                "settings_account_fixture_failed")
+        State.validate_account(archived)
+        state = self._state(self.mode)
+        source, target = state.account_snapshot(self.source), state.account_snapshot(self.target)
+        require(source is not None and target is not None, "settings_account_fixture_failed")
+        checks = {
+            "all_eight_tables_nonempty": all(self.source_bundle[0]["tables"][table] for table in ACCOUNT_TABLES),
+            "archive_all_tables_exact": archived == self.source_bundle[0],
+            "new_import_all_tables_exact": self.import_exact,
+            "restored_all_tables_exact": target == self.target_bundle,
+            "unknown_response_blobs_exact": all(
+                target[0]["tables"][table] == self.target_bundle[0]["tables"][table] for table in ACCOUNT_BLOB_TABLES),
+            "love_progress_bytes_exact": archived["tables"]["profile_love_progress"] == self.source_bundle[0]["tables"]["profile_love_progress"]
+                and source[0]["tables"]["profile_love_progress"] == self.source_bundle[0]["tables"]["profile_love_progress"]
+                and target[0]["tables"]["profile_love_progress"] == self.target_bundle[0]["tables"]["profile_love_progress"],
+            "source_account_preserved": source == self.source_bundle,
+            "original_account_preserved": state.account_snapshot("sandbox") == self.original_bundle,
+            "original_sessions_preserved": self._sessions(state,"sandbox") == self.original_sessions,
+            "source_session_preserved": state.authenticated(self.source_token, self.source),
+            "target_session_invalidated": not state.authenticated(self.target_token, self.target),
+            "original_selection_restored": selection_status(self.root)["selected"][self.mode] == "sandbox",
+        }
+        # A positive row-count expression must become a true JSON boolean, not a list.
+        checks["all_eight_tables_nonempty"] = bool(checks["all_eight_tables_nonempty"])
+        require(all(type(value) is bool and value is True for value in checks.values()),
+                "settings_account_fixture_failed")
+        return {"observer": "runner-sqlite-and-archive", "seed_fixture_used": True, "gameplay_tested": False,
+            "checks": checks, "table_rows": {table: len(target[0]["tables"][table]) for table in ACCOUNT_TABLES},
+            "normalized_source_sha256": hashlib.sha256(_normalized_account(source[0])).hexdigest(),
+            "normalized_restored_sha256": hashlib.sha256(_normalized_account(target[0])).hexdigest(),
+            "archive_sha256": sha, "archive_bytes": before.st_size}
+
+
+class ZIPPresenterStallWatchdog:
+    """Fail closed on one unchanged owned-run presenter checkpoint.
+
+    The native picker still has its original 12-second whole-operation timer.
+    This independent 30-second host observation catches a main queue that can
+    no longer deliver that timer. It cannot produce or replace any PASS proof.
+    """
+    def __init__(self, container, expected_language, run_index):
+        self._checkpoint = Path(container)/"Documents"/language_paths(expected_language,run_index)[2]
+        self._token = self._observed_since = None
+
+    def poll(self):
+        try:
+            value = parse_json(read_bounded(self._checkpoint,MAX_JSON))
+        except (OSError,ProbeError):
+            self._token = self._observed_since = None
+            return
+        pid = value.get("process_id") if type(value) is dict else None
+        count = value.get("checkpoint_count") if type(value) is dict else None
+        if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1
+                or value.get("stage") != "settings_zip_import_after_presenter"
+                or value.get("main_thread_checkpoint") is not True
+                or type(pid) is not int or not 1 <= pid <= 2**31-1
+                or type(count) is not int or not 1 <= count <= 100000):
+            self._token = self._observed_since = None
+            return
+        token, now = (pid,count), time.monotonic()
+        if self._token != token or self._observed_since is None or now < self._observed_since:
+            self._token, self._observed_since = token, now
+            return
+        require(now-self._observed_since < 30,"settings_zip_import_picker_failed")
+
+
+def wait_report(container, remaining, *, expected_language="ko", run_index=None, account_fixture=None, ui_driver=None, simulator_udid=None, process_sampler=None):
+    documents = Path(container) / "Documents"
+    final_name, waiting_name, _checkpoint_name = language_paths(expected_language,run_index)
+    final, waiting = documents / final_name, documents / waiting_name
+    presenter_watchdog = ZIPPresenterStallWatchdog(container,expected_language,run_index)
+    last_keyboard = {}
+    last_header = {}
+    last_http = {}
+    last_copy = {}
+    last_budget = {}
+    last_budget_probe = {}
+    last_language = {}
+    last_server_gate = {}
+    last_settings_web = {}
+    def checked_remaining():
+        try:
+            return remaining()
+        except ProbeError as error:
+            if last_keyboard:
+                error.native_keyboard = dict(last_keyboard)
+            if last_header:
+                error.native_header = dict(last_header)
+            if last_http:
+                error.native_http = dict(last_http)
+            if last_copy:
+                error.native_diagnostics_copy = dict(last_copy)
+            if last_budget:
+                error.native_octo_budget = dict(last_budget)
+            if last_budget_probe:
+                error.native_octo_budget_probe = dict(last_budget_probe)
+            if last_language:
+                error.native_language = dict(last_language)
+            if last_server_gate:
+                error.native_server_gate = dict(last_server_gate)
+            if last_settings_web:
+                error.native_settings_web = dict(last_settings_web)
+            raise
+    while True:
+        checked_remaining()
+        if ui_driver is not None:
+            _poll_official_ui_driver(ui_driver)
+        if account_fixture is not None:
+            account_fixture.process()
+        try:
+            observed = parse_json(read_bounded(final, MAX_JSON))
+            if account_fixture is not None:
+                menu = observed.get("menu_lifetime")
+                detail = menu.get("account_management") if type(menu) is dict else None
+                if type(detail) is dict:
+                    detail["state_observation"] = account_fixture.verify(detail)
+            if ui_driver is not None:
+                try:
+                    proof=validate_official_ui_proof(ui_driver.finish(),expected_simulator=simulator_udid)
+                except DriverError as error:
+                    raise ProbeError(error.code if error.code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed") from None
+                menu=observed.get("menu_lifetime")
+                require(type(menu) is dict and type(menu.get("official_prompt")) is dict,"official_ui_test_evidence_failed")
+                menu["official_prompt"]["ui_test"]=proof
+            try:
+                checked = validate_report(observed)
+                expected_index = MATRIX_LANGUAGES.index(expected_language) if run_index is None else run_index
+                require(checked["unity_host_probe"]["expected_language"] == expected_language
+                        and checked["unity_host_probe"]["run_index"] == expected_index, "language_relaunch_mismatch")
+                return checked
+            except ProbeError as error:
+                crypto = observed.get("native_crypto")
+                if type(crypto) is dict:
+                    # Only fixed scalar test flags from the fresh probe; no
+                    # credentials, server payloads or arbitrary exception text.
+                    error.native_crypto = {k: v for k, v in crypto.items()
+                                           if k in ("ok", "nist_encrypt", "nist_decrypt", "invalid_iv_rejected", "worker_main_thread")
+                                           and type(v) in (bool, int)}
+                corner = corner_observation(observed.get("corner_gesture"))
+                if corner:
+                    error.native_corner = corner
+                keyboard = keyboard_observation(observed.get("keyboard"))
+                if keyboard:
+                    error.native_keyboard = keyboard
+                header = header_observation(observed.get("native_header"))
+                if header:
+                    error.native_header = header
+                observed_status = observed.get("server_status")
+                gate = server_gate_observation(observed_status)
+                if gate: error.native_server_gate = gate
+                settings_web = settings_web_from_observation(observed)
+                if settings_web: error.native_settings_web = settings_web
+                http = http_readiness_observation(observed_status.get("http_readiness")) if type(observed_status) is dict else {}
+                if http:
+                    error.native_http = http
+                copied = diagnostics_copy_from_observation(observed)
+                if copied:
+                    error.native_diagnostics_copy = copied
+                attach_octo_budget_observation(error, observed)
+                evidence = language_observation(observed)
+                if evidence: error.native_language = evidence
+                raise
+        except FileNotFoundError:
+            pass
+        # No heartbeat/stage deadline is inferred here. Only a previously
+        # attested, exact owned process disappearing can fail before the budget.
+        if process_sampler is not None and callable(getattr(process_sampler,"poll_liveness",None)):
+            process_sampler.poll_liveness(lambda:parse_json(read_bounded(documents/_checkpoint_name,MAX_JSON)),
+                checkpoint_path=documents/_checkpoint_name)
+        presenter_watchdog.poll()
+        waiting_value = None
+        try:
+            waiting_value = parse_json(read_bounded(waiting, MAX_JSON))
+            last_keyboard.update(keyboard_observation(waiting_value.get("keyboard")))
+            last_header.update(header_observation(waiting_value.get("native_header")))
+            observed_status = waiting_value.get("server_status")
+            if type(observed_status) is dict:
+                last_server_gate.clear()
+                last_server_gate.update(server_gate_observation(observed_status))
+            if type(observed_status) is dict and type(observed_status.get("http_readiness")) is dict:
+                last_http.clear()
+                last_http.update(http_readiness_observation(observed_status.get("http_readiness")))
+            copied = diagnostics_copy_from_observation(waiting_value)
+            if copied:
+                last_copy.clear()
+                last_copy.update(copied)
+            budget = octo_budget_from_observation(waiting_value)
+            if type(waiting_value.get("octo_budget")) is dict or (type(observed_status) is dict
+                    and type(observed_status.get("octo_budget")) is dict):
+                last_budget.clear()
+                last_budget.update(budget)
+            budget_probe = octo_budget_probe_observation(waiting_value.get("octo_budget_probe"))
+            if type(waiting_value.get("octo_budget_probe")) is dict:
+                last_budget_probe.clear()
+                last_budget_probe.update(budget_probe)
+            settings_web = settings_web_from_observation(waiting_value)
+            menu = waiting_value.get("menu_lifetime")
+            if "settings_web" in waiting_value or (type(menu) is dict and "web" in menu):
+                last_settings_web.clear()
+                last_settings_web.update(settings_web)
+            observed_language = language_observation(waiting_value)
+            if any(key in waiting_value for key in ("unity_host", "unity_host_probe", "interface_language_cycle", "language_save")) \
+                    or (type(observed_status) is dict and "unity_host" in observed_status):
+                last_language.clear()
+                last_language.update(observed_language)
+            failure = waiting_value.get("probe_error")
+            if failure is not None:
+                require(type(failure) is str and failure in LAUNCHER_FAILURE_CODES,
+                        "invalid_launcher_failure_code")
+                error = ProbeError(failure)
+                error.native_menu = menu_close_observation(waiting_value.get("menu_close"))
+                raise error
+            status = waiting_value.get("server_status")
+            require(type(status) is dict, "invalid_waiting_status")
+            if status.get("game_error") is not None:
+                error = ProbeError("native_game_preparation_failed")
+                detail = status.get("game_error")
+                if isinstance(detail, str): error.native_detail = detail[:2000]
+                raise error
+            if status.get("phase") == 3 or status.get("error") is not None:
+                error = ProbeError("native_startup_failed")
+                # This fresh probe contains only the pinned public payload.
+                # Preserve the bounded bootstrap error before deleting its
+                # disposable Simulator, so missing modules can be diagnosed.
+                detail = status.get("error")
+                if isinstance(detail, str):
+                    error.native_detail = detail[:2000]
+                raise error
+        except FileNotFoundError:
+            pass
+        except ProbeError as error:
+            # NSDataWritingAtomic replaces this recurring checkpoint. Retry
+            # only a verified regular, bounded inode replacement; in-place
+            # mutation and all final-report checks remain strict.
+            if str(error) != "file_changed_while_opening" or getattr(error, "regular_replacement", False) is not True:
+                if type(waiting_value) is dict:
+                    keyboard = keyboard_observation(waiting_value.get("keyboard"))
+                    if keyboard:
+                        error.native_keyboard = keyboard
+                    header = header_observation(waiting_value.get("native_header"))
+                    if header:
+                        error.native_header = header
+                    observed_status = waiting_value.get("server_status")
+                    gate = server_gate_observation(observed_status)
+                    if gate: error.native_server_gate = gate
+                    settings_web = settings_web_from_observation(waiting_value)
+                    if settings_web: error.native_settings_web = settings_web
+                    http = http_readiness_observation(observed_status.get("http_readiness")) if type(observed_status) is dict else {}
+                    if http:
+                        error.native_http = http
+                    copied = diagnostics_copy_from_observation(waiting_value)
+                    if copied:
+                        error.native_diagnostics_copy = copied
+                    attach_octo_budget_observation(error, waiting_value)
+                    evidence = language_observation(waiting_value)
+                    if evidence: error.native_language = evidence
+                raise
+        time.sleep(min(0.25, checked_remaining()))
+
+
+SETTINGS_OVERFLOW_IDS = ('interface_language', 'refresh', 'options-fields', 'presentation-fields', 'accounts-fields', 'accounts-current', 'accounts-summary', 'accounts-user-detail', 'accounts-select', 'accounts-export', 'accounts-clone', 'accounts-new-profile', 'accounts-manager-name', 'accounts-restore-point', 'accounts-feedback', 'accounts-refresh', 'diagnostics', 'message')
+SETTINGS_OVERFLOW_TAGS = ('MAIN', 'SECTION', 'HEADER', 'DIV', 'LABEL', 'SPAN', 'BUTTON', 'SELECT', 'INPUT', 'FIELDSET', 'P', 'DETAILS', 'SUMMARY', 'PRE', 'OTHER')
+
+
+def settings_web_observation(value):
+    """Export only bounded DOM readiness scalars, never script/error text."""
+    if type(value) is not dict: return {}
+    clean = {key:value[key] for key in SETTINGS_WEB_BOOL_FIELDS if type(value.get(key)) is bool}
+    for key,maximum in (("viewport_width",16384),("content_width",16384),("elapsed_seconds",600),("navigation_progress",1)):
+        number = value.get(key)
+        if type(number) in (int,float) and math.isfinite(number) and 0 <= number <= maximum: clean[key] = number
+    for key,low,high in (("select_count",0,256),("observations",1,256),("evaluation_error_code",-100,100)):
+        number = value.get(key)
+        if type(number) is int and low <= number <= high: clean[key] = number
+    if type(value.get("overflow_elements")) is list:
+        clean["overflow_elements"] = []
+        for row in value["overflow_elements"][:8]:
+            if type(row) is not dict: continue
+            geometry = {key:row.get(key) for key in ("right","width","scroll_width")}
+            if not all(type(number) in (int,float) and math.isfinite(number) for number in geometry.values()): continue
+            if not (-16384 <= geometry["right"] <= 16384 and 0 < geometry["width"] <= 16384
+                    and 0 <= geometry["scroll_width"] <= 16384): continue
+            clean["overflow_elements"].append({"tag":row.get("tag") if row.get("tag") in SETTINGS_OVERFLOW_TAGS else "OTHER",
+                "id":row.get("id") if row.get("id") in SETTINGS_OVERFLOW_IDS else "", **geometry})
+    return clean
+
+
+def settings_web_from_observation(value):
+    if type(value) is not dict: return {}
+    raw = value.get("settings_web")
+    if type(raw) is not dict and type(value.get("menu_lifetime")) is dict:
+        raw = value["menu_lifetime"].get("web")
+    return settings_web_observation(raw)
+
+
+def octo_budget_observation(value):
+    """Keep fixed policy labels and bounded scalar state, never raw errors."""
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in ("prepared", "configured") if type(value.get(key)) is bool}
+    if type(value.get("schema")) is int and value["schema"] == 1:
+        clean["schema"] = 1
+    if value.get("status") in ("idle", "prepared", "failed", "configured"):
+        clean["status"] = value["status"]
+    if value.get("scope") == "unified-loopback":
+        clean["scope"] = "unified-loopback"
+    if "error" in value and value["error"] is None:
+        clean["error"] = None
+    elif type(value.get("error")) is str and value["error"] in OCTO_BUDGET_ERROR_CODES:
+        clean["error"] = value["error"]
+    for key in OCTO_BUDGET_SECONDS:
+        number = value.get(key)
+        if type(number) in (int,float) and math.isfinite(number) and 0 <= number <= 3600:
+            clean[key] = number
+    return clean
+
+
+def octo_budget_probe_observation(value):
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in OCTO_BUDGET_PROBE_BOOLS if type(value.get(key)) is bool}
+    for key in OCTO_BUDGET_PROBE_SECONDS:
+        number = value.get(key)
+        if type(number) in (int,float) and math.isfinite(number) and 0 <= number <= 3600:
+            clean[key] = number
+    for key in OCTO_BUDGET_PROBE_COUNTERS:
+        count = value.get(key)
+        if type(count) is int and 0 <= count <= 16:
+            clean[key] = count
+    return clean
+
+
+def octo_budget_from_observation(value):
+    if type(value) is not dict:
+        return {}
+    raw = value.get("octo_budget")
+    if type(raw) is not dict and type(value.get("server_status")) is dict:
+        raw = value["server_status"].get("octo_budget")
+    return octo_budget_observation(raw)
+
+
+def attach_octo_budget_observation(error, value):
+    budget = octo_budget_from_observation(value)
+    if budget:
+        error.native_octo_budget = budget
+    policy_probe = octo_budget_probe_observation(value.get("octo_budget_probe")) if type(value) is dict else {}
+    if policy_probe:
+        error.native_octo_budget_probe = policy_probe
+
+
+
+def account_management_observation(value):
+    """Bounded test observations only: never profile keys, nonces, tokens or provider paths."""
+    if type(value) is not dict:
+        return {}
+    if value == {"performed": False, "reason": "first-cold-run-only"} and type(value.get("performed")) is bool:
+        return dict(value)
+    clean = {key: value[key] for key in ("performed", "seed_fixture_used", "gameplay_tested", "timed_out", "completed",
+        *ACCOUNT_NATIVE_FLAGS) if type(value.get(key)) is bool}
+    for key, expected in (("scope","stock-simulator"),("ui_trigger","dom-click"),("selection_trigger","delegate-callback")):
+        if value.get(key) == expected: clean[key] = expected
+    for key in ("archive_bytes","preview_picker_count"):
+        if type(value.get(key)) is int and 0 <= value[key] <= 128*1024**2: clean[key] = value[key]
+    if _hex_digest(value.get("archive_sha256")): clean["archive_sha256"] = value["archive_sha256"]
+    elapsed = value.get("elapsed_seconds")
+    if type(elapsed) in (int,float) and math.isfinite(elapsed) and 0 <= elapsed <= 600: clean["elapsed_seconds"] = elapsed
+    if type(value.get("ui_flags")) is dict:
+        clean["ui_flags"] = {key:value["ui_flags"][key] for key in ACCOUNT_UI_FLAGS if type(value["ui_flags"].get(key)) is bool}
+    if type(value.get("ui_actions")) is list:
+        clean["ui_actions"] = [item for item in value["ui_actions"][:32] if item in ACCOUNT_UI_ACTIONS]
+    if type(value.get("preview_copies")) is list:
+        clean["preview_copies"] = [{key:row[key] for key in ("queued","copied_bytes","total_bytes")
+            if type(row.get(key)) is (bool if key=="queued" else int)}
+            for row in value["preview_copies"][:2] if type(row) is dict]
+    for phase in ("source","target"):
+        raw=value.get("fixture_"+phase)
+        if type(raw) is dict:
+            row={key:raw[key] for key in ("schema",) if type(raw.get(key)) is int}
+            if type(raw.get("ready")) is bool: row["ready"]=raw["ready"]
+            if raw.get("phase")==phase: row["phase"]=phase
+            for key in ("request_sha256","bundle_revision","normalized_sha256"):
+                if _hex_digest(raw.get(key)): row[key]=raw[key]
+            if type(raw.get("table_rows")) is dict:
+                row["table_rows"]={key:raw["table_rows"][key] for key in ACCOUNT_TABLES
+                    if type(raw["table_rows"].get(key)) is int and 0<=raw["table_rows"][key]<=20000}
+            if raw.get("unknown_tables")==list(ACCOUNT_BLOB_TABLES): row["unknown_tables"]=list(ACCOUNT_BLOB_TABLES)
+            clean["fixture_"+phase]=row
+    raw=value.get("state_observation")
+    if type(raw) is dict:
+        row={}
+        if raw.get("observer")=="runner-sqlite-and-archive": row["observer"]=raw["observer"]
+        for key in ("seed_fixture_used","gameplay_tested"):
+            if type(raw.get(key)) is bool: row[key]=raw[key]
+        if type(raw.get("checks")) is dict:
+            row["checks"]={key:raw["checks"][key] for key in ACCOUNT_STATE_FLAGS if type(raw["checks"].get(key)) is bool}
+        if type(raw.get("table_rows")) is dict:
+            row["table_rows"]={key:raw["table_rows"][key] for key in ACCOUNT_TABLES if type(raw["table_rows"].get(key)) is int}
+        for key in ("normalized_source_sha256","normalized_restored_sha256","archive_sha256"):
+            if _hex_digest(raw.get(key)): row[key]=raw[key]
+        if type(raw.get("archive_bytes")) is int: row["archive_bytes"]=raw["archive_bytes"]
+        clean["state_observation"]=row
+    code=value.get("error_code")
+    if type(code) is str and re.fullmatch(r"account_ui_[a-z_]{1,64}",code): clean["error_code"]=code
+    return clean
+
+
+def validate_account_management(value, run_index):
+    fail="settings_account_management_failed"
+    require(type(value) is dict,fail)
+    if run_index!=0:
+        require(value=={"performed":False,"reason":"first-cold-run-only"} and type(value.get("performed")) is bool,fail)
+        return dict(value)
+    require(value.get("performed") is True and value.get("scope")=="stock-simulator"
+        and value.get("ui_trigger")=="dom-click" and value.get("selection_trigger")=="delegate-callback"
+        and value.get("seed_fixture_used") is True and value.get("gameplay_tested") is False
+        and value.get("timed_out") is False and value.get("completed") is True
+        and all(value.get(key) is True for key in ACCOUNT_NATIVE_FLAGS)
+        and type(value.get("ui_flags")) is dict and all(value["ui_flags"].get(key) is True for key in ACCOUNT_UI_FLAGS)
+        and value.get("ui_actions")==list(ACCOUNT_UI_ACTIONS)
+        and type(value.get("preview_picker_count")) is int and value["preview_picker_count"]==2
+        and type(value.get("archive_bytes")) is int and 0<value["archive_bytes"]<=128*1024**2
+        and _hex_digest(value.get("archive_sha256"))
+        and type(value.get("elapsed_seconds")) in (int,float) and math.isfinite(value["elapsed_seconds"])
+        and 0<=value["elapsed_seconds"]<=120,fail)
+    copies=value.get("preview_copies")
+    require(type(copies) is list and len(copies)==2 and all(type(row) is dict and row.get("queued") is True
+        and all(type(row.get(key)) is int and row[key]==value["archive_bytes"] for key in ("copied_bytes","total_bytes"))
+        for row in copies),fail)
+    for phase in ("source","target"):
+        fixture=value.get("fixture_"+phase)
+        require(type(fixture) is dict and type(fixture.get("schema")) is int and fixture["schema"]==1
+            and fixture.get("ready") is True and fixture.get("phase")==phase
+            and all(_hex_digest(fixture.get(key)) for key in ("request_sha256","bundle_revision","normalized_sha256"))
+            and type(fixture.get("table_rows")) is dict and set(fixture["table_rows"])==set(ACCOUNT_TABLES)
+            and all(type(count) is int and 1<=count<=20000 for count in fixture["table_rows"].values())
+            and fixture.get("unknown_tables")==list(ACCOUNT_BLOB_TABLES),fail)
+    require(value["fixture_source"]["normalized_sha256"]!=value["fixture_target"]["normalized_sha256"]
+        and value["fixture_source"]["request_sha256"]!=value["fixture_target"]["request_sha256"],fail)
+    observed=value.get("state_observation")
+    require(type(observed) is dict and observed.get("observer")=="runner-sqlite-and-archive"
+        and observed.get("seed_fixture_used") is True and observed.get("gameplay_tested") is False
+        and type(observed.get("checks")) is dict and all(observed["checks"].get(key) is True for key in ACCOUNT_STATE_FLAGS)
+        and type(observed.get("table_rows")) is dict and set(observed["table_rows"])==set(ACCOUNT_TABLES)
+        and all(type(count) is int for count in observed["table_rows"].values())
+        and observed["table_rows"]==value["fixture_target"]["table_rows"]
+        and observed.get("normalized_source_sha256")==value["fixture_source"]["normalized_sha256"]
+        and observed.get("normalized_restored_sha256")==value["fixture_target"]["normalized_sha256"]
+        and observed.get("archive_sha256")==value["archive_sha256"]
+        and type(observed.get("archive_bytes")) is int and observed["archive_bytes"]==value["archive_bytes"],fail)
+    return account_management_observation(value)
+
+
+
+ACCOUNT_PERSIST_FLAGS = ("source_all_tables_persisted", "restored_all_tables_persisted",
+    "source_session_preserved", "target_session_invalidated", "original_selection_preserved", "love_progress_bytes_persisted")
+
+
+def validate_account_management_after_relaunch(value, first_account_summary):
+    """Recheck runner observations against the first complete account proof."""
+    fail = "settings_account_management_failed"
+    first = first_account_summary
+    source = first.get("fixture_source") if type(first) is dict else None
+    target = first.get("fixture_target") if type(first) is dict else None
+    require(type(first) is dict and first.get("performed") is True and first.get("scope") == "stock-simulator"
+        and first.get("seed_fixture_used") is True and first.get("gameplay_tested") is False
+        and type(source) is dict and type(target) is dict
+        and _hex_digest(source.get("normalized_sha256")) and _hex_digest(target.get("normalized_sha256"))
+        and type(value) is dict and type(value.get("schema")) is int and value["schema"] == 1
+        and value.get("observer") == "runner-sqlite-after-five-cold-runs"
+        and value.get("seed_fixture_used") is True and value.get("gameplay_tested") is False
+        and type(value.get("checks")) is dict and set(value["checks"]) == set(ACCOUNT_PERSIST_FLAGS)
+        and all(value["checks"].get(key) is True for key in ACCOUNT_PERSIST_FLAGS)
+        and value.get("normalized_source_sha256") == source["normalized_sha256"]
+        and value.get("normalized_restored_sha256") == target["normalized_sha256"], fail)
+    return {"schema": 1, "observer": value["observer"], "seed_fixture_used": True, "gameplay_tested": False,
+        "checks": {key: value["checks"][key] for key in ACCOUNT_PERSIST_FLAGS},
+        "normalized_source_sha256": value["normalized_source_sha256"],
+        "normalized_restored_sha256": value["normalized_restored_sha256"]}
+
+
+def zip_roundtrip_observation(value):
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in (*ZIP_ROUNDTRIP_FLAGS, "performed", "timed_out") if type(value.get(key)) is bool}
+    for key, expected in (("scope", "stock-simulator"), ("selection_trigger", "delegate-callback"),
+                          ("reason", "first-cold-run-only")):
+        if value.get(key) == expected:
+            clean[key] = expected
+    for key in ZIP_ROUNDTRIP_COUNTS:
+        if type(value.get(key)) is int and 0 <= value[key] <= 128*1024*1024:
+            clean[key] = value[key]
+    for key in ("source_sha256", "copied_sha256"):
+        if type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}", value[key]):
+            clean[key] = value[key]
+    seconds = value.get("elapsed_seconds")
+    if type(seconds) in (int,float) and math.isfinite(seconds) and 0 <= seconds <= 600:
+        clean["elapsed_seconds"] = seconds
+    return clean
+
+
+def validate_zip_roundtrip(value, run_index):
+    require(type(value) is dict, "settings_zip_roundtrip_failed")
+    if run_index != 0:
+        require(value == {"performed":False,"reason":"first-cold-run-only"}
+                and type(value.get("performed")) is bool, "settings_zip_roundtrip_failed")
+        return {"performed":False,"reason":"first-cold-run-only"}
+    require(value.get("performed") is True and value.get("scope") == "stock-simulator"
+            and value.get("selection_trigger") == "delegate-callback" and value.get("timed_out") is False
+            and all(value.get(key) is True for key in ZIP_ROUNDTRIP_FLAGS)
+            and all(type(value.get(key)) is int and 0 <= value[key] <= 128*1024*1024 for key in ZIP_ROUNDTRIP_COUNTS)
+            and value["source_bytes"] > 0 and value["source_bytes"] == value["copied_bytes"] == value["total_bytes"]
+            and value["failed_files"] == 0 and value["exported_files"] == value["imported_files"]
+            and all(type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}",value[key])
+                    for key in ("source_sha256", "copied_sha256"))
+            and value["source_sha256"] == value["copied_sha256"]
+            and type(value.get("elapsed_seconds")) in (int,float) and math.isfinite(value["elapsed_seconds"])
+            and 0 <= value["elapsed_seconds"] <= 120, "settings_zip_roundtrip_failed")
+    return zip_roundtrip_observation(value)
+
+
+def zip_import_observation(value):
+    """Keep stock UIKit mode/cancel evidence; never filenames or provider data."""
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in (*ZIP_IMPORT_SERVER_FLAGS, "timed_out") if type(value.get(key)) is bool}
+    for key, expected in (("scope", "stock-simulator"), ("cancel_trigger", "delegate-callback")):
+        if value.get(key) == expected:
+            clean[key] = expected
+    observations, elapsed = value.get("observations"), value.get("elapsed_seconds")
+    if type(observations) is int and 0 <= observations <= 200:
+        clean["observations"] = observations
+    if type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 <= elapsed <= 600:
+        clean["elapsed_seconds"] = elapsed
+    if type(value.get("passes")) is list:
+        clean["passes"] = []
+        for sample in value["passes"][:2]:
+            if type(sample) is not dict:
+                continue
+            observed = {key:sample[key] for key in ZIP_IMPORT_PASS_BOOL_FIELDS if type(sample.get(key)) is bool}
+            mode = sample.get("document_picker_mode")
+            if type(mode) is int and 0 <= mode <= 3:
+                observed["document_picker_mode"] = mode
+            clean["passes"].append(observed)
+    return clean
+
+
+def zip_import_from_observation(value):
+    if type(value) is not dict:
+        return {}
+    raw = value.get("zip_import_picker")
+    if type(raw) is not dict and type(value.get("menu_lifetime")) is dict:
+        raw = value["menu_lifetime"].get("zip_import_picker")
+    return zip_import_observation(raw)
+
+
+def diagnostics_copy_observation(value):
+    """Export copy-flow flags and size; never clipboard or diagnostic text."""
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in (*DIAGNOSTICS_COPY_BOOL_FIELDS, "timed_out")
+             if type(value.get(key)) is bool}
+    count = value.get("text_bytes")
+    if type(count) is int and 0 <= count <= 32768:
+        clean["text_bytes"] = count
+    return clean
+
+
+def diagnostics_copy_from_observation(value):
+    if type(value) is not dict:
+        return {}
+    raw = value.get("diagnostics_copy")
+    if type(raw) is not dict and type(value.get("menu_lifetime")) is dict:
+        raw = value["menu_lifetime"].get("diagnostics_copy")
+    return diagnostics_copy_observation(raw)
+
+
+def header_observation(value):
+    """Project fixed header phases and finite geometry/font scalars only."""
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in ("restore_succeeded", "owned_root_only") if type(value.get(key)) is bool}
+    for name in HEADER_PHASES:
+        sample = value.get(name)
+        if type(sample) is not dict:
+            continue
+        metrics = {key:sample[key] for key in HEADER_BOOL_FIELDS if type(sample.get(key)) is bool}
+        count = sample.get("button_count")
+        if type(count) is int and 0 <= count <= 16:
+            metrics["button_count"] = count
+        for key in HEADER_NUMBER_FIELDS:
+            number = sample.get(key)
+            if type(number) in (int, float) and 0 <= number <= 16384 and math.isfinite(number):
+                metrics[key] = number
+        if metrics:
+            clean[name] = metrics
+    return clean
+
+
+def http_readiness_observation(value):
+    """Keep only loopback NSURLSession evidence and fixed, public error labels."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    if type(value.get("schema")) is int and value["schema"] == 1:
+        clean["schema"] = 1
+    for key in ("ok", "body_is_json", "worker_main_thread"):
+        if type(value.get(key)) is bool:
+            clean[key] = value[key]
+    for key, maximum in (("http_status",599), ("received_bytes",16384)):
+        number = value.get(key)
+        if type(number) is int and 0 <= number <= maximum:
+            clean[key] = number
+    for key, expected in (("transport","NSURLSession"), ("url",HTTP_READINESS_URL),
+                          ("error_code","none")):
+        if type(value.get(key)) is str and value[key] == expected:
+            clean[key] = value[key]
+    for key in ("ns_error_domain", "ns_error_code"):
+        if key in value and value[key] is None:
+            clean[key] = None
+    return clean
+
+
+def keyboard_lifecycle_observation(value):
+    """Keep the fixed reuse strategy and bounded initialization counters only."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    if type(value.get("installed")) is bool:
+        clean["installed"] = value["installed"]
+    if type(value.get("strategy")) is str and value["strategy"] == "reuse-existing":
+        clean["strategy"] = value["strategy"]
+    for key in KEYBOARD_LIFECYCLE_COUNTERS:
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= 16:
+            clean[key] = item
+    return clean
+
+
+def keyboard_observation(value):
+    """Keep only fixed phases, bounded public getter state and lifecycle info."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    for name in KEYBOARD_PHASES:
+        observation = value.get(name)
+        if type(observation) is not dict:
+            continue
+        scalars = {key: observation[key] for key in KEYBOARD_BOOL_FIELDS
+                   if type(observation.get(key)) is bool}
+        for key in KEYBOARD_INT_FIELDS:
+            item = observation.get(key)
+            if type(item) is int and 0 <= item <= (4 if key == "phase" else 16):
+                scalars[key] = item
+        lifecycle = keyboard_lifecycle_observation(observation.get("lifecycle"))
+        if lifecycle:
+            scalars["lifecycle"] = lifecycle
+        if scalars:
+            clean[name] = scalars
+    return clean
+
+
+def corner_observation(value):
+    """Retain only bounded scalar recognizer diagnostics, never arbitrary names."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    for key in ("game_window_key", "delegate_present", "delays_touches_began",
+                "delays_touches_ended", "cancels_touches_in_view"):
+        if type(value.get(key)) in (bool, int) and value[key] in (False, True, 0, 1):
+            clean[key] = value[key]
+    for key in ("matching_count", "one_finger_count", "three_finger_count"):
+        if type(value.get(key)) is int and 0 <= value[key] <= 4096:
+            clean[key] = value[key]
+    for key in ("minimum_press_seconds", "allowable_movement_points"):
+        if type(value.get(key)) in (int, float) and 0 <= value[key] <= 1000000:
+            clean[key] = value[key]
+    name = value.get("recognizer_name")
+    clean["recognizer_name"] = name if name is None or name == "idoly.server-menu-corner" else "unexpected_name"
+    return clean
+
+
+def menu_close_observation(value):
+    """Retain public UIKit transition state, never view names or arbitrary text."""
+    if type(value) is not dict:
+        return {}
+    clean = {key: value[key] for key in (
+        "presented_controller_remaining", "settings_controller_still_presented", "settings_view_attached",
+        "settings_is_being_dismissed", "game_window_key", "timed_out") if type(value.get(key)) is bool}
+    for key, maximum in (("application_state", 2), ("observations", 10000)):
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= maximum:
+            clean[key] = item
+    seconds = value.get("wait_seconds")
+    if type(seconds) in (int, float) and math.isfinite(seconds) and 0 <= seconds <= 600:
+        clean["wait_seconds"] = seconds
+    return clean
+
+
+def failure_checkpoint(container, expected_language="ko", run_index=None, *, expected_pid=None, launch_started=None):
+    """Read only fixed scalar progress from this invocation's fresh container."""
+    result = {"stage": "not_observed", "container_available": container is not None}
+    if container is None:
+        return result
+    documents = Path(container) / "Documents"
+
+    def scalars(value):
+        if type(value) is not dict:
+            return {}
+        clean = {}
+        phase = value.get("phase")
+        if type(phase) is int and 0 <= phase <= 4:
+            clean["phase"] = phase
+        for key,maximum in (("process_id",2**31-1),("main_heartbeat_count",100000),("checkpoint_count",100000)):
+            item=value.get(key)
+            if type(item) is int and (1 if key=="process_id" else 0)<=item<=maximum:clean[key]=item
+        if type(value.get("main_thread_checkpoint")) is bool:clean["main_thread_checkpoint"]=value["main_thread_checkpoint"]
+        elapsed=value.get("main_elapsed_seconds")
+        if type(elapsed) in (int,float) and math.isfinite(elapsed) and 0<=elapsed<=900:clean["main_elapsed_seconds"]=elapsed
+        application_state = value.get("application_state")
+        if type(application_state) is int and 0 <= application_state <= 2:
+            clean["application_state"] = application_state
+        count = value.get("original_called")
+        if type(count) is int and 0 <= count <= 16:
+            clean["original_called"] = count
+        for key in ("launch_requested", "launch_prepared", "launcher_visible", "keyboard_ready"):
+            if type(value.get(key)) is bool:
+                clean[key] = value[key]
+        lifecycle = keyboard_lifecycle_observation(value.get("keyboard_lifecycle"))
+        if lifecycle:
+            clean["keyboard_lifecycle"] = lifecycle
+        http = http_readiness_observation(value.get("http_readiness"))
+        if http:
+            clean["http_readiness"] = http
+        return clean
+
+    final_name, status_name, checkpoint_name = language_paths(expected_language,run_index)
+    for source, name in (("checkpoint", checkpoint_name), ("status", status_name), ("report", final_name)):
+        result[source + "_available"] = False
+        try:
+            observed = parse_json(read_bounded(documents / name, MAX_JSON))
+        except FileNotFoundError:
+            continue
+        except ProbeError as error:
+            code = str(error)
+            result[source + "_read_error"] = code if code in CHECKPOINT_READ_CODES else "invalid_checkpoint"
+            continue
+        except OSError:
+            result[source + "_read_error"] = "unreadable_checkpoint"
+            continue
+        result[source + "_available"] = True
+        try:
+            info=(documents/name).lstat()
+            age=time.time()-info.st_mtime
+            if stat.S_ISREG(info.st_mode) and 0<=age<=3600:result[source+"_age_seconds"]=round(age,3)
+        except OSError:pass
+        gate = server_gate_observation(observed.get("server_status") if type(observed.get("server_status")) is dict else observed)
+        if gate: result["server_gate"] = gate
+        settings_web = settings_web_from_observation(observed)
+        if settings_web: result["settings_web"] = settings_web
+        language = language_observation(observed)
+        if language: result["language_observation"] = language
+        menu = menu_close_observation(observed.get("menu_close"))
+        if menu:
+            result["menu_close"] = menu
+        keyboard = keyboard_observation(observed.get("keyboard"))
+        if keyboard:
+            result.setdefault("keyboard", {}).update(keyboard)
+        header = header_observation(observed.get("native_header"))
+        if header:
+            result.setdefault("native_header", {}).update(header)
+        copied = diagnostics_copy_from_observation(observed)
+        if copied:
+            result["diagnostics_copy"] = copied
+        zipped = zip_import_from_observation(observed)
+        if zipped:
+            result["zip_import_picker"] = zipped
+        roundtrip_raw = observed.get("zip_roundtrip")
+        if type(roundtrip_raw) is not dict and type(observed.get("menu_lifetime")) is dict:
+            roundtrip_raw = observed["menu_lifetime"].get("zip_roundtrip")
+        roundtrip = zip_roundtrip_observation(roundtrip_raw)
+        if roundtrip:
+            result["zip_roundtrip"] = roundtrip
+        progress = zip_progress_observation(observed.get("zip_roundtrip_progress"))
+        if progress:
+            result["zip_roundtrip_progress"] = progress
+        account_raw=observed.get("account_management")
+        if type(account_raw) is not dict and type(observed.get("menu_lifetime")) is dict:
+            account_raw=observed["menu_lifetime"].get("account_management")
+        account=account_management_observation(account_raw)
+        if account: result["account_management"]=account
+        prompt_raw=observed.get("official_prompt")
+        if type(prompt_raw) is not dict and type(observed.get("menu_lifetime")) is dict:
+            prompt_raw=observed["menu_lifetime"].get("official_prompt")
+        prompt=official_prompt_observation(prompt_raw)
+        if prompt: result["official_prompt"]=prompt
+        budget = octo_budget_from_observation(observed)
+        if budget:
+            result["octo_budget"] = budget
+        budget_probe = octo_budget_probe_observation(observed.get("octo_budget_probe"))
+        if budget_probe:
+            result["octo_budget_probe"] = budget_probe
+        if source == "checkpoint":
+            stage = observed.get("stage")
+            if type(observed.get("schema")) is int and observed["schema"] == 1 \
+                    and type(stage) is str and stage in NATIVE_CHECKPOINT_STAGES:
+                result.update(scalars(observed), stage=stage)
+            else:
+                result["checkpoint_read_error"] = "invalid_checkpoint_stage"
+        else:
+            status = scalars(observed.get("server_status"))
+            status.update({key: item for key, item in scalars(observed).items() if key == "original_called"})
+            result.update({source + "_" + key: item for key, item in status.items()})
+            if source == "report":
+                corner = corner_observation(observed.get("corner_gesture"))
+                result.update({"corner_" + key: item for key, item in corner.items()})
+                try:
+                    validate_report(observed)
+                    result["report_valid"] = True
+                except ProbeError:
+                    result["report_valid"] = False
+    # These independent minimal files do not call native/Python status. Adopt
+    # only this launch's PID, time window and language/run-specific file names.
+    if (type(expected_pid) is int and 1<=expected_pid<=2**31-1
+            and type(launch_started) in (int,float) and math.isfinite(launch_started)):
+        stem=checkpoint_name.removesuffix("-checkpoint.json")
+        for kind in ("heartbeat","account-progress"):
+            path=documents/(stem+"-"+kind+".json")
+            try:
+                value=parse_json(read_bounded(path,8192));info=path.lstat()
+                if (type(value.get("schema")) is not int or value["schema"]!=1
+                        or type(value.get("process_id")) is not int or value["process_id"]!=expected_pid
+                        or not launch_started-1<=info.st_mtime<=time.time()+1
+                        or ("run_index" in value and (type(value["run_index"]) is not int or value["run_index"]!=run_index))): continue
+                stage=value.get("stage")
+                if type(stage) is not str or stage not in NATIVE_CHECKPOINT_STAGES: continue
+                clean=scalars(value)
+                clean["stage"]=stage
+                for key in ("resident_bytes","footprint_bytes"):
+                    if type(value.get(key)) is int and 0<=value[key]<=64*1024**3:clean[key]=value[key]
+                if kind=="heartbeat":
+                    if value.get("main_thread_heartbeat") is not True:continue
+                    clean["main_thread_heartbeat"]=True
+                    clean["age_seconds"]=round(max(0,time.time()-info.st_mtime),3)
+                    result["independent_heartbeat"]=clean
+                else:
+                    if value.get("main_thread_checkpoint") is not True:continue
+                    progress=value.get("account_management_progress")
+                    if type(progress) is not dict or type(progress.get("schema")) is not int or progress["schema"]!=1:continue
+                    if progress.get("phase") not in ("entered","fixture_loaded","status_requested","status_received","script_dispatched","script_started","finished","timeout","none","seed-source","seed-target","export","preview","pending","original"):continue
+                    current={"schema":1,"phase":progress["phase"]}
+                    if progress.get("last_action") in (*ACCOUNT_UI_ACTIONS,"none"):current["last_action"]=progress["last_action"]
+                    if type(progress.get("observations")) is int and 0<=progress["observations"]<=2000:current["observations"]=progress["observations"]
+                    elapsed=progress.get("elapsed_seconds")
+                    if type(elapsed) in (int,float) and math.isfinite(elapsed) and 0<=elapsed<=120:current["elapsed_seconds"]=elapsed
+                    code=progress.get("error_code")
+                    if type(code) is str and re.fullmatch(r"account_ui_[a-z_]{1,64}",code):current["error_code"]=code
+                    result["account_management_progress"]=current
+                    result["account_progress_checkpoint"]=clean
+                    result["stage"]=stage
+            except (OSError,ProbeError):continue
+    return result
+
+
+def unary_h2(path, request, *, token=None, port=50051, timeout=15):
+    """One real encrypted unary h2c RPC, restricted to IPv4 loopback."""
+    from h2.config import H2Configuration
+    from h2.connection import H2Connection
+    from h2.events import (ConnectionTerminated, DataReceived, ResponseReceived,
+                           StreamEnded, StreamReset, TrailersReceived)
+    from idoly_local import codec
+    require(path in (*RPC_PATHS, MASTER_RPC_PATH) and type(port) is int and 0 < port <= 65535,
+            "invalid_probe_rpc")
+    require(type(request) is bytes and len(request) <= MAX_JSON, "rpc_request_bound")
+    encrypted = codec.encode(request + PUBLIC_PROBE_FIELD)
+    require(bool(encrypted), "rpc_request_not_encrypted")
+    frame = b"\0" + struct.pack("!I", len(encrypted)) + encrypted
+    peer = H2Connection(H2Configuration(client_side=True, header_encoding="utf-8"))
+    peer.initiate_connection()
+    headers = [(":method", "POST"), (":scheme", "http"), (":authority", f"127.0.0.1:{port}"),
+               (":path", path), ("content-type", "application/grpc"), ("te", "trailers"),
+               ("grpc-timeout", f"{max(1, min(99999999, int(timeout * 1000)))}m")]
+    if token is not None:
+        require(type(token) is str and 0 < len(token) <= 4096 and token.isascii()
+                and not any(ord(c) < 33 or ord(c) > 126 for c in token), "invalid_local_auth_token")
+        headers.append(("x-auth-token", token))
+    peer.send_headers(1, headers)
+    peer.send_data(1, frame, end_stream=True)
+    response, metadata, ended = bytearray(), {}, False
+    deadline = time.monotonic() + timeout
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as connection:
+            connection.sendall(peer.data_to_send())
+            while not ended:
+                left = deadline - time.monotonic()
+                require(left > 0, "rpc_deadline_exceeded")
+                connection.settimeout(left)
+                raw = connection.recv(64 * 1024)
+                require(bool(raw), "rpc_closed_before_trailers")
+                for event in peer.receive_data(raw):
+                    if isinstance(event, (ResponseReceived, TrailersReceived)):
+                        require(event.stream_id == 1, "unexpected_rpc_stream")
+                        for key, value in event.headers:
+                            require(key not in metadata and len(key) + len(value) <= 8192,
+                                    "invalid_rpc_headers")
+                            metadata[key] = value
+                        require(sum(len(k) + len(v) for k, v in metadata.items()) <= 16 * 1024,
+                                "rpc_headers_bound")
+                    elif isinstance(event, DataReceived):
+                        require(event.stream_id == 1 and len(response) + len(event.data) <= MAX_RESPONSE,
+                                "rpc_response_bound")
+                        response.extend(event.data)
+                        peer.acknowledge_received_data(event.flow_controlled_length, event.stream_id)
+                    elif isinstance(event, StreamEnded):
+                        require(event.stream_id == 1, "unexpected_rpc_stream")
+                        ended = True
+                    elif isinstance(event, (ConnectionTerminated, StreamReset)):
+                        raise ProbeError("rpc_stream_terminated")
+                pending = peer.data_to_send()
+                if pending:
+                    connection.sendall(pending)
+    except OSError:
+        raise ProbeError("rpc_loopback_transport_failed") from None
+    require(metadata.get(":status") == "200" and metadata.get("grpc-status") == "0"
+            and metadata.get("content-type", "").startswith("application/grpc"), "rpc_status_failed")
+    require(len(response) >= 5 and response[0] == 0
+            and len(response) == 5 + struct.unpack_from("!I", response, 1)[0], "invalid_unary_rpc_frame")
+    require(len(response) > 5, "rpc_response_not_encrypted")
+    plain = codec.decode(bytes(response[5:]))
+    return plain, {"path": path, "grpc_status": 0, "request_encrypted": True,
+                   "response_encrypted": True, "response_bytes": len(plain),
+                   "response_sha256": hashlib.sha256(plain).hexdigest()}
+
+
+def probe_rpcs(schema, *, port=50051, timeout=15):
+    rows = []
+    token = None
+    deadline = time.monotonic() + timeout
+    for path in RPC_PATHS:
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, "rpc_deadline_exceeded")
+        request = schema.request_type(path)().SerializeToString()
+        plain, row = unary_h2(path, request, token=token, port=port, timeout=remaining)
+        result = schema.response_type(path).FromString(plain)
+        if path == RPC_PATHS[0]:
+            require(result.keepAliveTimeMilliseconds == 60000, "system_check_fixture_differs")
+        elif path == RPC_PATHS[1]:
+            token = result.gameAuthToken
+            require(bool(token) and bool(result.userPublic.serverUserId)
+                    and bool(result.userPublic.publicUserId), "fresh_local_login_failed")
+        else:
+            require(bool(result.currentMainAreaId), "fresh_local_home_failed")
+        rows.append(row)
+    return rows
+
+
+def validate_master_file_report(value):
+    """Validate and project only the bounded public master-file transfer proof."""
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"] == 1,
+            "master_file_schema_differs")
+    for key, path in (("auth_rpc", RPC_PATHS[1]), ("master_rpc", MASTER_RPC_PATH)):
+        row = value.get(key)
+        require(type(row) is dict and row.get("path") == path
+                and type(row.get("grpc_status")) is int and row["grpc_status"] == 0
+                and row.get("request_encrypted") is True and row.get("response_encrypted") is True,
+                "master_file_rpc_failed")
+    size, count = value.get("file_bytes"), value.get("sample_bytes")
+    require(value.get("transport") == "http.client" and value.get("origin") == MASTER_ORIGIN
+            and value.get("expected_source") == "bundled-master-prefix"
+            and type(size) is int and 0 < size <= MAX_MASTER_FILE
+            and type(count) is int and count == min(64, size)
+            and type(value.get("path_sha256")) is str and re.fullmatch(r"[0-9a-f]{64}", value["path_sha256"]),
+            "master_file_metadata_failed")
+    require(type(value.get("head_status")) is int and value["head_status"] == 200
+            and type(value.get("head_content_length")) is int and value["head_content_length"] == size,
+            "master_file_head_failed")
+    require(type(value.get("range_status")) is int and value["range_status"] == 206
+            and type(value.get("range_content_length")) is int and value["range_content_length"] == count
+            and value.get("content_range") == f"bytes 0-{count - 1}/{size}",
+            "master_file_range_failed")
+    require(all(type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}", value[key])
+                for key in ("expected_sample_sha256", "received_sample_sha256"))
+            and value["expected_sample_sha256"] == value["received_sample_sha256"]
+            and value.get("sample_matches_bundle") is True, "master_file_sample_differs")
+    result = {key:value[key] for key in ("schema", "transport", "origin", "expected_source", "path_sha256",
+        "file_bytes", "sample_bytes", "head_status", "head_content_length", "range_status",
+        "range_content_length", "content_range", "expected_sample_sha256", "received_sample_sha256",
+        "sample_matches_bundle")}
+    for key in ("auth_rpc", "master_rpc"):
+        result[key] = {field:value[key][field] for field in
+                       ("path", "grpc_status", "request_encrypted", "response_encrypted")}
+    return result
+
+
+def _master_http(method, path, count, timeout):
+    # The published URL is validated separately. Never pass it to a redirecting
+    # opener, environment proxy, or arbitrary network authority.
+    connection = HTTPConnection("127.0.0.1", 8080, timeout=timeout)
+    try:
+        headers = {"Connection":"close"}
+        if method == "GET": headers["Range"] = f"bytes=0-{count - 1}"
+        connection.request(method, path, headers=headers)
+        response = connection.getresponse()
+        require(response.getheader("Content-Type") == "application/octet-stream",
+                "master_file_head_failed" if method == "HEAD" else "master_file_range_failed")
+        length = response.getheader("Content-Length")
+        require(type(length) is str and bool(re.fullmatch(r"[0-9]{1,10}", length)),
+                "master_file_head_failed" if method == "HEAD" else "master_file_range_failed")
+        body = response.read(1 if method == "HEAD" else count + 1)
+        return response.status, int(length), response.getheader("Content-Range"), body
+    except (OSError, HTTPException):
+        raise ProbeError("master_head_transport_failed" if method == "HEAD" else "master_range_transport_failed") from None
+    finally:
+        connection.close()
+
+
+def probe_master_file(schema, app, *, port=50051, timeout=15):
+    """Authenticate, obtain one published master, and read its real file route."""
+    require(type(timeout) in (int, float) and 0 < timeout <= 15, "invalid_master_probe_timeout")
+    deadline = time.monotonic() + timeout
+    def remaining():
+        left = deadline - time.monotonic()
+        require(left > 0, "master_probe_deadline_exceeded")
+        return left
+    request = schema.request_type(RPC_PATHS[1])().SerializeToString()
+    plain, auth = unary_h2(RPC_PATHS[1], request, port=port, timeout=remaining())
+    login = schema.response_type(RPC_PATHS[1]).FromString(plain)
+    require(bool(login.gameAuthToken) and bool(login.userPublic.serverUserId)
+            and bool(login.userPublic.publicUserId), "fresh_local_login_failed")
+    request = schema.request_type(MASTER_RPC_PATH)().SerializeToString()
+    plain, master = unary_h2(MASTER_RPC_PATH, request, token=login.gameAuthToken, port=port, timeout=remaining())
+    catalog = schema.response_type(MASTER_RPC_PATH).FromString(plain)
+    packs = catalog.masterTag.masterTagPacks
+    require(0 < len(packs) <= 4096, "master_catalog_invalid")
+    pack = packs[0]
+    name, size = pack.fileName, pack.fileSize
+    require(type(name) is str and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}", name))
+            and type(size) is int and 0 < size <= MAX_MASTER_FILE, "master_catalog_invalid")
+    path = "/master/" + name
+    require(pack.downloadUrl == MASTER_ORIGIN + path, "master_file_url_invalid")
+    archive_path = Path(app) / "LocalServer" / "ServerData.zip"
+    require(archive_path.is_file() and not archive_path.is_symlink(), "master_bundle_file_invalid")
+    try:
+        with ZipFile(archive_path) as archive:
+            entries = [item for item in archive.infolist()
+                       if item.filename == "data/original-master/assets/master/" + name]
+            require(len(entries) == 1 and not entries[0].is_dir() and entries[0].file_size == size
+                    and not stat.S_ISLNK(entries[0].external_attr >> 16), "master_bundle_file_invalid")
+            with archive.open(entries[0]) as incoming:
+                expected = incoming.read(min(64, size))
+        require(len(expected) == min(64, size), "master_bundle_file_invalid")
+    except (OSError, BadZipFile, RuntimeError):
+        raise ProbeError("master_bundle_read_failed") from None
+    head_status, head_length, _unused, head_body = _master_http("HEAD", path, len(expected), remaining())
+    require(head_status == 200 and head_length == size and head_body == b"", "master_file_head_failed")
+    status, length, content_range, received = _master_http("GET", path, len(expected), remaining())
+    require(status == 206 and length == len(expected) and content_range == f"bytes 0-{len(expected)-1}/{size}"
+            and len(received) == len(expected), "master_file_range_failed")
+    require(received == expected, "master_file_sample_differs")
+    return validate_master_file_report({"schema":1,"transport":"http.client","origin":MASTER_ORIGIN,
+        "expected_source":"bundled-master-prefix","path_sha256":hashlib.sha256(path.encode("ascii")).hexdigest(),
+        "file_bytes":size,"sample_bytes":len(expected),"head_status":head_status,"head_content_length":head_length,
+        "range_status":status,"range_content_length":length,"content_range":content_range,
+        "expected_sample_sha256":hashlib.sha256(expected).hexdigest(),
+        "received_sample_sha256":hashlib.sha256(received).hexdigest(),"sample_matches_bundle":True,
+        "auth_rpc":auth,"master_rpc":master})
+
+
+def validate_sdk_resource_report(value):
+    """Project public SDK wire-identity and one complete translated-file proof."""
+    require(type(value) is dict, "sdk_resource_schema_differs")
+    fixed = {"schema":1,"transport":"http.client","origin":MASTER_ORIGIN,"application_id":212,
+        "application_version":105051,"manifest_path":SDK_MANIFEST_PATH,"manifest_http_status":200,
+        "manifest_encrypted":True,"manifest_decrypted":True,"wire_rowset_matches_original":True,
+        "all_active_object_names_six_base62":True,"selection":"smallest-translated-image",
+        "selected_kind":"assetbundle","object_http_status":200,"object_mime":"application/octet-stream",
+        "etag_matches_md5":True}
+    require(all(type(value.get(key)) is type(expected) and value[key] == expected
+                for key, expected in fixed.items()), "sdk_resource_metadata_failed")
+    bounds = {"manifest_ciphertext_bytes":(32,MAX_SDK_BYTES+32),"manifest_plaintext_bytes":(1,MAX_SDK_BYTES),
+        "manifest_rows":(2,100000),"active_rows":(1,100000),"translated_image_count":(1,100000),
+        "object_bytes":(1,MAX_SDK_BYTES),"received_bytes":(1,MAX_SDK_BYTES),
+        "original_revision":(1,2**31-1),"manifest_revision":(1,2**31-1)}
+    require(all(type(value.get(key)) is int and low <= value[key] <= high
+                for key, (low,high) in bounds.items())
+            and (value["manifest_ciphertext_bytes"]-16) % 16 == 0
+            and value["active_rows"] <= value["manifest_rows"]
+            and value["translated_image_count"] <= value["active_rows"]
+            and value["manifest_revision"] > value["original_revision"], "sdk_resource_manifest_failed")
+    require(all(type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}",value[key])
+                for key in ("original_manifest_sha256","object_path_sha256")), "sdk_resource_metadata_failed")
+    require(value["received_bytes"] == value["object_bytes"]
+            and all(type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{32}",value[key])
+                    for key in ("expected_md5","received_md5"))
+            and value["expected_md5"] == value["received_md5"], "sdk_resource_digest_failed")
+    return {key:value[key] for key in (*fixed,*bounds,"original_manifest_sha256","object_path_sha256",
+                                      "expected_md5","received_md5")}
+
+
+def _sdk_source(app):
+    from idoly_local.octo_manifest import Database
+    with ZipFile(Path(app)/"LocalServer"/"ServerData.zip") as archive:
+        result = {}
+        for name, maximum in (("settings.json",MAX_JSON),("manifest.pb",MAX_SDK_BYTES)):
+            entries = [entry for entry in archive.infolist()
+                       if entry.filename == "data/public-octo-ios/"+name]
+            require(len(entries) == 1 and not entries[0].is_dir() and 0 < entries[0].file_size <= maximum
+                    and not stat.S_ISLNK(entries[0].external_attr >> 16), "sdk_archive_invalid")
+            with archive.open(entries[0]) as incoming: raw = incoming.read(maximum+1)
+            require(len(raw) == entries[0].file_size, "sdk_archive_invalid")
+            result[name] = raw
+    settings = parse_json(result["settings.json"])
+    require(all(type(settings.get(key)) is int and settings[key] == expected
+                for key,expected in (("schema",1),("application_id",212),("application_version",105051)))
+            and all(type(settings.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}",settings[key])
+                    for key in ("manifest_sha256","aes_key_hex"))
+            and type(settings.get("client_key")) is str and 1 <= len(settings["client_key"]) <= 256
+            and settings["client_key"].isascii() and all(33 <= ord(c) <= 126 for c in settings["client_key"]),
+            "sdk_settings_invalid")
+    require(hashlib.sha256(result["manifest.pb"]).hexdigest() == settings["manifest_sha256"],
+            "sdk_archive_digest_failed")
+    original = Database.FromString(result["manifest.pb"])
+    require(type(settings.get("revision")) is int and original.revision == settings["revision"]
+            and original.revision > 0 and original.assetBundleList and original.resourceList, "sdk_archive_invalid")
+    return settings, original
+
+
+def probe_sdk_resource(app, *, timeout=30):
+    """Check the real SDK-facing catalog and stream one prepared image locally."""
+    from idoly_local.octo_manifest import Database, decrypt_manifest
+    from idoly_local.octo_runtime import _desktop_aes_backend
+    require(type(timeout) in (int,float) and 0 < timeout <= 30, "invalid_sdk_probe_timeout")
+    deadline = time.monotonic()+timeout
+    def remaining():
+        left = deadline-time.monotonic()
+        require(left > 0, "sdk_probe_deadline_exceeded")
+        return left
+    settings, original = _sdk_source(app)
+    connection = HTTPConnection("127.0.0.1",8080,timeout=remaining())
+    try:
+        connection.request("GET",SDK_MANIFEST_PATH,headers={"Connection":"close",
+            "Accept":"application/x-protobuf,x-octo-app/212","X-OCTO-KEY":settings["client_key"]})
+        response = connection.getresponse()
+        length = response.getheader("Content-Length")
+        require(response.status == 200 and response.getheader("Content-Type") == "application/x-protobuf"
+                and type(length) is str and re.fullmatch(r"[0-9]{1,9}",length)
+                and 32 <= int(length) <= MAX_SDK_BYTES+32, "sdk_manifest_http_failed")
+        encrypted = response.read(MAX_SDK_BYTES+33)
+        require(len(encrypted) == int(length), "sdk_manifest_http_failed")
+    except (OSError,HTTPException):
+        raise ProbeError("sdk_manifest_transport_failed") from None
+    finally: connection.close()
+    try:
+        plain = decrypt_manifest(encrypted,aes_key=bytes.fromhex(settings["aes_key_hex"]),
+                                 aes_cbc=_desktop_aes_backend())
+        wire = Database.FromString(plain)
+    except Exception:
+        raise ProbeError("sdk_manifest_decryption_failed") from None
+    require(wire.urlFormat == SDK_URL_FORMAT and wire.revision > original.revision, "sdk_manifest_invalid")
+    originals = {(kind,row.id):row for kind,rows in (("assetbundle",original.assetBundleList),
+                  ("resources",original.resourceList)) for row in rows}
+    rows = [(kind,row) for kind,group in (("assetbundle",wire.assetBundleList),("resources",wire.resourceList))
+            for row in group]
+    require(2 <= len(rows) <= 100000 and len(originals) == len(rows)
+            and {(kind,row.id) for kind,row in rows} == set(originals), "sdk_manifest_rowset_failed")
+    active = [(kind,row) for kind,row in rows if row.state != 4]
+    require(active and all(row.state in (1,2,3) and re.fullmatch(r"[A-Za-z0-9]{6}",row.objectName)
+            and 0 < row.size <= 2**31-1 and 0 < row.uploadVersionId <= 2**31-1
+            and 0 < row.generation <= 2**64-1 and re.fullmatch(r"[0-9a-fA-F]{32}",row.md5)
+            for kind,row in active), "sdk_wire_identity_failed")
+    changed = [row for kind,row in active if kind == "assetbundle"
+        and row.md5.lower() != originals[(kind,row.id)].md5.lower()
+        and row.generation != originals[(kind,row.id)].generation]
+    candidates = [row for row in changed if row.size <= MAX_SDK_BYTES]
+    require(candidates, "sdk_translated_image_missing")
+    selected = min(candidates,key=lambda row:(row.size,row.id))
+    path = f"/octo/{selected.uploadVersionId}/assetbundle/{selected.objectName}/{selected.generation}"
+    expected_md5 = selected.md5.lower()
+    connection = HTTPConnection("127.0.0.1",8080,timeout=remaining())
+    digest, received = hashlib.md5(), 0
+    try:
+        connection.request("GET",path,headers={"Connection":"close"})
+        response = connection.getresponse()
+        require(response.status == 200 and response.getheader("Content-Type") == "application/octet-stream"
+                and response.getheader("Content-Length") == str(selected.size)
+                and response.getheader("ETag") == '"'+expected_md5+'"', "sdk_object_http_failed")
+        while True:
+            block = response.read(min(64*1024,selected.size-received+1))
+            if not block: break
+            received += len(block)
+            require(received <= selected.size, "sdk_object_size_failed")
+            digest.update(block); remaining()
+    except (OSError,HTTPException):
+        raise ProbeError("sdk_object_transport_failed") from None
+    finally: connection.close()
+    require(received == selected.size and digest.hexdigest() == expected_md5, "sdk_object_digest_failed")
+    return validate_sdk_resource_report({"schema":1,"transport":"http.client","origin":MASTER_ORIGIN,
+        "application_id":212,"application_version":105051,"manifest_path":SDK_MANIFEST_PATH,
+        "manifest_http_status":200,"manifest_encrypted":True,"manifest_decrypted":True,
+        "manifest_ciphertext_bytes":len(encrypted),"manifest_plaintext_bytes":len(plain),
+        "original_manifest_sha256":settings["manifest_sha256"],"manifest_rows":len(rows),"active_rows":len(active),
+        "wire_rowset_matches_original":True,"all_active_object_names_six_base62":True,
+        "translated_image_count":len(changed),"selection":"smallest-translated-image","selected_kind":"assetbundle",
+        "object_path_sha256":hashlib.sha256(path.encode("ascii")).hexdigest(),"object_http_status":200,
+        "object_mime":"application/octet-stream","object_bytes":selected.size,"received_bytes":received,
+        "expected_md5":expected_md5,"received_md5":digest.hexdigest(),"etag_matches_md5":True,
+        "original_revision":original.revision,"manifest_revision":wire.revision})
+
+
+def _sample_executable_identity(path):
+    path = Path(path); before = path.lstat()
+    require(stat.S_ISREG(before.st_mode) and 0 < before.st_size <= 32*1024*1024, "owned_executable_invalid")
+    fd = os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        identity = lambda v:(v.st_dev,v.st_ino,v.st_size,v.st_mtime_ns,v.st_ctime_ns)
+        require(stat.S_ISREG(opened.st_mode) and identity(before)==identity(opened),"owned_executable_invalid")
+        digest = hashlib.sha256(); count = 0
+        while True:
+            block = os.read(fd,65536)
+            if not block: break
+            count += len(block); require(count <= 32*1024*1024,"owned_executable_invalid");digest.update(block)
+        after = os.fstat(fd)
+        require(identity(opened)==identity(after) and count==opened.st_size,"owned_executable_invalid")
+        return {"identity":identity(after),"bytes":count,"sha256":digest.hexdigest()}
+    finally: os.close(fd)
+
+
+def _terminate_owned_sample(process):
+    # start_new_session=True makes this newly spawned child's PID its own PGID.
+    # Never signal the sampled Probe PID, a default group, or unrelated targets.
+    child = getattr(process,"pid",None)
+    if type(child) is not int or child<=1: return
+    try: os.killpg(child,signal.SIGKILL)
+    except ProcessLookupError: pass
+
+
+def _diagnostic_time(value):
+    if type(value) is not str or not 10 <= len(value) <= 64: return None
+    # Apple IPS uses a space before its numeric zone (and fractional seconds),
+    # while ISO timestamps usually attach Z/+hh:mm directly. Normalize only
+    # those explicit-zone forms, never arbitrary whitespace or local dates.
+    match=re.fullmatch(r"([0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?) *(Z|[+-][0-9]{2}:?[0-9]{2})",value)
+    if match is None: return None
+    zone=match[2]
+    if zone=="Z": zone="+00:00"
+    elif len(zone)==5: zone=zone[:3]+":"+zone[3:]
+    try:
+        parsed = datetime.fromisoformat(match[1]+zone)
+        return parsed.timestamp() if parsed.tzinfo is not None else None
+    except (ValueError,OverflowError,OSError): return None
+
+
+def _owned_termination_record(raw, *, pid, executable, launch_started, launch_ack, ended, owned_device=False):
+    """Project one matching owned-process IPS; never retain paths or raw reasons."""
+    if type(raw) is not bytes or not 0 < len(raw) <= 1024*1024: return None
+    try:
+        try:
+            first,rest=raw.split(b"\n",1)
+            header=parse_json(first,1024*1024); body=parse_json(rest,1024*1024)
+        except (ValueError,ProbeError):
+            header={}; body=parse_json(raw,1024*1024)
+    except ProbeError: return None
+    captured=_diagnostic_time(body.get("captureTime",body.get("date",header.get("timestamp"))))
+    if captured is None or not launch_started-1 <= captured <= ended+5: return None
+    if body.get("procName")==PROBE_EXECUTABLE and type(body.get("pid")) is int and body["pid"]==pid:
+        if body.get("procPath")!=str(executable): return None
+        began=_diagnostic_time(body.get("procLaunch"))
+        if began is None or not launch_started-1 <= began <= launch_ack+1: return None
+        result={"kind":"crash", "pid_matched":True,"executable_matched":True,
+            "launch_interval_matched":True,"capture_interval_matched":True}
+        exception=body.get("exception") if type(body.get("exception")) is dict else {}
+        termination=body.get("termination") if type(body.get("termination")) is dict else {}
+        for key,allowed in (("type",("EXC_CRASH","EXC_BAD_ACCESS","EXC_RESOURCE","EXC_GUARD","EXC_BREAKPOINT","EXC_ARITHMETIC","EXC_SOFTWARE","EXC_CORPSE_NOTIFY")),
+                            ("signal",("SIGABRT","SIGSEGV","SIGBUS","SIGILL","SIGTRAP","SIGKILL","SIGTERM","SIGQUIT","SIGPIPE"))):
+            if type(exception.get(key)) is str and exception[key] in allowed: result["exception_"+key]=exception[key]
+        namespace=termination.get("namespace")
+        if type(namespace) is str and namespace in ("SIGNAL","FRONTBOARD","RUNNINGBOARD","SPRINGBOARD","JETSAM","DYLD","TCC","CODESIGNING","WATCHDOG"):
+            result["termination_namespace"]=namespace
+        code=termination.get("code")
+        if type(code) is int and 0 <= code <= 2**64-1: result["termination_code"]=code
+        images=body.get("usedImages");threads=body.get("threads");index=body.get("faultingThread")
+        if type(images) is list and len(images)<=512 and type(threads) is list and len(threads)<=1024 and type(index) is int and 0<=index<len(threads):
+            thread=threads[index];frames=thread.get("frames") if type(thread) is dict else None; projected=[]
+            if type(frames) is list:
+                for frame in frames[:16]:
+                    if type(frame) is not dict: continue
+                    image=frame.get("imageIndex")
+                    if type(image) is not int or not 0<=image<len(images) or type(images[image]) is not dict: continue
+                    projected.append({"module":images[image].get("name"),"symbol":frame.get("symbol"),"samples":0})
+            result["frames"]=process_sample_observation({"schema":1,"frames":projected})["frames"][:8]
+        return result
+    # Jetsam tables are accepted only from this invocation's owned Simulator
+    # directory. Never read host-wide JetsamEvent tables of unrelated processes.
+    rows=body.get("processes")
+    if owned_device and type(rows) is list and len(rows)<=4096:
+        matches=[row for row in rows if type(row) is dict and type(row.get("pid")) is int and row["pid"]==pid and row.get("name")==PROBE_EXECUTABLE]
+        if len(matches)==1 and matches[0].get("reason") in ("per-process-limit","highwater","vm-pageshortage","vnode-limit","cpu-limit","zone-map-exhaustion","idle-exit","memory-pressure"):
+            return {"kind":"jetsam","pid_matched":True,"owned_simulator_matched":True,
+                "capture_interval_matched":True,"reason":matches[0]["reason"]}
+    return None
+
+
+class OwnedProbeProcessSampler:
+    """One bounded diagnostic, exclusively for this invocation's launch ACK PID."""
+    def __init__(self, simulator_udid, source_app, data_container, *, remaining=None):
+        self.udid, self.source_app, self.container = simulator_udid, Path(source_app), Path(data_container)
+        self.pid = None; self.attempted = False
+        self.launch_started = None; self.launch_ack = None
+        self.executable = None; self.executable_pin = None; self.prepare_error = "owned_container_invalid"
+        self.process_start_identity = None; self.last_liveness_check = None
+        self.absent_since = None; self.termination = None
+        self._exit_queue=None; self._exit_attempted=False; self._exit_bound_pid=None
+        self._exit_bound_identity=None; self._exit_observation={};self._exit_birth_identity=None
+        self._remaining=remaining;self._source_pin=None;self.prepare_stage="not_attempted"
+        self.prepare_attempts=0;self._post_launch_prepare_attempted=False
+
+    def _kernel_birth_identity(self):
+        # Public libproc PROC_PIDTBSDINFO. Its microsecond process birth identity
+        # disambiguates same-image PID reuse within ps lstart's one-second tick.
+        # The other struct fields are never copied into a report or log.
+        import ctypes
+        class BSDInfo(ctypes.Structure):
+            _fields_=[("prefix",ctypes.c_uint32*12),("comm",ctypes.c_char*16),("name",ctypes.c_char*32),
+                ("suffix",ctypes.c_uint32*6),("start_seconds",ctypes.c_uint64),("start_microseconds",ctypes.c_uint64)]
+        require(type(self.pid) is int and 1<=self.pid<=2**31-1,"process_birth_invalid")
+        library=ctypes.CDLL("/usr/lib/libproc.dylib",use_errno=True)
+        function=library.proc_pidinfo
+        function.argtypes=(ctypes.c_int,ctypes.c_int,ctypes.c_uint64,ctypes.c_void_p,ctypes.c_int)
+        function.restype=ctypes.c_int
+        info=BSDInfo();size=ctypes.sizeof(info)
+        require(size==136 and function(self.pid,3,0,ctypes.byref(info),size)==size,"process_birth_unavailable")
+        require(info.prefix[3]==self.pid and info.prefix[5]==os.getuid()
+            and info.start_seconds>0 and info.start_microseconds<1000000,"process_birth_invalid")
+        return info.start_seconds,info.start_microseconds
+
+    def close(self):
+        queue,self._exit_queue=self._exit_queue,None
+        self._exit_bound_pid=self._exit_bound_identity=None
+        if queue is not None:
+            try: queue.close()
+            except OSError: pass
+
+    def _arm_exit_observer(self):
+        # At most one FD for an already image/start-attested owned launch.
+        # NOTE_EXITSTATUS is a public Darwin flag (sys/event.h), available for
+        # a child or another process this user is allowed to signal. It does
+        # not signal, reap, suspend, or otherwise change the target process.
+        if self._exit_attempted or self.process_start_identity is None: return
+        self._exit_attempted=True
+        if sys.platform!="darwin" or not hasattr(select,"kqueue"):
+            self._exit_observation={"schema":1,"state":"unsupported","error_code":"unsupported"}; return
+        queue=None
+        try:
+            if self._exit_birth_identity is None or self._kernel_birth_identity()!=self._exit_birth_identity:
+                self._exit_observation={"schema":1,"state":"unavailable","error_code":"identity_changed"};return
+            queue=select.kqueue()
+            event=select.kevent(self.pid,filter=select.KQ_FILTER_PROC,
+                flags=select.KQ_EV_ADD|select.KQ_EV_ENABLE|select.KQ_EV_ONESHOT,
+                fflags=select.KQ_NOTE_EXIT|0x04000000)  # NOTE_EXITSTATUS
+            queue.control([event],0,0)
+            # Registration alone cannot bind a recycled PID. Recheck the same
+            # image/start identity across registration before accepting events.
+            if (self._process_identity(self.executable)!=self.process_start_identity
+                    or self._kernel_birth_identity()!=self._exit_birth_identity):
+                self._exit_observation={"schema":1,"state":"unavailable","error_code":"identity_changed"}; return
+            self._exit_queue=queue;queue=None
+            self._exit_bound_pid=self.pid;self._exit_bound_identity=(self.process_start_identity,self._exit_birth_identity)
+            self._exit_observation={"schema":1,"state":"armed","error_code":"none"}
+        except (OSError,ProbeError,AttributeError,ValueError):
+            self._exit_observation={"schema":1,"state":"unavailable","error_code":"registration_failed"}
+        finally:
+            if queue is not None:
+                try: queue.close()
+                except OSError: pass
+
+    def _poll_exit_observer(self):
+        if self._exit_queue is None: return
+        if self.pid!=self._exit_bound_pid or (self.process_start_identity,self._exit_birth_identity)!=self._exit_bound_identity:
+            self._exit_observation={"schema":1,"state":"unavailable","error_code":"identity_changed"};self.close();return
+        try:
+            events=self._exit_queue.control(None,1,0)
+            if not events: return
+            event=events[0]
+            if (event.ident!=self._exit_bound_pid or event.filter!=select.KQ_FILTER_PROC
+                    or event.flags&select.KQ_EV_ERROR or not event.fflags&select.KQ_NOTE_EXIT
+                    or not event.fflags&0x04000000):
+                self._exit_observation={"schema":1,"state":"unavailable","error_code":"event_invalid"}
+            else:
+                value=process_exit_observation({"schema":1,"state":"exited","error_code":"none","wait_status":event.data})
+                self._exit_observation=value or {"schema":1,"state":"unavailable","error_code":"event_invalid"}
+            self.close()
+        except (OSError,ValueError):
+            self._exit_observation={"schema":1,"state":"unavailable","error_code":"read_failed"};self.close()
+
+    def attestation(self):
+        return process_attestation_observation({"schema":1,"stage":self.prepare_stage,"error_code":self.prepare_error,
+            "attempts":self.prepare_attempts,"post_launch_retry":self._post_launch_prepare_attempted,
+            "available":self.executable is not None and self.prepare_error=="none"})
+
+    def _prepare_attempt(self):
+        self.executable = None; self.executable_pin = None
+        # Bind the installed image while Simulator services are responsive.
+        # This optional setup cannot alter a probe's success/failure gates.
+        try:
+            require(sys.platform=="darwin","not_macos")
+            if self._source_pin is None:
+                self.prepare_stage="source_image"
+                self._source_pin=_sample_executable_identity(self.source_app/PROBE_EXECUTABLE)
+            self.executable,self.executable_pin = self._owned_executable()
+            self.prepare_error = "none";self.prepare_stage="complete"
+            return True
+        except Exception as error:
+            if isinstance(error,ProbeError):
+                code={"simctl_timeout":"owned_bundle_query_timeout","simctl_failed":"owned_bundle_query_failed",
+                    "simctl_output_bound":"owned_bundle_query_output_invalid"}.get(str(error),str(error))
+                self.prepare_error=code if code in PROCESS_SAMPLE_ERRORS else "owned_preparation_exception"
+            elif isinstance(error,OSError):self.prepare_error="owned_preparation_io_failed"
+            elif isinstance(error,(ValueError,TypeError,UnicodeError,plistlib.InvalidFileException)):
+                self.prepare_error="owned_preparation_parse_failed"
+            else:self.prepare_error="owned_preparation_exception"
+            return False
+
+    def prepare(self):
+        if self.prepare_attempts:return self.executable is not None and self.prepare_error=="none"
+        self.prepare_attempts=1
+        return self._prepare_attempt()
+
+    def _retry_prepare_after_launch(self,checkpoint_path):
+        # Exactly one recovery of optional early setup, never a CI/app retry.
+        # An already bound image/start/observer can never be replaced here.
+        if (self.prepare_attempts!=1 or self._post_launch_prepare_attempted or self.prepare_error=="none"
+                or self._source_pin is None or self.executable is not None or self.process_start_identity is not None
+                or self._exit_queue is not None or self._exit_attempted or type(self.pid) is not int
+                or self.launch_started is None or self.launch_ack is None or checkpoint_path is None):return
+        try:
+            path=Path(checkpoint_path)
+            allowed={language_paths(language,index)[2] for index,language in enumerate(MATRIX_LANGUAGES)}
+            require(path.parent==self.container/"Documents" and path.name in allowed
+                and path.resolve(strict=True)==path and not path.parent.is_symlink(),"owned_container_invalid")
+            before=path.lstat()
+            require(stat.S_ISREG(before.st_mode) and before.st_nlink==1
+                and self.launch_started<=before.st_mtime<=time.time()+1,"owned_container_invalid")
+            observed=parse_json(read_bounded(path,MAX_JSON));after=path.lstat()
+            require((before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)
+                ==(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns),"owned_container_invalid")
+            require(type(observed) is dict and type(observed.get("schema")) is int and observed["schema"]==1
+                and observed.get("main_thread_checkpoint") is True and type(observed.get("process_id")) is int
+                and observed["process_id"]==self.pid,"checkpoint_pid_differs")
+            os.kill(self.pid,0)  # Existence only, before retrying the same owned source/path checks.
+        except (OSError,ProbeError,ValueError):return
+        if callable(self._remaining):self._remaining()  # Preserve the original overall deadline.
+        self._post_launch_prepare_attempted=True;self.prepare_attempts=2
+        self._prepare_attempt()
+
+    def clear_launch(self):
+        self.close();self._exit_attempted=False;self._exit_observation={};self._exit_birth_identity=None
+        self.pid = None; self.launch_started = time.time(); self.launch_ack = None
+        self.process_start_identity = None; self.last_liveness_check = None
+        self.absent_since = None; self.termination = None
+
+    def note_launch(self, raw):
+        self.pid = None; self.launch_ack = time.time()
+        if type(raw) is bytes and len(raw) <= 256:
+            try: text = raw.decode("ascii")
+            except UnicodeError: return
+            match = re.fullmatch(re.escape(BUNDLE_ID)+r": ([1-9][0-9]{0,9})\n?",text)
+            if match and int(match.group(1)) <= 2**31-1: self.pid = int(match.group(1))
+
+    def poll_liveness(self, checkpoint, *, checkpoint_path=None):
+        if sys.platform=="darwin" and self.executable is None:self._retry_prepare_after_launch(checkpoint_path)
+        if (sys.platform!="darwin" or self.executable is None or self.prepare_error!="none"
+                or type(self.pid) is not int): return
+        now=time.monotonic()
+        if self.last_liveness_check is not None and now-self.last_liveness_check<1: return
+        self.last_liveness_check=now
+        if self.process_start_identity is None:
+            try:
+                observed=checkpoint() if callable(checkpoint) else checkpoint
+                if (type(observed) is not dict or type(observed.get("process_id")) is not int
+                        or observed["process_id"]!=self.pid): return
+                if _sample_executable_identity(self.executable)!=self.executable_pin: return
+                birth=None
+                if hasattr(select,"kqueue"):
+                    try:birth=self._kernel_birth_identity()
+                    except (OSError,ProbeError,AttributeError):pass
+                self.process_start_identity=self._process_identity(self.executable)
+                if birth is not None:
+                    try:
+                        if self._kernel_birth_identity()==birth:self._exit_birth_identity=birth
+                    except (OSError,ProbeError,AttributeError):pass
+            except (OSError,ProbeError): return
+        self._arm_exit_observer()
+        self._poll_exit_observer()
+        # Initial image/start attestation may take two seconds. Measure the
+        # actual existence query, not the earlier entry time, for separation.
+        now=time.monotonic();self.last_liveness_check=now
+        try:
+            os.kill(self.pid,0)  # Existence query only; never signal the Probe.
+        except ProcessLookupError:
+            if self.absent_since is None: self.absent_since=now; return
+            if now-self.absent_since<1: return
+            self.termination={"schema":1,"scope":"owned-disposable-simulator-process",
+                "pid":self.pid,"launch_ack_matched":True,"executable_verified_before_exit":True,
+                "start_identity_verified_before_exit":True,"confirmed_absence_observations":2,
+                "reason":"confirmed_esrch","ended":time.time()}
+            observer=process_exit_observation(self._exit_observation)
+            if observer:self.termination["exit_observer"]=observer
+            error=ProbeError("owned_probe_process_exited");error.process_termination=self.termination
+            raise error
+        except OSError:
+            self.absent_since=None  # Permission/query failures cannot establish death.
+        else:
+            self.absent_since=None
+
+    def termination_evidence(self):
+        if self.termination is None: return None
+        self._poll_exit_observer()
+        report={key:value for key,value in self.termination.items() if key!="ended"}
+        observer=process_exit_observation(self._exit_observation)
+        if observer:report["exit_observer"]=observer
+        report.update(records=[],raw_logs_retained=False)
+        device=self.container.resolve(strict=True).parents[4]
+        if device.name!=self.udid or device.parent.name!="Devices": return report
+        roots=((device/"data/Library/Logs/CrashReporter",True),
+               (Path.home()/"Library/Logs/DiagnosticReports",False))
+        deadline=time.monotonic()+2;read_bytes=0;seen=set()
+        for root,owned in roots:
+            try:
+                if root.is_symlink() or not root.is_dir(): continue
+                with os.scandir(root) as entries:
+                    for index,entry in enumerate(entries):
+                        if index>=512 or time.monotonic()>=deadline or len(report["records"])>=2: break
+                        if not (entry.name.startswith(PROBE_EXECUTABLE) or (owned and entry.name.startswith("JetsamEvent"))) or not entry.name.endswith(".ips"): continue
+                        info=entry.stat(follow_symlinks=False)
+                        if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or not 0<info.st_size<=1024*1024
+                                or not self.launch_started-2<=info.st_mtime<=self.termination["ended"]+10
+                                or read_bytes+info.st_size>2*1024*1024): continue
+                        raw=read_bounded(Path(entry.path),1024*1024);read_bytes+=len(raw)
+                        digest=hashlib.sha256(raw).hexdigest()
+                        if digest in seen: continue
+                        seen.add(digest)
+                        record=_owned_termination_record(raw,pid=self.pid,executable=self.executable,
+                            launch_started=self.launch_started,launch_ack=self.launch_ack,
+                            ended=self.termination["ended"],owned_device=owned)
+                        if record is not None: report["records"].append(record)
+            except (OSError,ProbeError): continue
+        report["matching_record_count"]=len(report["records"])
+        return report
+
+    def _owned_executable(self):
+        self.prepare_stage="validate_container"
+        require(type(self.udid) is str and str(uuid.UUID(self.udid)).upper()==self.udid,"owned_container_invalid")
+        data = self.container.resolve(strict=True)
+        require(not self.container.is_symlink() and len(data.parents)>=5,"owned_container_invalid")
+        device = data.parents[4]
+        require(device.name==self.udid and device.parent.name=="Devices"
+            and data.relative_to(device).parts[:4]==("data","Containers","Data","Application")
+            and len(data.relative_to(device).parts)==5
+            and str(uuid.UUID(data.name)).upper()==data.name.upper(),"owned_container_invalid")
+        self.prepare_stage="bundle_query"
+        budget=self._remaining() if callable(self._remaining) else 4
+        require(type(budget) in (int,float) and math.isfinite(budget) and budget>0,"probe_deadline_exceeded")
+        raw = _simctl(["get_app_container",self.udid,BUNDLE_ID,"app"],min(4,budget))
+        require(type(raw) is bytes and len(raw)<=4096,"owned_container_invalid")
+        self.prepare_stage="validate_bundle"
+        bundle = Path(raw.decode("utf-8").strip())
+        require(bundle.is_absolute() and not bundle.is_symlink(),"owned_container_invalid")
+        bundle = bundle.resolve(strict=True); parts = bundle.relative_to(device).parts
+        require(len(parts)==6 and parts[:4]==("data","Containers","Bundle","Application")
+            and str(uuid.UUID(parts[4])).upper()==parts[4].upper() and parts[5]=="Probe.app","owned_container_invalid")
+        self.prepare_stage="bundle_info"
+        info = plistlib.loads(read_bounded(bundle/"Info.plist",MAX_JSON))
+        require(type(info) is dict and info.get("CFBundleIdentifier")==BUNDLE_ID and info.get("CFBundleExecutable")==PROBE_EXECUTABLE
+            and info.get("CFBundleSupportedPlatforms")==["iPhoneSimulator"],"owned_container_invalid")
+        self.prepare_stage="source_recheck"
+        expected = _sample_executable_identity(self.source_app/PROBE_EXECUTABLE)
+        require(self._source_pin is None or expected==self._source_pin,"owned_executable_invalid")
+        self.prepare_stage="installed_image"
+        executable = bundle/PROBE_EXECUTABLE; actual = _sample_executable_identity(executable)
+        require(actual["sha256"]==expected["sha256"] and actual["bytes"]==expected["bytes"],"owned_executable_invalid")
+        return executable,actual
+
+    def _kernel_process_path(self, timeout):
+        require(type(self.pid) is int and 1<=self.pid<=2**31-1,"launch_pid_missing")
+        require(type(timeout) in (int,float) and math.isfinite(timeout) and 0<timeout<=2,"process_kernel_query_timeout")
+        try:
+            result = subprocess.run([sys.executable,"-I","-S","-c",PROCESS_PIDPATH_CHILD,str(self.pid)],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=timeout,check=False)
+        except subprocess.TimeoutExpired:
+            raise ProbeError("process_kernel_query_timeout") from None
+        except OSError:
+            raise ProbeError("process_kernel_query_failed") from None
+        require(result.returncode==0,"process_kernel_query_failed")
+        require(type(result.stdout) is bytes and 0<len(result.stdout)<4096,"process_kernel_output_invalid")
+        try: text = result.stdout.decode("utf-8")
+        except UnicodeError: raise ProbeError("process_kernel_encoding_invalid") from None
+        require(not any(character in text for character in ("\n","\r","\0")),"process_kernel_output_invalid")
+        path = Path(text);require(path.is_absolute(),"process_path_not_absolute")
+        return path
+
+    def _process_identity(self, executable):
+        deadline = time.monotonic()+2
+        def remaining():
+            value = deadline-time.monotonic()
+            require(value>0,"process_query_timeout")
+            return min(2,value)
+        try:
+            # Darwin comm is an argv[0] display. It cannot identify the kernel
+            # image, so ps is used exclusively for the owned PID and start time.
+            result = subprocess.run(["/bin/ps","-p",str(self.pid),"-o","pid=","-o","lstart=","-ww"],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=remaining(),check=False,
+                env={**os.environ,"LC_ALL":"C","LANG":"C"})
+        except subprocess.TimeoutExpired:
+            raise ProbeError("process_query_timeout") from None
+        except OSError:
+            raise ProbeError("process_query_failed") from None
+        require(result.returncode==0,"process_query_failed")
+        require(type(result.stdout) is bytes and 0<len(result.stdout)<=4096,"process_output_invalid")
+        try: text = result.stdout.decode("utf-8").strip()
+        except UnicodeError: raise ProbeError("process_output_encoding_invalid") from None
+        match = re.fullmatch(r"([1-9][0-9]{0,9})\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+[0-9]{4})",text)
+        require(match is not None,"process_output_shape_differs")
+        require(int(match.group(1))==self.pid,"process_pid_differs")
+        path = self._kernel_process_path(remaining())
+        require(path==executable,"process_path_differs")
+        try: resolved = path.resolve(strict=True)
+        except (OSError,RuntimeError): raise ProbeError("process_path_resolution_failed") from None
+        require(resolved==executable,"process_path_resolves_elsewhere")
+        try: started = time.mktime(time.strptime(match.group(2),"%a %b %d %H:%M:%S %Y"))
+        except (ValueError,OverflowError,OSError): raise ProbeError("process_start_parse_failed") from None
+        # ps lstart has one-second resolution. Match the independently issued
+        # launch interval, rejecting a same-image PID reused after its ACK.
+        require(type(self.launch_started) in (int,float) and type(self.launch_ack) in (int,float)
+            and math.isfinite(self.launch_started) and math.isfinite(self.launch_ack)
+            and self.launch_started<=self.launch_ack,"process_launch_interval_invalid")
+        require(self.launch_started-1<=started<=self.launch_ack+1,"process_start_outside_launch")
+        remaining()  # Parsing and the kernel child share the original 2s budget.
+        return match.group(2)
+
+    def capture(self, checkpoint):
+        if self.attempted: return None
+        self.attempted = True
+        result = {"schema":1,"attempted":True,"available":False,"launch_pid_matched":False,
+            "executable_verified":False,"identity_stable":False,"sample_seconds":1,
+            "truncated":False,"timed_out":False,"error_code":"not_attempted","frames":[]}
+        process = None
+        try:
+            require(sys.platform=="darwin","not_macos")
+            require(type(self.pid) is int and 1<=self.pid<=2**31-1,"launch_pid_missing")
+            require(type(checkpoint) is dict and type(checkpoint.get("process_id")) is int
+                and checkpoint["process_id"]==self.pid,"checkpoint_pid_differs")
+            result["launch_pid_matched"] = True
+            require(self.executable is not None and type(self.executable_pin) is dict,self.prepare_error)
+            executable = self.executable; before = _sample_executable_identity(executable)
+            require(before==self.executable_pin,"owned_executable_invalid")
+            started = self._process_identity(executable)
+            result["executable_verified"] = True
+            with tempfile.TemporaryDirectory(prefix="idoly-owned-process-sample-") as temporary:
+                path = Path(temporary)/"sample.txt"
+                try:
+                    process = subprocess.Popen([sys.executable,"-I","-S","-c",PROCESS_SAMPLE_CHILD,str(self.pid),str(path)],
+                        stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+                except OSError:
+                    raise ProbeError("sample_spawn_failed") from None
+                deadline = time.monotonic()+8
+                while process.poll() is None:
+                    if time.monotonic()>=deadline:
+                        result["timed_out"] = True;_terminate_owned_sample(process);break
+                    time.sleep(0.05)
+                try: exit_code = process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    _terminate_owned_sample(process);exit_code = process.wait(timeout=1)
+                require(path.exists() and not path.is_symlink(),"sample_output_missing")
+                metadata = path.lstat();require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink==1,"sample_output_missing")
+                # RLIMIT_FSIZE bounds raw output. Retain the useful main-thread
+                # prefix even when many Python/Go workers reach that hard cap.
+                fd = os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                try: raw = os.read(fd,PROCESS_SAMPLE_MAX_BYTES)
+                finally: os.close(fd)
+                truncated = metadata.st_size>=PROCESS_SAMPLE_MAX_BYTES
+                require(type(exit_code) is int and (exit_code==0 or result["timed_out"]
+                    or (exit_code==-signal.SIGXFSZ and truncated)),"sample_failed")
+                parsed = parse_process_sample(raw,truncated=truncated)
+                after_start = self._process_identity(executable); after = _sample_executable_identity(executable)
+                require(started==after_start and before==after,"identity_changed")
+                result.update(parsed);result["identity_stable"] = True
+                result["available"] = bool(parsed.get("main_thread_found") and parsed.get("frames"))
+                result["error_code"] = ("sample_timed_out" if result["timed_out"] else
+                    "none" if result["available"] else "main_thread_not_found")
+                return process_sample_observation(result)
+        except Exception as error:
+            code = str(error) if isinstance(error,ProbeError) else "sample_failed"
+            result["error_code"] = code if code in PROCESS_SAMPLE_ERRORS else "sample_failed"
+            result["frames"] = [];result["available"] = False
+            return process_sample_observation(result)
+        finally:
+            if process is not None:
+                try:
+                    if process.poll() is None:
+                        _terminate_owned_sample(process);process.wait(timeout=1)
+                except Exception:
+                    try: _terminate_owned_sample(process)
+                    except Exception: pass
+
+
+def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_SECONDS):
+    audit = Path(audit)
+    require(not audit.exists() and not audit.is_symlink(), "fresh_audit_path_required")
+    report = {"schema": 1, "status": "FAIL", "execution": "ios_simulator",
+              "gameplay_tested": False, "device_tested": False, "playcover_tested": False,
+              "simulator_created": False, "launch_ack_timeout": False,
+              "cleanup": {"shutdown": False, "delete": False}}
+    created = None
+    container = None
+    account_harness = None
+    ui_driver = None
+    owned_sampler = None
+    current_language = "ko"
+    current_run_index = 0
+    start = time.monotonic()
+    stage = "platform"
+    def remaining(cap=60):
+        value = timeout - (time.monotonic() - start)
+        require(value > 0, "probe_deadline_exceeded")
+        return min(cap, value)
+    try:
+        require(sys.platform == "darwin", "macos_required_no_simulator_execution")
+        require(type(timeout) in (int, float) and math.isfinite(timeout)
+                and 5 <= timeout <= MAX_PROBE_SECONDS, "invalid_probe_timeout")
+        report["configured_timeout_seconds"] = timeout
+        app = Path(app).resolve(strict=True)
+        require(app.is_dir() and app.suffix == ".app", "simulator_app_required")
+        info = plistlib.loads(read_bounded(app / "Info.plist", MAX_JSON))
+        require(info.get("CFBundleIdentifier") == BUNDLE_ID
+                and info.get("CFBundleSupportedPlatforms") == ["iPhoneSimulator"], "fake_unity_probe_app_required")
+        report["bundle_id"] = BUNDLE_ID
+        stage = "public_schema"
+        schema, report["descriptor_sha256"] = load_schema(app)
+        stage = "language_canaries"
+        canaries, report["language_canaries_sha256"] = load_language_canaries(app,report["descriptor_sha256"])
+        stage = "simulator_discovery"
+        chosen_type, chosen_runtime = discover(device_type, runtime, remaining)
+        report.update(device_type=chosen_type, runtime=chosen_runtime)
+        stage = "simulator_create"
+        raw = _simctl(["create", "IdolyEmbeddedProbe-" + uuid.uuid4().hex, chosen_type, chosen_runtime], remaining())
+        value = raw.decode("ascii").strip()
+        require(bool(re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", value)),
+                "invalid_created_simulator_uuid")
+        created = str(uuid.UUID(value)).upper()
+        report.update(simulator_created=True, simulator_uuid=created)
+        stage = "simulator_boot"
+        stage_start = time.monotonic()
+        boot_created_simulator(created, remaining)
+        report["simulator_boot_seconds"] = round(time.monotonic() - stage_start, 3)
+        stage = "app_install"
+        stage_start = time.monotonic()
+        _simctl(["install", created, str(app)], remaining(180))
+        report["app_install_seconds"] = round(time.monotonic() - stage_start, 3)
+        stage = "fresh_container"
+        raw = _simctl(["get_app_container", created, BUNDLE_ID, "data"], remaining())
+        candidate = Path(raw.decode("utf-8").strip())
+        require(candidate.is_absolute() and candidate.is_dir() and not candidate.is_symlink(),
+                "invalid_fresh_app_container")
+        for relative in ("Library/Application Support/IdolyPrideLocal/state.db",
+                         "Library/Application Support/IdolyPrideLocal/media-state.db",
+                         "Documents/embedded-probe.json", "Documents/embedded-probe-status.json",
+                         "Documents/embedded-probe-checkpoint.json", "Documents/probe-cache-identities.json"):
+            path = candidate / relative
+            require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
+        for run_index,language in enumerate(MATRIX_LANGUAGES):
+            for name in language_observation_paths(language,run_index):
+                path = candidate/"Documents"/name
+                require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
+        container = candidate
+        owned_sampler = OwnedProbeProcessSampler(created,app,container,remaining=remaining)
+        owned_sampler.prepare()
+        account_harness = AccountFixtureHarness(container, schema, descriptor_sha256=report["descriptor_sha256"])
+        report["fresh_local_state_before_launch"] = True
+        stage = "official_ui_test_build_and_start"
+        try:
+            ui_driver = ProbePromptCancelDriver(created,remaining=remaining)
+            ui_driver.start()
+        except DriverError as error:
+            raise ProbeError(error.code if error.code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed") from None
+        while not _poll_official_ui_driver(ui_driver)["ready"]:
+            remaining()
+            time.sleep(min(0.1,remaining()))
+        stage = "app_launch"
+        owned_sampler.clear_launch()
+        try:
+            launched = _simctl(["launch", created, BUNDLE_ID, "--idoly-probe-language=ko", "--idoly-probe-run-index=0"], remaining(180))
+            owned_sampler.note_launch(launched)
+        except ProbeError as error:
+            if str(error) != "simctl_timeout":
+                raise
+            # A launch acknowledgement can time out while the app keeps
+            # running. Do not launch twice: the full native/RPC report must
+            # still pass under the original overall deadline.
+            report["launch_ack_timeout"] = True
+            if type(getattr(error, "tool_detail", None)) is dict:
+                report["launch_ack_diagnostic"] = error.tool_detail
+            report["launch_ack_checkpoint"] = failure_checkpoint(container)
+        stage = "startup_gate_report"
+        report["native_probe"] = wait_report(container, remaining, expected_language="ko", run_index=0, account_fixture=account_harness, ui_driver=ui_driver, simulator_udid=created, process_sampler=owned_sampler)
+        report["official_prompt_ui_test"] = report["native_probe"]["menu_lifetime"]["official_prompt"]["ui_test"]
+        summaries = [validate_language_relaunch_report(report["native_probe"],"ko",run_index=0)]
+        compare_language_canaries(summaries[0],"ko",canaries,report["language_canaries_sha256"])
+        stage = "asset_listener"
+        with socket.create_connection(("127.0.0.1", 8080), timeout=min(5, remaining())):
+            pass
+        report["host_asset_loopback_connected"] = True
+        stage = "encrypted_rpc"
+        report["rpcs"] = probe_rpcs(schema, timeout=min(15, remaining()))
+        stage = "master_file"
+        report["master_file"] = probe_master_file(schema, app, timeout=min(15, remaining()))
+        stage = "sdk_resource"
+        report["sdk_resource"] = probe_sdk_resource(app, timeout=min(30, remaining()))
+        for run_index,language in enumerate(MATRIX_LANGUAGES[1:],1):
+            stage = "language_terminate_" + language
+            _simctl(["terminate",created,BUNDLE_ID],remaining(30))
+            for name in language_observation_paths(language,run_index):
+                path = container/"Documents"/name
+                require(not path.exists() and not path.is_symlink(), "preexisting_language_report_rejected")
+            current_language = language
+            current_run_index = run_index
+            stage = "language_launch_" + language
+            owned_sampler.clear_launch()
+            try:
+                launched = _simctl(["launch",created,BUNDLE_ID,"--idoly-probe-language="+language,
+                    "--idoly-probe-run-index="+str(run_index)],remaining(30))
+                owned_sampler.note_launch(launched)
+            except ProbeError as error:
+                if str(error) != "simctl_timeout": raise
+                report.setdefault("language_launch_ack_timeouts",[]).append(language)
+            stage = "language_report_" + language
+            native = wait_report(container,remaining,expected_language=language,run_index=run_index,process_sampler=owned_sampler)
+            summary = validate_language_relaunch_report(native,language,run_index=run_index)
+            compare_language_canaries(summary,language,canaries,report["language_canaries_sha256"])
+            summaries.append(summary)
+        stage = "language_matrix"
+        report["language_matrix"] = validate_language_matrix_report({"schema":2,"order":list(MATRIX_LANGUAGES),
+            "preserved_app_container":True,"reports":summaries})
+        report["account_management_after_relaunch"] = validate_account_management_after_relaunch(
+            account_harness.verify_persisted(), report["native_probe"]["menu_lifetime"]["account_management"])
+        remaining()  # Final validation cannot publish PASS after the shared deadline.
+        report["status"] = "PASS"
+    except BaseException as error:
+        report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
+                      error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
+        report["native_checkpoint"] = failure_checkpoint(container,current_language,current_run_index,
+            expected_pid=getattr(owned_sampler,"pid",None),launch_started=getattr(owned_sampler,"launch_started",None))
+        if owned_sampler is not None and callable(getattr(owned_sampler,"termination_evidence",None)):
+            try:
+                termination=owned_sampler.termination_evidence()
+                if termination:
+                    report["process_termination"]=process_termination_summary(termination)
+                    diagnostic_path=audit.with_name(audit.stem+"-termination.json")
+                    write_audit(diagnostic_path,termination)
+                    raw=read_bounded(diagnostic_path,MAX_JSON)
+                    report["process_termination"]["evidence_file"]=diagnostic_path.name
+                    report["process_termination"]["evidence_sha256"]=hashlib.sha256(raw).hexdigest()
+            except (OSError,ProbeError):
+                # Optional crash reporting cannot replace the original failure.
+                if type(getattr(error,"process_termination",None)) is dict:
+                    report["process_termination"]=process_termination_summary(error.process_termination)
+        if owned_sampler is not None:
+            try:
+                sampled = owned_sampler.capture(report["native_checkpoint"])
+                if sampled: report["process_sample"] = process_sample_observation(sampled)
+            except Exception:
+                report["process_sample"] = process_sample_observation({"schema":1,"attempted":True,
+                    "available":False,"error_code":"sample_failed","frames":[]})
+        if report["error"] == "native_startup_failed":
+            report["host_startup_failure"] = read_startup_failure(container)
+        if ui_driver is not None and callable(getattr(ui_driver,"failure_diagnostic",None)):
+            try:
+                diagnostic=official_ui_failure_observation(ui_driver.failure_diagnostic())
+                if diagnostic:report["xctest_failure"]=diagnostic
+            except DriverError:pass
+        if ui_driver is not None and callable(getattr(ui_driver,"build_failure_log",None)):
+            try:
+                raw=ui_driver.build_failure_log()
+                if type(raw) is bytes and raw:
+                    raw=raw[-16384:]
+                    diagnostic={"schema":1,"scope":"pre-input-xctest-build","tail_bytes":len(raw),
+                        "sha256":hashlib.sha256(raw).hexdigest(),"text":raw.decode("utf-8","replace")}
+                    # Keep escaped JSON below the same audit cap even if a
+                    # compiler emits control bytes or malformed UTF-8.
+                    while len(json.dumps(diagnostic,separators=(",",":"),sort_keys=True).encode())+1>MAX_JSON:
+                        raw=raw[-max(1,len(raw)//2):]
+                        diagnostic.update(tail_bytes=len(raw),sha256=hashlib.sha256(raw).hexdigest(),text=raw.decode("utf-8","replace"))
+                    diagnostic_path=audit.with_name(audit.stem+"-xctest-build.json")
+                    write_audit(diagnostic_path,diagnostic)
+                    report["xctest_build_diagnostic"]={key:diagnostic[key] for key in ("scope","tail_bytes","sha256")}
+                    report["xctest_build_diagnostic"]["file_name"]=diagnostic_path.name
+            except (OSError,ProbeError,DriverError):
+                report["xctest_build_diagnostic"]={"available":False}
+        if ui_driver is not None and callable(getattr(ui_driver,"build_metadata_diagnostic",None)):
+            try:
+                observed=ui_driver.build_metadata_diagnostic()
+                if observed is not None:
+                    diagnostic=official_ui_build_metadata(observed)
+                    diagnostic_path=audit.with_name(audit.stem+"-xctest-metadata.json")
+                    write_audit(diagnostic_path,diagnostic)
+                    encoded=(json.dumps(diagnostic,separators=(",",":"),sort_keys=True)+"\n").encode()
+                    report["xctest_build_metadata"]={"scope":diagnostic["scope"],"bytes":len(encoded),
+                        "sha256":hashlib.sha256(encoded).hexdigest(),"file_name":diagnostic_path.name}
+            except (OSError,ProbeError,DriverError):
+                report["xctest_build_metadata"]={"available":False}
+        if isinstance(error, ProbeError) and isinstance(getattr(error, "native_detail", None), str):
+            report["native_startup_error"] = error.native_detail
+        if isinstance(error, ProbeError) and type(getattr(error, "native_crypto", None)) is dict:
+            report["native_crypto_observed"] = error.native_crypto
+        if isinstance(error, ProbeError) and type(getattr(error, "native_corner", None)) is dict:
+            report["native_corner_observed"] = error.native_corner
+        if isinstance(error, ProbeError) and type(getattr(error, "native_menu", None)) is dict and error.native_menu:
+            report["native_menu_close_observed"] = error.native_menu
+        if isinstance(error, ProbeError) and type(getattr(error, "native_keyboard", None)) is dict and error.native_keyboard:
+            report["native_keyboard_observed"] = keyboard_observation(error.native_keyboard)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_header", None)) is dict and error.native_header:
+            report["native_header_observed"] = header_observation(error.native_header)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_http", None)) is dict and error.native_http:
+            report["native_http_readiness_observed"] = http_readiness_observation(error.native_http)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_diagnostics_copy", None)) is dict and error.native_diagnostics_copy:
+            report["native_diagnostics_copy_observed"] = diagnostics_copy_observation(error.native_diagnostics_copy)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_octo_budget", None)) is dict and error.native_octo_budget:
+            report["native_octo_budget_observed"] = octo_budget_observation(error.native_octo_budget)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_octo_budget_probe", None)) is dict and error.native_octo_budget_probe:
+            report["native_octo_budget_probe_observed"] = octo_budget_probe_observation(error.native_octo_budget_probe)
+        gate = server_gate_observation(getattr(error,"native_server_gate",None))
+        if not gate:
+            gate = server_gate_observation(report["native_checkpoint"].get("server_gate"))
+        if gate: report["native_server_gate_observed"] = gate
+        settings_web = settings_web_observation(getattr(error,"native_settings_web",None))
+        if not settings_web:
+            settings_web = settings_web_observation(report["native_checkpoint"].get("settings_web"))
+        if settings_web: report["native_settings_web_observed"] = settings_web
+        evidence = language_observation(getattr(error,"native_language",None))
+        if not evidence:
+            evidence = language_observation(report["native_checkpoint"].get("language_observation"))
+        if evidence: report["native_language_observed"] = evidence
+        if isinstance(error, ProbeError) and type(getattr(error, "tool_detail", None)) is dict:
+            report["simctl_failure"] = error.tool_detail
+    finally:
+        # Capture before deleting the owned container, including when an
+        # otherwise passing run subsequently encounters a cleanup failure.
+        checkpoint = report.get("native_checkpoint") or failure_checkpoint(container,current_language,current_run_index,
+            expected_pid=getattr(owned_sampler,"pid",None),launch_started=getattr(owned_sampler,"launch_started",None))
+        if owned_sampler is not None and callable(getattr(owned_sampler,"close",None)):
+            if callable(getattr(owned_sampler,"attestation",None)):
+                try:
+                    attestation=process_attestation_observation(owned_sampler.attestation())
+                    if attestation:report["process_attestation"]=attestation
+                except Exception:
+                    # Optional observer metadata cannot replace the gate error.
+                    report["process_attestation"]={"schema":1,"stage":"not_attempted",
+                        "error_code":"owned_preparation_exception"}
+            owned_sampler.close()
+        if ui_driver is not None:
+            try:
+                ui_driver.close()
+                report["ui_test_driver_cleanup"] = True
+            except BaseException:
+                report["ui_test_driver_cleanup"] = False
+                report.update(status="FAIL",cleanup_complete=False)
+        if created is not None:
+            for action in ("shutdown", "delete"):
+                try:
+                    _simctl([action, created], 30)
+                    report["cleanup"][action] = True
+                except BaseException as error:
+                    report["cleanup"][action + "_error"] = type(error).__name__
+            if not all(report["cleanup"][key] for key in ("shutdown", "delete")):
+                report.update(status="FAIL", cleanup_complete=False)
+                report["native_checkpoint"] = checkpoint
+        report["seconds"] = round(time.monotonic() - start, 3)
+        if report.get("status")=="FAIL":
+            fit_process_sample_audit(report)
+            print("IDOLY_SAFE_PROBE_FAILURE "+json.dumps(safe_failure_summary(report),sort_keys=True,separators=(",",":"),allow_nan=False))
+        write_audit(audit, report)
+    return report
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--app", type=Path, required=True)
+    parser.add_argument("--audit", type=Path, required=True)
+    parser.add_argument("--device-type")
+    parser.add_argument("--runtime")
+    parser.add_argument("--timeout", type=float, default=MAX_PROBE_SECONDS,
+                        help="Shared deadline for boot, install, XCTest and all five cold app processes (5..1200 seconds)")
+    args = parser.parse_args(argv)
+    try:
+        result = run_probe(args.app, args.audit, device_type=args.device_type,
+                           runtime=args.runtime, timeout=args.timeout)
+    except (ProbeError, OSError) as error:
+        print(json.dumps({"status": "FAIL", "error": str(error) if isinstance(error, ProbeError)
+                          else type(error).__name__}))
+        return 1
+    print(json.dumps({"status": result["status"], "audit": str(args.audit)}))
+    return 0 if result["status"] == "PASS" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -8,6 +8,8 @@ film use, account delta, live result or resource bytes are generated.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from types import MappingProxyType
 
 from google.protobuf.message import DecodeError
@@ -43,9 +45,41 @@ class MediaPanoramaScene:
     cast_count: int
 
 
+def _projection(musics, stages):
+    rules = (*PANORAMA_RULES, *MASTER_PANORAMA_RULES)
+    music_rows = []
+    for rule in rules:
+        row = musics[rule.music_id]
+        value = {key: row.get(key) for key in ("id", "assetId", "is360LiveExist", "displayCharacterAmount")}
+        if rule in MASTER_PANORAMA_RULES:
+            value.update(selectableStageIds=row.get("selectableStageIds"), releaseTime=str(row.get("releaseTime")))
+        music_rows.append(value)
+    stage_rows = []
+    for identity in sorted({rule.stage_id for rule in rules}):
+        row = stages[identity]
+        stage_rows.append({"id": row["id"], "assetId": row.get("assetId"),
+            "cameraPositions": [{key: position.get(key) for key in ("name", "index")}
+                                for position in row["cameraPositions"]]})
+    return {"schema": 1, "musics": music_rows, "stages": stage_rows}
+
+
+def _latest_pin(catalog):
+    from . import latest_cohort_pins as pins
+    values = getattr(pins, "PROJECTION_SHA256", None)
+    digest = values.get("panorama") if type(values) is dict else None
+    if (catalog.version() != pins.MASTER_VERSION or type(digest) is not str or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)):
+        _fail("The media 360 LIVE catalog needs its audited latest cohort")
+    from .public_cohort_support import require_master_cohort
+    try:
+        require_master_cohort(catalog.directory, "panorama")
+    except (OSError, ValueError):
+        _fail("The media 360 LIVE catalog needs its audited latest cohort")
+    return digest
+
+
 def _prepare(catalog):
-    if catalog.version() != MASTER_VERSION:
-        _fail("The media 360 LIVE catalog needs its pinned original masters")
+    latest_pin = _latest_pin(catalog) if catalog.version() != MASTER_VERSION else None
     musics, stages = catalog.ids("Music", required=True), catalog.ids("Stage", required=True)
     result, orders = {}, set()
 
@@ -79,6 +113,11 @@ def _prepare(catalog):
                 or str(music["releaseTime"]) != str(rule.release_time)):
             _fail("The master-backed 360 LIVE music lacks its exact original stage or release")
         add_scene(rule, "")
+    if latest_pin is not None:
+        raw = json.dumps(_projection(musics, stages), sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+        if hashlib.sha256(raw).hexdigest() != latest_pin:
+            _fail("The media 360 LIVE scene references differ from the audited latest cohort")
     return MappingProxyType(result)
 
 

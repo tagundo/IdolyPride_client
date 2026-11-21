@@ -145,6 +145,40 @@ class ClientDiagnosticsTests(unittest.TestCase):
         self.assertEqual(receiver.status()["latest_exception"], exception())
         self.assertEqual(receiver.status()["stored_events"], 200)
 
+    def test_summary_does_not_clone_history_and_keeps_current_fields_detached(self):
+        from copy import deepcopy
+        receiver = ClientDiagnostics()
+        frames = ["Solis.Benchmark.Polling.Frame" + str(index) for index in range(16)]
+        for _ in range(200):
+            receiver.receive(body([exception(frames=frames)]))
+        expected = receiver.status()
+        copied = []
+        class CountedEvent(dict):
+            def __deepcopy__(self, memo):
+                copied.append(1)
+                return deepcopy(dict(self), memo)
+        history = list(receiver._events)
+        receiver._events.clear()
+        receiver._events.extend(CountedEvent(event) for event in history)
+        summary = receiver.status(include_events=False)
+        self.assertEqual(copied, [], "A routine poll must not traverse event history")
+        self.assertEqual(summary, {key: value for key, value in expected.items() if key != "events"})
+        self.assertEqual(summary["stored_events"], 200)
+        self.assertEqual(summary["received_events"], 200)
+        summary["latest_exception"]["frames"].clear()
+        summary["progress"]["summary"] = "changed"
+        self.assertEqual(receiver.status(include_events=False)["latest_exception"], expected["latest_exception"])
+        full = receiver.status()
+        self.assertEqual(len(copied), 200, "Explicit history is copied once")
+        self.assertEqual(full, expected)
+        full["events"][0]["frames"].clear()
+        self.assertEqual(len(receiver._events[0]["frames"]), 16)
+
+    def test_history_choice_requires_an_explicit_boolean(self):
+        for value in (None, 0, 1, "false"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                ClientDiagnostics().status(include_events=value)
+
     def test_concurrent_receives_keep_bounded_consistent_event_count(self):
         receiver = ClientDiagnostics()
         payload = body([status("logcat_started")] * 8)

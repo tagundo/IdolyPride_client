@@ -1,0 +1,87 @@
+name: Profile pinned native server startup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/profile-native-startup.yml
+      - tools/profile_native_startup.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-startup-profile-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  profile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      PYTHONPATH: .:src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked profiling dependencies
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Fetch the exact registered public latest payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --locked --all-extras python - <<'PYFETCH'
+          import os
+          from pathlib import Path
+          from tools import latest_server_data_pin as latest
+          work=Path(os.environ['RUNNER_TEMP'])/'idoly-startup-input'
+          work.mkdir(mode=0o700)
+          latest.fetch_overlay(work/'ServerData.zip')
+          from tools import release_platform_builds as builds
+          donors=work/'language-inputs'
+          donors.mkdir(mode=0o700)
+          guard=builds.Guard()
+          for platform in ('android','ios'):
+              builds.fetch_public_inputs(platform,donors/platform,work,guard,prepare=False)
+          PYFETCH
+      # Format 2 reuses the separately SHA-checked prepared base manifest.
+      - name: Build public startup receipts with the original strict validators
+        run: |
+          uv run --locked --all-extras python - <<'PYRECEIPT'
+          import os, subprocess, sys
+          from pathlib import Path
+          from tools.profile_native_startup import PAYLOAD, TRANSLATIONS
+          work=Path(os.environ['RUNNER_TEMP'])/'idoly-startup-input'
+          for platform,pin in TRANSLATIONS.items():
+              source=work/'language-inputs'/platform
+              subprocess.run([sys.executable,'-B','tools/build_startup_translation_receipt.py',
+                  '--payload',str(work/'ServerData.zip'),'--payload-sha256',PAYLOAD['sha256'],
+                  '--payload-bytes',str(PAYLOAD['bytes']),
+                  '--translations',str(source/'bundledTranslations.zip'),
+                  '--translations-sha256',pin['sha256'],'--translations-bytes',str(pin['bytes']),
+                  '--platform',platform,'--output',str(source/'startupTranslations.zip'),
+                  '--receipt',str(source/'startupTranslations.json')],check=True)
+          PYRECEIPT
+      - name: Measure matched strict and receipt startup without asset downloads
+        run: >-
+          uv run --locked --all-extras python -B tools/profile_native_startup.py
+          --payload "$RUNNER_TEMP/idoly-startup-input/ServerData.zip"
+          --work "$RUNNER_TEMP/idoly-startup-work"
+          --output "$RUNNER_TEMP/idoly-startup-output/startup-profile.json"
+          --source-commit "$GITHUB_SHA" --runs 3
+          --translations-root "$RUNNER_TEMP/idoly-startup-input/language-inputs"
+          --startup-receipts-root "$RUNNER_TEMP/idoly-startup-input/language-inputs"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: startup-profile-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-startup-output/*.json
+          if-no-files-found: warn
+          retention-days: 7

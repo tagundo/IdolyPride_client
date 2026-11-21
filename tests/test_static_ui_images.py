@@ -146,3 +146,59 @@ def test_pinned_rgb_image_expands_to_rgba_without_changing_its_rgb_samples(tmp_p
     canvas = images._canvas(images._png(tmp_path, entry), entry)
     assert canvas.mode == "RGBA" and canvas.size == source.size
     assert canvas.tobytes() == source.convert("RGBA").tobytes()
+
+
+@pytest.mark.parametrize("name,size,content,offset", [
+    ("love_btn_present", (194,40), (72,40), (61,0)),
+    ("love_btn_achievement", (280,40), (250,40), (15,0)),
+    ("love_btn_playing", (240,48), (96,48), (72,0)),
+    ("love_btn_mission", (80,40), (78,37), (1,1)),
+    ("love_btn_status", (192,40), (185,37), (3,1)),
+    ("love_btn_setting", (80,40), (75,40), (2,0)),
+    ("love_button_start", (192,48), (184,48), (4,0)),
+    ("love_btn_fin", (159,40), (147,40), (6,0)),
+    ("love_btn_max", (72,28), (72,27), (0,0)),
+    ("love_header_level_label", (96,32), (96,28), (0,2)),
+])
+def test_fixed_love_button_text_keeps_original_ui_geometry(name, size, content, offset):
+    row = next(row for row in images.PROFILES if row["name"] == name)
+    assert row["layout_policy"] == row["render_key_policy"] == images.TEXT_LAYOUT_POLICY
+    assert tuple(row["sprite_size"]) == size
+    assert tuple(row["content_size"]) == content
+    assert tuple(row["padding_offset"]) == offset
+    for target in ([row["android"]] if row["android"] else []) + row["ios"]:
+        assert tuple(target["source_layout"]["sprite_size"]) == size
+
+
+@pytest.mark.parametrize("name", ("love_btn_present", "love_btn_achievement", "love_btn_playing", "love_header_level_label"))
+def test_short_korean_words_are_padded_not_stretched_or_redrawn(name):
+    pytest.importorskip("UnityPy")
+    from io import BytesIO
+    from PIL import Image
+    row = next(row for row in images.PROFILES if row["name"] == name)
+    # A nonuniform pixel canary exposes both anisotropic scaling and cropping.
+    source = Image.new("RGBA", row["png_size"], (17, 51, 119, 255))
+    source.putpixel((0, 0), (217, 61, 7, 123))
+    stream = BytesIO(); source.save(stream, format="PNG")
+    canvas = images._canvas(stream.getvalue(), row)
+    x, y = row["padding_offset"]
+    assert canvas.size == tuple(row["sprite_size"])
+    assert canvas.crop((x, y, x + source.width, y + source.height)).tobytes() == source.tobytes()
+    assert canvas.getpixel((0, 0)) == (0, 0, 0, 0)
+
+
+def test_fixed_love_layout_does_not_accept_a_different_original_or_png_rectangle():
+    from copy import deepcopy
+    raw = json.loads((ROOT / "client-presentation/images/korean-static-sprites-v2.json").read_text())
+    source = next(row for row in raw["inputs"] if row["name"] == "love_btn_present")
+    for damage in ("png", "original"):
+        changed = deepcopy(source)
+        if damage == "png": changed["png_size"][0] += 1
+        else: changed["ios"][0]["source_layout"]["sprite_size"][0] += 1
+        with pytest.raises(ValueError, match="audited rectangle"):
+            images._text_layout(changed)
+    # Separate animated logo consumers require their own audited layout fix;
+    # do not shrink two Korean letters into the former single-kanji slot.
+    logo = next(row for row in images.PROFILES if row["name"] == "love_label_koi")
+    assert logo["sprite_size"] == logo["png_size"] == [63, 32]
+    assert logo["layout_policy"] == "localify-png-rect"

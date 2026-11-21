@@ -10,6 +10,18 @@ import subprocess
 import pytest
 
 
+def compile_swift(arguments):
+    try:
+        return subprocess.run(arguments, check=True, capture_output=True, timeout=30)
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr or b""
+        if isinstance(stderr, bytes):
+            stderr = stderr[-4096:].decode("utf-8", errors="replace")
+        else:
+            stderr = stderr[-4096:]
+        pytest.fail(f"Swift compiler exited {error.returncode}; last 4 KiB of stderr:\n{stderr}", pytrace=False)
+
+
 @pytest.mark.skipif(shutil.which("swiftc") is None, reason="Swift compiler unavailable")
 def test_actual_swift_command_writer_never_waits_for_a_full_pipe(tmp_path):
     app = (Path(__file__).parents[1] / "App.swift").read_text()
@@ -59,7 +71,7 @@ print("SWIFT_NONBLOCKING_PIPE_PASS")
 '''
     path = tmp_path / "policy.swift"; path.write_text(source)
     executable = tmp_path / "policy"
-    subprocess.run([shutil.which("swiftc"), str(path), "-o", str(executable)], check=True, capture_output=True, timeout=30)
+    compile_swift([shutil.which("swiftc"), str(path), "-o", str(executable)])
     result = subprocess.run([str(executable)], check=True, capture_output=True, text=True, timeout=3)
     assert result.stdout.strip() == "SWIFT_NONBLOCKING_PIPE_PASS"
 
@@ -111,6 +123,8 @@ final class Harness {
     var shutdownCompletions:[() -> Void]=[]
     var busy=false,canStop=true,status=""
     var presentationClient:[String:Any]?
+    var officialPreview:[String:Any] = ["manager_name":"PRIVATE-PREVIEW-MUST-CLEAR"]
+    var officialJobID:String? = String(repeating:"a",count:32)
     var statusTimer:Timer?
     var child:Child?=Child()
     var input:TestPipe?=TestPipe(), output:TestPipe?=TestPipe(), errors:TestPipe?=TestPipe()
@@ -121,6 +135,7 @@ final class Harness {
     after=r'''
 }
 let model=Harness()
+assert(!model.officialPreview.isEmpty && model.officialJobID != nil)
 var callbacks=0
 DispatchQueue.global().asyncAfter(deadline:.now()+2) {
     fputs("Swift shutdown policy timed out\n",stderr);exit(3)
@@ -129,6 +144,7 @@ let completion={
     callbacks+=1
     if callbacks==2 {
         assert(model.shutdownFinished)
+        assert(model.officialPreview.isEmpty && model.officialJobID == nil)
         // A completed shutdown may finish a later request immediately.
         model.shutdown { callbacks+=1 }
         assert(callbacks==3)
@@ -139,6 +155,7 @@ let completion={
 }
 let start=ProcessInfo.processInfo.systemUptime
 model.shutdown(completion)
+assert(model.officialPreview.isEmpty && model.officialJobID == nil)
 model.shutdown(completion)
 assert(callbacks==0) // Duplicate Quit must not complete before owned cleanup.
 assert(ProcessInfo.processInfo.systemUptime-start<0.2) // Full pipe cannot block UI.
@@ -147,7 +164,6 @@ dispatchMain()
 '''
     source=tmp_path/"ShutdownPolicy.swift";source.write_text(before+methods+after)
     binary=tmp_path/"shutdown-policy"
-    subprocess.run([shutil.which("swiftc"),"-swift-version","5",str(source),"-o",str(binary)],
-                   check=True,capture_output=True,timeout=30)
+    compile_swift([shutil.which("swiftc"),"-swift-version","5",str(source),"-o",str(binary)])
     result=subprocess.run([str(binary)],check=True,capture_output=True,text=True,timeout=3)
     assert "SWIFT_SHUTDOWN_POLICY_PASS" in result.stdout

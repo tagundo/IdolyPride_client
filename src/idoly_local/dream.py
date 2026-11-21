@@ -61,9 +61,27 @@ class Dream:
                              Path(master_dir).parent / "dream-private-catalog.json" if master_dir is not None else None)
         self.clock = clock if clock is not None else lambda: time.time_ns() // 1000000
 
+    def _admit_master(self):
+        version = self.catalog.version()
+        if version == MASTER_VERSION: return
+        from .live_input import _LATEST_MASTER_VERSION
+        _need(version == _LATEST_MASTER_VERSION, "master version differs")
+        from .public_cohort_support import require_master_cohort
+        try: require_master_cohort(self.catalog.directory, "dream")
+        except (OSError, ValueError): _need(False, "latest public master cohort is unapproved or changed")
+
+    def _condition_matches(self, row, expected):
+        if self.catalog.version() == MASTER_VERSION:
+            return row.get("settings") == expected
+        from .live_input import _master_message
+        actual = _master_message(self.schema,"Condition",row)
+        wanted = _master_message(self.schema,"Condition",{"id":row["id"],"settings":expected})
+        return list(actual.settings) == list(wanted.settings)
+
     def _private(self, snapshot):
         if self.capture_catalog_path is None or not self.capture_catalog_path.exists():
             return None
+        self._admit_master()
         profile = self.state.profile(self.profile)
         _need(profile is not None and snapshot.HasField("userPublic")
               and (profile["server_id"], profile["public_id"]) ==
@@ -76,7 +94,7 @@ class Dream:
         # October fixture. Its original area-16 unlock still comes from master.
         conditions = self.catalog.ids("Condition", required=True)
         for identity in ("cd-dream-25-0320-play", "cd-clear-area-main-016"):
-            _need(identity in conditions and conditions[identity].get("settings") == _CONDITIONS[identity],
+            _need(identity in conditions and self._condition_matches(conditions[identity], _CONDITIONS[identity]),
                   "private capture unlock condition differs")
         area = self.catalog.ids("Area", required=True).get("area-main-016")
         _need(area is not None and isinstance(area.get("questIds"), list) and bool(area["questIds"])
@@ -137,8 +155,8 @@ class Dream:
               and saved["catalog_id"] == "public-dream-2026-10", "catalog version differs")
         _need(self.schema.fingerprint == SCHEMA_SHA256 and saved["schema_sha256"] == SCHEMA_SHA256,
               "schema differs")
-        _need(self.catalog.version() == MASTER_VERSION and saved["master_version"] == MASTER_VERSION,
-              "master version differs")
+        self._admit_master()
+        _need(saved["master_version"] == self.catalog.version(), "master version differs")
         _need(saved["source"] == _SOURCE and saved["home"] == _HOME, "public source or projection differs")
         _need(all(type(saved["home"][key]) is int for key in ("startTime", "endTime", "order")),
               "time or ordering type differs")
@@ -149,7 +167,7 @@ class Dream:
         _need(_HOME["generateAreaItemId"] in self.catalog.ids("Item", required=True), "manual master is missing")
         conditions = self.catalog.ids("Condition", required=True)
         for identity, expected in _CONDITIONS.items():
-            _need(identity in conditions and conditions[identity].get("settings") == expected,
+            _need(identity in conditions and self._condition_matches(conditions[identity], expected),
                   "preserved condition differs")
         event = self.catalog.ids("EventMission", required=True).get(_HOME["eventMissionId"])
         _need(event is not None and event.get("viewConditionId") == "cd-time-dream-26-10"
@@ -266,3 +284,57 @@ class Dream:
         # invented. Missing eventMissionInfo explicitly hides the client button.
         result.commonResponse.SetInParent()
         return result.SerializeToString()
+
+
+def audit_latest_dream_semantics(schema, legacy_master_dir, latest_all_master_dir):
+    """Prove preserved October controls only; never create optional Dream data."""
+    from .live_input import (_AuditCatalog, _LATEST_MASTER_VERSION, _audit_need, _audit_equal,
+        _audit_wire, _audit_conditions, _audit_receipt, _master_message, LatestSemanticsError)
+    scope = "dream"
+    try:
+        _audit_need(schema.fingerprint == SCHEMA_SHA256,scope,"schema_changed")
+        old=_AuditCatalog(schema,legacy_master_dir,MASTER_VERSION,scope)
+        latest=_AuditCatalog(schema,latest_all_master_dir,_LATEST_MASTER_VERSION,scope)
+        settings=[]
+        for catalog in (old,latest):
+            rows=catalog.rows("Setting",required=True)
+            _audit_need(len(rows)==1 and rows[0].get("dreamAreaName")=="イメージトレーニング"
+                        and type(rows[0].get("dreamGenerateAreaBasePhotoRequiredRarity")) is int
+                        and rows[0]["dreamGenerateAreaBasePhotoRequiredRarity"]==4,scope,"dream_setting_changed")
+            settings.append({key:rows[0][key] for key in ("dreamAreaName","dreamGenerateAreaBasePhotoRequiredRarity")})
+            conditions=catalog.ids("Condition",required=True)
+            for identity,expected in _CONDITIONS.items():
+                row=conditions.get(identity)
+                _audit_need(row is not None,scope,"dream_condition_changed")
+                actual=_master_message(schema,"Condition",row)
+                wanted=_master_message(schema,"Condition",{"id":identity,"settings":expected})
+                _audit_need(list(actual.settings)==list(wanted.settings),scope,"dream_condition_changed")
+        _audit_need(settings[0]==settings[1],scope,"dream_setting_changed")
+        first=_audit_conditions(old,_CONDITIONS);second=_audit_conditions(latest,_CONDITIONS)
+        _audit_equal(schema,"Condition",first,second,scope,"dream_condition_changed")
+        projection={"source":_SOURCE,"home":_HOME,"settings":settings[0],"conditions":_audit_wire(schema,"Condition",first)}
+        for table,identity,reason in (("Item",_HOME["generateAreaItemId"],"dream_manual_changed"),
+                                      ("EventMission",_HOME["eventMissionId"],"dream_mission_changed"),
+                                      ("Area","area-main-016","dream_area_changed")):
+            a,b=old.ids(table,required=True).get(identity),latest.ids(table,required=True).get(identity)
+            _audit_need(a is not None and b is not None,scope,reason)
+            _audit_equal(schema,table,[a],[b],scope,reason)
+            projection[table]=_audit_wire(schema,table,[a])
+        event=latest.ids("EventMission")[_HOME["eventMissionId"]]
+        _audit_need(event.get("viewConditionId")=="cd-time-dream-26-10"
+                    and event.get("unlockConditionId")==_HOME["unlockConditionId"]
+                    and event.get("assetId")==_HOME["bannerAssetId"],scope,"dream_mission_changed")
+        area=latest.ids("Area")["area-main-016"]
+        quests=area.get("questIds")
+        _audit_need(type(area.get("type")) is int and area["type"]==1 and type(quests) is list
+                    and quests and len(set(quests))==len(quests),scope,"dream_area_changed")
+        a,b=old.ids("Quest",required=True),latest.ids("Quest",required=True)
+        _audit_need(all(key in a and key in b and a[key].get("areaId")==area["id"] and b[key].get("areaId")==area["id"] for key in quests),scope,"dream_quest_changed")
+        _audit_equal(schema,"Quest",[a[key] for key in quests],[b[key] for key in quests],scope,"dream_quest_changed")
+        projection["Quest"]=_audit_wire(schema,"Quest",[a[key] for key in quests])
+        return _audit_receipt(scope,schema,old,latest,projection,{"public_source_preserved":True,
+            "optional_capture_created":False,"period_changed":False,"condition_count":len(first),"area_16_quests":len(quests),
+            "manual_changed":False,"mission_changed":False})
+    except LatestSemanticsError: raise
+    except Exception:
+        raise LatestSemanticsError(scope,"input_invalid") from None

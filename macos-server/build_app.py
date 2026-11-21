@@ -12,24 +12,62 @@ import platform
 import plistlib
 import signal
 import shutil
+import stat
 import struct
 import subprocess
 import sys
 import tempfile
 from zipfile import ZipFile
 
-from payload import member_path, translation_bundle_input
-from certificate_bundle import install_certificate_bundle
-
 ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tools"))
+
+from release_account_contract import validate as validate_account_roundtrip
+
+from payload import member_path, translation_bundle_input
+from certificate_bundle import install_certificate_bundle
+
 APP_NAME = "IdolyPrideLocalServer"
 LIVE_ENGINE_NAME = "libidoly_live.dylib"
 LIVE_ENGINE_LICENSE_FILES = (
     "LICENSE", "NOTICE", "third-party-licenses/Go-LICENSE", "third-party-licenses/Protobuf-LICENSE",
     "third-party-licenses/YAML-LICENSE", "third-party-licenses/YAML-NOTICE",
 )
+BUILD_PHASES = frozenset(("preflight", "pyinstaller", "assemble", "swift", "sign",
+                         "engine_smoke", "relocated_app", "archive", "complete"))
+BUILD_ERROR_CLASSES = frozenset(("ValueError", "OSError", "FileNotFoundError", "PermissionError",
+                                "CalledProcessError", "TimeoutExpired", "RuntimeError"))
+
+
+class BuildDiagnostics:
+    """Only fixed, credential-free fields cross the child-build boundary."""
+    def __init__(self, evidence):
+        self.path = Path(evidence) / "mac-build-phase.json"
+        self.phase = "preflight"
+
+    def checkpoint(self, phase, error=None):
+        if phase not in BUILD_PHASES:
+            raise ValueError("Unknown macOS build diagnostic phase")
+        self.phase = phase
+        value = {"schema": 1, "status": "PASS" if phase == "complete" else "RUNNING", "phase": phase}
+        if error is not None:
+            name = type(error).__name__
+            value.update(status="FAIL", error_class=name if name in BUILD_ERROR_CLASSES else "Exception",
+                         error_code="mac_build_" + phase + "_failed")
+            code = getattr(error, "returncode", None)
+            if type(code) is int and -255 <= code <= 255:
+                value["exitcode"] = code
+        raw = (json.dumps(value, sort_keys=True) + "\n").encode("utf-8")
+        if len(raw) > 1024:
+            raise ValueError("macOS build diagnostic exceeds bound")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_bytes(raw)
+        except OSError:
+            # Diagnostics must not turn a real build failure into a new one.
+            pass
 
 
 def run(arguments, **kwargs):
@@ -43,6 +81,38 @@ def digest(path: Path) -> str:
 
 def write_json(path, value):
     Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def latest_payload_metadata(server_data, proof_path):
+    """Require the exact compiled cohort; synthetic API fixtures may omit it."""
+    if proof_path is None:
+        return None, None
+    import latest_server_data_pin as verifier
+
+    def pairs(rows):
+        value = {}
+        for key, item in rows:
+            if key in value:
+                raise ValueError("Duplicate server data proof key")
+            value[key] = item
+        return value
+
+    descriptor = os.open(proof_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= 512 * 1024:
+            raise ValueError("Server data proof exceeds bound")
+        raw = stream.read(512 * 1024 + 1)
+        after = os.fstat(stream.fileno())
+        if (len(raw) != before.st_size or (before.st_dev, before.st_ino, before.st_size,
+                before.st_mtime_ns, before.st_ctime_ns) != (after.st_dev, after.st_ino,
+                after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+            raise ValueError("Server data proof changed")
+    proof = json.loads(raw, object_pairs_hook=pairs,
+        parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Nonfinite server data proof")))
+    proof = verifier.verify_upgrade_proof(proof)
+    verifier.verify_payload(server_data)
+    return verifier.payload_pin(), proof
 
 
 def validate_live_engine_library(path: Path) -> dict:
@@ -149,9 +219,9 @@ def smoke_native_app(app: Path, evidence: Path, data_dir: Path, timeout: float =
     return report
 
 
-def build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
-          live_engine_library: Path | None = None, *, build_number: str = "45", translations=None,
-          translations_sha256=None, translations_bytes=None):
+def _build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
+          live_engine_library: Path | None = None, *, build_number: str = "52", translations=None,
+          translations_sha256=None, translations_bytes=None, server_data_upgrade_proof=None, diagnostics):
     if sys.platform != "darwin" or platform.machine() != "arm64":
         raise ValueError("Build on an Apple Silicon macOS runner (macos-15, uname -m = arm64)")
     if output.suffix != ".app" or output.exists() or archive.exists():
@@ -160,6 +230,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
         raise ValueError("Version must contain only digits and periods")
     if not build_number or any(char not in "0123456789" for char in build_number) or int(build_number) <= 0:
         raise ValueError("Build number must be a positive decimal integer")
+    payload_pin, payload_proof = latest_payload_metadata(server_data, server_data_upgrade_proof)
     translations, translation_report = translation_bundle_input(translations, translations_sha256, translations_bytes)
     live_engine = {"included": False}
     if live_engine_library is not None:
@@ -182,6 +253,10 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
         temporary = Path(directory)
         pyinstaller = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--console",
              "--name", "IdolyServerEngine", "--target-arch", "arm64", "--codesign-identity", "-",
+             "--hidden-import", "idoly_local.public_payload_transaction",
+             "--hidden-import", "idoly_local.love_compatibility_pins",
+             "--hidden-import", "idoly_local.public_cohort_support",
+             "--hidden-import", "idoly_local.latest_cohort_pins",
              "--paths", ROOT / "src", "--paths", HERE,
              "--distpath", temporary / "dist", "--workpath", temporary / "work",
              "--specpath", temporary / "spec"]
@@ -194,7 +269,9 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             shutil.copy2(live_engine_library, staging / LIVE_ENGINE_NAME)
             pyinstaller.extend(["--add-binary", str(staging / LIVE_ENGINE_NAME) + ":."])
         pyinstaller.append(HERE / "engine.py")
+        diagnostics.checkpoint("pyinstaller")
         run(pyinstaller, cwd=ROOT, env=environment)
+        diagnostics.checkpoint("assemble")
         contents = output / "Contents"
         resources = contents / "Resources"
         executable = contents / "MacOS" / APP_NAME
@@ -202,6 +279,14 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
         resources.mkdir()
         shutil.copytree(temporary / "dist/IdolyServerEngine", resources / "runtime", symlinks=True)
         shutil.copy2(server_data, resources / "ServerData.zip")
+        if payload_pin is not None:
+            copied = resources / "ServerData.zip"
+            if copied.stat().st_size != payload_pin["bytes"] or digest(copied) != payload_pin["sha256"]:
+                raise ValueError("Copied server data differs from its cohort pin")
+            pin_path = resources / "payload-pin.json"
+            write_json(pin_path, payload_pin)
+            if not 0 < pin_path.stat().st_size <= 4096:
+                raise ValueError("Server data identity exceeds bound")
         if translations is not None:
             with translations.open("rb") as incoming, (resources / "bundledTranslations.zip").open("xb") as outgoing:
                 shutil.copyfileobj(incoming, outgoing, length=64 * 1024)
@@ -233,6 +318,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
                 "NSDownloadsFolderUsageDescription": "게임 리소스를 Downloads/IdolyPride에 보관하고 게임에 제공합니다.",
                 "NSPrincipalClass": "NSApplication",
             }, stream)
+        diagnostics.checkpoint("swift")
         run(["/usr/bin/xcrun", "swiftc", "-swift-version", "5", "-parse-as-library", "-O",
              "-target", "arm64-apple-macos13.0", "-framework", "SwiftUI", "-framework", "AppKit",
              HERE / "App.swift", HERE / "PresentationSettings.swift", "-o", executable], env=environment)
@@ -240,13 +326,18 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
         provenance = {"version": version, "build_number": build_number, "architecture": "arm64", "minimum_macos": "13.0",
             "translations": translation_report,
             "source_commit": source_commit, "server_data_sha256": digest(server_data),
+            "server_data_bytes": server_data.stat().st_size,
             "source_sha256": {name: digest(HERE / name) for name in ("App.swift", "PresentationSettings.swift", "engine.py", "payload.py")},
             "python": platform.python_version(),
             "pyinstaller": importlib.metadata.version("PyInstaller"),
             "signature": "ad-hoc", "notarized": False,
             "user_python_required": False, "user_terminal_required": False,
             "game_client_tested": False, "live_engine": live_engine, "public_tls_trust": public_tls_trust}
+        if payload_pin is not None:
+            provenance.update(payload_pin=payload_pin, payload_pin_sha256=digest(resources / "payload-pin.json"),
+                              server_data_provenance=payload_proof)
         write_json(resources / "bundle-provenance.json", provenance)
+        diagnostics.checkpoint("sign")
         run(["/usr/bin/codesign", "--force", "--deep", "--sign", "-", output])
         if live_engine_library is not None:
             run(["/usr/bin/codesign", "--verify", "--strict", embedded_live_engine])
@@ -268,12 +359,14 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             runtime_environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
             runtime_environment["PYTHONNOUSERSITE"] = "1"
             engine = resources / "runtime/IdolyServerEngine"
+            diagnostics.checkpoint("engine_smoke")
             run([engine, "--smoke", "--data-dir", temporary / "engine-smoke-data",
                  "--server-data", resources / "ServerData.zip", "--report", evidence / "engine-smoke.json"],
                 env=runtime_environment, timeout=120)
             engine_report = json.loads((evidence / "engine-smoke.json").read_text())
             if engine_report.get("frozen_runtime") is not True:
                 raise ValueError("The bundled engine did not use its frozen Python runtime")
+            validate_account_roundtrip(engine_report)
             if engine_report.get("home_fish_heaven_absent") is not True:
                 raise ValueError("The bundled engine did not verify the inactive home fish-heaven event is absent")
             if not all(engine_report.get(key) is True for key in
@@ -303,6 +396,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
                     "main_live_settings_preserved", "main_live_cached_no_grant")
                 if not all(engine_report.get(key) is True for key in main_flags):
                     raise ValueError("The bundled engine did not verify opt-in main-live settlement and exact persistent retries")
+            diagnostics.checkpoint("relocated_app")
             moved = temporary / "이동한 앱" / "IdolyPride Local Server.app"
             moved.parent.mkdir()
             shutil.copytree(output, moved, symlinks=True)
@@ -312,6 +406,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
                 smoke_native_app(moved, evidence, temporary / "gui-smoke-data")
             run(["/usr/bin/codesign", "--verify", "--deep", "--strict", moved])
         run(["/usr/bin/codesign", "--verify", "--deep", "--strict", output])
+        diagnostics.checkpoint("archive")
         archive.parent.mkdir(parents=True, exist_ok=True)
         run(["/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", output, archive])
         provenance.update(archive_sha256=digest(archive), archive_bytes=archive.stat().st_size,
@@ -320,14 +415,34 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
     return provenance
 
 
+def build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
+          live_engine_library: Path | None = None, *, build_number: str = "52", translations=None,
+          translations_sha256=None, translations_bytes=None, server_data_upgrade_proof=None):
+    diagnostics = BuildDiagnostics(evidence)
+    diagnostics.checkpoint("preflight")
+    try:
+        result = _build(server_data, output, archive, evidence, version, smoke,
+                        live_engine_library, build_number=build_number, translations=translations,
+                        translations_sha256=translations_sha256, translations_bytes=translations_bytes,
+                        server_data_upgrade_proof=server_data_upgrade_proof,
+                        diagnostics=diagnostics)
+    except BaseException as error:
+        diagnostics.checkpoint(diagnostics.phase, error)
+        raise
+    diagnostics.checkpoint("complete")
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-data", required=True, type=Path)
+    parser.add_argument("--server-data-upgrade-proof", required=True, type=Path,
+                        help="Exact latest-cohort preparation proof; mandatory for production builds")
     parser.add_argument("--output", required=True, type=Path, help="New IdolyPrideLocalServer.app path")
     parser.add_argument("--archive", required=True, type=Path, help="New deliverable .app.zip path")
     parser.add_argument("--evidence", required=True, type=Path)
-    parser.add_argument("--version", default="0.3.31")
-    parser.add_argument("--build-number", default="45")
+    parser.add_argument("--version", default="0.3.36")
+    parser.add_argument("--build-number", default="53")
     parser.add_argument("--skip-smoke", action="store_true", help="Development only; release builds must run smoke checks")
     parser.add_argument("--live-engine-library", type=Path,
                         help="Optional ARM64 macOS 13 libidoly_live.dylib; experimental engine remains off by default")
@@ -340,7 +455,7 @@ def main(argv=None):
               args.evidence.resolve(), args.version, not args.skip_smoke,
               live_engine_library=args.live_engine_library, build_number=args.build_number,
               translations=args.translations, translations_sha256=args.translations_sha256,
-              translations_bytes=args.translations_bytes)
+              translations_bytes=args.translations_bytes, server_data_upgrade_proof=args.server_data_upgrade_proof)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         parser.exit(1, f"macOS app build failed: {error}\n")
     print(args.archive)

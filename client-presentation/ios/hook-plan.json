@@ -5,7 +5,7 @@
   "bootstrap_unity_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
   "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
   "uuid": "cd2fb04c5a5b3c298383bbc20b923b91",
-  "profile_sha256": "0bde947f36991438e9ad56163c055f7981bd2febf18ebf8c1dbd1676e4907510",
+  "profile_sha256": "652ee72fb7d81e21596d8149eff7b124481b2a842353d5bc0f03e1a9b222a30b",
   "hook_names": [
     "q_set",
     "q_apply",
@@ -47,7 +47,19 @@
     "sound_voice_volume",
     "sound_voice_soundable",
     "sound_bind",
-    "sound_save"
+    "sound_save",
+    "shared_setup",
+    "shared_is_cached",
+    "shared_file_path",
+    "shared_pre_download",
+    "shared_downloader_update",
+    "mp4_presenter_update",
+    "mp4_capture_pass",
+    "mp4_end_camera",
+    "mp4_graph_mode",
+    "mp4_brain_delta",
+    "mp4_core_camera",
+    "mp4_player_initialize"
   ],
   "entries": {
     "q_set": {
@@ -459,7 +471,127 @@
       "patched_entry": "aefee915",
       "gateway_hex": "30a000b010e2279110fedfc8500000b400021fd6f657bda94d011616",
       "registration_pointer_slot": 170420960
+    },
+    "shared_setup": {
+      "rva": 115844120,
+      "original16": "fa67bba9f85f01a9f65702a9f44f03a9",
+      "gateway": 158893424,
+      "slot": 179886592,
+      "original_callable": 158893444,
+      "patched_entry": "5638a414",
+      "gateway_hex": "30a000b01002289110fedfc8500000b400021fd6fa67bba9a5c75b17",
+      "registration_pointer_slot": 175249440
+    },
+    "shared_is_cached": {
+      "rva": 115995104,
+      "original16": "830000b4632880b9040080528bf7ff17",
+      "gateway": 158893456,
+      "slot": 179886600,
+      "original_callable": 158893476,
+      "patched_entry": "eca4a314",
+      "gateway_hex": "30a000b01022289110fedfc8500000b400021fd6430000b40f5b5c17115b5c17",
+      "registration_pointer_slot": 175255832
+    },
+    "shared_file_path": {
+      "rva": 115995132,
+      "original16": "080040f9040d41f9031141f980001fd6",
+      "gateway": 158893488,
+      "slot": 179886608,
+      "original_callable": 158893508,
+      "patched_entry": "eda4a314",
+      "gateway_hex": "30a000b01042289110fedfc8500000b400021fd6080040f90e5b5c17",
+      "registration_pointer_slot": 175255840
+    },
+    "shared_pre_download": {
+      "rva": 115921016,
+      "original16": "ffc301d1fc6f01a9fa6702a9f85f03a9",
+      "gateway": 158893520,
+      "slot": 179886616,
+      "original_callable": 158893540,
+      "patched_entry": "56eda314",
+      "gateway_hex": "30a000b01062289110fedfc8500000b400021fd6ffc301d1a5125c17",
+      "registration_pointer_slot": 175253312
+    },
+    "shared_downloader_update": {
+      "rva": 115906720,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158893552,
+      "slot": 179886624,
+      "original_callable": 158893572,
+      "patched_entry": "54fba314",
+      "gateway_hex": "30a000b01082289110fedfc8500000b400021fd6f657bda9a7045c17",
+      "registration_pointer_slot": 175252688
+    },
+    "mp4_presenter_update": {
+      "rva": 51322596,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158893584,
+      "slot": 179886632,
+      "original_callable": 158893604,
+      "patched_entry": "cb599a15",
+      "gateway_hex": "30a000b010a2289110fedfc8500000b400021fd6f657bda930a66516",
+      "registration_pointer_slot": 170253504
+    },
+    "mp4_capture_pass": {
+      "rva": 124229848,
+      "original16": "ff0303d1f85f08a9f65709a9f44f0aa9",
+      "gateway": 158893616,
+      "slot": 179886640,
+      "original_callable": 158893636,
+      "patched_entry": "563b8414",
+      "gateway_hex": "30a000b010c2289110fedfc8500000b400021fd6ff0303d1a5c47b17",
+      "registration_pointer_slot": 175589448
+    },
+    "mp4_end_camera": {
+      "rva": 126370084,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158893648,
+      "slot": 179886648,
+      "original_callable": 158893668,
+      "patched_entry": "4b117c14",
+      "gateway_hex": "30a000b010e2289110fedfc8500000b400021fd6f657bda9b0ee8317",
+      "registration_pointer_slot": 175686448
+    },
+    "mp4_graph_mode": {
+      "rva": 126420272,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158893680,
+      "slot": 179886656,
+      "original_callable": 158893700,
+      "patched_entry": "50e07b14",
+      "gateway_hex": "30a000b01002299110fedfc8500000b400021fd6f657bda9ab1f8417",
+      "registration_pointer_slot": 175688984
+    },
+    "mp4_brain_delta": {
+      "rva": 54431948,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158893712,
+      "slot": 179886664,
+      "original_callable": 158893732,
+      "patched_entry": "717d8e15",
+      "gateway_hex": "30a000b01022299110fedfc8500000b400021fd6f657bda98a827116",
+      "registration_pointer_slot": 171090136
+    },
+    "mp4_core_camera": {
+      "rva": 54630936,
+      "original16": "ffc301d1eb2b016de923026df85f03a9",
+      "gateway": 158893744,
+      "slot": 179886672,
+      "original_callable": 158893764,
+      "patched_entry": "26bb8d15",
+      "gateway_hex": "30a000b01042299110fedfc8500000b400021fd6ffc301d1d5447216",
+      "registration_pointer_slot": 171095232
+    },
+    "mp4_player_initialize": {
+      "rva": 117040808,
+      "original16": "ff4302d1f85f05a9f65706a9f44f07a9",
+      "gateway": 158893776,
+      "slot": 179886680,
+      "original_callable": 158893796,
+      "patched_entry": "0aa89f14",
+      "gateway_hex": "30a000b01062299110fedfc8500000b400021fd6ff4302d1f1576017",
+      "registration_pointer_slot": 175308288
     }
   },
-  "profile_header_sha256": "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3"
+  "profile_header_sha256": "03f9d0302547ac13fac535c989e7db515665545f6d4c1573ee46e9daa79a45f5"
 }

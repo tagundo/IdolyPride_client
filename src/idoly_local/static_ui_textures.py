@@ -55,12 +55,12 @@ PROFILES = _profiles()
 
 
 def _patch(original, profile, platform, cache):
-    import attrs
-    from io import BytesIO
-    from PIL import Image
     target = profile[platform]
     _need(len(original) == target["bytes"] and _sha(original) == target["object_sha256"],
           "Original direct Texture2D fingerprint differs")
+    import attrs
+    from io import BytesIO
+    from PIL import Image
     _, reader = images._mini_asset(original, 28, 13 if platform == "android" else 9)
     texture = reader.read()
     before = attrs.asdict(texture)

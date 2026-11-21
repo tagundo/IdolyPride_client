@@ -1,0 +1,68 @@
+name: Recover verified 3c0156f MP4 APK and IPA (draft only)
+# One-time delivery transport repair. Application packages remain at 3c0156f;
+# the current delivery source is recorded separately. No application rebuild.
+
+on:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/recover-mp4-preview-3c0156f.yml
+      - tools/recover_mp4_preview_3c0156f.py
+      - tests/test_mp4_preview_recovery.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mp4-preview-recovery-3c0156f
+  cancel-in-progress: false
+
+jobs:
+  recover-draft:
+    if: ${{ github.ref == 'refs/heads/feat/ios-unified-server' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: write
+      actions: read
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the exact delivery workflow source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: delivery-source
+          persist-credentials: false
+      - name: Check out the unchanged verified application source
+        uses: actions/checkout@v4
+        with:
+          ref: 3c0156f3cbc21b74890c2685e06bc96d587ba8e4
+          path: app-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check recovery source and immutable producer guards
+        working-directory: delivery-source
+        run: |
+          python -m pip install --disable-pip-version-check pytest==8.4.2
+          python -B -m pytest -q -p no:cacheprovider tests/test_mp4_preview_delivery.py tests/test_mp4_preview_recovery.py
+      - name: Verify original artifacts and stage only their source-bound new draft
+        working-directory: delivery-source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -B tools/recover_mp4_preview_3c0156f.py
+          --app-checkout "$GITHUB_WORKSPACE/app-source"
+          --work "$RUNNER_TEMP/mp4-recovery-staging"
+      - name: Retain separate source identities, final draft URL and six full SHA readbacks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp4-recovery-proof-3c0156f-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mp4-recovery-staging/draft-staging-proof.json
+          if-no-files-found: ignore
+          retention-days: 14

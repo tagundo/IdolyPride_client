@@ -110,10 +110,16 @@ def test_both_mac_producer_interfaces_forward_optional_pin_trio(tmp_path, monkey
     if native:
         args += ["--server-data", str(tmp_path / "data.zip"), "--output", str(tmp_path / "new.app"),
                  "--archive", str(tmp_path / "new.zip"), "--evidence", str(tmp_path / "evidence")]
+        with pytest.raises(SystemExit) as error:
+            builder.main(args)
+        assert error.value.code == 2 and captured == []
+        proof = tmp_path / "server-data-preparation.json"
+        args += ["--server-data-upgrade-proof", str(proof)]
         builder.main(args)
         assert captured[0][1]["translations"] == asset
         assert captured[0][1]["translations_sha256"] == "a" * 64
         assert captured[0][1]["translations_bytes"] == 123
+        assert captured[0][1]["server_data_upgrade_proof"] == proof
     else:
         for name in ("runtime", "payload", "llvm", "rcodesign", "app", "archive", "evidence"):
             args.extend(["--" + name, str(tmp_path / name)])
