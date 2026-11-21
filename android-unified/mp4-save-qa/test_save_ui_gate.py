@@ -52,6 +52,15 @@ def test_accept_only_complete_exact_source_android_ui_proof():
     assert qa.validate_runtime_report(value, BUILT) == value
 
 
+def test_native_fixture_must_have_only_packaged_or_android_system_dependencies():
+    table = "  0x1 (NEEDED) Shared library: [libc.so]\n  0x1 (NEEDED) Shared library: [libm.so]\n"
+    assert qa.verify_native_dependencies(table) == ["libc.so", "libm.so"]
+    with pytest.raises(ValueError, match="unpackaged runtime dependency"):
+        qa.verify_native_dependencies(table + "  0x1 (NEEDED) Shared library: [libc++_shared.so]\n")
+    with pytest.raises(ValueError):
+        qa.verify_native_dependencies("")
+
+
 @pytest.mark.parametrize("field,value", [
     ("status", "BUILT_NOT_RUNTIME_VALIDATED"), ("actual_android_save_ui_verified", False),
     ("source_commit", "0" * 40), ("apk_sha256", "0" * 64), ("actual_game_mv_verified", True),

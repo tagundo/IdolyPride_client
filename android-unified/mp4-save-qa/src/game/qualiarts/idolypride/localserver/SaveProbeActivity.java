@@ -178,14 +178,24 @@ public final class SaveProbeActivity extends Activity {
     }
 
     private void fail(Throwable error) { failure = error.getClass().getSimpleName() + ":" + String.valueOf(error.getMessage()); writeReport(); }
+    private JSONObject nativeProof() throws Exception {
+        try { return new JSONObject(nativeReceipt()); }
+        catch (Throwable error) {
+            // A failed JNI load must become an immediate failed receipt. It
+            // must not prevent all reporting and appear as a UI timeout.
+            if (failure == null) failure = error.getClass().getSimpleName() + ":native_receipt_unavailable";
+            return new JSONObject().put("error", "native_receipt_unavailable");
+        }
+    }
     private void writeReport() {
         if (root == null || preferences == null) { label.setText("FAIL: fixture setup"); return; }
         try {
+            JSONObject nativeReceipt = nativeProof();
             JSONObject report = new JSONObject().put("schema", 1).put("package", getPackageName()).put("challenge", challenge)
                     .put("phase", failure != null ? "failed" : preferences.getBoolean("finished", false) ? "completed" : "observing")
                     .put("scope", "synthetic_mp4_save_ui_only").put("java_uid", Process.myUid()).put("java_pid", Process.myPid())
                     .put("launch_mode", launchMode)
-                    .put("android_api", android.os.Build.VERSION.SDK_INT).put("native", new JSONObject(nativeReceipt()))
+                    .put("android_api", android.os.Build.VERSION.SDK_INT).put("native", nativeReceipt)
                     .put("launches", preferences.getInt("launches", 0)).put("results", preferences.getInt("results", 0))
                     .put("cancelled", preferences.getInt("cancelled", 0)).put("boots", preferences.getInt("boots", 0))
                     .put("creations", preferences.getInt("creations", 0)).put("can_save", UnifiedMP4Export.canSave())

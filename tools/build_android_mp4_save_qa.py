@@ -84,6 +84,16 @@ def verify_fixture(root=ROOT):
     return value
 
 
+def verify_native_dependencies(dynamic_table):
+    dependencies = re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", dynamic_table)
+    # This fixture packages one JNI DSO per ABI. Its entire runtime dependency
+    # closure must be Android system libraries, not an omitted C++ shared DSO.
+    need(dependencies and len(dependencies) == len(set(dependencies))
+         and "libc.so" in dependencies and set(dependencies) <= {"libc.so", "libm.so", "libdl.so"},
+         "QA JNI library has an unpackaged runtime dependency")
+    return sorted(dependencies)
+
+
 def build(directory, sdk, *, root=ROOT, require_committed=False):
     need(not directory.exists() and not directory.is_symlink(), "Fresh output directory required")
     directory.mkdir(mode=0o700, parents=True); log = directory / "build.log"
@@ -112,14 +122,16 @@ def build(directory, sdk, *, root=ROOT, require_committed=False):
         run([tools / "aapt2", "compile", "--dir", resources, "-o", compiled_res])
         run([tools / "aapt2", "link", "--manifest", root / MANIFEST, "-I", android, compiled_res,
              "--java", generated, "--custom-package", JAVA_PACKAGE, "--min-sdk-version", "30", "--target-sdk-version", "35", "-o", unsigned])
-        libraries = {}
+        libraries, native_dependencies = {}, {}
         for abi, triple in (("x86_64", "x86_64-linux-android"), ("arm64-v8a", "aarch64-linux-android")):
             compiler = toolchain / (triple + "30-clang++"); need(compiler.is_file(), "NDK compiler unavailable")
             library = work / abi / "libidoly_presentation.so"; library.parent.mkdir()
-            run([compiler, "-std=c++17", "-O2", "-fPIC", "-shared", "-fvisibility=hidden", "-Wall", "-Wextra", "-Werror",
+            run([compiler, "-std=c++17", "-O2", "-fPIC", "-shared", "-static-libstdc++", "-fvisibility=hidden", "-Wall", "-Wextra", "-Werror",
                  "-Wl,-z,relro,-z,now,-z,noexecstack", '-DIDOLY_SAVE_SOURCE_SHA256="' + snapshot(before) + '"',
                  '-DIDOLY_SAVE_CONTROLLER_SHA256="' + before[CONTROLLER]["sha256"] + '"', root / BASE / "native/save_fixture.cpp", "-o", library])
             regular(library, MIB); libraries[abi] = library
+            dynamic_table = subprocess.check_output([str(toolchain / "llvm-readelf"), "--dynamic", str(library)], text=True, timeout=15)
+            native_dependencies[abi] = verify_native_dependencies(dynamic_table)
         java_files = sorted((root / BASE / "src").rglob("*.java")) + [root / PRODUCTION / name for name in PRODUCTION_JAVA] + sorted(generated.rglob("*.java"))
         run([javac, *["-J" + flag for flag in common.JAVA_FLAGS], "--release", "17", "-encoding", "UTF-8", "-classpath", android, "-d", classes, *java_files])
         class_files = sorted(classes.rglob("*.class")); need(class_files, "No compiled QA classes")
@@ -144,7 +156,8 @@ def build(directory, sdk, *, root=ROOT, require_committed=False):
               "source_sha256": before, "source_snapshot_sha256": snapshot(before), "production_controller_sha256": before[CONTROLLER]["sha256"],
               "working_tree_snapshot": not committed, "source_unchanged_during_build": True, "ndk_revision": storage.NDK,
               "certificate_sha256": common.CERT, "apk_sha256": sha(apk), "apk_bytes": apk.stat().st_size,
-              "native_library_sha256": native_hashes, "fixture": fixture, "scope": "synthetic_mp4_save_ui_only",
+              "native_library_sha256": native_hashes, "native_required_libraries": native_dependencies,
+              "fixture": fixture, "scope": "synthetic_mp4_save_ui_only",
               "actual_android_save_ui_verified": False, "actual_game_mv_verified": False, "actual_codec_verified": False}
     (directory / "build-report.json").write_text(json.dumps(report, indent=2) + "\n"); print(json.dumps(report, indent=2))
 
