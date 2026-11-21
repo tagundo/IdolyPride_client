@@ -165,11 +165,8 @@ def factories_binary(tmp_path_factory):
     source = build / "factories.cpp"
     source.write_text(SOURCE)
     executable = build / "factories"
-    warning_flags = ["-Wno-misleading-indentation"]
-    if "g++" in Path(compiler).name:
-        warning_flags.append("-Wno-class-memaccess")
     result = subprocess.run(
-        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", *warning_flags,
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-Wno-misleading-indentation",
          "-I", str(ROOT / "client-presentation/native"), str(source), "-o", str(executable)],
         capture_output=True, text=True,
     )
