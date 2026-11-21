@@ -269,14 +269,25 @@ public:
         if(!restorable_owner_current())return fail(Result::stale,"original_playback_graph_changed");
         error_="none";return Result::ok;
     }
-    Result restore(ClockState clock){
+    // The coordinator can retain this scope through a historical checkpoint,
+    // then detach the native clock before asynchronous resource retirement.
+    // Once ordinary playback resumes, saved-time equality is no longer a
+    // valid predicate and none of these original setters may run again.
+    bool logical_restored()const{return source_verified_;}
+    Result release_restored(){
+        if(!active())return Result::ok;
+        if(!source_verified_)return fail(Result::invalid,"original_restore_checkpoint_missing");
+        return release(false,Result::ok,"none");
+    }
+    Result restore(ClockState clock,bool release_resources=true){
         if(!active())return Result::ok;
         if(releasing_)return release(release_owned_&&current(),release_result_,release_reason_);
+        if(source_verified_)return release_resources?release_restored():Result::ok;
         const Result quiet=prepare_restore(clock);
         if(quiet==Result::stale)return release(false,quiet,error_);
         if(quiet!=Result::ok)return quiet;
         phase_=Phase::restoring;
-        if(!saved_known_||!held_)return release(true,Result::ok,"none");
+        if(!saved_known_||!held_)return release_resources?release(true,Result::ok,"none"):Result::ok;
         if(!restore_graph_){
             original_.director_pause(director_,nullptr);
             if(!current())return release(false,Result::stale,"selected_scene_changed");
@@ -323,7 +334,7 @@ public:
             if(verified!=Result::ok)return verified;
             source_verified_=true;
         }
-        return release(true,Result::ok,"none");
+        return release_resources?release(true,Result::ok,"none"):Result::ok;
     }
     // A lost native clock must never be reacquired to restore an old scene.
     // Release only our roots/storage; do not even query current graph state.

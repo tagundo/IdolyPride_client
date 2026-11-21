@@ -156,6 +156,7 @@ inline void close_configuration(Configuration& c){for(int*fd:{&c.root,&c.req,&c.
 struct Options{uint32_t fps_num=30,fps_den=1,codec=1,bitrate=16000000,audio_bitrate=192000,output_width=0,output_height=0;};
 struct PublicStatus {
     char phase[24]="idle",id[33]{},error[192]="none";
+    char restoration_error[96]="none";
     uint64_t frames=0,total_frames=0,audio=0,total_audio=0,bytes=0;
     uint32_t width=0,height=0,fps_num=30,fps_den=1,source_width=0,source_height=0,video_codec=1,video_bitrate=0;
     bool ready=false,pausable=false;
@@ -222,7 +223,13 @@ struct NativeSceneControl {
     // NOT retry a Unity setter/owner query or let an old finally write globals
     // after original replacement initialization. Keep unresolved resources.
     void (*abandon_globals)(void*)=nullptr;
-    bool valid()const{return admit&&prepare_step&&attest&&error&&hold&&grant&&source_clock_restorable&&revoke_grants&&prepare_render&&restore_globals_before_source_change&&abandon_globals;}
+    // Detach every global/interception lease before any resource or natural
+    // Audio WAIT. Post callbacks own their roots independently of Scene and
+    // Playback scopes and must remain callable after those scopes retire.
+    Result (*detach_after_restore)(void*)=nullptr;
+    Result (*verify_post_restore)(void*)=nullptr;
+    Result (*release_post_restore)(void*)=nullptr;
+    bool valid()const{return admit&&prepare_step&&attest&&error&&hold&&grant&&source_clock_restorable&&revoke_grants&&prepare_render&&restore_globals_before_source_change&&abandon_globals&&detach_after_restore&&verify_post_restore&&release_post_restore;}
 };
 static NativeSceneControl native_scene_control;
 static void* native_scene_context=nullptr;
@@ -325,6 +332,9 @@ struct Job {
     bool automatic=false,scene_acquired=false,auto_started=false,capture_requested=false,
         scene_restored=false,clock_lost=false,restoration_verified=false,
         clock_settings_restored=false,camera_audio_restored=false,dependent_state_restored=false;
+    bool logical_checkpoint_done=false,logical_checkpoint_valid=false,logical_camera_audio=false,
+        scene_detached=false,post_verify_done=false,post_verified=false,post_release_done=false;
+    uint64_t post_wait_started=0;
     bool cancel_encoder_pending=false;
     bool pcm_owned=false,bundle_owned=false,pending_broker=false,audible_energy=false,captured=false,terminal_success=false,terminal_cancel=false;
 };
@@ -870,21 +880,83 @@ inline void service_deferred_encoder_cancel(){
     if(job.encoder)job.api.cancel(job.encoder);
     job.cancel_encoder_pending=false;
 }
+inline void restoration_failure(const char* reason){
+    job.terminal_success=false;
+    if(!job.status.restoration_error[0]||!strcmp(job.status.restoration_error,"none")){
+        size_t at=0;
+        for(;reason&&reason[at]&&at<sizeof(job.status.restoration_error)-1;++at){
+            const char c=reason[at];job.status.restoration_error[at]=
+                ((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')?c:'_';
+        }
+        job.status.restoration_error[at]=0;
+        if(!at)snprintf(job.status.restoration_error,sizeof(job.status.restoration_error),"restoration_failed");
+    }
+    // An encoder failure or explicit cancellation remains the primary cause.
+    if(!job.status.error[0]||!strcmp(job.status.error,"none"))stable_error(job.status.restoration_error);
+}
+inline bool service_post_restore(){
+    static bool running=false;
+    if(running)return false;
+    struct Guard{bool& value;explicit Guard(bool& v):value(v){value=true;}~Guard(){value=false;}} guard(running);
+    if(!job.automatic)return true;
+    if(!job.scene_detached)return false;
+    if(!job.post_verify_done){
+        if(!job.logical_checkpoint_valid){job.post_verify_done=true;job.post_verified=false;}
+        else {
+            const uint64_t now=milliseconds();
+            if(!job.post_wait_started)job.post_wait_started=now;
+            Result result=Result::failed;
+            try{result=native_scene_control.verify_post_restore(native_scene_context);}
+            catch(...){job.post_verify_done=true;restoration_failure("source_audio_verification_exception");}
+            if(!job.post_verify_done){
+                if(result==Result::waiting){
+                    // A latched successful natural receipt wins over elapsed
+                    // wall time; only a still-missing receipt can time out.
+                    if(now<job.post_wait_started||now-job.post_wait_started<=15000)return false;
+                    job.post_verify_done=true;restoration_failure("source_audio_restoration_timeout");
+                }else {
+                    job.post_verify_done=true;job.post_verified=result==Result::ok;
+                    if(!job.post_verified)restoration_failure(native_scene_error("source_audio_restoration_failed"));
+                }
+            }
+        }
+    }
+    job.camera_audio_restored=job.logical_checkpoint_valid&&job.logical_camera_audio&&job.post_verified;
+    job.restoration_verified=job.logical_checkpoint_valid&&job.clock_settings_restored
+        &&job.camera_audio_restored&&job.dependent_state_restored;
+    if(!job.post_release_done){
+        Result released=Result::failed;
+        try{released=native_scene_control.release_post_restore(native_scene_context);}
+        catch(...){restoration_failure("source_audio_release_exception");return false;}
+        // A failure does not prove that retained native-reader/GC duties were
+        // discharged. Remain busy until the independent owner returns OK.
+        if(released!=Result::ok){
+            if(released!=Result::waiting)restoration_failure(native_scene_error("source_audio_release_failed"));
+            return false;
+        }
+        job.post_release_done=true;
+    }
+    return true;
+}
 inline void retire() {
+    static bool running=false;
+    if(running)return;
+    struct Guard{bool& value;explicit Guard(bool& v):value(v){value=true;}~Guard(){value=false;}} guard(running);
     if(job.automatic&&!job.scene_restored)return;
     service_deferred_encoder_cancel();
     if(game.restoration_pending()){
         const Result restored=game.restore();
         if(restored!=Result::ok&&restored!=Result::waiting){
-            job.terminal_success=false;stable_error(game.last_error());
+            restoration_failure(game.last_error());
         }
         // An owned native job or an asynchronous restoration step can outlive
         // the UI's cancel/finish request. Retain its scene roots and buffers;
         // a new job cannot inherit resources still owned by this one.
         if(game.restoration_pending())return;
     }
+    if(!service_post_restore())return;
     if(!retire_pending_audio())return;
-    if(job.encoder){const int result=job.api.destroy(job.encoder);if(result==IDMP4_RETRY)return;if(result<0){stable_error("encoder_cleanup_failed");job.terminal_success=false;}job.encoder=nullptr;}
+    if(job.encoder){const int result=job.api.destroy(job.encoder);if(result==IDMP4_RETRY)return;if(result<0)restoration_failure("encoder_cleanup_failed");job.encoder=nullptr;}
     if(!cleanup_bundle())return; // Original Unity async bundle IO must finish first.
     if(job.pcm>=0){close(job.pcm);job.pcm=-1;}
     if(job.pcm_owned)unlink_owned(job.config.exports,job.pcm_name,job.pcm_identity);
@@ -909,60 +981,78 @@ inline Result restore_owned_scene(void* manager,double wall){
     if(job.scene_restored)return Result::ok;
     if(!job.automatic)return Result::invalid;
     auto& clock=native_engine_clock;
-    if(clock.active()&&!clock.hold_for_boundary(manager,wall))job.clock_lost=true;
-    if(!clock.active())job.clock_lost=true;
-    bool source_owned=false;
-    Result result=Result::ok;
-    if(game.automatic()){
-        if(!job.clock_lost){
+    if(!job.logical_checkpoint_done){
+        if(clock.active()&&!clock.hold_for_boundary(manager,wall))job.clock_lost=true;
+        if(!clock.active())job.clock_lost=true;
+        Result result=Result::ok;
+        if(game.automatic()&&!job.clock_lost){
             result=game.prepare_restore();
             if(result==Result::waiting)return result;
-            if(result!=Result::ok)job.clock_lost=true;
+            if(result!=Result::ok){job.clock_lost=true;restoration_failure(game.last_error());}
+            if(!job.clock_lost){
+                const bool owned=game.owned_primary_scene_current()
+                    &&native_scene_control.source_clock_restorable(native_scene_context);
+                if(!owned||!clock.rebase_for_restore(manager,wall,true))job.clock_lost=true;
+            }
+            if(!job.clock_lost){
+                result=game.restore_logical();
+                if(result==Result::waiting)return result;
+                if(result!=Result::ok){job.clock_lost=true;restoration_failure(game.last_error());}
+            }
+            if(!job.clock_lost&&result==Result::ok){
+                // Historical evidence: all snapshots are compared while the
+                // source clock is held. Ordinary source progress after detach
+                // must never be compared against these old time/history bytes.
+                native_scene_control.attest(native_scene_context,&job.logical_camera_audio,&job.dependent_state_restored);
+                job.restored_source_valid=game.observe_source(job.restored_source_time,job.restored_source_paused);
+                job.restored_source_identity=selected_identity;
+                job.logical_checkpoint_valid=job.scene_acquired&&job.logical_camera_audio&&job.dependent_state_restored
+                    &&job.restored_source_valid&&job.acquired_source_valid
+                    &&job.restored_source_identity==job.acquired_source_identity
+                    &&job.restored_source_paused==job.acquired_source_paused
+                    &&std::fabs(job.restored_source_time-job.acquired_source_time)<=.0001;
+                if(!job.logical_checkpoint_valid)restoration_failure("source_restoration_checkpoint_failed");
+            }
         }
-        if(!job.clock_lost){
-            source_owned=game.owned_primary_scene_current()
-                &&native_scene_control.source_clock_restorable(native_scene_context);
-            if(!source_owned||!clock.rebase_for_restore(manager,wall,true))job.clock_lost=true;
-        }
-        if(job.clock_lost&&clock.active()){
-            // Cleanup-only release may itself wait for Unity async teardown.
-            // The replacement scene must not inherit our frozen counters.
-            clock.restore(manager,wall,false);
-            job.clock_settings_restored=false;
-        }
-        result=job.clock_lost?game.abandon_automatic("native_clock_or_scene_ownership_lost"):game.restore();
-        if(result==Result::waiting)return result;
-        if(result!=Result::ok){job.terminal_success=false;stable_error(game.last_error());}
-        if(game.restoration_pending()){
-            // A permanent dependency failure cannot be repaired by retrying
-            // raw writes to unknown buffers. Next boundary cleans up only.
-            if(result!=Result::ok)job.clock_lost=true;
+        job.logical_checkpoint_done=true;
+        if(job.clock_lost)restoration_failure("native_clock_or_scene_ownership_lost");
+    }
+    if(!job.scene_detached){
+        // This is also owed after partial capture, cancellation and source
+        // loss. An old resource reader may WAIT, but no global loop lease may
+        // be retained for that WAIT. The host detaches before resource release.
+        game.detach_restore_globals();
+        const Result detached=native_scene_control.detach_after_restore(native_scene_context);
+        if(detached!=Result::ok){
+            if(detached!=Result::waiting){
+                job.clock_lost=true;restoration_failure(native_scene_error("native_scene_detach_failed"));
+                // Never leave a replacement scene frozen on a failed detach.
+                if(clock.active())clock.restore(manager,wall,false);
+            }
             return Result::waiting;
         }
-    }else source_owned=!job.clock_lost&&game.owned_primary_scene_current();
-    if(clock.active()){
-        const bool safe=!job.clock_lost&&source_owned;
-        job.clock_settings_restored=clock.restore(manager,wall,safe)&&safe;
-        if(!job.clock_settings_restored){job.terminal_success=false;stable_error(clock.error());}
+        const bool safe=!job.clock_lost&&job.logical_checkpoint_valid&&game.restoration_source_current();
+        if(clock.active())job.clock_settings_restored=clock.restore(manager,wall,safe)&&safe;
+        if(!job.clock_settings_restored&&job.logical_checkpoint_valid)
+            restoration_failure("source_clock_restoration_failed");
+        job.scene_detached=!clock.active();
+        if(!job.scene_detached)return Result::waiting;
+        job.post_wait_started=milliseconds();
     }
-    // Release the native clock BEFORE private bundle/AsyncOperation cleanup;
-    // their original frame-based completion must be allowed to run again.
-    job.scene_restored=!clock.active()&&!game.restoration_pending();
-    if(job.scene_restored&&!job.clock_lost&&source_owned&&result==Result::ok){
-        native_scene_control.attest(native_scene_context,&job.camera_audio_restored,&job.dependent_state_restored);
-        // Record actual source state at this boundary, before ordinary source
-        // playback is allowed to continue. HTTP polling cannot freeze a source
-        // that was originally playing, nor infer restoration from later time.
-        job.restored_source_valid=game.observe_source(job.restored_source_time,job.restored_source_paused);
-        job.restored_source_identity=selected_identity;
-        job.restoration_verified=job.clock_settings_restored&&job.camera_audio_restored&&job.dependent_state_restored
-            &&job.restored_source_valid&&job.acquired_source_valid
-            &&job.restored_source_identity==job.acquired_source_identity
-            &&job.restored_source_paused==job.acquired_source_paused
-            &&std::fabs(job.restored_source_time-job.acquired_source_time)<=.0001;
-        if(!job.restoration_verified){job.terminal_success=false;stable_error("source_restoration_not_verified");}
+    // Arm/poll the independent natural Audio observer immediately. A GPU
+    // cleanup WAIT must not keep fresh source callbacks in private-silent mode
+    // or consume this entire timeout before the observer is first allowed.
+    (void)service_post_restore();
+    // Cleanup-only continuation. No rebase, rebuild, held-clock query or old
+    // setter is permitted after this point, even over an arbitrary GPU WAIT.
+    if(game.restoration_pending()){
+        const Result released=job.clock_lost||!job.logical_checkpoint_valid
+            ?game.abandon_automatic("native_clock_or_scene_ownership_lost"):game.restore();
+        if(released!=Result::ok&&released!=Result::waiting)restoration_failure(game.last_error());
+        if(game.restoration_pending())return Result::waiting;
     }
-    return job.scene_restored?Result::ok:Result::waiting;
+    job.scene_restored=true;
+    return Result::ok;
 }
 inline bool native_capture_request(){
     if(job.capture_requested)return true;
@@ -1176,11 +1266,13 @@ inline bool native_render_boundary(void* manager,double wall){
     try{result=native_render_boundary_impl(manager,wall);}
     catch(...){
         const bool restoring=job.stage==Stage::retiring;
-        job.terminal_success=false;stable_error("original_callback_exception");
+        if(restoring)restoration_failure("original_callback_exception");
+        else {job.terminal_success=false;stable_error("original_callback_exception");}
         try{native_scene_control.revoke_grants(native_scene_context);}catch(...){job.clock_lost=true;}
         if(restoring)job.clock_lost=true;
         try{terminal("original_callback_exception");}catch(...){
-            job.terminal_success=false;job.stage=Stage::retiring;stable_error("original_callback_exception");
+            job.terminal_success=false;job.stage=Stage::retiring;
+            if(restoring)restoration_failure("original_callback_exception");else stable_error("original_callback_exception");
         }
         try{
             if(native_engine_clock.active()){
@@ -1199,6 +1291,9 @@ inline bool native_render_boundary(void* manager,double wall){
 // END_MP4_NATIVE_BOUNDARY
 inline void on_unity_tick_impl() {
     if(!installed)return;
+    static bool running=false;
+    if(running)return;
+    struct TickGuard{bool& value;explicit TickGuard(bool& v):value(v){value=true;}~TickGuard(){value=false;}} tick_guard(running);
     struct ObserveExit {~ObserveExit(){try{refresh_native_observation();}catch(...){pthread_mutex_lock(&control_mutex);native_observation.source_valid=false;pthread_mutex_unlock(&control_mutex);}}} observe_exit;
     queue_tick();
     pthread_mutex_lock(&control_mutex);
@@ -1315,9 +1410,9 @@ inline size_t status(char*buffer,size_t capacity){
         static_cast<unsigned long long>(observed.accepted),observed.restored?"true":"false",observed.clock_restored?"true":"false",
         observed.camera_audio?"true":"false",observed.dependents?"true":"false",observed.world?"verified":"unverified");
     if(observed_count<=0||static_cast<size_t>(observed_count)>=sizeof(observation))return 0;
-    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u},\"observation\":%s,\"scene_diagnostics\":%s}",
+    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"restoration_error\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u},\"observation\":%s,\"scene_diagnostics\":%s}",
         static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",readiness,current_phase,
-        paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,
+        paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,s.restoration_error,
         static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),
         static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.source_width,s.source_height,
         s.video_codec,s.video_bitrate,s.fps_num,s.fps_den,static_cast<unsigned long long>(s.bytes),

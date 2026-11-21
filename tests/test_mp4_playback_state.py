@@ -28,13 +28,14 @@ struct Scene {
     int player=0,director=0;bool owner=true,playing=true,paused=false;
     int state=1,mode=0,version=1;double time=13.25;
     int history=37,saved_history=0;float volume=.6f,saved_volume=0;
+    unsigned primary_reads=0,owner_queries=0;
     unsigned sets=0,evaluates=0,rebuilds=0,captures=0,prepares=0,resets=0,restores=0,releases=0,quiesces=0;
     unsigned pending_jobs=1;bool quiesce_ready=true;
     bool fence=true,reset_ready=true,restore_ready=true,release_ready=true,rebuild_ready=true,exclusive=true;
     bool source_ready=true;unsigned verifications=0;bool fail_reset=false,old_valid=false;bool released_owned=true;
     std::string switch_on;std::vector<std::string> calls;
 } s;
-void primary(){assert(s.owner&&"no original scene read/write after identity loss");}
+void primary(){++s.primary_reads;assert(s.owner&&"no original scene read/write after identity loss");}
 void event(const char* name){
     primary();s.calls.emplace_back(name);
     if(s.switch_on==name){s.owner=false;s.state=0;s.mode=2;s.time=77;s.history=88;s.volume=.8f;s.playing=false;s.paused=true;}
@@ -55,7 +56,7 @@ bool playing(void*,void*){primary();return s.playing;}
 bool paused(void*,void*){primary();return s.paused;}
 void setplaying(void*,bool value,void*){primary();s.playing=value;event("playing_flag");}
 void setpaused(void*,bool value,void*){primary();s.paused=value;event("paused_flag");}
-bool current(void* context){assert(context==&s);return s.owner;}
+bool current(void* context){assert(context==&s);++s.owner_queries;return s.owner;}
 p::Result quiesce(void*){primary();++s.quiesces;if(!s.quiesce_ready)return p::Result::waiting;s.pending_jobs=0;event("quiesce");return p::Result::ok;}
 p::Result capture(void*){primary();assert(!s.pending_jobs);++s.captures;if(!s.fence)return p::Result::waiting;s.saved_history=s.history;s.saved_volume=s.volume;event("capture");return p::Result::ok;}
 p::Result prepare(void*){primary();++s.prepares;s.volume=0;event("prepare");return p::Result::ok;}
@@ -74,6 +75,7 @@ p::Dependents dependents(){return {current,quiesce,capture,prepare,reset,restore
 int main(int argc,char** argv){
     assert(argc==2);std::string scenario=argv[1];p::Scope<Graph> scope;
     if(scenario=="paused"){s.state=0;s.paused=true;}
+    if(scenario=="checkpoint_pause_pending")s.paused=true;
     if(scenario=="not_started"){s.state=0;s.playing=false;}
     const int source_state=s.state,source_mode=s.mode;const bool source_playing=s.playing,source_paused=s.paused;
     auto a=api();auto d=dependents();if(scenario=="missing_dependency")d.capture=nullptr;
@@ -89,10 +91,25 @@ int main(int argc,char** argv){
         assert(scope.acquire(&s.player,&s.director,&s,{true,true})==p::Result::unsupported);
         assert(!scope.active()&&s.calls.empty()&&s.captures==0);return 0;
     }
-    if(scenario=="capture_wait"||scenario=="cancel_capture")s.fence=false;
+    if(scenario=="capture_wait"||scenario=="cancel_capture"||scenario=="checkpoint_capture_unknown")s.fence=false;
     if(scenario=="quiesce_wait")s.quiesce_ready=false;
     if(scenario=="owner_capture")s.switch_on="capture";
     auto result=scope.acquire(&s.player,&s.director,&s,{true,true});
+    if(scenario=="checkpoint_capture_unknown"||scenario=="checkpoint_pause_pending"){
+        // Capture/pause preparation can be incomplete before a historical
+        // source state has been acquired. An OK partial cleanup is not proof
+        // that source playback/camera/audio was restored.
+        assert(result==p::Result::waiting&&scope.active()&&!scope.logical_restored());
+        const auto sets_before=s.sets,rebuilds_before=s.rebuilds,verifications_before=s.verifications;
+        assert(scope.restore({true,true},false)==p::Result::ok&&scope.active()&&!scope.logical_restored());
+        assert(s.sets==sets_before&&s.rebuilds==rebuilds_before&&s.verifications==verifications_before);
+        const auto reads=s.primary_reads,queries=s.owner_queries;
+        assert(scope.release_restored()==p::Result::invalid&&scope.active());
+        assert(s.primary_reads==reads&&s.owner_queries==queries&&s.releases==0);
+        s.owner=false;
+        assert(scope.abandon()==p::Result::stale&&!scope.active()&&!s.released_owned);
+        assert(s.primary_reads==reads&&s.owner_queries==queries);return 0;
+    }
     if(scenario=="quiesce_wait"){
         assert(result==p::Result::waiting&&scope.active()&&s.captures==0&&s.pending_jobs==1&&s.prepares==0);
         s.quiesce_ready=true;result=scope.acquire(&s.player,&s.director,&s,{true,true});
@@ -160,6 +177,40 @@ int main(int argc,char** argv){
         s.owner=false;s.time=66;s.history=77;s.volume=.9f;assert(scope.restore({false,false})==p::Result::stale&&!scope.active());
         assert(!s.released_owned&&s.time==66&&s.history==77&&s.volume==.9f);return 0;
     }
+    if(scenario=="checkpoint_progress"||scenario=="checkpoint_owner_lost"||scenario=="checkpoint_release_wait"){
+        // Source restoration is a historical checkpoint. Ordinary playback can
+        // advance or replace the graph before private GPU resources retire.
+        assert(scope.restore({true,true},false)==p::Result::ok&&scope.active()&&scope.logical_restored());
+        assert(s.releases==0&&s.verifications==1&&s.time==13.25&&s.history==37&&s.volume==.6f);
+        const auto reads=s.primary_reads,queries=s.owner_queries,sets_before=s.sets,evaluates_before=s.evaluates;
+        const auto rebuilds_before=s.rebuilds,restores_before=s.restores,verifies_before=s.verifications;
+        s.time=19.75;s.history=903;s.volume=.4f;++s.version;s.state=0;s.paused=true;
+        if(scenario=="checkpoint_owner_lost")s.owner=false;
+        // Explicitly retrying the checkpoint after detach must not compare
+        // its old time/history or require a newly acquired native clock.
+        assert(scope.restore({false,false},false)==p::Result::ok&&scope.logical_restored());
+        assert(s.primary_reads==reads&&s.owner_queries==queries);
+        if(scenario=="checkpoint_release_wait"){
+            s.release_ready=false;
+            assert(scope.release_restored()==p::Result::waiting&&scope.active()&&scope.logical_restored());
+            assert(!s.released_owned&&s.primary_reads==reads&&s.owner_queries==queries);
+            s.time=25;s.history=1001;s.owner=false;s.release_ready=true;
+        }
+        assert(scope.release_restored()==p::Result::ok&&!scope.active()&&!scope.logical_restored()&&!s.released_owned);
+        assert(s.primary_reads==reads&&s.owner_queries==queries&&s.sets==sets_before&&s.evaluates==evaluates_before);
+        assert(s.rebuilds==rebuilds_before&&s.restores==restores_before&&s.verifications==verifies_before);
+        assert(s.history==(scenario=="checkpoint_release_wait"?1001:903)&&s.volume==.4f&&s.state==0&&s.paused);
+        assert(scope.release_restored()==p::Result::ok&&s.primary_reads==reads&&s.owner_queries==queries);return 0;
+    }
+    if(scenario=="checkpoint_verify_wait"){
+        s.source_ready=false;
+        assert(scope.restore({true,true},false)==p::Result::waiting&&scope.active()&&!scope.logical_restored());
+        const auto reads=s.primary_reads,queries=s.owner_queries,sets_before=s.sets;
+        assert(scope.release_restored()==p::Result::invalid&&scope.active()&&s.releases==0);
+        assert(s.primary_reads==reads&&s.owner_queries==queries&&s.sets==sets_before);
+        s.owner=false;assert(scope.abandon()==p::Result::stale&&!scope.active()&&!s.released_owned);
+        assert(s.primary_reads==reads&&s.owner_queries==queries);return 0;
+    }
     if(scenario=="restore_wait")s.restore_ready=false;
     if(scenario=="source_verify_wait")s.source_ready=false;
     if(scenario=="restore_quiesce_wait"){s.quiesce_ready=false;s.pending_jobs=3;}
@@ -208,7 +259,8 @@ def playback_binary(tmp_path_factory):
 @pytest.mark.parametrize("scenario",["playing","paused","not_started","abandon","abandon_wait","clock_unowned","clock_not_held",
     "missing_dependency","missing_api","missing_quiesce","missing_source_verify","source_verify_wait","quiesce_wait","capture_wait","cancel_capture","cancel_held","owner_capture",
     "rebuild_wait","reset_wait","reset_graph_changed","reset_unsupported","owner_rebuild","wrong_time","changed_graph",
-    "changed_owner","restore_quiesce_wait","restore_wait","release_wait","owner_restore_evaluate"])
+    "changed_owner","restore_quiesce_wait","restore_wait","release_wait","owner_restore_evaluate",
+    "checkpoint_progress","checkpoint_owner_lost","checkpoint_release_wait","checkpoint_capture_unknown","checkpoint_pause_pending","checkpoint_verify_wait"])
 def test_original_game_time_held_clock_dependent_closure_and_restoration(playback_binary,scenario):
     ran=subprocess.run([str(playback_binary),scenario],capture_output=True,text=True,timeout=5)
     assert ran.returncode==0,ran.stdout+ran.stderr

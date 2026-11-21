@@ -53,6 +53,13 @@ struct Manager {alignas(8) unsigned char bytes[0x200]{};} first_manager,second_m
 void* current_manager=&first_manager;
 double wall=1000.;
 unsigned kernel_calls=0,finished_calls=0,cancel_calls=0,destroy_calls=0,cleanup_calls=0;
+unsigned detach_calls=0,attest_calls=0,post_verify_calls=0,post_release_calls=0,ordinary_frames=0,post_root_drops=0;
+int detach_waits=0,post_verify_waits=0,post_release_waits=0;
+bool interception_detached=false,post_identity_current=true,post_verify_fails=false;
+bool reenter_verify=false,reenter_release=false,require_natural_receipt=false;
+uint64_t fake_milliseconds=1000;
+uint64_t milliseconds(){return fake_milliseconds;}
+void retire();
 bool finish_file_exists=false,audio_retired=true,bundle_retired=true;
 bool world_owned=true,prepare_wait=false,grant_fail=false,inject_f8_on_accept=false;
 bool cancel_on_append=false,pause_on_append=false;
@@ -104,17 +111,18 @@ void stable_error(const char* value){std::snprintf(job.status.error,sizeof job.s
 void phase(const char* value){std::snprintf(job.status.phase,sizeof job.status.phase,"%s",value);events.push_back(std::string("phase:")+value);}
 bool busy_stage(){return job.stage!=Stage::idle;}
 struct FakeGame {
-    bool own=true,source=true,pending=true,capture_pending=false,paused=true;
+    bool own=true,source=true,pending=true,capture_pending=false,paused=true,logical=false,saved_paused=true;
     uint64_t generation=77;
     double time=0,saved_time=.37,shader_time=0;
-    int capture_waits=0,start_waits=0,begin_waits=0,restore_waits=0,quiet_waits=0,abandon_waits=0;
+    int capture_waits=0,start_waits=0,begin_waits=0,restore_waits=0,quiet_waits=0,abandon_waits=0,cleanup_waits=0;
     int width=16,height=16;
-    unsigned restores=0,abandons=0,captures=0,reads=0,starts=0,shader_steps=0;
+    unsigned restores=0,abandons=0,captures=0,reads=0,starts=0,shader_steps=0,resource_releases=0;
     std::string error="fake_game_failure";
     bool automatic()const{return own;}
     bool observe_source(double& seconds,bool& flag)const{seconds=time;flag=paused;return source;}
     bool selected_scene_witness(idoly_mp4_game::SceneWitness& value)const{original_fault("scene-witness");value.camera=camera_token;value.generation=generation;return source;}
     bool owned_primary_scene_current()const{return own&&source;}
+    bool restoration_source_current()const{return source;}
     bool source_handoff_failed(void* receiver) noexcept {if(receiver!=camera_token||!own)return false;source=false;++generation;return true;}
     uint64_t owned_scene_generation()const{return generation;}
     bool restoration_pending()const{return pending;}
@@ -122,12 +130,26 @@ struct FakeGame {
     Result begin_automatic(){events.push_back("begin");own=pending=true;if(begin_waits){--begin_waits;return Result::waiting;}return Result::ok;}
     Result start_automatic(){events.push_back("start");++starts;if(start_waits){--start_waits;return Result::waiting;}time=0;paused=false;return Result::ok;}
     Result prepare_restore(){events.push_back("restore-fence");if(!source)return Result::stale;assert(native_engine_clock.held());if(quiet_waits){--quiet_waits;return Result::waiting;}return Result::ok;}
-    Result restore(){
+    bool logical_restored()const{return logical;}
+    Result restore_logical(){
+        if(logical)return Result::ok;
         events.push_back("restore");assert(native_engine_clock.active()&&native_engine_clock.held()&&native_engine_clock.restoring());
         assert(load<double>(current_manager,0x60)==60.);
         original_fault("restore");
         if(restore_waits){--restore_waits;return Result::waiting;}
-        ++restores;time=saved_time;paused=true;own=pending=false;return Result::ok;
+        ++restores;time=saved_time;paused=saved_paused;logical=true;return Result::ok;
+    }
+    void detach_restore_globals(){
+        events.push_back("detach-game-globals");
+        if(logical)assert(native_engine_clock.active()&&native_engine_clock.held());
+    }
+    Result release_restored(){return restore();}
+    Result restore(){
+        if(!own&&!pending)return Result::ok;
+        events.push_back("release-resources");
+        assert(logical&&!native_engine_clock.active()&&interception_detached);
+        if(cleanup_waits){--cleanup_waits;return Result::waiting;}
+        ++resource_releases;own=pending=false;return Result::ok;
     }
     Result abandon_automatic(const char*){events.push_back("abandon");++abandons;if(abandon_waits){--abandon_waits;return Result::waiting;}own=pending=false;return Result::stale;}
     Result request_capture(){
@@ -169,7 +191,37 @@ Result grant(void* ctx,uint64_t tick){
 }
 bool restorable(void* ctx){assert(ctx==native_scene_context);events.push_back("world");return world_owned;}
 const char* error_code(void* ctx){assert(ctx==native_scene_context);return scene_error;}
-void attest(void* ctx,bool* camera_audio,bool* dependents){assert(ctx==native_scene_context&&!native_engine_clock.active()&&game.restores==1);*camera_audio=*dependents=true;}
+void attest(void* ctx,bool* camera_audio,bool* dependents){
+    assert(ctx==native_scene_context&&native_engine_clock.active()&&native_engine_clock.held()&&game.logical&&game.restores==1&&!interception_detached);
+    ++attest_calls;assert(attest_calls==1);events.push_back("attest-checkpoint");*camera_audio=*dependents=true;
+}
+Result detach_after_restore(void* ctx){
+    assert(ctx==native_scene_context);
+    if(game.logical)assert(native_engine_clock.active()&&native_engine_clock.held());
+    ++detach_calls;events.push_back("detach");
+    if(detach_waits){--detach_waits;return Result::waiting;}
+    interception_detached=true;return Result::ok;
+}
+Result verify_post_restore(void* ctx){
+    assert(ctx==native_scene_context&&!native_engine_clock.active()&&interception_detached);
+    ++post_verify_calls;events.push_back("post-verify");
+    if(reenter_verify){reenter_verify=false;retire();assert(post_root_drops==0);}
+    original_fault("post-verify");
+    if(post_verify_waits){--post_verify_waits;return Result::waiting;}
+    if(require_natural_receipt&&ordinary_frames<2)return Result::waiting;
+    if(post_verify_fails||!post_identity_current){scene_error="post_source_identity_changed";return Result::stale;}
+    return Result::ok;
+}
+Result release_post_restore(void* ctx){
+    // Cleanup uses retained old roots, including after its source changed or
+    // acquisition failed. It never asks Game.owned_primary_scene_current().
+    assert(ctx==native_scene_context&&!native_engine_clock.active());
+    ++post_release_calls;events.push_back("post-release");
+    if(reenter_release){reenter_release=false;retire();assert(post_root_drops==0);}
+    original_fault("post-release");
+    if(post_release_waits){--post_release_waits;return Result::waiting;}
+    ++post_root_drops;assert(post_root_drops==1);return Result::ok;
+}
 IDMP4EncoderHandle create_encoder(const IDMP4EncoderConfig* c,char*,size_t){assert(c->width==16&&c->height==16);return &context_token;}
 int append_encoder(IDMP4EncoderHandle value,const uint8_t* pixels,size_t row,uint64_t frame){
     assert(value==&context_token&&row==64&&frame==accepted.size());events.push_back("append:"+std::to_string(frame));
@@ -212,11 +264,18 @@ void initialize(unsigned fps){
     native_scene_control.prepare_render=prepare_render;
     native_scene_control.restore_globals_before_source_change=restore_globals;
     native_scene_control.abandon_globals=abandon_globals;
+    native_scene_control.detach_after_restore=detach_after_restore;
+    native_scene_control.verify_post_restore=verify_post_restore;
+    native_scene_control.release_post_restore=release_post_restore;
     assert(native_scene_control.valid());
 }
 bool boundary(bool acknowledge=true){
     const auto before=grants.size();wall+=.01;
     const bool result=native_render_boundary(current_manager,wall);
+    if(!native_engine_clock.active()){
+        ++ordinary_frames;events.push_back("ordinary-loop");
+        if(game.source&&!game.paused)game.time+=.01;
+    }
     if(grants.size()!=before&&published_tick!=~uint64_t(0)){
         body_ticks.push_back(published_tick);game.time=published_tick/60.;gpu_pixel=uint8_t(published_tick+10);events.push_back("player-loop");
     }
@@ -245,6 +304,108 @@ void finish_and_restore(){
 DRIVER = r'''
 int main(int argc,char**argv){
     assert(argc==2);const std::string s=argv[1];const unsigned fps=s=="thirty"?30:60;initialize(fps);
+    if(s.rfind("post_",0)==0){
+        job.stage=Stage::retiring;job.terminal_success=true;finish_file_exists=true;
+        job.encoder=&context_token;job.rgba=static_cast<uint8_t*>(std::calloc(1024,1));job.rgba_capacity=1024;
+        if(s=="post_partial_acquire"){
+            game.own=game.pending=false;job.scene_acquired=false;
+            boundary();assert(!native_engine_clock.active()&&!job.logical_checkpoint_valid);
+            retire();assert(job.stage==Stage::idle&&post_verify_calls==0&&post_release_calls==1&&post_root_drops==1);
+            assert(!job.restoration_verified);return 0;
+        }
+        post_verify_waits=1;
+        if(s=="post_playing_progress"){game.saved_paused=false;job.acquired_source_paused=false;require_natural_receipt=true;}
+        if(s=="post_resource_wait")game.cleanup_waits=2;
+        if(s=="post_long_resource_wait")game.cleanup_waits=3;
+        if(s=="post_detach_wait")detach_waits=2;
+        if(s=="post_verify_wait"||s=="post_source_change")post_verify_waits=2;
+        if(s=="post_verify_timeout")post_verify_waits=100000;
+        if(s=="post_release_retry")post_release_waits=2;
+        if(s=="post_verify_throw"){throw_phase="post-verify";throw_count=1;}
+        if(s=="post_release_throw"){throw_phase="post-release";throw_count=1;}
+        if(s=="post_reentry")reenter_verify=reenter_release=true;
+        if(s=="post_error_precedence"){stable_error("encoder_frame_rejected");job.terminal_success=false;post_verify_fails=true;}
+        events.clear();boundary();
+        if(s=="post_detach_wait"){
+            assert(job.logical_checkpoint_done&&job.logical_checkpoint_valid&&!job.scene_detached&&native_engine_clock.held());
+            assert(game.restores==1&&attest_calls==1&&game.resource_releases==0);
+            boundary();assert(!job.scene_detached&&native_engine_clock.held()&&game.restores==1);
+            boundary();assert(job.scene_detached&&detach_calls==3);
+        }
+        assert(job.logical_checkpoint_done&&job.logical_checkpoint_valid&&job.scene_detached&&!native_engine_clock.active());
+        assert(game.restores==1&&attest_calls==1&&job.restored_source_time==.37);
+        assert(!job.camera_audio_restored&&!job.restoration_verified);
+        assert(job.post_verify_done==(s=="post_verify_throw"));
+        assert(position(events,"attest-checkpoint")<position(events,"detach"));
+        assert(position(events,"detach")<position(events,"release-resources"));
+        if(s=="post_direct_service_reentry"){
+            reenter_verify=reenter_release=true;
+            assert(service_post_restore());
+            assert(post_verify_calls==2&&post_release_calls==1&&post_root_drops==1);
+            retire();assert(job.stage==Stage::idle&&job.restoration_verified);return 0;
+        }
+        if(s=="post_playing_progress"){
+            assert(game.time>.37&&!game.paused);retire();
+            assert(job.stage==Stage::retiring&&!job.post_verify_done&&!job.restoration_verified&&!native_engine_clock.active());
+            const double checkpoint=job.restored_source_time;boundary();assert(game.time>checkpoint&&ordinary_frames>=2);
+            retire();assert(job.stage==Stage::idle&&job.restoration_verified&&job.restored_source_time==checkpoint&&game.restores==1);
+            assert(post_verify_calls==3&&post_root_drops==1);return 0;
+        }
+        if(s=="post_resource_wait"){
+            assert(game.pending&&game.resource_releases==0&&post_verify_calls==1);
+            retire();assert(job.stage==Stage::retiring&&!native_engine_clock.active()&&game.restores==1&&post_verify_calls==1);
+            boundary();retire();assert(job.stage==Stage::retiring&&!native_engine_clock.active());
+            boundary();retire();assert(job.stage==Stage::idle&&game.resource_releases==1&&post_verify_calls==2&&post_root_drops==1);return 0;
+        }
+        if(s=="post_long_resource_wait"){
+            assert(game.pending&&post_verify_calls==1&&post_root_drops==0);
+            ++fake_milliseconds;boundary();
+            assert(game.pending&&!native_engine_clock.active()&&post_verify_calls==2&&job.post_verified&&post_root_drops==1);
+            fake_milliseconds+=20000;boundary();
+            assert(game.pending&&!native_engine_clock.active()&&post_verify_calls==2&&std::string(job.status.restoration_error)=="none");
+            boundary();retire();assert(job.stage==Stage::idle&&job.restoration_verified&&game.restores==1&&post_root_drops==1);return 0;
+        }
+        if(s=="post_ready_after_timeout")fake_milliseconds+=20000;
+        retire();
+        if(s=="post_source_change"){
+            assert(job.stage==Stage::retiring&&!job.post_verify_done);
+            game.source=false;++game.generation;game.time=9;post_identity_current=false;
+            const auto kernels=kernel_calls;boundary();retire();
+            assert(kernel_calls==kernels+1&&job.stage==Stage::idle&&!job.restoration_verified&&job.restored_source_time==.37);
+            assert(game.time==9&&game.restores==1&&post_root_drops==1);return 0;
+        }
+        if(s=="post_verify_timeout"){
+            assert(job.stage==Stage::retiring&&!job.post_verify_done&&post_root_drops==0);
+            fake_milliseconds+=16000;const auto kernels=kernel_calls;boundary();retire();
+            assert(kernel_calls==kernels+1&&job.stage==Stage::idle&&job.post_verify_done&&!job.post_verified&&post_root_drops==1);
+            assert(std::string(job.status.restoration_error)=="source_audio_restoration_timeout");return 0;
+        }
+        if(s=="post_verify_wait"){
+            assert(job.stage==Stage::retiring&&!job.restoration_verified&&post_root_drops==0);
+            boundary();retire();assert(job.stage==Stage::idle&&job.restoration_verified&&post_verify_calls==3);return 0;
+        }
+        if(s=="post_release_retry"){
+            assert(job.stage==Stage::retiring&&job.post_verify_done&&job.post_verified&&!job.post_release_done&&post_root_drops==0);
+            boundary();retire();assert(job.stage==Stage::retiring&&post_verify_calls==2&&post_release_calls==2);
+            boundary();retire();assert(job.stage==Stage::idle&&post_verify_calls==2&&post_release_calls==3&&post_root_drops==1);return 0;
+        }
+        if(s=="post_release_throw"){
+            assert(job.stage==Stage::retiring&&post_root_drops==0&&!job.post_release_done);
+            boundary();retire();assert(job.stage==Stage::idle&&post_verify_calls==2&&post_release_calls==2&&post_root_drops==1&&!job.terminal_success);
+            assert(std::string(job.status.restoration_error)=="source_audio_release_exception");return 0;
+        }
+        if(s=="post_verify_throw"){
+            assert(job.stage==Stage::idle&&job.post_verify_done&&!job.post_verified&&!job.restoration_verified&&post_root_drops==1);
+            assert(std::string(job.status.restoration_error)=="source_audio_verification_exception");return 0;
+        }
+        if(s=="post_error_precedence"){
+            assert(job.stage==Stage::idle&&!job.terminal_success&&!job.restoration_verified);
+            assert(std::string(job.status.error)=="encoder_frame_rejected"&&std::string(job.status.restoration_error)=="post_source_identity_changed");return 0;
+        }
+        assert(job.stage==Stage::idle&&job.restoration_verified&&post_verify_calls==2&&post_release_calls==1&&post_root_drops==1&&finish_file_exists);
+        if(s=="post_ready_after_timeout")assert(std::string(job.status.restoration_error)=="none"&&job.terminal_success);
+        return 0;
+    }
     if(s=="handoff_failure"||s=="foreign_handoff_failure"){
         boundary();const auto tick_count=grants.size();events.clear();
         observe_source_handoff_failed(s=="handoff_failure"?camera_token:reinterpret_cast<void*>(0x77));
@@ -471,7 +632,8 @@ int main(int argc,char**argv){
     if(s=="restore_time_mismatch"){
         game.saved_time=.45;encoder_poll();boundary();
         assert(job.scene_restored&&!job.restoration_verified&&!job.terminal_success&&job.restored_source_valid
-            &&job.restored_source_time==.45&&std::string(job.status.error)=="source_restoration_not_verified");
+            &&job.restored_source_time==.45&&std::string(job.status.error)=="source_restoration_checkpoint_failed"
+            &&std::string(job.status.restoration_error)=="source_restoration_checkpoint_failed");
         retire();assert(finish_file_exists);return 0;
     }
     if(s=="throw_restore"){
@@ -519,7 +681,7 @@ def boundary_binary(tmp_path_factory):
     functions = "\n".join(definition(source, name) for name in (
         "inline const char* native_scene_error", "inline void terminal(const char* error", "inline void export_observer_failed", "inline bool prepare_frame_output", "inline void capture_pass_did_execute", "inline void camera_did_render",
         "inline bool native_render_job_current", "inline uint64_t claim_native_prewarm_render", "inline void release_native_prewarm_render_claim", "inline void complete_native_prewarm_render", "inline uint64_t native_simulation_render_generation", "inline void complete_native_simulation_render", "inline void observe_source_handoff_failed", "inline void service_deferred_encoder_cancel",
-        "inline void encoder_poll", "inline void retire"))
+        "inline void encoder_poll", "inline void restoration_failure", "inline bool service_post_restore", "inline void retire"))
     functions += source.split("// BEGIN_MP4_NATIVE_BOUNDARY", 1)[1].split("// END_MP4_NATIVE_BOUNDARY", 1)[0]
     code = PRELUDE.replace("// ACTUAL_TYPES", types).replace("// ACTUAL_FUNCTIONS", functions) + DRIVER
     directory = tmp_path_factory.mktemp("mp4-native-boundary")
@@ -532,6 +694,7 @@ def boundary_binary(tmp_path_factory):
 
 
 @pytest.mark.parametrize("scenario", [
+    "post_playing_progress", "post_paused", "post_resource_wait", "post_long_resource_wait", "post_direct_service_reentry", "post_detach_wait", "post_verify_wait", "post_source_change", "post_verify_timeout", "post_ready_after_timeout", "post_verify_throw", "post_release_throw", "post_release_retry", "post_reentry", "post_error_precedence", "post_partial_acquire",
     "acquire_then_render", "acquire_wait", "admission_failure", "world_lost_before_tick", "prewarm_wait", "prewarm_resource_wait", "render_wait", "outer_render_failure", "handoff_failure", "foreign_handoff_failure",
     "partial_grant_failure", "partial_grant_owner_lost", "partial_grant_clock_lost", "throw_prepare", "throw_shader", "throw_grant", "throw_after_grant", "throw_kernel", "throw_readback", "throw_append", "throw_restore",
     "throw_after_camera", "throw_validate", "throw_capture_pass", "throw_scene_witness", "throw_observation", "idle_observer_failure",

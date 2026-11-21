@@ -230,6 +230,8 @@ public:
     void close_private_audio();
     bool camera_delta_override(void* brain,float* output) const { if(!manual_||!camera_evaluating_||brain!=get(brain_)||!output)return false;*output=camera_step_delta_;return true; }
     bool private_audio_quiescent() const { return !audio_request_&&!audio_bundle_&&!audio_clip_; }
+    Result restore_logical();
+    void detach_restore_globals(){release_shader_lease();}
     Result restore();
     Result abandon_automatic(const char* reason="original_engine_clock_lost");
     void reset_observations();
@@ -261,6 +263,7 @@ public:
     bool owned_scene_current()const{return manual_&&identities_current();}
     bool owned_primary_scene_current()const{return manual_&&primary_scene_current()
         &&(!automatic_||automatic_scope_.restorable_owner_current());}
+    bool restoration_source_current()const{return manual_&&primary_scene_current();}
     SceneKind scene_kind()const{return scene_kind_;}
     void* selected_presenter()const {void* value=get(presenter_);return value&&live(value)?value:nullptr;}
     void* selected_player()const {return resolve_selected_player(true);}
@@ -367,6 +370,7 @@ private:
     static idoly_mp4_playback::Result automatic_verify_source_restored(void* context);
     static const char* automatic_error(void* context);
     Result automatic_result(idoly_mp4_playback::Result value){error_=automatic_scope_.error();return static_cast<Result>(value);}
+    Result restore_impl(bool release_resources);
     Result collect_actor_graphs(void* player);
     bool actor_graphs_current() const;
     void drop_actor_graphs();
@@ -1150,7 +1154,12 @@ inline void GameAdapter::close_private_audio() {
     if(void* bundle=get(audio_bundle_))if(api_.bundle_unload)api_.bundle_unload(bundle,true,nullptr);
     drop(audio_bundle_);drop(audio_request_);expected_audio_={};audio_cancel_pending_=false;audio_failed_=false;
 }
-inline Result GameAdapter::restore() {
+inline Result GameAdapter::restore_logical(){
+    if(!automatic_)return fail(Result::invalid,"original_playback_not_owned");
+    return restore_impl(false);
+}
+inline Result GameAdapter::restore(){return restore_impl(true);}
+inline Result GameAdapter::restore_impl(bool release_resources) {
     capture_pending_=capture_pass_seen_=capture_submitted_=false;
     close_private_audio();
     if(automatic_){
@@ -1158,16 +1167,23 @@ inline Result GameAdapter::restore() {
         // Lens/target restoration belongs to the same held-clock boundary as
         // graph and actor restoration. Scene loss may still discard our CPU
         // bookkeeping immediately, without changing the replacement scene.
-        const auto quiet=automatic_scope_.prepare_restore(clock);
-        if(quiet!=idoly_mp4_playback::Result::ok&&quiet!=idoly_mp4_playback::Result::stale)
-            return automatic_result(quiet);
+        if(!automatic_scope_.logical_restored()){
+            const auto quiet=automatic_scope_.prepare_restore(clock);
+            if(quiet!=idoly_mp4_playback::Result::ok&&quiet!=idoly_mp4_playback::Result::stale)
+                return automatic_result(quiet);
+        }
         if(output_geometry_applied_){
             if(api_.output_geometry)automatic_geometry_restored_=api_.output_geometry(
                 owned_primary_scene_current()?get(camera_controller_):nullptr,0,0);
             else automatic_geometry_restored_=false;
             output_geometry_applied_=false;
         }
-        const auto result=automatic_scope_.restore(clock);
+        const auto result=automatic_scope_.restore(clock,release_resources);
+        if(!release_resources){
+            if(result==idoly_mp4_playback::Result::ok&&!automatic_geometry_restored_)
+                return fail(Result::failed,"output_restore_failed");
+            return automatic_result(result);
+        }
         if(automatic_scope_.active())return automatic_result(result);
         release_shader_lease();
         manual_=automatic_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
