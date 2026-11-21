@@ -57,6 +57,10 @@ jobs:
           node-version: '22'
       - name: Install the focused test runner
         run: python -m pip install --disable-pip-version-check pytest==8.4.2
+      - name: Verify strict no-skip policy and compiled-source receipt closure
+        run: >-
+          python -B -m pytest -q -p no:cacheprovider
+          tests/test_ios_mp4_saved_outputs_ci.py tests/test_mp4_preview_delivery.py
       - name: Require real Foundation executions, no skips, and both Apple UIKit targets
         run: >-
           python -B tools/verify_ios_mp4_saved_outputs.py
