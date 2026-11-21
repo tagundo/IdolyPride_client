@@ -5,6 +5,7 @@ on:
     branches: [feat/ios-unified-server]
     paths:
       - .github/workflows/verify-android-queue-storage.yml
+      - .github/workflows/build-mp4-preview.yml
       - client-presentation/native/mp4_queue.hpp
       - client-presentation/native/mp4_output_policy.hpp
       - android-unified/queue-qa/**

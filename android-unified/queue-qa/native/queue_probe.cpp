@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "mp4_queue.hpp"
+#include "queue_probe_files.hpp"
 
 #ifndef IDOLY_QUEUE_SOURCE_SHA256
 #error Verified production source identity required
@@ -59,9 +60,7 @@ string directory(const string& root, const char* name) {
     string out = root + '/' + name; require(mkdir(out.c_str(), 0700) == 0, "fresh_case_directory"); return out;
 }
 bool no_temporary_files(const string& path) {
-    DIR* dir = opendir(path.c_str()); require(dir != nullptr, "list_case"); bool good = true;
-    while (dirent* item = readdir(dir)) if (!strncmp(item->d_name, ".queue-", 7)) good = false;
-    closedir(dir); return good;
+    return idoly_queue_storage_qa::no_temporary_files(path.c_str());
 }
 std::unique_ptr<q::Descriptor> descriptor() {
     auto out = std::make_unique<q::Descriptor>();
@@ -143,6 +142,8 @@ string run(const string& root, const string& challenge) {
     run_case(cases, "queue_roundtrip", [&](Json& row) {
         string dir = directory(root, "roundtrip"); q::Queue queue; auto d = descriptor(); char first[33]{}, second[33]{};
         require(queue.open(dir.c_str(), profile) == q::Error::ok, "open_empty");
+        const string lock = dir + "/.queue-v1.lock"; struct stat lock_identity{};
+        require(lstat(lock.c_str(), &lock_identity) == 0 && safe(lock) && lock_identity.st_size == 0, "initial_lock_identity");
         q::Error error = queue.enqueue(*d, options(), first); result(row, queue, error); require(error == q::Error::ok, "first_enqueue");
         require(queue.count() == 1 && queue.generation() == 1 && safe(dir + "/queue-v1.bin"), "first_commit_identity");
         queue.close(); require(queue.open(dir.c_str(), profile) == q::Error::ok && queue.find(first), "first_reopen");
@@ -152,8 +153,12 @@ string run(const string& root, const string& challenge) {
             && queue.find(first) && queue.find(second), "second_reopen");
         row.number("reopened_count", queue.count()); row.number("generation", queue.generation());
         row.yes("descriptor_preserved", true); row.yes("private_single_link_journal", safe(dir + "/queue-v1.bin"));
+        struct stat final_lock{};
+        const bool lock_preserved = lstat(lock.c_str(), &final_lock) == 0 && safe(lock) && final_lock.st_size == 0
+            && final_lock.st_dev == lock_identity.st_dev && final_lock.st_ino == lock_identity.st_ino;
+        row.yes("private_zero_byte_single_link_lock_preserved", lock_preserved);
         row.yes("temporary_files_absent", no_temporary_files(dir));
-        require(safe(dir + "/queue-v1.bin") && no_temporary_files(dir), "queue_storage_identity");
+        require(safe(dir + "/queue-v1.bin") && lock_preserved && no_temporary_files(dir), "queue_storage_identity");
     });
     run_case(cases, "queue_existing_target_rejected", [&](Json& row) {
         string dir = directory(root, "existing"); q::Queue queue; auto d = descriptor(); char id[33]{};

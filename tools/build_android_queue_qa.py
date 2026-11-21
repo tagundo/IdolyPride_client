@@ -34,8 +34,9 @@ MIB = 1024 * 1024
 MANIFEST = "android-unified/queue-qa/AndroidManifest.xml"
 JAVA = "android-unified/queue-qa/src/game/qualiarts/idolypride/queueqa/QueueProbeActivity.java"
 NATIVE = "android-unified/queue-qa/native/queue_probe.cpp"
+FILES = "android-unified/queue-qa/native/queue_probe_files.hpp"
 QUEUE = "client-presentation/native/mp4_queue.hpp"
-SOURCE_PATHS = (MANIFEST, JAVA, NATIVE, QUEUE, "client-presentation/native/mp4_output_policy.hpp",
+SOURCE_PATHS = (MANIFEST, JAVA, NATIVE, FILES, QUEUE, "client-presentation/native/mp4_output_policy.hpp",
                 "tools/build_android_queue_qa.py", "tools/build_android_mp4_qa.py")
 REQUIRED = {"legacy_hardlink_denied", "install_new_no_clobber", "queue_roundtrip",
             "queue_existing_target_rejected", "journal_symlink_rejected", "lock_symlink_rejected", "journal_tamper_rejected"}
@@ -196,7 +197,8 @@ def validate_runtime_report(value, built, challenge, app_uid, host_enforcement):
             if name == "queue_roundtrip":
                 need(row.get("queue_error") == "none" and row.get("storage_stage") == "none" and row["storage_errno"] == 0
                      and row.get("reopened_count") == 2 and row.get("generation") == 2
-                     and all(row.get(key) is True for key in ("descriptor_preserved", "private_single_link_journal", "temporary_files_absent")),
+                     and all(row.get(key) is True for key in ("descriptor_preserved", "private_single_link_journal",
+                         "private_zero_byte_single_link_lock_preserved", "temporary_files_absent")),
                      "Production Queue commit/reopen proof differs")
             elif name == "queue_existing_target_rejected":
                 need(row.get("queue_error") == "queue_storage_changed" and row.get("sentinel_preserved") is True
@@ -211,14 +213,22 @@ def validate_runtime_report(value, built, challenge, app_uid, host_enforcement):
     return value
 
 
-def collect_optional_evidence(directory, base):
+def collect_optional_evidence(directory, base, challenge):
     """Capture only this visible Activity and its current process; never gate pass."""
     evidence = {}
-    def raw(*args, maximum=MIB, timeout=20):
+    def raw_result(*args, maximum=MIB, timeout=5):
         process = subprocess.run([*base, *map(str, args)], stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, timeout=timeout)
-        need(process.returncode == 0 and len(process.stdout) <= maximum, "Optional evidence unavailable or oversized")
+        need(len(process.stdout) <= maximum and len(process.stderr) <= maximum, "Optional evidence oversized")
+        return process
+    def raw(*args, **kwargs):
+        process = raw_result(*args, **kwargs)
+        need(process.returncode == 0, "Optional evidence command unavailable")
         return process.stdout
+    def absent_test(flag, path):
+        result = raw_result("shell", "test", flag, path, maximum=128, timeout=3)
+        need(result.returncode in (0, 1), "Optional path inspection failed")
+        return result.returncode == 1
     try:
         pid_text = raw("shell", "pidof", "-s", PACKAGE, maximum=128).strip().decode("ascii")
         need(re.fullmatch(r"[0-9]{1,10}", pid_text) and int(pid_text) > 1, "Probe PID unavailable")
@@ -227,8 +237,16 @@ def collect_optional_evidence(directory, base):
         evidence.update(logcat="own-pid-logcat.txt", logcat_pid=int(pid_text), logcat_bytes=len(log))
     except Exception as error:
         evidence["logcat_error_type"] = type(error).__name__
+    temporary, owns_temporary = None, False
     try:
-        dump = raw("shell", "uiautomator", "dump", "/dev/tty", maximum=256 * 1024, timeout=30)
+        need(re.fullmatch(r"[0-9a-f]{64}", challenge), "Optional capture challenge differs")
+        temporary = "/data/local/tmp/idoly-queue-storage-" + challenge + ".xml"
+        need(absent_test("-e", temporary) and absent_test("-L", temporary), "Optional XML path already exists")
+        owns_temporary = True
+        raw("shell", "uiautomator", "dump", temporary, maximum=4096, timeout=20)
+        need(absent_test("-L", temporary), "Optional XML path is a symlink")
+        raw("shell", "test", "-f", temporary, maximum=128, timeout=3)
+        dump = raw("exec-out", "cat", temporary, maximum=256 * 1024)
         start, end = dump.find(b"<?xml"), dump.rfind(b"</hierarchy>")
         need(start >= 0 and end >= start, "UI hierarchy unavailable")
         tree = dump[start:end + len(b"</hierarchy>")]
@@ -238,12 +256,18 @@ def collect_optional_evidence(directory, base):
              "Probe Activity is not the visible UI; omit capture")
         with (directory / "ui-tree.xml").open("xb") as output: output.write(tree)
         evidence["ui_tree"] = "ui-tree.xml"
-        screenshot = raw("exec-out", "screencap", "-p", maximum=8 * MIB)
+        screenshot = raw("exec-out", "screencap", "-p", maximum=8 * MIB, timeout=10)
         need(screenshot.startswith(b"\x89PNG\r\n\x1a\n"), "Screenshot is not PNG")
         with (directory / "activity.png").open("xb") as output: output.write(screenshot)
         evidence.update(screenshot="activity.png", screenshot_bytes=len(screenshot))
     except Exception as error:
         evidence["ui_error_type"] = type(error).__name__
+    finally:
+        if owns_temporary:
+            try:
+                raw("shell", "rm", "-f", "--", temporary, maximum=128, timeout=3)
+            except Exception as error:
+                evidence["ui_cleanup_error_type"] = type(error).__name__
     return evidence
 
 
@@ -305,7 +329,7 @@ def run_device(directory, sdk, serial, timeout, *, root=ROOT, require_committed=
     finally:
         if terminal is not None and not (directory / "terminal-report.json").exists():
             (directory / "terminal-report.json").write_text(json.dumps(terminal, indent=2) + "\n")
-        proof["optional_evidence"] = collect_optional_evidence(directory, base)
+        proof["optional_evidence"] = collect_optional_evidence(directory, base, challenge)
         try:
             command("shell", "am", "force-stop", PACKAGE)
         except Exception as error:

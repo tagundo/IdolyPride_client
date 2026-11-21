@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import shutil
 import subprocess
 
 import pytest
@@ -21,7 +22,8 @@ def report():
         {"name": "install_new_no_clobber", "existing_return": -1, "existing_errno": 17,
          "fresh_return": 0, "fresh_errno": 0, "both_existing_files_preserved": True, "fresh_single_link_install": True},
         {"name": "queue_roundtrip", **diagnostic, "queue_error": "none", "reopened_count": 2, "generation": 2,
-         "descriptor_preserved": True, "private_single_link_journal": True, "temporary_files_absent": True},
+         "descriptor_preserved": True, "private_single_link_journal": True,
+         "private_zero_byte_single_link_lock_preserved": True, "temporary_files_absent": True},
         {"name": "queue_existing_target_rejected", **diagnostic, "queue_error": "queue_storage_changed",
          "sentinel_preserved": True, "state_unmodified": True},
         *[{"name": name, **diagnostic, "queue_error": "unsafe_queue_storage", "symlink_and_sentinel_preserved": True}
@@ -96,6 +98,7 @@ def test_each_case_is_mandatory_and_cannot_be_skipped(index, mutation):
     (2, "storage_errno", 1), (2, "storage_errno", False), (2, "reopened_count", 1),
     (2, "generation", 1), (2, "descriptor_preserved", False),
     (2, "private_single_link_journal", False), (2, "temporary_files_absent", False),
+    (2, "private_zero_byte_single_link_lock_preserved", False),
     (3, "queue_error", "none"), (3, "sentinel_preserved", False), (3, "state_unmodified", False),
     (4, "queue_error", "none"), (4, "symlink_and_sentinel_preserved", False),
     (5, "queue_error", "queue_corrupt"), (5, "symlink_and_sentinel_preserved", False),
@@ -113,6 +116,8 @@ def test_missing_diagnostics_and_other_app_uid_fail():
         with pytest.raises(ValueError): validate(proof)
     for uid in (0, 2000, 9999, 20000, 99000, True, "10123"):
         with pytest.raises(ValueError): qa.validate_runtime_report(report(), BUILT, CHALLENGE, uid, HOST_ENFORCEMENT)
+    proof = report(); del proof["native"]["cases"][2]["private_zero_byte_single_link_lock_preserved"]
+    with pytest.raises(ValueError): validate(proof)
 
 
 @pytest.mark.parametrize("read_errno", (1, 13))
@@ -153,39 +158,94 @@ def test_native_and_host_enforcement_fields_are_required_even_for_read_success()
 
 def test_snapshot_receipt_covers_production_queue_and_changes_when_source_changes():
     rows = qa.sources()
-    assert qa.QUEUE in rows and qa.NATIVE in rows and qa.JAVA in rows
+    assert qa.QUEUE in rows and qa.NATIVE in rows and qa.JAVA in rows and qa.FILES in rows
     changed = copy.deepcopy(rows); changed[qa.QUEUE]["sha256"] = "0" * 64
     assert qa.snapshot(changed) != qa.snapshot(rows)
 
 
+@pytest.fixture(scope="module")
+def native_directory_probe(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("queue-files-native")
+    compiler = shutil.which("c++")
+    assert compiler, "Native queue filename regression requires a C++ compiler"
+    source = directory / "probe.cpp"
+    source.write_text('#include "queue_probe_files.hpp"\n'
+                      'int main(int argc,char**argv){if(argc!=2)return 3;'
+                      'try{return idoly_queue_storage_qa::no_temporary_files(argv[1])?0:1;}'
+                      'catch(...){return 2;}}\n')
+    executable = directory / "probe"
+    subprocess.run([compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I", str((qa.ROOT / qa.FILES).parent),
+                    str(source), "-o", str(executable)], check=True, timeout=30, capture_output=True)
+    return executable
+
+
+@pytest.mark.parametrize("extra,expected", [
+    (None, 0), ("queue-v1.bin", 0),
+    (".queue-" + "a" * 32 + ".tmp", 1), (".queue-", 1), (".queue-bad", 1),
+    (".queue-" + "a" * 31 + ".tmp", 1), (".queue-" + "g" * 32 + ".tmp", 1),
+    (".queue-v1.lock.tmp", 1), (".queue-v1.lock.extra", 1), (".queue-v2.lock", 1),
+])
+def test_native_directory_check_allows_only_exact_persistent_lock(native_directory_probe, tmp_path, extra, expected):
+    lock = tmp_path / ".queue-v1.lock"; lock.touch(mode=0o600)
+    if extra is not None: (tmp_path / extra).touch(mode=0o600)
+    result = subprocess.run([str(native_directory_probe), str(tmp_path)], timeout=10, capture_output=True)
+    assert result.returncode == expected
+    assert lock.is_file() and lock.stat().st_size == 0
+
+
 def test_optional_ui_and_logcat_evidence_is_bounded_and_owned(monkeypatch, tmp_path):
     commands = []
+    temporary = "/data/local/tmp/idoly-queue-storage-" + CHALLENGE + ".xml"
     tree = ('<?xml version="1.0"?><hierarchy><node package="' + qa.PACKAGE + '" /></hierarchy>').encode()
     png = b"\x89PNG\r\n\x1a\nsmall-test-image"
     def run(command, **kwargs):
         commands.append(command)
         tail = command[3:]
+        if tail[:2] == ["shell", "test"] and tail[2] in ("-e", "-L"):
+            assert tail[3] == temporary
+            return subprocess.CompletedProcess(command, 1, b"", b"")
         if tail == ["shell", "pidof", "-s", qa.PACKAGE]: data = b"1234\n"
         elif tail == ["logcat", "-d", "--pid", "1234", "-t", "200"]: data = b"own process only\n"
-        elif tail == ["shell", "uiautomator", "dump", "/dev/tty"]: data = tree + b"\nUI hierarchy dumped to: /dev/tty"
+        elif tail == ["shell", "uiautomator", "dump", temporary]: data = b"UI hierarchy dumped"
+        elif tail == ["shell", "test", "-f", temporary]: data = b""
+        elif tail == ["exec-out", "cat", temporary]: data = tree
         elif tail == ["exec-out", "screencap", "-p"]: data = png
+        elif tail == ["shell", "rm", "-f", "--", temporary]: data = b""
         else: raise AssertionError(command)
         return subprocess.CompletedProcess(command, 0, data, b"")
     monkeypatch.setattr(qa.subprocess, "run", run)
-    result = qa.collect_optional_evidence(tmp_path, ["adb", "-s", "emulator-5554"])
+    result = qa.collect_optional_evidence(tmp_path, ["adb", "-s", "emulator-5554"], CHALLENGE)
     assert result["logcat_pid"] == 1234 and (tmp_path / "activity.png").read_bytes() == png
     assert (tmp_path / "ui-tree.xml").read_bytes() == tree
     assert all("--pid" in command for command in commands if "logcat" in command)
+    assert commands[-1][3:] == ["shell", "rm", "-f", "--", temporary]
 
 
 def test_other_app_ui_and_missing_pid_do_not_collect_or_block_storage_evidence(monkeypatch, tmp_path):
     commands = []
     def run(command, **kwargs):
         commands.append(command)
+        if "test" in command and "-f" not in command:
+            return subprocess.CompletedProcess(command, 1, b"", b"")
         data = b'<?xml version="1.0"?><hierarchy><node package="another.app" /></hierarchy>'
+        if "test" in command or "rm" in command: data = b""
         return subprocess.CompletedProcess(command, 1 if "pidof" in command else 0, data, b"")
     monkeypatch.setattr(qa.subprocess, "run", run)
-    result = qa.collect_optional_evidence(tmp_path, ["adb", "-s", "emulator-5554"])
+    result = qa.collect_optional_evidence(tmp_path, ["adb", "-s", "emulator-5554"], CHALLENGE)
     assert result == {"logcat_error_type": "ValueError", "ui_error_type": "ValueError"}
     assert not list(tmp_path.iterdir())
     assert not any("screencap" in command or "logcat" in command for command in commands)
+
+
+@pytest.mark.parametrize("existing", ("-e", "-L"))
+def test_optional_xml_capture_never_overwrites_or_removes_preexisting_path(monkeypatch, tmp_path, existing):
+    commands = []
+    def run(command, **kwargs):
+        commands.append(command)
+        if "pidof" in command: return subprocess.CompletedProcess(command, 1, b"", b"")
+        assert command[3:5] == ["shell", "test"] and command[5] in ("-e", "-L")
+        return subprocess.CompletedProcess(command, 0 if command[5] == existing else 1, b"", b"")
+    monkeypatch.setattr(qa.subprocess, "run", run)
+    result = qa.collect_optional_evidence(tmp_path, ["adb", "-s", "emulator-5554"], CHALLENGE)
+    assert result["ui_error_type"] == "ValueError"
+    assert not any("uiautomator" in command or "rm" in command for command in commands)

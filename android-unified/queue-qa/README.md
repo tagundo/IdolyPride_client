@@ -22,7 +22,10 @@ EPERM/EACCES errno, the production no-replace install preserves an existing
 target and installs a new single-link file, the production Queue survives first
 and replacement enqueue/reopen, an unexpected journal is preserved, journal and
 lock symlinks are rejected, and tampering is rejected both during an open session
-and after reopen. Unsupported or missing cases fail the run.
+and after reopen. The roundtrip also requires the same private regular, single-link,
+zero-byte lock inode to survive reopen; only that exact persistent `.queue-v1.lock`
+name is excluded from the check for unexpected `.queue-` entries. Unsupported or
+missing cases fail the run.
 
 The runner requires enforcing SELinux before and after the run, native and Java
 UID/PID agreement with the package UID, the compiled source hashes, a fresh
@@ -36,4 +39,6 @@ never becomes a claim that the app observed enforcing. Other read failures fail.
 game rendering, UI queue admission, or MP4 encoding. The runner also attempts
 optional UI-tree/screenshot capture while the probe is visible and retains only
 the probe's own PID-filtered logcat. Missing optional captures do not change the
-storage gate result.
+storage gate result. UI capture uses a fresh challenge-named XML file under
+`/data/local/tmp`, rejects an existing file or symlink, validates the captured app
+package before taking a screenshot, and removes only that exact temporary file.
