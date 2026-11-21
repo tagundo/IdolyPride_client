@@ -3614,6 +3614,664 @@
       "registration_pointer_slot_rva": "0x9aa69c8",
       "prefix16": "ee0f19fced33016deb2b026de923036d",
       "native_abi": "void(void* unboxedJobX0,const AnimationStream56* indirectX1,const MethodInfo* X2)"
+    },
+    "mp4_psyllium_execute": {
+      "name": "Solis.Live.Psyllium.RenderPsyllium.Execute",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23082,
+      "metadata_method_index": 158481,
+      "token_row": 883,
+      "rva": "0x8816138",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "context",
+          "typeindex": 71554,
+          "type": "UnityEngine.Rendering.ScriptableRenderContext"
+        },
+        {
+          "name": "renderingData",
+          "typeindex": 44787,
+          "type": "UnityEngine.Rendering.Universal.RenderingData&"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 198,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9fc3aa0",
+      "prefix16": "ffc301d1fe0701a9fc6f02a9fa6703a9",
+      "native_abi": "void(void*,ScriptableRenderContext8,void*,const MethodInfo*)"
+    },
+    "mp4_particle_simulate": {
+      "name": "UnityEngine.ParticleSystem.Simulate",
+      "module": "UnityEngine.ParticleSystemModule.dll",
+      "type_definition_index": 31433,
+      "metadata_method_index": 211134,
+      "token_row": 76,
+      "rva": "0x8fd36fc",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "t",
+          "typeindex": 72837,
+          "type": "System.Single"
+        },
+        {
+          "name": "withChildren",
+          "typeindex": 50428,
+          "type": "System.Boolean"
+        },
+        {
+          "name": "restart",
+          "typeindex": 50428,
+          "type": "System.Boolean"
+        },
+        {
+          "name": "fixedTimeStep",
+          "typeindex": 50428,
+          "type": "System.Boolean"
+        }
+      ],
+      "parameter_count": 4,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa028900",
+      "prefix16": "e80f1cfcfe5f01a9f65702a9f44f03a9",
+      "native_abi": "void(void*,float,bool,bool,bool,const MethodInfo*)"
+    },
+    "mp4_live_particle_simulate": {
+      "name": "Solis.Live.Equipment.Environment.LiveParticleEffect.SimulateParticle",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23156,
+      "metadata_method_index": 158911,
+      "token_row": 1313,
+      "rva": "0x8822b20",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "particleSystem",
+          "typeindex": 67018,
+          "type": "UnityEngine.ParticleSystem"
+        },
+        {
+          "name": "localTime",
+          "typeindex": 72837,
+          "type": "System.Single"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9fc4810",
+      "prefix16": "ffc302d1ee2b00fdedb3056debab066d",
+      "native_abi": "void(void*,void*,float,const MethodInfo*)"
+    },
+    "mp4_presenter_end": {
+      "name": "Solis.OutGame.LivePlayerScreenPresenter.EndAsync",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 7410,
+      "metadata_method_index": 36966,
+      "token_row": 36967,
+      "rva": "0x572fdd4",
+      "return_type_index": 76686,
+      "parameters": [
+        {
+          "name": "ct",
+          "typeindex": 50865,
+          "type": "System.Threading.CancellationToken"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 129,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": "0x9af2cc8",
+      "prefix16": "ffc301d1fe2300f9f65705a9f44f06a9",
+      "native_abi": "UniTask16(void*,CancellationToken8,const MethodInfo*)"
+    },
+    "mp4_actor_update": {
+      "name": "VL.Core.VLActorController.Update",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28614,
+      "metadata_method_index": 195795,
+      "token_row": 1117,
+      "rva": "0x9245a10",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 452,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa04ae80",
+      "prefix16": "fe0f1cf8f85f01a9f65702a9f44f03a9",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_actor_late": {
+      "name": "VL.Core.VLActorController.LateUpdate",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28614,
+      "metadata_method_index": 195796,
+      "token_row": 1118,
+      "rva": "0x9245b5c",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 452,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa04ae88",
+      "prefix16": "fe5fbda9f65701a9f44f02a9d47100b0",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_actor_eye_late": {
+      "name": "VL.VLActorEye.LateUpdate",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28483,
+      "metadata_method_index": 194964,
+      "token_row": 286,
+      "rva": "0x9228534",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa049488",
+      "prefix16": "e923bd6dfe5701a9f44f02a9b47200d0",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_actor_face_late": {
+      "name": "VL.VLActorFaceTargetCorrection.LateUpdate",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28485,
+      "metadata_method_index": 194971,
+      "token_row": 293,
+      "rva": "0x9228e98",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa0494c0",
+      "prefix16": "ff0303d1eb2b046de923056dfe3300f9",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_actor_foot_apply": {
+      "name": "VL.VLActorFootShadow.ApplyJob",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28454,
+      "metadata_method_index": 194818,
+      "token_row": 140,
+      "rva": "0x921ff88",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa048ff8",
+      "prefix16": "ff8301d1fe2300f9f44f05a9f47200f0",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_particle_control_simulate": {
+      "name": "UnityEngine.Timeline.ParticleControlPlayable.Simulate",
+      "module": "Unity.Timeline.dll",
+      "type_definition_index": 30593,
+      "metadata_method_index": 205156,
+      "token_row": 741,
+      "rva": "0x8ef80e0",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "time",
+          "typeindex": 72837,
+          "type": "System.Single"
+        },
+        {
+          "name": "restart",
+          "typeindex": 50428,
+          "type": "System.Boolean"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa013448",
+      "prefix16": "e923bd6dfe0b00f9f44f02a9f30300aa",
+      "native_abi": "void(void*,float,bool,const MethodInfo*)"
+    },
+    "mp4_actor_derived_late_ref": {
+      "name": "VL.VLDefaultActorController`3.LateUpdate",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28492,
+      "metadata_method_index": 195023,
+      "token_row": 345,
+      "rva": "0x73cf2d0",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 196,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9677b80",
+      "prefix16": "fe0f1df8f65701a9f44f02a9b5640190",
+      "native_abi": "void(void* selfX0,const MethodInfo* closedGenericX1)",
+      "generic_source": {
+        "metadata_registration": "0x96dd758",
+        "method_spec_index": 255220,
+        "generic_arguments": [
+          "System.Object",
+          "System.Object",
+          "System.Object"
+        ],
+        "method_pointer_index": 199040,
+        "pointer_table": "0x94f2f80",
+        "pointer_slot": "0x9677b80"
+      }
+    },
+    "mp4_actor_derived_late_shared": {
+      "name": "VL.VLDefaultActorController`3.LateUpdate",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28492,
+      "metadata_method_index": 195023,
+      "token_row": 345,
+      "rva": "0x73d244c",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 196,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9677c50",
+      "prefix16": "fe0f1df8f65701a9f44f02a9956401b0",
+      "native_abi": "void(void* selfX0,const MethodInfo* closedGenericX1)",
+      "generic_source": {
+        "metadata_registration": "0x96dd758",
+        "method_spec_index": 255246,
+        "generic_arguments": [
+          "System.Object",
+          "System.Object",
+          "Unity.IL2CPP.Metadata.__Il2CppFullySharedGenericType"
+        ],
+        "method_pointer_index": 199066,
+        "pointer_table": "0x94f2f80",
+        "pointer_slot": "0x9677c50"
+      }
+    },
+    "mp4_equipment_late": {
+      "name": "Solis.Live.Equipment.LiveEquipmentController.LateUpdate",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23116,
+      "metadata_method_index": 158628,
+      "token_row": 1030,
+      "rva": "0x881b054",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9fc3f38",
+      "prefix16": "ff8301d1fe2300f9f44f05a9b4c200b0",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_photography_is_end": {
+      "name": "Solis.Common.Photography.PhotographyLive3DPresenter.IsEndTimeline",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23491,
+      "metadata_method_index": 160756,
+      "token_row": 3158,
+      "rva": "0x887f25c",
+      "return_type_index": 50428,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": "0x9fc81b8",
+      "prefix16": "e80f1dfcfe5701a9f44f02a994bf00d0",
+      "native_abi": "bool(void*,const MethodInfo*)"
+    },
+    "mp4_player_is_end": {
+      "name": "Solis.Common.SolisLivePlayer.IsTimelineEnded",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23280,
+      "metadata_method_index": 159577,
+      "token_row": 1979,
+      "rva": "0x8846b70",
+      "return_type_index": 50428,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": "0x9fc5ce0",
+      "prefix16": "e80f1dfcfe5701a9f44f02a954c100f0",
+      "native_abi": "bool(void*,const MethodInfo*)"
+    },
+    "mp4_render_stack": {
+      "name": "UnityEngine.Rendering.Universal.UniversalRenderPipeline.RenderCameraStack",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25283,
+      "metadata_method_index": 174625,
+      "token_row": 736,
+      "rva": "0x8e28798",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "context",
+          "typeindex": 71554,
+          "type": "UnityEngine.Rendering.ScriptableRenderContext"
+        },
+        {
+          "name": "baseCamera",
+          "typeindex": 50798,
+          "type": "UnityEngine.Camera"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 145,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa00b5f0",
+      "prefix16": "fd7bbaa9fc6f01a9fa6702a9f85f03a9",
+      "native_abi": "void(ScriptableRenderContext8,void*,const MethodInfo*)"
+    },
+    "mp4_render_camera": {
+      "name": "UnityEngine.Rendering.Universal.UniversalRenderPipeline.RenderSingleCamera",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25283,
+      "metadata_method_index": 174622,
+      "token_row": 733,
+      "rva": "0x8e29be4",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "context",
+          "typeindex": 71554,
+          "type": "UnityEngine.Rendering.ScriptableRenderContext"
+        },
+        {
+          "name": "camera",
+          "typeindex": 50798,
+          "type": "UnityEngine.Camera"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 150,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa00b5d8",
+      "prefix16": "fd7bbda9f65701a9f44f02a9ffc30ad1",
+      "native_abi": "void(ScriptableRenderContext8,void*,const MethodInfo*)"
+    },
+    "mp4_vlb_draw": {
+      "name": "VLB.VLBBatchSRP.UpdateAndDrawMeshInstanced",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 22979,
+      "metadata_method_index": 158000,
+      "token_row": 402,
+      "rva": "0x8800f14",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "cmd",
+          "typeindex": 52217,
+          "type": "UnityEngine.Rendering.CommandBuffer"
+        },
+        {
+          "name": "cameraData",
+          "typeindex": 44479,
+          "type": "UnityEngine.Rendering.Universal.CameraData&"
+        },
+        {
+          "name": "overrideMaterial",
+          "typeindex": 64888,
+          "type": "UnityEngine.Material"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9fc2b98",
+      "prefix16": "eb2bb86de923016dfd7b02a9fc6f03a9",
+      "native_abi": "void(void*,void*,CameraData336Ref*,void*,const MethodInfo*)"
+    },
+    "mp4_selected_renderer": {
+      "name": "UnityEngine.Rendering.Universal.UniversalAdditionalCameraData.get_scriptableRenderer",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25275,
+      "metadata_method_index": 174579,
+      "token_row": 690,
+      "rva": "0x8e26a78",
+      "return_type_index": 71560,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 2182,
+      "return_type": "UnityEngine.Rendering.Universal.ScriptableRenderer",
+      "registration_pointer_slot_rva": "0xa00b480",
+      "prefix16": "fe0f1df8f65701a9f44f02a9759200d0",
+      "native_abi": "void*(void*,const MethodInfo*)"
+    },
+    "mp4_volume_update": {
+      "name": "UnityEngine.Rendering.Volume.Update",
+      "module": "Unity.RenderPipelines.Core.Runtime.dll",
+      "type_definition_index": 28134,
+      "metadata_method_index": 193105,
+      "token_row": 1233,
+      "rva": "0x8de5f48",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa008638",
+      "prefix16": "fe0f1ef8f44f01a9749400f0889a5439",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_material_ctor_shader": {
+      "name": "UnityEngine.Material..ctor",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 23838,
+      "metadata_method_index": 163018,
+      "token_row": 1526,
+      "rva": "0x8f543f8",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "shader",
+          "typeindex": 71853,
+          "type": "UnityEngine.Shader"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 6278,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa01bb30",
+      "prefix16": "fe0f1df8f65701a9f44f02a9158900f0",
+      "native_abi": "void(void*,void*,const MethodInfo*)"
+    },
+    "mp4_render_library_ctor": {
+      "name": "VL.Rendering.Internal.VLPostProcessPass/MaterialLibrary..ctor",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25147,
+      "metadata_method_index": 174092,
+      "token_row": 203,
+      "rva": "0x8e0daf8",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "data",
+          "typeindex": 77653,
+          "type": "VL.Rendering.VLPostProcessData"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 6278,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa00a548",
+      "prefix16": "fe0f1ef8f44f01a9f40301aae1031faa",
+      "native_abi": "void(void*,void*,const MethodInfo*)"
+    },
+    "mp4_cine_apply": {
+      "name": "Cinemachine.PostFX.CinemachineVolumeSettings.ApplyPostFX",
+      "module": "Cinemachine.dll",
+      "type_definition_index": 28403,
+      "metadata_method_index": 194600,
+      "token_row": 1024,
+      "rva": "0x5a1d398",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "brain",
+          "typeindex": 51797,
+          "type": "Cinemachine.CinemachineBrain"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 145,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9bc10e0",
+      "prefix16": "ff8305d1e87b00fdfd7b10a9fc6f11a9",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_cine_game_object_ctor": {
+      "name": "UnityEngine.GameObject..ctor",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 23999,
+      "metadata_method_index": 164805,
+      "token_row": 3313,
+      "rva": "0x8f8013c",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "name",
+          "typeindex": 74263,
+          "type": "System.String"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 6278,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa01f308",
+      "prefix16": "fe0f1df8f65701a9f44f02a9d58700b0",
+      "native_abi": "void(void*,void*,const MethodInfo*)"
+    },
+    "mp4_cine_volume_enable": {
+      "name": "UnityEngine.Rendering.Volume.OnEnable",
+      "module": "Unity.RenderPipelines.Core.Runtime.dll",
+      "type_definition_index": 28134,
+      "metadata_method_index": 193103,
+      "token_row": 1231,
+      "rva": "0x8de5e34",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa008628",
+      "prefix16": "fe0f1ef8f44f01a9749400f088925439",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_mirror_late": {
+      "name": "VL.Rendering.MirrorVolume.LateUpdate",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25113,
+      "metadata_method_index": 173915,
+      "token_row": 26,
+      "rva": "0x8df57e4",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa009fc0",
+      "prefix16": "fe57bea9f44f01a9f59300f0f4570090",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_mirror_parameters": {
+      "name": "VL.Rendering.MirrorVolume.UpdateParameters",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25113,
+      "metadata_method_index": 173916,
+      "token_row": 27,
+      "rva": "0x8df5898",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa009fc8",
+      "prefix16": "ff4304d1fd7300f9fe570fa9f44f10a9",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_mirror_destroy": {
+      "name": "VL.Rendering.MirrorVolume.OnDestroy",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25113,
+      "metadata_method_index": 173914,
+      "token_row": 25,
+      "rva": "0x8df5730",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa009fb8",
+      "prefix16": "fe57bea9f44f01a9f49300f0f5570090",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_fog_enable": {
+      "name": "Solis.Rendering.VolumetricHeightFogVolume.OnEnable",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23166,
+      "metadata_method_index": 158938,
+      "token_row": 1340,
+      "rva": "0x8824138",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9fc48e8",
+      "prefix16": "fe0f1df8f65701a9f44f02a976c20090",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_fog_disable": {
+      "name": "Solis.Rendering.VolumetricHeightFogVolume.OnDisable",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23166,
+      "metadata_method_index": 158939,
+      "token_row": 1341,
+      "rva": "0x8824200",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9fc48f0",
+      "prefix16": "fe57bea9f44f01a974c20090758600b0",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_fog_late": {
+      "name": "Solis.Rendering.VolumetricHeightFogVolume.LateUpdate",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23166,
+      "metadata_method_index": 158940,
+      "token_row": 1342,
+      "rva": "0x88242fc",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9fc48f8",
+      "prefix16": "eb2bbc6de923016dfe5702a9f44f03a9",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_context_submit": {
+      "name": "UnityEngine.Rendering.ScriptableRenderContext.Submit",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24390,
+      "metadata_method_index": 166391,
+      "token_row": 4899,
+      "rva": "0x8fa6e84",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa022498",
+      "prefix16": "fe57bea9f44f01a9b4860090155000f0",
+      "native_abi": "void(ScriptableRenderContext8*,const MethodInfo*)"
     }
   },
   "graphics_fields": [

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit the six appended iOS gateways against whole pinned original inputs.
+"""Audit all appended iOS scene gateways against whole pinned original inputs.
 
 Only small derived evidence is written. Neither original executable nor a
 patched executable is published. This does not execute an iOS application.
@@ -50,12 +50,15 @@ def audit(native_path, metadata_path):
     original = Original(metadata, native)  # Whole SHA + metadata version + registrations.
     profile, plan = p.load_profile(), p.make_plan()
     old = json.loads(json.dumps(profile))
-    for name in ('mp4_native_time', 'mp4_brain_update', 'mp4_shader_set', 'mp4_shader_reset', 'mp4_actor_process', 'mp4_actor_burst'):
+    from audit_mp4_scene_aliases import SELECTIONS,DERIVED_ALIASES
+    appended=('mp4_native_time','mp4_brain_update','mp4_shader_set','mp4_shader_reset','mp4_actor_process','mp4_actor_burst','mp4_fixed_loop_condition',*SELECTIONS,*DERIVED_ALIASES)
+    for name in appended:
         del old['aliases'][name]
         old['hook_names'].remove(name)
-    old['gateway_region']['bytes'] -= 192
-    old['slot_region']['bytes'] -= 48
+    old['gateway_region']['bytes'] -= len(appended)*32
+    old['slot_region']['bytes'] -= len(appended)*8
     del old['native_relay_region']
+    del old['native_extra_relay_regions']
     assert digest((json.dumps(old, indent=2) + '\n').encode()) == OLD_PROFILE_SHA256
     clock = json.loads((ROOT / 'client-presentation/native/mp4_engine_clock_profile.json').read_text())['platforms']['ios']
     update = clock['bindings']['update']
@@ -77,6 +80,13 @@ def audit(native_path, metadata_path):
         'method_flags': method[7], 'return_type': brain['return'],
         'registration_pointer_slot_rva': int(brain['registration_pointer_slot'], 16),
         'prefix16': brain['prefix']}
+    from audit_mp4_scene_aliases import derive,SELECTIONS
+    for alias in (*SELECTIONS,*DERIVED_ALIASES):assert profile['aliases'][alias]==derive(original,'ios',alias)
+    from audit_mp4_world import build as world_profile
+    world=world_profile(Path(native_path).parent,'ios')
+    fixed=world['native']['fixed_condition'];row=profile['aliases']['mp4_fixed_loop_condition']
+    assert row['rva']==int(fixed['rva'],16) and row['prefix16']==fixed['prefix']
+    assert row['native_abi']=='bool(void)' and row['registration_pointer_slot_rva'] is None
     assert (ROOT / 'client-presentation/ios/ios_profile.hpp').read_bytes() == p.render_header(plan)
     p._validate_native_relay(native, profile)
     patched, original_report = p.patch_presentation(native, plan)

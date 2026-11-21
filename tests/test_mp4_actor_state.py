@@ -49,6 +49,7 @@ struct Fixture {
     int graph_mode=2,animator_mode=0,culling=0;
     double root_clock=11.2;
     bool held=true,routes=true,source=true,job_type=true,fence_pending=false;
+    uint64_t clock_serial=0;unsigned clock_reads=0,clock_revoke_read=0;
     bool clip_advance=false,job_clock_advance=false,root_advance=false,replace_job=false;
     bool fail_zero=false,nonzero_pose=false,original_throw=false;
     Object* make(const char* type){
@@ -102,6 +103,10 @@ bool current(void* ctx,const Owner& o){
         &&f->same(o.graph,f->owner.graph)&&f->same(o.playable,f->owner.playable)&&f->same(o.output,f->owner.output);
 }
 bool held(void* ctx){assert(ctx==f);return f->held;}
+bool clock_granted(void* ctx,uint64_t serial){
+    assert(ctx==f);++f->clock_reads;
+    return (!f->clock_revoke_read||f->clock_reads!=f->clock_revoke_read)&&f->clock_serial==serial;
+}
 bool routes(void* ctx){assert(ctx==f);return f->routes;}
 Result zero_pose(void* ctx){
     assert(ctx==f);f->root_clock=0;for(auto& n:f->nodes)n.time=0;
@@ -171,13 +176,14 @@ StateApi api(){return {current,held,routes,zero_pose,root_time,mapped,type,alive
     output,job_type,is_job,job_data,mode,culling,complete,reset_dynamic,reset_breast,
     graph_valid,graph_mode,graph_mode_set,evaluate,root_count,get_root,playable_valid,
     input_count,input,time,root_transform,transforms,length,data,parent,position,rotation,scale,
-    set_position_rotation,set_scale};}
+    set_position_rotation,set_scale,clock_granted};}
 Result warm(Scope& scope){
     Result result=Result::waiting;for(int i=0;i<40&&result==Result::waiting;++i)result=scope.reset();return result;
 }
 int main(int argc,char** argv){
     assert(argc==2);const std::string s=argv[1];Fixture fixture;f=&fixture;Scope scope;StateApi a=api();
     if(s=="missing_api"){a.job_complete=nullptr;assert(!scope.configure(a,&f->gate,&f->owner,1,f,17));return 0;}
+    if(s=="missing_clock_witness"){a.clock_granted=nullptr;assert(!scope.configure(a,&f->gate,&f->owner,1,f,17));return 0;}
     if(s=="invalid_configure"){
         assert(!scope.configure(a,nullptr,&f->owner,1,f,17));assert(!scope.configure(a,&f->gate,nullptr,1,f,17));
         assert(!scope.configure(a,&f->gate,&f->owner,0,f,17));assert(!scope.configure(a,&f->gate,&f->owner,1,nullptr,17));
@@ -232,6 +238,43 @@ int main(int argc,char** argv){
     if(reset_fail)assert(result!=Result::ok);
     else {assert(result==Result::ok&&scope.warmed_steps()==180&&f->evals==180&&f->body_calls==180);
         assert(f->graph_mode==1&&f->gate.stats().duplicate_calls==180);}
+    if(s.rfind("two_phase_",0)==0){
+        assert(scope.commit_grant(1)==Result::invalid);
+        assert(scope.prepare_grant(0)==Result::invalid&&scope.prepare_grant(2)==Result::invalid);
+        assert(scope.prepare_grant(1)==Result::ok&&f->graph_mode==1);
+        f->gate.invoke_managed(solver,f->job,nullptr,nullptr);
+        assert(f->body_calls==180); // Prepared is not published.
+        assert(scope.commit_grant(1)==Result::waiting);
+        if(s=="two_phase_f8_retry"||s=="two_phase_hold_revokes"){
+            assert(scope.hold_frame()==Result::ok&&scope.commit_grant(1)==Result::invalid);
+            assert(scope.prepare_grant(1)==Result::ok); // Reuse rejected logical index.
+        }
+        if(s=="two_phase_idempotent_prepare")assert(scope.prepare_grant(1)==Result::ok);
+        f->held=false;f->clock_serial=1;
+        const int completed=f->completions;
+        if(s=="two_phase_source_changed")f->source=false;
+        if(s=="two_phase_fence_changed"){
+            f->put(f->native_animator,0x238,uint64_t{7});f->put(f->native_animator,0x240,int32_t{2});
+        }
+        if(s=="two_phase_mode_changed")f->graph_mode=3;
+        if(s=="two_phase_buffer_changed")f->lists[0].capacity=1;
+        if(s=="two_phase_clock_revoked")f->clock_revoke_read=f->clock_reads+2;
+        const bool rejected=s=="two_phase_source_changed"||s=="two_phase_fence_changed"
+            ||s=="two_phase_mode_changed"||s=="two_phase_buffer_changed"||s=="two_phase_clock_revoked";
+        assert(scope.commit_grant(1)==(rejected?Result::stale:Result::ok));
+        assert(f->completions==completed); // Commit never runs a new Complete.
+        f->gate.invoke_managed(solver,f->job,nullptr,nullptr);
+        f->gate.invoke_burst(burst_solver,f->job,nullptr,1,nullptr,0);
+        assert(f->body_calls==(rejected?180:181));
+        if(rejected){assert(scope.release(false)==Result::ok&&f->roots.empty());return 0;}
+        assert(scope.commit_grant(1)==Result::invalid);
+        assert(scope.prepare_grant(2)==Result::waiting); // Next prepare needs a held boundary.
+        f->held=true;assert(scope.hold_frame()==Result::ok&&scope.prepare_grant(2)==Result::ok);
+        f->held=false;f->clock_serial=2;
+        assert(scope.commit_grant(2)==Result::ok);
+        f->gate.invoke_managed(solver,f->job,nullptr,nullptr);assert(f->body_calls==182);
+        f->held=true;
+    }
     if(s=="grant"){
         assert(scope.grant(1)==Result::ok);f->gate.invoke_managed(solver,f->job,nullptr,nullptr);
         f->gate.invoke_burst(burst_solver,f->job,nullptr,1,nullptr,0);assert(f->body_calls==181);
@@ -326,7 +369,9 @@ def state_binary(tmp_path_factory):
 
 
 @pytest.mark.parametrize("scenario", [
-    "complete_restore", "grant", "hold_regrant_keeps_game_time", "external_mode_change", "missing_api", "invalid_configure", "clock_not_held",
+    "complete_restore", "grant", "hold_regrant_keeps_game_time", "external_mode_change", "missing_api", "missing_clock_witness", "invalid_configure", "clock_not_held",
+    "two_phase_grant", "two_phase_f8_retry", "two_phase_hold_revokes", "two_phase_idempotent_prepare",
+    "two_phase_source_changed", "two_phase_fence_changed", "two_phase_mode_changed", "two_phase_buffer_changed", "two_phase_clock_revoked",
     "routes_not_ready", "wrong_actor_type", "wrong_rig_job_type", "wrong_native_job_type",
     "uninitialized", "animator_unscaled", "animator_culled", "dead_rig", "root_allocation_failure",
     "native_list_negative", "native_list_capacity", "native_list_huge", "native_list_unmapped",

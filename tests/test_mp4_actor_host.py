@@ -31,7 +31,7 @@ def host_binary(tmp_path_factory):
         pytest.skip('A host C++ compiler is required')
     bridge = (NATIVE / 'bridge.cpp').read_text()
     selected = [
-        'bool mp4_actor_map_add(', 'bool mp4_actor_refresh_maps(', 'bool mp4_actor_mapped(',
+        'bool mp4_actor_map_add(', 'bool mp4_actor_refresh_maps(', 'bool mp4_actor_mapped(const void* value',
         'template<class T> bool mp4_actor_field(', 'bool mp4_actor_list(',
         'bool mp4_actor_owner(', 'void* mp4_actor_transforms(',
         'bool mp4_actor_graph_mode(mp4actor::Handle* handle',
@@ -69,9 +69,9 @@ void* mp4_array_data(void* p){return static_cast<unsigned char*>(p)+0x20;}
 uint32_t mp4_actor_transform_type_handle=7;void* type_object=reinterpret_cast<void*>(0x1234);
 void* weak_get(uint32_t value){return value==7?type_object:nullptr;}
 bool mp4_actor_selected_source(void*){return source_current;}
-struct FakeScope{uint64_t last=0;mp4actor::Result grant(uint64_t n){last=n;return mp4actor::Result::ok;}};
+struct FakeScope{uint64_t last=0;mp4actor::Result commit_grant(uint64_t n){last=n;return mp4actor::Result::ok;}};
 struct Host{void* player=nullptr;void* presenter=nullptr;uint64_t epoch=0;bool invalidated=false;FakeScope scope;}mp4_actor_host;
-mp4actor::WorkerGate mp4_actor_gate;mp4actor::ManagedProcess mp4_actor_process_original=nullptr;mp4actor::BurstExecute mp4_actor_burst_original=nullptr;
+mp4actor::MonoGate mp4_actor_mono_gate;mp4actor::WorkerGate mp4_actor_gate;mp4actor::ManagedProcess mp4_actor_process_original=nullptr;mp4actor::BurstExecute mp4_actor_burst_original=nullptr;
 void* actor_object=nullptr;void* game_object=nullptr;void* result_array=nullptr;unsigned components_calls=0;
 void* get_game_object(void* actor,Method*){assert(actor==actor_object);return game_object;}
 void* components(void* object,void* type,bool search,bool recursive,bool inactive,bool reverse,void* list,Method*){
@@ -169,3 +169,13 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
 def test_actual_host_selection_lifetime_and_native_mode_are_strict(host_binary, mode):
     result = subprocess.run([str(host_binary), mode], capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr
+
+
+def test_photography_replacement_restores_shader_before_original_or_data_replacement():
+    bridge=(NATIVE/'bridge.cpp').read_text()
+    for signature,original in (("Mp4UniTask mp4_photography_initialize_hook(","mp4_photography_initialize_original("),
+                               ("Mp4UniTask mp4_photography_player_initialize_hook(","mp4_photography_player_initialize_original(")):
+        body=function(bridge,signature)
+        assert body.index('mp4_scene_will_change(self)')<body.index('observe_source_will_change(self)')<body.index(original)
+    body=function(bridge,'Mp4UniTask mp4_photography_player_initialize_hook(')
+    assert body.index('observe_source_will_change(self)')<body.index('mp4_normalize_photography_descriptors(data)')

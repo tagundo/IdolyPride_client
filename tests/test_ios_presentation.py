@@ -9,6 +9,8 @@ import pytest
 
 from idoly_local import ios_presentation as p
 
+SCENE_APPENDED=('mp4_psyllium_execute','mp4_fixed_loop_condition','mp4_particle_simulate','mp4_live_particle_simulate','mp4_presenter_end','mp4_actor_update','mp4_actor_late','mp4_actor_eye_late','mp4_actor_face_late','mp4_actor_foot_apply','mp4_particle_control_simulate','mp4_actor_derived_late_ref','mp4_actor_derived_late_shared','mp4_equipment_late','mp4_photography_is_end','mp4_player_is_end','mp4_render_stack','mp4_render_camera','mp4_vlb_draw','mp4_selected_renderer','mp4_volume_update','mp4_material_ctor_shader','mp4_render_library_ctor','mp4_cine_apply','mp4_cine_game_object_ctor','mp4_cine_volume_enable','mp4_mirror_late','mp4_mirror_parameters','mp4_mirror_destroy','mp4_fog_enable','mp4_fog_disable','mp4_fog_late','mp4_context_submit')
+
 
 def signed_branch_target(source, instruction):
     assert instruction >> 26 == 0b000101
@@ -92,9 +94,9 @@ def test_original_cache_conditional_gateway_executes_both_paths(item_pointer):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "c675dfd6141856503282cafae6c548b86c77442b11264de46b84ec2aa97a6dc2"
+    assert hashlib.sha256(header).hexdigest() == "8baa58198f5e7117b2307138cf4c974d9a4ab55ebc735d451877f32bff1a1cb2"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 137 and len(plan["entries"]) == 62
+    assert len(profile["aliases"]) == 170 and len(plan["entries"]) == 95
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -115,14 +117,16 @@ def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
 
 def test_two_new_gateways_preserve_every_previous_profile_byte_and_mapping():
     profile, plan = p.load_profile(), p.make_plan()
-    assert profile['hook_names'][-6:] == ['mp4_native_time', 'mp4_brain_update', 'mp4_shader_set', 'mp4_shader_reset', 'mp4_actor_process', 'mp4_actor_burst']
+    appended=('mp4_native_time','mp4_brain_update','mp4_shader_set','mp4_shader_reset','mp4_actor_process','mp4_actor_burst',*SCENE_APPENDED)
+    assert set(appended).issubset(profile['hook_names'])
     old = copy.deepcopy(profile)
-    for name in ('mp4_native_time', 'mp4_brain_update', 'mp4_shader_set', 'mp4_shader_reset', 'mp4_actor_process', 'mp4_actor_burst'):
+    for name in appended:
         del old['aliases'][name]
         old['hook_names'].remove(name)
-    old['gateway_region']['bytes'] -= 192
-    old['slot_region']['bytes'] -= 48
+    old['gateway_region']['bytes'] -= len(appended)*32
+    old['slot_region']['bytes'] -= len(appended)*8
     del old['native_relay_region']
+    del old['native_extra_relay_regions']
     import json
     assert hashlib.sha256((json.dumps(old, indent=2) + '\n').encode()).hexdigest() == '09c3106f3aef9f04ca6464b224455cb5a5ffa27ab8ded24d182a65c891242cdc'
     for index, name in enumerate(old['hook_names']):
@@ -174,7 +178,7 @@ def relay_macho_fixture():
     for index, (name, start, size) in enumerate(((b'__gcc_except_tab', 700, 100), (b'__const', 900, 100))):
         struct.pack_into('<16s16sQQ', raw, 128 + index * 80, name, b'__TEXT', start, size)
     profile = {'target': {'uuid': uuid.hex()}, 'native_relay_region': {
-        'rva': 800, 'bytes': 8, 'gap_begin': 800, 'gap_end': 900,
+        'name':'mp4_native_time','original_zero':True,'rva': 800, 'bytes': 8, 'gap_begin': 800, 'gap_end': 900,
         'after_section': '__gcc_except_tab', 'before_section': '__const'}}
     return raw, profile
 
@@ -307,8 +311,8 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 62 * 32
-    assert profile["slot_region"]["bytes"] == 62 * 8
+    assert profile["gateway_region"]["bytes"] == 95 * 32
+    assert profile["slot_region"]["bytes"] == 95 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
@@ -339,8 +343,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 62 * 32
-    assert original["slot_region"]["bytes"] == 62 * 8
+    assert original["gateway_region"]["bytes"] == 95 * 32
+    assert original["slot_region"]["bytes"] == 95 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length
@@ -413,3 +417,56 @@ def test_in_place_requires_explicit_boolean_and_owned_bytearray_before_validatio
     for value in (1, 'yes', None):
         with pytest.raises(ValueError, match='boolean'):
             p.patch_presentation(bytearray(), {}, in_place=value)
+
+
+def test_new_stage_and_fixed_aliases_preserve_previous_sixty_two_mappings():
+    profile,plan=p.load_profile(),p.make_plan();old=copy.deepcopy(profile)
+    for name in SCENE_APPENDED:
+        del old['aliases'][name];old['hook_names'].remove(name)
+    old['gateway_region']['bytes']-=len(SCENE_APPENDED)*32;old['slot_region']['bytes']-=len(SCENE_APPENDED)*8
+    del old['native_extra_relay_regions']
+    import json
+    assert hashlib.sha256((json.dumps(old,indent=2)+'\n').encode()).hexdigest()=='60ecc264edd253ed482519c1035264647c8e67b960fe5b3b99e1c909d9a309b0'
+    for index,name in enumerate(old['hook_names']):
+        assert plan['entries'][name]['gateway']==old['gateway_region']['rva']+32*index
+        assert plan['entries'][name]['slot']==old['slot_region']['rva']+8*index
+    fixed=profile['aliases']['mp4_fixed_loop_condition'];gate=plan['entries']['mp4_fixed_loop_condition']
+    assert fixed['native_abi']=='bool(void)' and fixed['native_parameter_registers']=={}
+    assert fixed['rva']==0xccc210 and fixed['registration_pointer_slot_rva'] is None
+    assert (gate['relay_in'],gate['relay_out'])==(0x8610a4c,0x8610a50)
+    assert profile['aliases']['mp4_psyllium_execute']['native_abi']=='void(void*,ScriptableRenderContext8,void*,const MethodInfo*)'
+    assert profile['aliases']['mp4_particle_simulate']['native_abi']=='void(void*,float,bool,bool,bool,const MethodInfo*)'
+
+
+@pytest.mark.parametrize('alias', list(SCENE_APPENDED))
+def test_selected_stage_and_fixed_gateways_preserve_actual_native_argument_registers(alias):
+    """Execute packaged replacement dispatch with real pointer/float ABI lanes."""
+    unicorn=pytest.importorskip('unicorn')
+    from unicorn import arm64_const as r
+    profile,plan=p.load_profile(),p.make_plan();entry=plan['entries'][alias]
+    handler=0x10001000;stack=0x10010000
+    machine=unicorn.Uc(unicorn.UC_ARCH_ARM64,unicorn.UC_MODE_ARM)
+    machine.ctl_set_tcg_buffer_size(16*1024*1024)
+    pages={entry['rva']&~4095,entry['gateway']&~4095,entry['slot']&~4095,handler&~4095,stack}
+    if 'relay_in' in entry:pages.add(entry['relay_in']&~4095)
+    for page in pages:machine.mem_map(page,4096)
+    machine.mem_write(entry['rva'],bytes.fromhex(entry['patched_entry']))
+    machine.mem_write(entry['gateway'],bytes.fromhex(entry['gateway_hex']))
+    machine.mem_write(entry['slot'],struct.pack('<Q',handler))
+    if 'relay_in' in entry:
+        for key in ('relay_in','relay_out'):machine.mem_write(entry[key],bytes.fromhex(entry[key+'_hex']))
+    pointers=[0x22334400+index*0x100 for index in range(8)]
+    vectors=[(0x1234567812345678<<64)|0x3f400000+index for index in range(8)]
+    for index,value in enumerate(pointers):machine.reg_write(getattr(r,'UC_ARM64_REG_X'+str(index)),value)
+    for index,value in enumerate(vectors):machine.reg_write(getattr(r,'UC_ARM64_REG_Q'+str(index)),value)
+    machine.reg_write(r.UC_ARM64_REG_SP,stack+4096)
+    observed=[]
+    def entered(current,pc,_size,_data):
+        if pc==handler:
+            observed.append(pc);current.emu_stop()
+    machine.hook_add(unicorn.UC_HOOK_CODE,entered)
+    machine.emu_start(entry['rva'],0,count=12)
+    assert observed==[handler]
+    for index,value in enumerate(pointers):assert machine.reg_read(getattr(r,'UC_ARM64_REG_X'+str(index)))==value
+    for index,value in enumerate(vectors):assert machine.reg_read(getattr(r,'UC_ARM64_REG_Q'+str(index)))==value
+    assert machine.reg_read(r.UC_ARM64_REG_SP)==stack+4096

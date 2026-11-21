@@ -1,0 +1,757 @@
+{
+  "schema": 1,
+  "platforms": {
+    "android": {
+      "schema": 1,
+      "platform": "android",
+      "sources": {
+        "engine_sha256": "c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85"
+      },
+      "registry": "0x14591a0",
+      "registry_indirect": true,
+      "phases": [
+        {
+          "alias": "sample",
+          "type": "UnityEngine.PlayerLoop.Initialization/DirectorSampleTime",
+          "name": "DirectorSampleTime",
+          "namespace": "",
+          "loop_index": 6,
+          "slot": "0x3f8",
+          "type_cache": {
+            "rva": "0x80b568",
+            "lookup": "#0x73985c",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "Initialization/DirectorSampleTime"
+            ],
+            "store": "0x80b57c"
+          },
+          "writer": {
+            "rva": "0x72f13c",
+            "target": 7534304
+          },
+          "callback": {
+            "rva": "0x72f6e0",
+            "prefix": "a86d00f0006142f9bc000014a86d00f0",
+            "body": "a86d00f0006142f9bc000014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0x9e27f40",
+            "prefix": "4f5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24143
+          }
+        },
+        {
+          "alias": "update",
+          "type": "UnityEngine.PlayerLoop.Update/DirectorUpdate",
+          "name": "DirectorUpdate",
+          "namespace": "",
+          "loop_index": 73,
+          "slot": "0x5f0",
+          "type_cache": {
+            "rva": "0x80be98",
+            "lookup": "#0x73985c",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "Update/DirectorUpdate"
+            ],
+            "store": "0x80beac"
+          },
+          "writer": {
+            "rva": "0x72f16c",
+            "target": 7534360
+          },
+          "callback": {
+            "rva": "0x72f718",
+            "prefix": "a86d00f0006142f941008052be030014",
+            "body": "a86d00f0006142f941008052be030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0x9e4ffc0",
+            "prefix": "925e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24210
+          }
+        },
+        {
+          "alias": "begin",
+          "type": "UnityEngine.PlayerLoop.PreLateUpdate/DirectorUpdateAnimationBegin",
+          "name": "DirectorUpdateAnimationBegin",
+          "namespace": "",
+          "loop_index": 76,
+          "slot": "0x600",
+          "type_cache": {
+            "rva": "0x80bbdc",
+            "lookup": "#0x73985c",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PreLateUpdate/DirectorUpdateAnimationBegin"
+            ],
+            "store": "0x80bbf0"
+          },
+          "writer": {
+            "rva": "0x72f19c",
+            "target": 7534480
+          },
+          "callback": {
+            "rva": "0x72f790",
+            "prefix": "a86d00f0006142f961008052a0030014",
+            "body": "a86d00f0006142f961008052a0030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0x9e3b0f0",
+            "prefix": "995e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24217
+          }
+        },
+        {
+          "alias": "legacy",
+          "type": "UnityEngine.PlayerLoop.PreLateUpdate/LegacyAnimationUpdate",
+          "name": "LegacyAnimationUpdate",
+          "namespace": "",
+          "loop_index": 77,
+          "slot": "0x608",
+          "type_cache": {
+            "rva": "0x80bc30",
+            "lookup": "#0x73985c",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PreLateUpdate/LegacyAnimationUpdate"
+            ],
+            "store": "0x80bc44"
+          },
+          "writer": {
+            "rva": "0x8a51d8",
+            "target": 9064968
+          },
+          "callback": {
+            "rva": "0x8a5208",
+            "prefix": "fe0f1ff81668f697a0000036c86200b0",
+            "body": "fe0f1ff81668f697a0000036c86200b000e947f9fe0741f88fffff17fe0741f8c0035fd6",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0x9e3b120",
+            "prefix": "9a5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24218
+          }
+        },
+        {
+          "alias": "end",
+          "type": "UnityEngine.PlayerLoop.PreLateUpdate/DirectorUpdateAnimationEnd",
+          "name": "DirectorUpdateAnimationEnd",
+          "namespace": "",
+          "loop_index": 78,
+          "slot": "0x610",
+          "type_cache": {
+            "rva": "0x80bbf8",
+            "lookup": "#0x73985c",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PreLateUpdate/DirectorUpdateAnimationEnd"
+            ],
+            "store": "0x80bc0c"
+          },
+          "writer": {
+            "rva": "0x72f1a8",
+            "target": 7534496
+          },
+          "callback": {
+            "rva": "0x72f7a0",
+            "prefix": "a86d00f0006142f9810080529c030014",
+            "body": "a86d00f0006142f9810080529c030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0x9e3b100",
+            "prefix": "9b5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24219
+          }
+        },
+        {
+          "alias": "deferred",
+          "type": "UnityEngine.PlayerLoop.PreLateUpdate/DirectorDeferredEvaluate",
+          "name": "DirectorDeferredEvaluate",
+          "namespace": "",
+          "loop_index": 79,
+          "slot": "0x618",
+          "type_cache": {
+            "rva": "0x80bbc0",
+            "lookup": "#0x73985c",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PreLateUpdate/DirectorDeferredEvaluate"
+            ],
+            "store": "0x80bbd4"
+          },
+          "writer": {
+            "rva": "0x72f178",
+            "target": 7534376
+          },
+          "callback": {
+            "rva": "0x72f728",
+            "prefix": "fe4fbfa9b36d00f0606242f97e030094",
+            "body": "fe4fbfa9b36d00f0606242f97e030094606242f9fe4fc1a89b030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0x9e3b0e0",
+            "prefix": "9c5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24220
+          }
+        },
+        {
+          "alias": "late",
+          "type": "UnityEngine.PlayerLoop.PostLateUpdate/DirectorLateUpdate",
+          "name": "DirectorLateUpdate",
+          "namespace": "",
+          "loop_index": 89,
+          "slot": "0x660",
+          "type_cache": {
+            "rva": "0x80b664",
+            "lookup": "#0x73985c",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PostLateUpdate/DirectorLateUpdate"
+            ],
+            "store": "0x80b678"
+          },
+          "writer": {
+            "rva": "0x72f184",
+            "target": 7534404
+          },
+          "callback": {
+            "rva": "0x72f744",
+            "prefix": "a86d00f0006142f9a1008052b3030014",
+            "body": "a86d00f0006142f9a1008052b3030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0x9e3ad60",
+            "prefix": "ab5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24235
+          }
+        },
+        {
+          "alias": "render",
+          "type": "UnityEngine.PlayerLoop.PostLateUpdate/DirectorRenderImage",
+          "name": "DirectorRenderImage",
+          "namespace": "",
+          "loop_index": 108,
+          "slot": "0x6f8",
+          "type_cache": {
+            "rva": "0x80b680",
+            "lookup": "#0x73985c",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PostLateUpdate/DirectorRenderImage"
+            ],
+            "store": "0x80b694"
+          },
+          "writer": {
+            "rva": "0x72f190",
+            "target": 7534420
+          },
+          "callback": {
+            "rva": "0x72f754",
+            "prefix": "fe0f1ff8d43efc9760010036fb611594",
+            "body": "fe0f1ff8d43efc9760010036fb611594080040f9086143f900013fd6c0000036a86d00f0006142f9c1008052fe0741f8a6030014fe0741f8c0035fd6",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0x9e3ad70",
+            "prefix": "ba5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24250
+          }
+        }
+      ],
+      "all_native_animation_phases": [
+        "FixedUpdate/DirectorFixedSampleTime",
+        "FixedUpdate/DirectorFixedUpdate",
+        "FixedUpdate/DirectorFixedUpdatePostPhysics",
+        "FixedUpdate/LegacyFixedAnimationUpdate",
+        "Initialization/DirectorSampleTime",
+        "PostLateUpdate/DirectorLateUpdate",
+        "PostLateUpdate/DirectorRenderImage",
+        "PreLateUpdate/DirectorDeferredEvaluate",
+        "PreLateUpdate/DirectorUpdateAnimationBegin",
+        "PreLateUpdate/DirectorUpdateAnimationEnd",
+        "PreLateUpdate/LegacyAnimationUpdate",
+        "Update/DirectorUpdate"
+      ],
+      "fixed_root_owned_phases": [
+        "FixedUpdate/DirectorFixedSampleTime",
+        "FixedUpdate/DirectorFixedUpdate",
+        "FixedUpdate/DirectorFixedUpdatePostPhysics",
+        "FixedUpdate/LegacyFixedAnimationUpdate"
+      ],
+      "sample_fixture": {
+        "sample_region": "0x72f6e0",
+        "manager_slot": "0x14e64c0",
+        "time_getter": "0x6225e8",
+        "clock_info": "0x731b80",
+        "bytes": "a86d00f0006142f9bc000014a86d00f0006142f906010014a86d00f0006142f9e1031f2ac6030014a86d00f0006142f921008052c2030014a86d00f0006142f941008052be030014fe4fbfa9b36d00f0606242f97e030094606242f9fe4fc1a89b030014a86d00f0006142f9a1008052b3030014fe0f1ff8d43efc9760010036fb611594080040f9086143f900013fd6c0000036a86d00f0006142f9c1008052fe0741f8a6030014fe0741f8c0035fd6a86d00f0006142f961008052a0030014a86d00f0006142f9810080529c030014fe4fbfa9a86d00f0136142f9e00313aaee000094e00313aafe4fc1a805050014fe4fbfa9a86d00f0136142f9e00313aae6000094e00313aafe4fc1a8fd040014fe4fbfa9a86d00f0136142f9e00313aade000094e00313aafe4fc1a8f5040014a86d00f0086142f92900805200e4006f097110391f0900b9008100ad000d803d1f2100f91f5100b90081853c0081863c0081873c1f4500f9c0035fd6e80f1dfcfe5701a9f44f02a9081ca04ef30300aaf4031faa15c00091a87a74f8680000b56306ff97a07a34f8a80a148b940600919f1600f11f811db81fc11eb8e1feff54680200bd7f0600b9f44f42a9fe5741a9e80743fcc0035fd6282040b93f1400f908090011282000b9004042f90406ff17fe0f1ef8f44f01a9f403012af30300aa27000094e803142a6916088bea0309aa4b0d4af8cb0100b4eb031faa2c4102910d0980528e0140f96b050091ce696df8ad410191cf1140f9ef050091cf1100f94e0140f9df010bebe8feff542ac140f90a0200b46816088bea031faa2901069108c105910b0980520c0140f94a0500918c696bf86b4101918d1140f9ad0500918d1100f92c0140f99f010aebe8feff54f44f41a9fe0742f8c0035fd6fe57bea9f44f01a908745039a8020034f30300aa151280527402158be00314aadb03009480820391d9030094b5820091bfc205f121ffff5474ba41f975a20d919f0215ebc0000054e00313aae10314aae0030094940640f9faffff177f761039f44f41a9fe57c2a8c0035fd6fe0f1ef8f44f01a9f30300aa0080109119000094ffcafb9700a840bd017c40bd02fc40bde00313aa6006002d620e00bd5e08009468725039a800003408f0a7527f0200f9680e00b97f72103954008052e00313aae103142aa4ffff97940600119f1e007161ffff54f44f41a9fe0742f8c0035fd6fe0f1df8f65701a9f44f02a9080440b908050034f30300aaf4031faa680a148b150940b9bf060071cb030054680e148b001940f98d05ff9740030034600240bda102221e0008211e0800381ea8020034f5031faa167d4093e00313aae103142a83050094086080b9e10300aa680a088b0871009109fd5f882905005109fd0a88aaffff35286080b9680e088b001940f97c05ff97b5060091bf0216ebe3fdff54940600919f1600f1a1fbff547f0600b9f44f42a9f65741a9fe0743f8c0035fd6",
+        "phase_dispatch": "0x73061c",
+        "stubbed_callbacks": [
+          "0x63f264",
+          "0x8a505c",
+          "0x73052c",
+          "0x7305ac",
+          "0x63f2a8",
+          "0xc87f4c",
+          "0x73061c"
+        ]
+      },
+      "executor": {
+        "rva": "0x640004",
+        "prefix": "086340f914a30191a80000b4080140f9",
+        "instructions": [
+          {
+            "rva": "0x640004",
+            "bytes": "086340f9",
+            "instruction": "ldr x8, [x24, #0xc0]"
+          },
+          {
+            "rva": "0x640008",
+            "bytes": "14a30191",
+            "instruction": "add x20, x24, #0x68"
+          },
+          {
+            "rva": "0x64000c",
+            "bytes": "a80000b4",
+            "instruction": "cbz x8, #0x640020"
+          },
+          {
+            "rva": "0x640010",
+            "bytes": "080140f9",
+            "instruction": "ldr x8, [x8]"
+          },
+          {
+            "rva": "0x640014",
+            "bytes": "c80400b4",
+            "instruction": "cbz x8, #0x6400ac"
+          },
+          {
+            "rva": "0x640018",
+            "bytes": "00013fd6",
+            "instruction": "blr x8"
+          },
+          {
+            "rva": "0x64001c",
+            "bytes": "24000014",
+            "instruction": "b #0x6400ac"
+          },
+          {
+            "rva": "0x640020",
+            "bytes": "085f40f9",
+            "instruction": "ldr x8, [x24, #0xb8]"
+          },
+          {
+            "rva": "0x640024",
+            "bytes": "280100b4",
+            "instruction": "cbz x8, #0x640048"
+          },
+          {
+            "rva": "0x640028",
+            "bytes": "e0c30491",
+            "instruction": "add x0, sp, #0x130"
+          }
+        ]
+      }
+    },
+    "ios": {
+      "schema": 1,
+      "platform": "ios",
+      "sources": {
+        "engine_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
+      },
+      "registry": "0xa939448",
+      "registry_indirect": false,
+      "phases": [
+        {
+          "alias": "sample",
+          "type": "UnityEngine.PlayerLoop.Initialization/DirectorSampleTime",
+          "name": "DirectorSampleTime",
+          "namespace": "",
+          "loop_index": 6,
+          "slot": "0x3f8",
+          "type_cache": {
+            "rva": "0xe60270",
+            "lookup": "#0xdcf494",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "Initialization/DirectorSampleTime"
+            ],
+            "store": "0xe60278"
+          },
+          "writer": {
+            "rva": "0xdc5164",
+            "target": 14439960
+          },
+          "callback": {
+            "rva": "0xdc5618",
+            "prefix": "08d704f0000147f9d000001408d704f0",
+            "body": "08d704f0000147f9d0000014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0xa591e60",
+            "prefix": "7e5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24190
+          }
+        },
+        {
+          "alias": "update",
+          "type": "UnityEngine.PlayerLoop.Update/DirectorUpdate",
+          "name": "DirectorUpdate",
+          "namespace": "",
+          "loop_index": 73,
+          "slot": "0x5f0",
+          "type_cache": {
+            "rva": "0xe60ba0",
+            "lookup": "#0xdcf494",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "Update/DirectorUpdate"
+            ],
+            "store": "0xe60ba8"
+          },
+          "writer": {
+            "rva": "0xdc5194",
+            "target": 14440016
+          },
+          "callback": {
+            "rva": "0xdc5650",
+            "prefix": "08d704f0000147f941008052ef030014",
+            "body": "08d704f0000147f941008052ef030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0xa5ba4a0",
+            "prefix": "c15e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24257
+          }
+        },
+        {
+          "alias": "begin",
+          "type": "UnityEngine.PlayerLoop.PreLateUpdate/DirectorUpdateAnimationBegin",
+          "name": "DirectorUpdateAnimationBegin",
+          "namespace": "",
+          "loop_index": 76,
+          "slot": "0x600",
+          "type_cache": {
+            "rva": "0xe608e4",
+            "lookup": "#0xdcf494",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PreLateUpdate/DirectorUpdateAnimationBegin"
+            ],
+            "store": "0xe608ec"
+          },
+          "writer": {
+            "rva": "0xdc51c4",
+            "target": 14440152
+          },
+          "callback": {
+            "rva": "0xdc56d8",
+            "prefix": "08d704f0000147f961008052cd030014",
+            "body": "08d704f0000147f961008052cd030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0xa5a5420",
+            "prefix": "c85e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24264
+          }
+        },
+        {
+          "alias": "legacy",
+          "type": "UnityEngine.PlayerLoop.PreLateUpdate/LegacyAnimationUpdate",
+          "name": "LegacyAnimationUpdate",
+          "namespace": "",
+          "loop_index": 77,
+          "slot": "0x608",
+          "type_cache": {
+            "rva": "0xe60938",
+            "lookup": "#0xdcf494",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PreLateUpdate/LegacyAnimationUpdate"
+            ],
+            "store": "0xe60940"
+          },
+          "writer": {
+            "rva": "0xefcc0c",
+            "target": 15715392
+          },
+          "callback": {
+            "rva": "0xefcc40",
+            "prefix": "fd7bbfa9fd0300918335f797a0000034",
+            "body": "fd7bbfa9fd0300918335f797a0000034c8cd04f000e940f9fd7bc1a8aaffff17fd7bc1a8c0035fd6",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0xa5a5450",
+            "prefix": "c95e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24265
+          }
+        },
+        {
+          "alias": "end",
+          "type": "UnityEngine.PlayerLoop.PreLateUpdate/DirectorUpdateAnimationEnd",
+          "name": "DirectorUpdateAnimationEnd",
+          "namespace": "",
+          "loop_index": 78,
+          "slot": "0x610",
+          "type_cache": {
+            "rva": "0xe60900",
+            "lookup": "#0xdcf494",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PreLateUpdate/DirectorUpdateAnimationEnd"
+            ],
+            "store": "0xe60908"
+          },
+          "writer": {
+            "rva": "0xdc51d0",
+            "target": 14440168
+          },
+          "callback": {
+            "rva": "0xdc56e8",
+            "prefix": "08d704f0000147f981008052c9030014",
+            "body": "08d704f0000147f981008052c9030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0xa5a5430",
+            "prefix": "ca5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24266
+          }
+        },
+        {
+          "alias": "deferred",
+          "type": "UnityEngine.PlayerLoop.PreLateUpdate/DirectorDeferredEvaluate",
+          "name": "DirectorDeferredEvaluate",
+          "namespace": "",
+          "loop_index": 79,
+          "slot": "0x618",
+          "type_cache": {
+            "rva": "0xe608c8",
+            "lookup": "#0xdcf494",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PreLateUpdate/DirectorDeferredEvaluate"
+            ],
+            "store": "0xe608d0"
+          },
+          "writer": {
+            "rva": "0xdc51a0",
+            "target": 14440032
+          },
+          "callback": {
+            "rva": "0xdc5660",
+            "prefix": "f44fbea9fd7b01a9fd43009113d704f0",
+            "body": "f44fbea9fd7b01a9fd43009113d704f0600247f9ab030094600247f9fd7b41a9f44fc2a8c8030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0xa5a5410",
+            "prefix": "cb5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24267
+          }
+        },
+        {
+          "alias": "late",
+          "type": "UnityEngine.PlayerLoop.PostLateUpdate/DirectorLateUpdate",
+          "name": "DirectorLateUpdate",
+          "namespace": "",
+          "loop_index": 89,
+          "slot": "0x660",
+          "type_cache": {
+            "rva": "0xe6036c",
+            "lookup": "#0xdcf494",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PostLateUpdate/DirectorLateUpdate"
+            ],
+            "store": "0xe60374"
+          },
+          "writer": {
+            "rva": "0xdc51ac",
+            "target": 14440072
+          },
+          "callback": {
+            "rva": "0xdc5688",
+            "prefix": "08d704f0000147f9a1008052e1030014",
+            "body": "08d704f0000147f9a1008052e1030014",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0xa5a5090",
+            "prefix": "da5e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24282
+          }
+        },
+        {
+          "alias": "render",
+          "type": "UnityEngine.PlayerLoop.PostLateUpdate/DirectorRenderImage",
+          "name": "DirectorRenderImage",
+          "namespace": "",
+          "loop_index": 108,
+          "slot": "0x6f8",
+          "type_cache": {
+            "rva": "0xe60388",
+            "lookup": "#0xdcf494",
+            "arguments": [
+              "UnityEngine.CoreModule.dll",
+              "UnityEngine.PlayerLoop",
+              "PostLateUpdate/DirectorRenderImage"
+            ],
+            "store": "0xe60390"
+          },
+          "writer": {
+            "rva": "0xdc51b8",
+            "target": 14440088
+          },
+          "callback": {
+            "rva": "0xdc5698",
+            "prefix": "fd7bbfa9fd030091fc12fc9760010034",
+            "body": "fd7bbfa9fd030091fc12fc97600100343c6e1294080040f9086d43f900013fd6c000003408d704f0000147f9c1008052fd7bc1a8d3030014fd7bc1a8c0035fd6",
+            "native_abi": "void(void)"
+          },
+          "type_binding": {
+            "rva": "0xa5a50a0",
+            "prefix": "e95e0000000000000000118000000000",
+            "kind": 17,
+            "definition": 24297
+          }
+        }
+      ],
+      "all_native_animation_phases": [
+        "FixedUpdate/DirectorFixedSampleTime",
+        "FixedUpdate/DirectorFixedUpdate",
+        "FixedUpdate/DirectorFixedUpdatePostPhysics",
+        "FixedUpdate/LegacyFixedAnimationUpdate",
+        "Initialization/DirectorSampleTime",
+        "PostLateUpdate/DirectorLateUpdate",
+        "PostLateUpdate/DirectorRenderImage",
+        "PreLateUpdate/DirectorDeferredEvaluate",
+        "PreLateUpdate/DirectorUpdateAnimationBegin",
+        "PreLateUpdate/DirectorUpdateAnimationEnd",
+        "PreLateUpdate/LegacyAnimationUpdate",
+        "Update/DirectorUpdate"
+      ],
+      "fixed_root_owned_phases": [
+        "FixedUpdate/DirectorFixedSampleTime",
+        "FixedUpdate/DirectorFixedUpdate",
+        "FixedUpdate/DirectorFixedUpdatePostPhysics",
+        "FixedUpdate/LegacyFixedAnimationUpdate"
+      ],
+      "sample_fixture": {
+        "sample_region": "0xdc5618",
+        "manager_slot": "0xa8a8e00",
+        "time_getter": "0xcad690",
+        "clock_info": "0xdc7ae8",
+        "bytes": "08d704f0000147f9d000001408d704f0000147f91d01001408d704f0000147f901008052f703001408d704f0000147f921008052f303001408d704f0000147f941008052ef030014f44fbea9fd7b01a9fd43009113d704f0600247f9ab030094600247f9fd7b41a9f44fc2a8c803001408d704f0000147f9a1008052e1030014fd7bbfa9fd030091fc12fc97600100343c6e1294080040f9086d43f900013fd6c000003408d704f0000147f9c1008052fd7bc1a8d3030014fd7bc1a8c0035fd608d704f0000147f961008052cd03001408d704f0000147f981008052c9030014f44fbea9fd7b01a9fd43009108d704f0130147f9e00313aa02010094e00313aafd7b41a9f44fc2a848050014f44fbea9fd7b01a9fd43009108d704f0130147f9e00313aaf7000094e00313aafd7b41a9f44fc2a83d050014f44fbea9fd7b01a9fd43009108d704f0130147f9e00313aaec000094e00313aafd7b41a9f44fc2a83205001408d704f0080147f929008052097110391f0900b900e4004f008100ad000d803d1f2100f91f5100b90081853c0081863c0081873c1f4500f9c0035fd6e923bc6df65701a9f44f02a9fd7b03a9fdc30091081ca04ef30300aa140080d215c00091a87a74f8680000b5a908ff97a07a34f8a80a148b1f811db81fc11eb8940600919f1600f1e1feff54680200bd7f0600b9fd7b43a9f44f42a9f65741a9e923c46cc0035fd6282040b908090011282000b93f1400f9004042f97a08ff17f44fbea9fd7b01a9fd430091f40301aaf30300aa27000094e803142a6916088bea0309aa4b0d4af8cb0100b40b0080d22c4102910d0980528e0140f9ce696df8cf1140f9ef050091cf1100f96b0500914e0140f9ad410191df010bebe8feff542ac140f90a0200b40a0080d2290106916816088b08c105910b0980520c0140f98c696bf88d1140f9ad0500918d1100f94a0500912c0140f96b4101919f010aebe8feff54fd7b41a9f44fc2a8c0035fd6f657bda9f44f01a9fd7b02a9fd83009108745039a8020034f30300aa151280527402158be00314aa8ff2f597808203918df2f597b5820091bfc205f121ffff5475a20d9174ba41f99f0215ebc0000054e00313aae10314aa0b040094940640f9faffff177f761039fd7b42a9f44f41a9f657c3a8c0035fd6f44fbea9fd7b01a9fd430091f30300aa0080109119000094469ffb9700a840bd017c40bd02fc40bd6006002d620e00bde00313aa5508009468725039a80000347f0200f908f0a752680e00b97f72103954008052e00313aae10314aa9fffff97940600119f1e007161ffff54fd7b41a9f44fc2a8c0035fd6f85fbca9f65701a9f44f02a9fd7b03a9fdc30091080440b9e8040034f30300aa140080d2680a148b150940b9bf060071ab030054680e148b001940f9b462fa9720030034a002221e610240bd2008201e0800381e88020034160080d2177d4093e00313aae10314aab5050094f50300aa086080b9680a088b0171009100008012dde9d295a86280b9680e088b001940f9e10315aaec07ff97d6060091df0217eb03feff54940600919f1600f1c1fbff547f0600b9fd7b43a9f44f42a9f65741a9f85fc4a8c0035fd6",
+        "phase_dispatch": "0xdc6618",
+        "stubbed_callbacks": [
+          "0xcca254",
+          "0xefcb04",
+          "0xdc6520",
+          "0xdc65a4",
+          "0xcca290",
+          "0x1260f98",
+          "0xdc6618"
+        ]
+      },
+      "executor": {
+        "rva": "0xccac60",
+        "prefix": "086340f9a80000b4080140f9c80400b4",
+        "instructions": [
+          {
+            "rva": "0xccac60",
+            "bytes": "086340f9",
+            "instruction": "ldr x8, [x24, #0xc0]"
+          },
+          {
+            "rva": "0xccac64",
+            "bytes": "a80000b4",
+            "instruction": "cbz x8, #0xccac78"
+          },
+          {
+            "rva": "0xccac68",
+            "bytes": "080140f9",
+            "instruction": "ldr x8, [x8]"
+          },
+          {
+            "rva": "0xccac6c",
+            "bytes": "c80400b4",
+            "instruction": "cbz x8, #0xccad04"
+          },
+          {
+            "rva": "0xccac70",
+            "bytes": "00013fd6",
+            "instruction": "blr x8"
+          },
+          {
+            "rva": "0xccac74",
+            "bytes": "24000014",
+            "instruction": "b #0xccad04"
+          },
+          {
+            "rva": "0xccac78",
+            "bytes": "085f40f9",
+            "instruction": "ldr x8, [x24, #0xb8]"
+          },
+          {
+            "rva": "0xccac7c",
+            "bytes": "280100b4",
+            "instruction": "cbz x8, #0xccaca0"
+          },
+          {
+            "rva": "0xccac80",
+            "bytes": "a00302d1",
+            "instruction": "sub x0, x29, #0x80"
+          },
+          {
+            "rva": "0xccac84",
+            "bytes": "21008052",
+            "instruction": "mov w1, #1"
+          }
+        ]
+      }
+    }
+  }
+}

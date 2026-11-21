@@ -44,7 +44,8 @@ void* string_new(const char* value){return ptr(make("System.String",value));}
 size_t utf8(void* p,char* out,size_t cap){if(!p)return 0;const auto& s=objects.at(p)->name;if(s.size()<cap)std::memcpy(out,s.c_str(),s.size()+1);return s.size();}
 void* name(void* p,Method*){return string_new(objects.at(p)->name.c_str());}
 void* asset(void*,Method*){return ptr(timeline);}
-void* binding(void*,void*,Method*){return ptr(brain);}
+void* audio_binding_override=nullptr;
+void* binding(void*,void* key,Method*){if(istype(key,"UnityEngine.Timeline.AudioTrack"))return audio_binding_override?audio_binding_override:ptr(bgm);return ptr(brain);}
 void* output_camera(void*,Method*){return ptr(camera);}
 std::map<void*,void*> director_game_objects;
 void* game_object(void* value,Method*){auto found=director_game_objects.find(value);if(found!=director_game_objects.end())return found->second;return director_game_objects[value]=ptr(make("UnityEngine.GameObject"));}
@@ -85,10 +86,11 @@ bool resize_output(void* value,int32_t w,int32_t h){if(!value){assert(!w&&!h);++
 bool project_output(void* value,bool){assert(value==ptr(camera_controller));return true;}
 int32_t width(void*,Method*){return capture_width;}int32_t height(void*,Method*){return capture_height;}
 int32_t format_value=4;int32_t format(void*,Method*){return format_value;}bool srgb(void*,Method*){return true;}
-void* active_get(Method*){return active;}void active_set(void* p,Method*){active=p;}
+bool throw_bind=false,throw_pixels=false,supersede_active=false;void* replacement_active=nullptr;
+void* active_get(Method*){return active;}void active_set(void* p,Method*){active=p;if(throw_bind&&p==ptr(rt)){throw_bind=false;throw 17;}}
 void* new_texture(){return ptr(make("UnityEngine.Texture2D"));}
 void ctor(void*,int32_t w,int32_t h,int32_t f,bool m,bool linear,Method*){assert(w==16&&h==16&&f==4&&!m&&!linear);}
-void readpixels(void*,const Rect* rect,int32_t x,int32_t y,bool m,Method*){assert(active==ptr(rt)&&rect->width==16&&x==0&&y==0&&!m);}
+void readpixels(void*,const Rect* rect,int32_t x,int32_t y,bool m,Method*){assert(active==ptr(rt)&&rect->width==16&&x==0&&y==0&&!m);if(throw_pixels)throw 23;if(supersede_active)active=replacement_active;}
 void* raw_data(void*,Method*){auto* a=make("byte[]");a->array_kind=3;a->bytes.resize(16*16*4);for(int y=0;y<16;++y)for(int x=0;x<16;++x){a->bytes[(y*16+x)*4]=uint8_t(y);a->bytes[(y*16+x)*4+3]=255;}return ptr(a);}
 void destroy(void*,Method*){++destroys;}
 bool shader_custom(Method*){return custom;}float shader_time(Method*){return shader;}
@@ -111,6 +113,13 @@ int main(){
     auto* ap=make("UnityEngine.Timeline.AudioPlayableAsset");auto* props=make("UnityEngine.Timeline.AudioMixerProperties");auto* cp=make("UnityEngine.Timeline.AudioClipProperties");write(props,0x10,1.f);write(cp,0x10,1.f);write(track,0xa0,ptr(props));write(clip,0x28,ptr(ap));write(ap,0x18,ptr(source_clip));write(ap,0x28,ptr(cp));write(clip,0x18,2.0);write(clip,0x20,0.0);write(clip,0x30,116.0);write(clip,0x38,1.0);write(clip,0x58,-1.0);write(clip,0x60,-1.0);
     Api selected_api=api();selected_api.camera_pixel_width=logical_width;selected_api.camera_pixel_height=logical_height;selected_api.source_geometry=actual_source_geometry;selected_api.output_geometry=resize_output;selected_api.output_projection=project_output;
     GameAdapter a(selected_api);clock_game=&a;a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));Snapshot s{};assert(a.snapshot(s)==Result::ok);assert(s.audio.count==1&&s.audio.clips[0].start_seconds==2&&s.duration_seconds==122&&s.audio.clips[0].source_gain==.6f&&!s.procedural_physics_determinism_proven);
+    void* audio_director=nullptr,*audio_asset=nullptr,*audio_track=nullptr,*audio_source=nullptr;
+    assert(a.selected_audio_track_count()==1&&a.selected_audio_track(0,audio_director,audio_asset,audio_track,audio_source));
+    assert(audio_director==ptr(director)&&audio_asset==ptr(timeline)&&audio_track==ptr(track)&&audio_source==ptr(bgm));
+    audio_binding_override=ptr(voice);SceneWitness changed_audio{};assert(!a.selected_scene_witness(changed_audio));
+    assert(a.selected_audio_track(0,audio_director,audio_asset,audio_track,audio_source)&&audio_source==ptr(bgm));
+    audio_binding_override=nullptr;
+    assert(!a.selected_audio_track(1,audio_director,audio_asset,audio_track,audio_source)&&!audio_director&&!audio_asset&&!audio_track&&!audio_source);
     int32_t actual_width=0,actual_height=0;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==4096&&actual_height==2458);
     source_width=4095;source_height=2457;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==4095&&actual_height==2457);
     source_width=4097;assert(a.source_geometry(actual_width,actual_height)==Result::unsupported);source_width=4096;source_height=2458;
@@ -119,6 +128,17 @@ int main(){
     assert(s.actor_graph_count==1);assert(a.begin_manual()==Result::ok&&mode==3&&bgm_volume==0&&voice_volume==0&&actor_mode==3&&actor_resets==1);assert(a.evaluate(2)==Result::ok&&time_value==2&&shader==2&&graph_steps==1);assert(a.evaluate(2)==Result::ok&&graph_steps==1&&actor_steps==1&&camera_steps==1);graph_variant=1;assert(a.evaluate(3)==Result::ok&&time_value==3&&graph_steps==2);graph_variant=0;assert(a.evaluate(123)==Result::invalid);
     assert(a.request_capture()==Result::ok);int32_t w=0,h=0;assert(a.capture_geometry(w,h)==Result::ok&&w==16&&h==16);std::vector<uint8_t> pixels(1024);size_t bytes=0;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::waiting);
     auto* pass=make("VL.Rendering.VLCapturePass");auto* rd=make("RenderingData");write(rd,0x90,ptr(camera));write(rd,0x158,uint8_t(1));a.observe_capture_pass(ptr(pass),ptr(rd));assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::waiting);assert(!a.after_camera(ptr(bgm)));assert(a.after_camera(ptr(camera)));format_value=97;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::unsupported);format_value=4;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::ok&&bytes==1024&&pixels[0]==15&&pixels[15*64]==0&&active==nullptr);
+    auto* previous_rt=make("UnityEngine.RenderTexture");auto* external_rt=make("UnityEngine.RenderTexture");
+    assert(a.request_capture()==Result::ok);a.observe_capture_pass(ptr(pass),ptr(rd));assert(a.after_camera(ptr(camera)));
+    const auto roots_before_readback=handles.size();active=ptr(previous_rt);throw_bind=true;
+    try{a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h);assert(false);}catch(int code){assert(code==17);}
+    assert(active==ptr(previous_rt)&&handles.size()==roots_before_readback);
+    throw_pixels=true;
+    try{a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h);assert(false);}catch(int code){assert(code==23);}
+    assert(active==ptr(previous_rt)&&handles.size()==roots_before_readback);throw_pixels=false;
+    supersede_active=true;replacement_active=ptr(external_rt);
+    assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::failed);
+    assert(active==ptr(external_rt)&&handles.size()==roots_before_readback);supersede_active=false;active=nullptr;
     auto expected=s.audio.clips[0];assert(a.begin_private_audio("/private/derived.bundle",expected)==Result::waiting);assert(a.poll_private_audio()==Result::waiting);done=true;assert(a.poll_private_audio()==Result::ok&&audio_load_calls==0);float pcm[4]{};assert(a.read_audio_chunk(2,2,pcm,4)==Result::ok&&pcm[0]==.25f&&pcm[3]==.4375f);assert(a.read_audio_chunk(7,2,pcm,4)==Result::invalid);a.close_private_audio();assert(unloads==1);
     private_clip->name="wrong-clip";assert(a.begin_private_audio("/private/bad.bundle",expected)==Result::waiting);assert(a.poll_private_audio()==Result::failed);assert(a.poll_private_audio()==Result::failed);a.close_private_audio();private_clip->name=source_clip->name;assert(unloads==2);
     done=false;assert(a.begin_private_audio("/private/second.bundle",expected)==Result::waiting);const size_t held=handles.size();a.close_private_audio();assert(handles.size()==held&&unloads==2);done=true;a.maintenance();assert(unloads==3);

@@ -101,6 +101,9 @@ struct Dependents {
     // never dereference freed or pooled scene-native buffers.
     Result (*release)(void*,bool scene_owned)=nullptr;
     const char* (*error)(void*)=nullptr;
+    // Director/player state is restored first. Timeline-owned clipless audio
+    // cannot attest isPlaying while its parent graph is still paused.
+    Result (*verify_source_restored)(void*)=nullptr;
 };
 // Global shader state needs a lease independent of scene-native ownership.
 // Hooks serialize every external setter/reset with a generation, including
@@ -130,8 +133,10 @@ public:
         original_=original;dependents_=dependents;error_="none";return true;
     }
     bool active()const{return phase_!=Phase::idle;}
+    bool owns_source_completion()const{return active()&&(!releasing_||release_owned_);}
     bool playing()const{return phase_==Phase::playing;}
     Phase phase()const{return phase_;}
+    bool rebuilding()const{return rebuilding_;}
     const char* error()const{return error_;}
     const Snapshot<Graph>& snapshot()const{return saved_;}
     bool restorable_owner_current()const{
@@ -297,20 +302,34 @@ public:
             dependents_restored_=true;
         }
         if(!current())return release(false,Result::stale,"selected_scene_changed");
-        original_.director_set_mode(director_,saved_.mode,nullptr);
-        if(!current())return release(false,Result::stale,"selected_scene_changed");
-        if(saved_.state==1)original_.director_resume(director_,nullptr);
-        else original_.director_pause(director_,nullptr);
-        if(!current())return release(false,Result::stale,"selected_scene_changed");
-        original_.player_set_playing(player_,saved_.playing,nullptr);
-        if(!current())return release(false,Result::stale,"selected_scene_changed");
-        original_.player_set_paused(player_,saved_.paused,nullptr);
-        if(!current())return release(false,Result::stale,"selected_scene_changed");
+        if(!source_playback_restored_){
+            original_.director_set_mode(director_,saved_.mode,nullptr);
+            if(!current())return release(false,Result::stale,"selected_scene_changed");
+            if(saved_.state==1)original_.director_resume(director_,nullptr);
+            else original_.director_pause(director_,nullptr);
+            if(!current())return release(false,Result::stale,"selected_scene_changed");
+            original_.player_set_playing(player_,saved_.playing,nullptr);
+            if(!current())return release(false,Result::stale,"selected_scene_changed");
+            original_.player_set_paused(player_,saved_.paused,nullptr);
+            if(!current())return release(false,Result::stale,"selected_scene_changed");
+            source_playback_restored_=true;
+        }
         if(!at_time(saved_.time)||original_.director_mode(director_,nullptr)!=saved_.mode
             ||original_.director_state(director_,nullptr)!=saved_.state
             ||original_.player_playing(player_,nullptr)!=saved_.playing||original_.player_paused(player_,nullptr)!=saved_.paused)
             return fail(Result::failed,"original_playback_restore_failed");
+        if(!source_verified_){
+            const Result verified=dependent(dependents_.verify_source_restored,"original_dependent_source_verification_unavailable");
+            if(verified!=Result::ok)return verified;
+            source_verified_=true;
+        }
         return release(true,Result::ok,"none");
+    }
+    // A lost native clock must never be reacquired to restore an old scene.
+    // Release only our roots/storage; do not even query current graph state.
+    Result abandon(){
+        if(!active())return Result::ok;
+        return release(false,Result::stale,"original_engine_clock_lost");
     }
 private:
     bool valid_api()const{
@@ -318,7 +337,7 @@ private:
             &&original_.director_set_time&&original_.director_evaluate&&original_.director_graph&&original_.graph_valid
             &&original_.director_play&&original_.director_pause&&original_.director_resume&&original_.director_rebuild
             &&original_.player_playing&&original_.player_paused&&original_.player_set_playing&&original_.player_set_paused
-            &&dependents_.owner_current&&dependents_.quiesce&&dependents_.capture&&dependents_.prepare&&dependents_.reset&&dependents_.restore&&dependents_.release;
+            &&dependents_.owner_current&&dependents_.quiesce&&dependents_.capture&&dependents_.prepare&&dependents_.reset&&dependents_.restore&&dependents_.release&&dependents_.verify_source_restored;
     }
     bool current()const{return context_&&dependents_.owner_current&&dependents_.owner_current(context_);}
     static bool same(Graph a,Graph b){return a.handle==b.handle&&a.version==b.version;}
@@ -345,13 +364,13 @@ private:
         releasing_=true;release_owned_=owned;release_result_=result;release_reason_=reason;
         if(dependents_owned_){const Result released=dependents_.release(context_,owned);if(released!=Result::ok)return fail(released,"original_dependent_release_pending");}
         phase_=Phase::idle;player_=director_=context_=nullptr;
-        dependents_owned_=dependents_captured_=saved_known_=held_=have_owned_graph_=restore_graph_=dependents_restored_=releasing_=release_owned_=false;
+        dependents_owned_=dependents_captured_=saved_known_=held_=have_owned_graph_=restore_graph_=dependents_restored_=source_playback_restored_=source_verified_=releasing_=release_owned_=false;
         saved_=Snapshot<Graph>{};owned_graph_=Graph{};error_=reason;return result;
     }
     OriginalApi<Graph> original_{};Dependents dependents_{};Snapshot<Graph> saved_{};Graph owned_graph_{};
     void* player_=nullptr;void* director_=nullptr;void* context_=nullptr;
     bool dependents_owned_=false,dependents_captured_=false,saved_known_=false,held_=false,have_owned_graph_=false,restore_graph_=false,
-        dependents_restored_=false,releasing_=false,release_owned_=false,rebuilding_=false;
+        dependents_restored_=false,source_playback_restored_=false,source_verified_=false,releasing_=false,release_owned_=false,rebuilding_=false;
     Result release_result_=Result::ok;const char* release_reason_="none";
     Phase phase_=Phase::idle;const char* error_="none";
 };

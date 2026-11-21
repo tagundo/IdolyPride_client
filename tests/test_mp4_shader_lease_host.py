@@ -46,6 +46,38 @@ int main(int argc,char** argv){
     assert(!mp4_shader_lease_set_time(&other,0));mp4_shader_lease_finish(&other);assert(mp4_shader_lease.active);
     assert(!mp4_shader_lease_set_time(&owner,-1)&&!mp4_shader_lease_set_time(&owner,901));
     assert(mp4_shader_lease_set_time(&owner,0)&&sets==1&&mp4_shader_generation==1&&global_time==0);
+    if(mode.rfind("suspend_",0)==0){
+        Mp4ShaderSuspension outer{},inner{};
+        assert(mp4_shader_suspend_for_unowned(outer)&&global_time==-1);
+        assert(!mp4_shader_lease_set_time(&owner,1));
+        if(mode=="suspend_nested"||mode=="suspend_lifo"){
+            assert(mp4_shader_suspend_for_unowned(inner)&&global_time==-1);
+            if(mode=="suspend_lifo"){
+                assert(!mp4_shader_resume_after_unowned(outer));const auto writes=sets+resets;
+                assert(!mp4_shader_resume_after_unowned(inner));mp4_shader_lease_finish(&owner);
+                assert(global_time==-1&&sets+resets==writes);return 0;
+            }
+            assert(mp4_shader_resume_after_unowned(inner)&&global_time==-1);
+        }
+        if(mode=="suspend_external"){
+            mp4_shader_set_hook(7,nullptr);const auto writes=sets+resets;
+            assert(!mp4_shader_resume_after_unowned(outer));mp4_shader_lease_finish(&owner);
+            assert(global_time==7&&sets+resets==writes);return 0;
+        }
+        if(mode=="suspend_handoff"||mode=="suspend_abandon"){
+            if(mode=="suspend_handoff")mp4_shader_lease_finish(&owner);else mp4_shader_lease_abandon(&owner);
+            global_time=23;mp4_api.shader_use_custom=nullptr;mp4_api.shader_current_time=nullptr;unity_thread=false;
+            const auto writes=sets+resets;assert(!mp4_shader_resume_after_unowned(outer));
+            assert(global_time==23&&sets+resets==writes);return 0;
+        }
+        if(mode=="suspend_reused_context"){
+            mp4_shader_lease_finish(&owner);assert(mp4_shader_lease_begin(&owner));assert(mp4_shader_lease_set_time(&owner,4));
+            const auto writes=sets+resets;assert(!mp4_shader_resume_after_unowned(outer));assert(global_time==4&&sets+resets==writes);return 0;
+        }
+        assert(mp4_shader_resume_after_unowned(outer)&&global_time==0);
+        const auto writes=sets+resets;assert(!mp4_shader_resume_after_unowned(outer)&&sets+resets==writes);
+        mp4_shader_lease_finish(&owner);assert(global_time==-1);return 0;
+    }
     if(mode=="external_same"||mode=="external_reset"||mode=="external_other"){
         if(mode=="external_reset")mp4_shader_reset_hook(nullptr);
         else mp4_shader_set_hook(mode=="external_same"?0:7,nullptr);
@@ -94,7 +126,7 @@ def lease_binary(tmp_path_factory):
 
 
 @pytest.mark.parametrize('mode', ['default', 'custom', 'source_unverified', 'wrong_thread', 'exhausted',
-                                  'external_same', 'external_reset', 'external_other', 'concurrent_external', 'new_scene'])
+                                  'external_same', 'external_reset', 'external_other', 'concurrent_external', 'new_scene', 'suspend_normal', 'suspend_nested', 'suspend_lifo', 'suspend_external', 'suspend_handoff', 'suspend_abandon', 'suspend_reused_context'])
 def test_serialized_real_host_preserves_external_owners_and_finishes_without_scene_reads(lease_binary, mode):
     result = subprocess.run([str(lease_binary), mode], capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr

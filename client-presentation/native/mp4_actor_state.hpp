@@ -7,12 +7,16 @@
 #include <cstdlib>
 #endif
 #include "mp4_playback_state.hpp"
+#include "mp4_actor_state_profile.hpp"
 
 // The original ActorSwing solver advances by its own fixed step even when the
 // AnimationStream delta is zero. This worker gate covers both the managed AOT
 // ProcessAnimation body and the separate original Burst Execute callback. It
 // does not establish ownership or complete Unity jobs: the main-thread owner
 // must prove those boundaries before publishing/changing a grant or retiring.
+namespace idoly_mp4_actor_placement { struct Address {void* value;}; }
+inline void* operator new(size_t,idoly_mp4_actor_placement::Address a)noexcept{return a.value;}
+inline void operator delete(void*,idoly_mp4_actor_placement::Address)noexcept{}
 namespace idoly_mp4_actor {
 constexpr size_t max_owned_jobs = 128;
 constexpr size_t list_header_offsets[4] = {0x28, 0x38, 0x48, 0x98};
@@ -165,6 +169,19 @@ public:
         __atomic_store_n(&grant_, serial, __ATOMIC_SEQ_CST);
         return GateResult::ok;
     }
+    // Pure revocation of future worker entry. This is not a job fence and
+    // deliberately leaves registry ownership/in-flight retirement duty intact.
+    GateResult revoke(uint64_t owner_epoch) {
+        if(!owner_epoch_||owner_epoch!=owner_epoch_)return GateResult::stale;
+        __atomic_store_n(&grant_,uint64_t{0},__ATOMIC_SEQ_CST);return GateResult::ok;
+    }
+    // Pure publication observation; callers still need the actual original
+    // Animator/job fence. Closed future entry is not worker completion.
+    bool held(uint64_t owner_epoch)const{
+        const Registry* registry=__atomic_load_n(&published_,__ATOMIC_SEQ_CST);
+        return owner_epoch&&owner_epoch==owner_epoch_&&!retiring_&&registry&&registry->owner_epoch==owner_epoch
+            &&!__atomic_load_n(&grant_,__ATOMIC_SEQ_CST)&&!__atomic_load_n(&readers_,__ATOMIC_SEQ_CST);
+    }
     GateResult hold(uint64_t owner_epoch, bool original_jobs_fenced) {
         if (!owner_epoch_ || owner_epoch != owner_epoch_ || retiring_)
             return GateResult::stale;
@@ -214,6 +231,16 @@ public:
             original(job, stream, method_index, ranges, job_index);
         }
     }
+    // Main-thread observation after the actual Animator fence. It neither
+    // grants a worker nor treats registry publication as completion.
+    bool consumed(const OwnershipKey& key,uint64_t epoch,uint64_t serial)const{
+        if(!epoch||epoch!=owner_epoch_||!serial)return false;
+        const Registry* registry=__atomic_load_n(&published_,__ATOMIC_SEQ_CST);
+        if(!registry||registry->owner_epoch!=epoch)return false;
+        for(size_t i=0;i<registry->count;++i)if(registry->entries[i].key==key)
+            return __atomic_load_n(&registry->entries[i].consumed_serial,__ATOMIC_ACQUIRE)==serial;
+        return false;
+    }
     GateStats stats() const {
         return {__atomic_load_n(&owned_calls_, __ATOMIC_RELAXED),
             __atomic_load_n(&permitted_calls_, __ATOMIC_RELAXED),
@@ -246,6 +273,1076 @@ struct Owner {
     void* animator = nullptr;
     Handle graph{}, playable{}, output{};
 };
+// Exact owned Mono callbacks are a different scheduling domain from Animator
+// jobs: Time.deltaTime == 0 does not make these original callbacks pure.
+enum class MonoPhase : uint8_t { actor_update, actor_late, eye_late, face_late, foot_apply };
+using MonoCallback = void (*)(void*, Method*);
+struct RandomState { uint32_t words[4]{}; };
+struct RandomSuspension { RandomState private_state{};uint64_t epoch=0;uint32_t depth=0;bool active=false; };
+struct MonoReceiver { void* object=nullptr; MonoPhase phase=MonoPhase::actor_update; };
+constexpr size_t max_mono_receivers=512;
+constexpr size_t presentation_max_snapshot_bytes=64u*1024u*1024u;
+struct MonoApi {
+    bool (*current)(void*)=nullptr;
+    bool (*owner_thread)()=nullptr;
+    void (*random_get)(RandomState*,Method*)=nullptr;
+    void (*random_set)(const RandomState*,Method*)=nullptr;
+};
+class MonoGate {
+    struct Entry { MonoReceiver receiver{};uint64_t consumed=0;MonoCallback nested[3]{};uint8_t nested_count=0; };
+    Entry entries_[max_mono_receivers]{};size_t count_=0;
+    MonoApi api_{};void* context_=nullptr;uint64_t epoch_=0,serial_=0,last_serial_=0;
+    RandomState private_random_{};bool poisoned_=false;uint32_t random_depth_=0;
+    RandomState lease_ambient_{};bool rng_active_=false,rng_released_=false;uint32_t rng_suspended_=0;
+    struct RenderRandom {uintptr_t key=0;uint64_t serial=0;RandomState seed{};};
+    RenderRandom render_random_[8]{};size_t render_random_count_=0;
+    void* active_receiver_=nullptr;MonoCallback active_callback_=nullptr;MonoPhase active_phase_=MonoPhase::actor_update;
+    const char* error_="none";
+public:
+    bool publish(MonoApi api,void* context,uint64_t epoch,const MonoReceiver* values,size_t count) {
+        if(epoch_||random_depth_||!context||!epoch||!values||!count||count>max_mono_receivers
+            ||!api.current||!api.owner_thread||!api.random_get||!api.random_set
+            ||!api.owner_thread()||!api.current(context))return false;
+        for(size_t i=0;i<count;++i){
+            if(!values[i].object)return false;
+            for(size_t j=0;j<i;++j)if(values[i].object==values[j].object&&values[i].phase==values[j].phase)return false;
+        }
+        api_=api;context_=context;epoch_=epoch;count_=count;
+        for(size_t i=0;i<count;++i){entries_[i]={};entries_[i].receiver=values[i];}
+        api_.random_get(&private_random_,nullptr);
+        serial_=last_serial_=0;poisoned_=false;render_random_count_=0;rng_active_=rng_released_=false;rng_suspended_=0;error_="none";return true;
+    }
+    // Main-thread scalar close only: no owner callback, Unity call or fence.
+    bool revoke(uint64_t epoch){if(!epoch_||epoch!=epoch_)return false;serial_=0;return true;}
+    bool closed(uint64_t epoch)const{return epoch&&epoch==epoch_&&!serial_&&!active_receiver_;}
+    bool hold(uint64_t epoch){
+        if(!epoch_||epoch!=epoch_||!api_.owner_thread())return false;
+        serial_=0;return true;
+    }
+    bool grant(uint64_t epoch,uint64_t serial){
+        if(!epoch_||epoch!=epoch_||!serial||serial<=last_serial_||poisoned_
+            ||!api_.owner_thread()||!api_.current(context_))return false;
+        serial_=last_serial_=serial;render_random_count_=0;return true;
+    }
+    bool current()const{return epoch_&&!poisoned_&&api_.owner_thread()&&api_.current(context_);}
+    const char* error()const{return error_;}
+    void release(uint64_t epoch){
+        if(epoch_==epoch){count_=0;epoch_=serial_=last_serial_=0;context_=nullptr;poisoned_=false;render_random_count_=0;if(!random_depth_){rng_active_=rng_released_=false;rng_suspended_=0;}}
+    }
+    // Invalidating a source only detaches our scalar registry. It neither calls
+    // Unity nor writes the former objects; subsequent normal playback forwards.
+    void invalidate(uint64_t epoch){release(epoch);}
+    // Before an original selected-scene replacement, return the global RNG
+    // lease immediately. The new scene may consume ambient RNG; the old scope
+    // must not rewind those new draws when its stack later unwinds.
+    void restore_rng_before_source_change(){
+        if(rng_active_&&!rng_released_){if(!rng_suspended_)api_.random_set(&lease_ambient_,nullptr);rng_released_=true;}
+    }
+    // Observer failure fallback: no Unity/current/thread/RNG call is permitted
+    // here. Future entry closes, and the old callback finally must never rewind
+    // RNG after the original new-scene initializer has been forwarded.
+    void abandon_rng_before_source_change(){
+        rng_released_=true;poisoned_=true;serial_=0;error_="actor_rng_handoff_abandoned";
+    }
+    // A nested unrelated camera uses the real ambient stream. The outer lease
+    // adopts its advanced state, rather than rewinding unrelated Random draws.
+    // Tokens are LIFO; a source handoff withdraws their duty without Unity calls.
+    bool suspend_rng_for_unowned(RandomSuspension& token){
+        if(token.active)return false;
+        token={};
+        if(!rng_active_||rng_released_)return true;
+        if(!current()){abandon_rng_before_source_change();return false;}
+        token.epoch=epoch_;token.depth=rng_suspended_+1;
+        if(!rng_suspended_){api_.random_get(&token.private_state,nullptr);api_.random_set(&lease_ambient_,nullptr);}
+        ++rng_suspended_;token.active=true;return true;
+    }
+    bool resume_rng_after_unowned(RandomSuspension& token){
+        if(!token.active)return true;
+        if(rng_released_||!rng_active_||token.epoch!=epoch_){token.active=false;return false;}
+        if(token.depth!=rng_suspended_){abandon_rng_before_source_change();token.active=false;return false;}
+        if(!current()){abandon_rng_before_source_change();token.active=false;return false;}
+        if(rng_suspended_==1){
+            api_.random_get(&lease_ambient_,nullptr);
+            api_.random_set(&token.private_state,nullptr);
+        }
+        --rng_suspended_;token.active=false;return true;
+    }
+    // The same private stream covers controlled selected RootRebuild /
+    // zero-time Evaluate. Nesting within an already isolated owned callback
+    // keeps its in-flight state rather than resetting to the previous seed.
+    template<class Action> bool isolate(Action action) {
+        if(!current()||rng_suspended_){poisoned_=true;serial_=0;error_="actor_mono_owner_changed";return false;}
+        if(random_depth_){action();return current();}
+        RandomState ambient{};api_.random_get(&ambient,nullptr);
+        lease_ambient_=ambient;rng_active_=true;rng_released_=false;
+        api_.random_set(&private_random_,nullptr);++random_depth_;
+        try {action();if(rng_suspended_)abandon_rng_before_source_change();if(!rng_released_)api_.random_get(&private_random_,nullptr);}
+        catch(...) {--random_depth_;if(rng_suspended_)abandon_rng_before_source_change();if(!rng_released_)api_.random_set(&lease_ambient_,nullptr);rng_active_=false;poisoned_=true;serial_=0;error_="actor_mono_callback_exception";throw;}
+        --random_depth_;if(!rng_released_)api_.random_set(&lease_ambient_,nullptr);rng_active_=false;
+        if(!current()||rng_released_){poisoned_=true;serial_=0;error_="actor_mono_owner_changed";return false;}
+        return true;
+    }
+    template<class Action> bool isolate_preview(Action action){
+        if(random_depth_){error_="actor_rng_preview_nested";return false;}
+        const RandomState before=private_random_;
+        try{const bool ok=isolate(action);private_random_=before;return ok;}
+        catch(...){private_random_=before;throw;}
+    }
+    // The draw gate still permits only one selected render per accepted tick.
+    // This seed cache is defense for repeated calls, not permission to advance
+    // renderer histories during held retries. Pre-frame-zero draws are preview.
+    template<class Action> bool isolate_render(uintptr_t key,Action action){
+        if(!current()||!key||rng_suspended_){poisoned_=true;serial_=0;error_="actor_render_rng_owner_changed";return false;}
+        RandomState ambient{};api_.random_get(&ambient,nullptr);const bool nested=random_depth_!=0;
+        const bool accepted=last_serial_!=0;RenderRandom* record=nullptr;
+        if(accepted)for(size_t i=0;i<render_random_count_;++i)if(render_random_[i].key==key&&render_random_[i].serial==last_serial_){record=&render_random_[i];break;}
+        const bool fresh=accepted&&!record;
+        if(fresh){if(render_random_count_==8){poisoned_=true;serial_=0;error_="actor_render_rng_key_limit";return false;}record=&render_random_[render_random_count_++];record->key=key;record->serial=last_serial_;record->seed=nested?ambient:private_random_;}
+        const RandomState seed=record?record->seed:(nested?ambient:private_random_);
+        if(!nested){lease_ambient_=ambient;rng_active_=true;rng_released_=false;}
+        api_.random_set(&seed,nullptr);++random_depth_;RandomState after{};
+        try{action();if(rng_suspended_)abandon_rng_before_source_change();if(!rng_released_)api_.random_get(&after,nullptr);}
+        catch(...){--random_depth_;if(rng_suspended_)abandon_rng_before_source_change();if(!rng_released_)api_.random_set(nested?&ambient:&lease_ambient_,nullptr);if(!nested)rng_active_=false;poisoned_=true;serial_=0;error_="actor_render_rng_exception";throw;}
+        --random_depth_;
+        if(!rng_released_){
+            if(fresh){if(!nested){private_random_=after;api_.random_set(&lease_ambient_,nullptr);}}
+            else api_.random_set(nested?&ambient:&lease_ambient_,nullptr);
+        }
+        if(!nested)rng_active_=false;
+        if(!current()||rng_released_){poisoned_=true;serial_=0;error_="actor_render_rng_owner_changed";return false;}
+        return true;
+    }
+    void invoke(MonoPhase phase,MonoCallback original,void* receiver,Method* method) {
+        if(!original)return;
+        Entry* found=nullptr;
+        if(epoch_)for(size_t i=0;i<count_;++i)
+            if(entries_[i].receiver.object==receiver&&entries_[i].receiver.phase==phase){found=&entries_[i];break;}
+        if(!found){original(receiver,method);return;}
+        if(!api_.owner_thread()||!api_.current(context_)){
+            poisoned_=true;serial_=0;error_="actor_mono_owner_changed";return;
+        }
+        if(!serial_||poisoned_)return;
+        if(found->consumed==serial_){
+            // The verified derived LateUpdate calls the separately hooked
+            // base body. Forward that exact nested route once inside the
+            // active root call; a later duplicate remains suppressed.
+            if(random_depth_&&active_receiver_==receiver&&active_phase_==phase&&active_callback_!=original){
+                bool seen=false;for(size_t i=0;i<found->nested_count;++i)seen|=found->nested[i]==original;
+                if(!seen&&found->nested_count<3){found->nested[found->nested_count++]=original;original(receiver,method);}
+            }
+            return;
+        }
+        found->consumed=serial_;found->nested_count=0;
+        void* previous_receiver=active_receiver_;const auto previous_callback=active_callback_;const auto previous_phase=active_phase_;
+        active_receiver_=receiver;active_callback_=original;active_phase_=phase;
+        try {isolate([&]{original(receiver,method);});}
+        catch(...){active_receiver_=previous_receiver;active_callback_=previous_callback;active_phase_=previous_phase;throw;}
+        active_receiver_=previous_receiver;active_callback_=previous_callback;active_phase_=previous_phase;
+    }
+};
+
+struct TalkJobSnapshotApi {
+    bool (*mapped)(const void*,size_t,bool)=nullptr;
+    bool (*job_current)(void*,const void*)=nullptr;
+    bool (*held_fenced)(void*,const void*)=nullptr;
+};
+class TalkJobSnapshot {
+    static constexpr size_t job_bytes=96,identity_bytes=80,max_rows=8192;
+    struct List {uintptr_t header=0,data=0;int32_t length=0,capacity=0;size_t stride=0;uint8_t* saved=nullptr;};
+    TalkJobSnapshotApi api_{};void* context_=nullptr;void* job_=nullptr;
+    uint8_t identity_[identity_bytes]{},tail_[16]{};List lists_[2]{};
+    bool captured_=false,restored_=false;const char* error_="none";
+    Result fail(Result value,const char* code){error_=code;return value;}
+    template<class T>bool read(const void* p,size_t at,T& value)const{
+        if(!p||!api_.mapped(static_cast<const uint8_t*>(p)+at,sizeof(T),false))return false;
+        ::memcpy(&value,static_cast<const uint8_t*>(p)+at,sizeof(T));return true;
+    }
+    bool current()const{return api_.job_current&&api_.job_current(context_,job_);}
+    Result boundary(){
+        if(!job_||!api_.mapped||!api_.job_current||!api_.held_fenced)
+            return fail(Result::invalid,"talk_state_api_incomplete");
+        if(!current())return fail(Result::stale,"talk_state_owner_changed");
+        if(!api_.held_fenced(context_,job_))return fail(Result::waiting,"talk_state_fence_pending");
+        if(!current())return fail(Result::stale,"talk_state_owner_changed");
+        if(!api_.mapped(job_,job_bytes,true))return fail(Result::stale,"talk_state_job_unmapped");
+        return Result::ok;
+    }
+    bool list_now(size_t kind,List& value)const{
+        value.stride=kind?20:24;
+        if(!read(job_,kind*16,value.header)||!value.header)return false;
+        const void* header=reinterpret_cast<void*>(value.header);
+        if(!read(header,0,value.data)||!read(header,8,value.length)||!read(header,12,value.capacity)
+            ||value.length<0||value.capacity<value.length||static_cast<size_t>(value.capacity)>max_rows)return false;
+        const size_t bytes=static_cast<size_t>(value.length)*value.stride;
+        return !bytes||(value.data&&api_.mapped(reinterpret_cast<void*>(value.data),bytes,true));
+    }
+    static bool same(const uint8_t* a,const uint8_t* b,size_t at,size_t n){return !::memcmp(a+at,b+at,n);}
+    static bool row_identity(size_t kind,const uint8_t* saved,const uint8_t* live){
+        // PropertyStreamHandle's version0 and resolved valueArrayIndex8 are
+        // legitimate caches. Only handleIndex4 and bindType12 are binding ID.
+        return kind?(same(saved,live,4,4)&&same(saved,live,12,8))
+            :(same(saved,live,4,4)&&same(saved,live,12,4));
+    }
+    static bool finite_float(const uint8_t* p){float value=0;::memcpy(&value,p,4);return __builtin_isfinite(value);}
+public:
+    TalkJobSnapshot()=default;
+    TalkJobSnapshot(const TalkJobSnapshot&)=delete;
+    TalkJobSnapshot& operator=(const TalkJobSnapshot&)=delete;
+    ~TalkJobSnapshot(){clear();}
+    const char* error()const{return error_;}
+    bool captured()const{return captured_;}
+    bool restored()const{return restored_;}
+    Result capture(TalkJobSnapshotApi api,void* context,void* typed_live_job){
+        if(captured_)return fail(Result::invalid,"talk_state_already_captured");
+        clear();api_=api;context_=context;job_=typed_live_job;
+        Result status=boundary();if(status!=Result::ok)return status;
+        ::memcpy(identity_,job_,identity_bytes);
+        ::memcpy(tail_,static_cast<const uint8_t*>(job_)+identity_bytes,sizeof tail_);
+        if(!finite_float(tail_)||!finite_float(tail_+12)||tail_[8]>1)
+            return fail(Result::invalid,"talk_state_scalars_invalid");
+        for(size_t kind=0;kind<2;++kind){
+            List value{};if(!list_now(kind,value))return fail(Result::stale,"talk_state_list_invalid");
+            const size_t bytes=static_cast<size_t>(value.length)*value.stride;
+            if(bytes){value.saved=static_cast<uint8_t*>(::malloc(bytes));if(!value.saved)return fail(Result::failed,"talk_state_allocation_failed");
+                ::memcpy(value.saved,reinterpret_cast<void*>(value.data),bytes);}
+            lists_[kind]=value;
+            for(int32_t row=0;row<value.length;++row){const auto* p=value.saved+static_cast<size_t>(row)*value.stride;
+                if(!finite_float(p+(kind?0:16))||!finite_float(p+(kind?8:20)))
+                    return fail(Result::invalid,"talk_state_rows_invalid");}
+        }
+        if(!current())return fail(Result::stale,"talk_state_owner_changed");
+        captured_=true;restored_=false;error_="none";return Result::ok;
+    }
+    Result validate(){
+        if(!captured_)return fail(Result::invalid,"talk_state_not_captured");
+        Result status=boundary();if(status!=Result::ok)return status;
+        if(::memcmp(identity_,job_,identity_bytes))return fail(Result::stale,"talk_state_job_identity_changed");
+        for(size_t kind=0;kind<2;++kind){
+            List value{};const auto& saved=lists_[kind];
+            if(!list_now(kind,value)||value.header!=saved.header||value.data!=saved.data
+                ||value.length!=saved.length||value.capacity!=saved.capacity)
+                return fail(Result::stale,"talk_state_list_identity_changed");
+            for(int32_t row=0;row<saved.length;++row){const size_t at=static_cast<size_t>(row)*saved.stride;
+                if(!row_identity(kind,saved.saved+at,reinterpret_cast<const uint8_t*>(saved.data)+at))
+                    return fail(Result::stale,"talk_state_row_identity_changed");}
+        }
+        if(!current())return fail(Result::stale,"talk_state_owner_changed");
+        error_="none";return Result::ok;
+    }
+    Result reset_time(){
+        Result status=validate();if(status!=Result::ok)return status;
+        const float zero=0;::memcpy(static_cast<uint8_t*>(job_)+92,&zero,4);return Result::ok;
+    }
+    Result restore(){
+        Result status=validate();if(status!=Result::ok)return status;
+        if(restored_)return Result::ok;
+        // All owners/ranges/identities have been validated before any write.
+        // There are no callbacks between this last witness and the memcpy set.
+        if(!current())return fail(Result::stale,"talk_state_owner_changed");
+        ::memcpy(static_cast<uint8_t*>(job_)+identity_bytes,tail_,sizeof tail_);
+        for(size_t kind=0;kind<2;++kind){const auto& list=lists_[kind];
+            for(int32_t row=0;row<list.length;++row){const size_t at=static_cast<size_t>(row)*list.stride;
+                auto* live=reinterpret_cast<uint8_t*>(list.data)+at;const auto* saved=list.saved+at;
+                if(kind){::memcpy(live,saved,4);::memcpy(live+8,saved+8,4);}
+                else ::memcpy(live+16,saved+16,8);
+            }
+        }
+        restored_=true;error_="none";return Result::ok;
+    }
+    void clear(){
+        for(auto& list:lists_){::free(list.saved);list=List{};}
+        api_=TalkJobSnapshotApi{};context_=job_=nullptr;captured_=restored_=false;error_="none";
+    }
+};
+
+struct FixedJobOwner {void* component=nullptr;void* job=nullptr;const ActorFixedJobSchema* schema=nullptr;Handle playable{},graph{};void* animator=nullptr;};
+struct FixedJobApi {
+    bool (*mapped)(const void*,size_t,bool)=nullptr;
+    bool (*current)(void*,const FixedJobOwner&)=nullptr;
+    bool (*held_fenced)(void*,const FixedJobOwner&)=nullptr;
+};
+class FixedJobSnapshot {
+    struct Buffer {uint8_t descriptor[16]{};uintptr_t header=0;void* data=nullptr;int32_t length=0,capacity=0;uint8_t* saved=nullptr;uint8_t* mask=nullptr;};
+    FixedJobApi api_{};void* context_=nullptr;FixedJobOwner owner_{};
+    uint8_t* saved_=nullptr;uint8_t* mask_=nullptr;Buffer buffers_[16]{};
+    size_t bytes_=0,limit_=0;bool captured_=false,restored_=false;
+    const char* error_="none";
+    Result fail(Result value,const char* why){error_=why;return value;}
+    bool allocate(size_t bytes,uint8_t** value){if(!bytes||bytes>limit_-bytes_)return false;*value=static_cast<uint8_t*>(::malloc(bytes));if(!*value)return false;bytes_+=bytes;return true;}
+    template<class T>bool read(const void* object,size_t at,T& value)const{if(!object||!api_.mapped(static_cast<const uint8_t*>(object)+at,sizeof(T),false))return false;::memcpy(&value,static_cast<const uint8_t*>(object)+at,sizeof(T));return true;}
+    bool mask(uint8_t* data,size_t bytes,const ActorValueRange* ranges,size_t count){
+        for(size_t i=0;i<count;++i){if(!ranges[i].bytes||ranges[i].offset>bytes||ranges[i].bytes>bytes-ranges[i].offset)return false;::memset(data+ranges[i].offset,1,ranges[i].bytes);}return true;
+    }
+    static bool equal(const uint8_t* a,const uint8_t* b,const uint8_t* mask,size_t bytes){
+        size_t at=0;while(at<bytes){while(at<bytes&&mask[at])++at;const size_t begin=at;while(at<bytes&&!mask[at])++at;if(at>begin&&::memcmp(a+begin,b+begin,at-begin))return false;}return true;
+    }
+    Result boundary(){
+        if(!owner_.component||!owner_.job||!owner_.schema||!api_.mapped||!api_.current||!api_.held_fenced)return fail(Result::invalid,"actor_fixed_job_api_unavailable");
+        if(!api_.current(context_,owner_))return fail(Result::stale,"actor_fixed_job_owner_changed");
+        if(!api_.held_fenced(context_,owner_))return fail(Result::waiting,"actor_fixed_job_fence_pending");
+        if(!api_.current(context_,owner_)||!api_.mapped(owner_.job,owner_.schema->bytes,true))return fail(Result::stale,"actor_fixed_job_unmapped");
+        return Result::ok;
+    }
+    bool inspect(size_t index,Buffer& b){const auto& c=owner_.schema->containers[index];
+        if(!api_.mapped(static_cast<uint8_t*>(owner_.job)+c.offset,16,false)
+            ||!api_.mapped(static_cast<uint8_t*>(owner_.component)+c.component_offset,16,false))return false;
+        ::memcpy(b.descriptor,static_cast<uint8_t*>(owner_.job)+c.offset,16);
+        if(::memcmp(b.descriptor,static_cast<uint8_t*>(owner_.component)+c.component_offset,16))return false;
+        if(c.list){
+            ::memcpy(&b.header,b.descriptor,8);
+            if(!b.header||!read(reinterpret_cast<void*>(b.header),0,b.data)||!read(reinterpret_cast<void*>(b.header),8,b.length)||!read(reinterpret_cast<void*>(b.header),12,b.capacity))return false;
+        }else{::memcpy(&b.data,b.descriptor,8);::memcpy(&b.length,b.descriptor+8,4);b.capacity=b.length;}
+        if(!c.stride||c.stride>4096||b.length<0||b.capacity<b.length||b.capacity>8192)return false;
+        return !b.length||(b.data&&api_.mapped(b.data,static_cast<size_t>(b.length)*c.stride,true));
+    }
+public:
+    FixedJobSnapshot()=default;FixedJobSnapshot(const FixedJobSnapshot&)=delete;FixedJobSnapshot& operator=(const FixedJobSnapshot&)=delete;
+    ~FixedJobSnapshot(){clear();}
+    const char* error()const{return error_;}bool captured()const{return captured_;}size_t bytes()const{return bytes_;}
+    const FixedJobOwner& owner()const{return owner_;}
+    Result capture(FixedJobApi api,void* context,FixedJobOwner owner,size_t limit=64u*1024u*1024u){
+        if(captured_)return fail(Result::invalid,"actor_fixed_job_already_captured");
+        clear();api_=api;context_=context;owner_=owner;limit_=limit;
+        Result result=boundary();if(result!=Result::ok)return result;const auto& s=*owner_.schema;
+        if(!s.bytes||s.bytes>4096||s.container_count>16||s.cache_count>512||s.scratch_count>128||s.history_count>128)return fail(Result::unsupported,"actor_fixed_job_schema_invalid");
+        if(!allocate(s.bytes,&saved_)||!allocate(s.bytes,&mask_))return fail(Result::failed,"actor_fixed_job_allocation_failed");
+        ::memcpy(saved_,owner_.job,s.bytes);::memset(mask_,0,s.bytes);
+        if(!mask(mask_,s.bytes,s.caches,s.cache_count)||!mask(mask_,s.bytes,s.scratch,s.scratch_count)||!mask(mask_,s.bytes,s.history,s.history_count))return fail(Result::unsupported,"actor_fixed_job_schema_invalid");
+        for(size_t i=0;i<s.container_count;++i){auto& b=buffers_[i];if(!inspect(i,b))return fail(Result::unsupported,"actor_fixed_job_container_invalid");const auto& c=s.containers[i];
+            if(!allocate(c.stride,&b.mask)){return fail(Result::failed,"actor_fixed_job_allocation_failed");}
+            ::memset(b.mask,0,c.stride);
+            if(!mask(b.mask,c.stride,c.caches,c.cache_count))return fail(Result::unsupported,"actor_fixed_job_schema_invalid");
+            if(b.length){const size_t bytes=static_cast<size_t>(b.length)*c.stride;if(!allocate(bytes,&b.saved))return fail(Result::failed,"actor_fixed_job_allocation_failed");::memcpy(b.saved,b.data,bytes);}
+        }
+        captured_=true;restored_=false;error_="none";return Result::ok;
+    }
+    Result validate(){
+        if(!captured_){return fail(Result::invalid,"actor_fixed_job_snapshot_missing");}
+        Result result=boundary();if(result!=Result::ok)return result;const auto& s=*owner_.schema;
+        if(!equal(saved_,static_cast<const uint8_t*>(owner_.job),mask_,s.bytes))return fail(Result::stale,"actor_fixed_job_configuration_changed");
+        for(size_t i=0;i<s.container_count;++i){Buffer now{};const auto& b=buffers_[i];const auto& c=s.containers[i];
+            if(!inspect(i,now)||::memcmp(b.descriptor,now.descriptor,16)||b.header!=now.header||b.data!=now.data||b.length!=now.length||b.capacity!=now.capacity)return fail(Result::stale,"actor_fixed_job_container_changed");
+            for(int32_t row=0;row<b.length;++row){const size_t at=static_cast<size_t>(row)*c.stride;
+                if(!equal(b.saved+at,static_cast<const uint8_t*>(b.data)+at,b.mask,c.stride))return fail(Result::stale,"actor_fixed_job_row_configuration_changed");}
+        }
+        return api_.current(context_,owner_)?Result::ok:fail(Result::stale,"actor_fixed_job_owner_changed");
+    }
+    Result reset_history(){Result result=validate();if(result!=Result::ok)return result;const auto& s=*owner_.schema;
+        // Only original first-evaluation zero-sentinel float caches. Scratch is
+        // overwritten before use by the original job and needs no fake reset.
+        for(size_t i=0;i<s.history_count;++i)::memset(static_cast<uint8_t*>(owner_.job)+s.history[i].offset,0,s.history[i].bytes);
+        return Result::ok;
+    }
+    Result restore(){Result result=validate();if(result!=Result::ok)return result;if(restored_)return Result::ok;const auto& s=*owner_.schema;
+        for(size_t i=0;i<s.scratch_count;++i)::memcpy(static_cast<uint8_t*>(owner_.job)+s.scratch[i].offset,saved_+s.scratch[i].offset,s.scratch[i].bytes);
+        for(size_t i=0;i<s.history_count;++i)::memcpy(static_cast<uint8_t*>(owner_.job)+s.history[i].offset,saved_+s.history[i].offset,s.history[i].bytes);
+        restored_=true;return Result::ok;
+    }
+    void clear(){::free(saved_);::free(mask_);saved_=mask_=nullptr;for(auto& b:buffers_){::free(b.saved);::free(b.mask);b={};}api_={};context_=nullptr;owner_={};bytes_=limit_=0;captured_=restored_=false;error_="none";}
+};
+
+struct Vector2 {float x=0,y=0;};
+struct Bounds {Vector3 center{},extents{};};
+struct PropertyBlockOwner {void* renderer=nullptr;void* original=nullptr;int32_t index=-1;};
+struct NativeImagesApi {
+    // The host uses exact original Material(Shader), then CopyProperties.
+    // CopyProperties is independently pinned through native property/keyword /
+    // renderQueue copy bodies; it intentionally preserves the shader identity.
+    void* (*material_shader)(void*,Method*)=nullptr;
+    void* (*material_new)(void* shader)=nullptr;
+    void (*material_copy)(void*,void*,Method*)=nullptr;
+    void (*material_destroy)(void*)=nullptr;
+    void* (*block_new)()=nullptr;bool (*block_valid)(void*)=nullptr;
+    bool (*block_empty)(void*,Method*)=nullptr;
+    void (*block_get)(void*,void*,int32_t,Method*)=nullptr;
+    void (*block_set)(void*,void*,int32_t,Method*)=nullptr;
+    void (*renderer_bounds_get)(void*,Bounds*,Method*)=nullptr;
+    void (*renderer_bounds_set)(void*,const Bounds*,Method*)=nullptr;
+    void (*mesh_bounds_get)(void*,Bounds*,Method*)=nullptr;
+    void (*mesh_bounds_set)(void*,const Bounds*,Method*)=nullptr;
+    void* (*mesh_vertices_get)(void*,Method*)=nullptr;
+    void (*mesh_vertices_set)(void*,void*,Method*)=nullptr;
+    void (*block_dispose)(void*,Method*)=nullptr;
+};
+
+struct PresentationNode {void* object=nullptr;const ActorPresentationSchema* schema=nullptr;};
+struct PresentationInventory {
+    PresentationNode nodes[256]{};size_t node_count=0;
+    void* arrays[256]{};size_t array_count=0;
+    void* materials[128]{};size_t material_count=0;
+    void* renderers[128]{};size_t renderer_count=0;
+    MonoReceiver callbacks[max_mono_receivers]{};size_t callback_count=0;
+    void* talk_jobs[32]{};size_t talk_job_count=0;
+    FixedJobOwner fixed_jobs[256]{};size_t fixed_job_count=0;
+    void* full_materials[256]{};size_t full_material_count=0;
+    PropertyBlockOwner blocks[512]{};size_t block_count=0;
+    void* bounds_renderers[256]{};size_t bounds_renderer_count=0;
+    void* shadow_meshes[32]{};size_t shadow_mesh_count=0;
+};
+struct PresentationApi {
+    bool (*current)(void*)=nullptr;bool (*held)(void*)=nullptr;
+    bool (*mapped)(const void*,size_t,bool)=nullptr;
+    bool (*is_type)(void*,const char*)=nullptr;bool (*alive)(void*)=nullptr;
+    void* (*class_of)(void*)=nullptr;
+    bool (*schema_matches)(void*,const ActorPresentationSchema&)=nullptr;
+    uint32_t (*retain)(void*)=nullptr;void* (*target)(uint32_t)=nullptr;void (*release)(uint32_t)=nullptr;
+    // This is a read-only selected-cast inventory. It must include exact known
+    // extension families and reject unknown mutable components before capture.
+    bool (*inventory)(void*,PresentationInventory&)=nullptr;
+    size_t (*array_length)(void*)=nullptr;void* (*array_data)(void*)=nullptr;
+    void* (*blend_mesh)(void*,Method*)=nullptr;int32_t (*blend_count)(void*,Method*)=nullptr;
+    float (*blend_get)(void*,int32_t,Method*)=nullptr;void (*blend_set)(void*,int32_t,float,Method*)=nullptr;
+    float (*material_float_get)(void*)=nullptr;void (*material_float_set)(void*,float)=nullptr;
+    Vector2 (*material_offset_get)(void*,Method*)=nullptr;void (*material_offset_set)(void*,Vector2,Method*)=nullptr;
+    void (*initialize_constraints)(void*,Method*)=nullptr;
+    MonoApi mono{};
+    TalkJobSnapshotApi talk{};
+    NativeImagesApi images{};
+    void (*aux_complete)(void*,Method*)=nullptr;
+    void (*foot_apply_raw)(void*,Method*)=nullptr;
+    int32_t (*color_dirty_offset)(void*)=nullptr;
+    FixedJobApi fixed{};
+};
+// Field-level finite snapshot: a scalar field is admitted only by the generated
+// original schema. Managed references/native headers are identity witnesses and
+// never restored as bytes. Primitive FFT arrays exclude their managed headers.
+class PresentationScope {
+    struct Field {void* object=nullptr;void* klass=nullptr;const ActorPresentationSchema* schema=nullptr;
+        uint32_t root=0;uint8_t* saved=nullptr;size_t bytes=0;};
+    struct Array {void* object=nullptr;void* data=nullptr;uint32_t root=0;size_t length=0,stride=4;uint8_t* saved=nullptr;};
+    struct Material {void* object=nullptr;uint32_t root=0;float highlight=0;Vector2 offset{};};
+    struct Blend {void* object=nullptr;void* mesh=nullptr;uint32_t root=0,mesh_root=0;int32_t count=0;float* weights=nullptr;};
+    PresentationApi api_{};MonoGate* gate_=nullptr;void* context_=nullptr;uint64_t epoch_=0;
+    PresentationInventory inventory_{};
+    Field fields_[256]{};Array arrays_[256]{};Material materials_[128]{};Blend blends_[128]{};
+    TalkJobSnapshot talk_[32]{};size_t talk_count_=0;
+    FixedJobSnapshot fixed_[256]{};size_t fixed_count_=0;
+    struct MaterialCopy {void* source=nullptr;void* shader=nullptr;void* snapshot=nullptr;uint32_t roots[3]{};};
+    struct BlockCopy {PropertyBlockOwner source{};void* snapshot=nullptr;void* cpu_snapshot=nullptr;uint32_t roots[4]{};bool empty=true,slot_displaced=false;};
+    struct RendererBounds {void* object=nullptr;uint32_t root=0;Bounds bounds{};};
+    struct MeshImage {void* object=nullptr;void* vertices=nullptr;uint32_t roots[2]{};Bounds bounds{};size_t length=0;};
+    MaterialCopy material_copies_[256]{};BlockCopy block_copies_[512]{};
+    RendererBounds renderer_bounds_[256]{};MeshImage mesh_images_[32]{};
+    size_t material_copy_count_=0,block_copy_count_=0,renderer_bounds_count_=0,mesh_image_count_=0;
+    struct NativeBuffer {void* owner=nullptr;uint16_t offset=0,stride=0;uint8_t header[16]{};void* data=nullptr;size_t length=0;uint8_t* saved=nullptr;};
+    NativeBuffer native_buffers_[256]{};size_t native_buffer_count_=0;
+    struct DirtyFlag {void* object=nullptr;void* klass=nullptr;uint32_t offset=0;uint8_t value=0;};
+    DirtyFlag dirty_flags_[32]{};size_t dirty_flag_count_=0;
+    size_t fields_count_=0,arrays_count_=0,materials_count_=0,blends_count_=0,bytes_=0;
+    bool configured_=false,captured_=false,restored_=false,initialized_=false,source_flushed_=false,runtime_history_reset_=false;
+    const char* error_="none";
+    Result fail(Result value,const char* why){error_=why;return value;}
+    static bool finite(float v){return __builtin_isfinite(v);}
+    bool root_current(uint32_t root,void* value)const{return root&&api_.target(root)==value;}
+    bool alloc(size_t count,uint8_t** out){
+        if(!count||count>presentation_max_snapshot_bytes-bytes_)return false;
+        *out=static_cast<uint8_t*>(::malloc(count));if(!*out)return false;bytes_+=count;return true;
+    }
+    bool same_inventory(const PresentationInventory& b)const {
+        const auto& a=inventory_;
+        if(a.node_count!=b.node_count||a.array_count!=b.array_count||a.material_count!=b.material_count
+            ||a.renderer_count!=b.renderer_count||a.callback_count!=b.callback_count||a.talk_job_count!=b.talk_job_count
+            ||a.full_material_count!=b.full_material_count||a.block_count!=b.block_count
+            ||a.bounds_renderer_count!=b.bounds_renderer_count||a.shadow_mesh_count!=b.shadow_mesh_count||a.fixed_job_count!=b.fixed_job_count)return false;
+        for(size_t i=0;i<a.node_count;++i)if(a.nodes[i].object!=b.nodes[i].object||a.nodes[i].schema!=b.nodes[i].schema)return false;
+        for(size_t i=0;i<a.array_count;++i)if(a.arrays[i]!=b.arrays[i])return false;
+        for(size_t i=0;i<a.material_count;++i)if(a.materials[i]!=b.materials[i])return false;
+        for(size_t i=0;i<a.renderer_count;++i)if(a.renderers[i]!=b.renderers[i])return false;
+        for(size_t i=0;i<a.fixed_job_count;++i)if(a.fixed_jobs[i].component!=b.fixed_jobs[i].component||a.fixed_jobs[i].job!=b.fixed_jobs[i].job||a.fixed_jobs[i].schema!=b.fixed_jobs[i].schema||a.fixed_jobs[i].playable.handle!=b.fixed_jobs[i].playable.handle||a.fixed_jobs[i].playable.version!=b.fixed_jobs[i].playable.version||a.fixed_jobs[i].graph.handle!=b.fixed_jobs[i].graph.handle||a.fixed_jobs[i].graph.version!=b.fixed_jobs[i].graph.version||a.fixed_jobs[i].animator!=b.fixed_jobs[i].animator)return false;
+        for(size_t i=0;i<a.full_material_count;++i)if(a.full_materials[i]!=b.full_materials[i])return false;
+        for(size_t i=0;i<a.block_count;++i)if(a.blocks[i].renderer!=b.blocks[i].renderer||a.blocks[i].original!=b.blocks[i].original||a.blocks[i].index!=b.blocks[i].index)return false;
+        for(size_t i=0;i<a.bounds_renderer_count;++i)if(a.bounds_renderers[i]!=b.bounds_renderers[i])return false;
+        for(size_t i=0;i<a.shadow_mesh_count;++i)if(a.shadow_meshes[i]!=b.shadow_meshes[i])return false;
+        for(size_t i=0;i<a.talk_job_count;++i)if(a.talk_jobs[i]!=b.talk_jobs[i])return false;
+        for(size_t i=0;i<a.callback_count;++i)if(a.callbacks[i].object!=b.callbacks[i].object||a.callbacks[i].phase!=b.callbacks[i].phase)return false;
+        return true;
+    }
+    bool rollback_block(BlockCopy& b){
+        if(!b.slot_displaced)return true;
+        if(!api_.current(context_)||!api_.held(context_)||!root_current(b.roots[0],b.source.renderer)
+            ||!root_current(b.roots[2],b.snapshot)||!api_.alive(b.source.renderer)||!api_.images.block_valid(b.snapshot))return false;
+        api_.images.block_set(b.source.renderer,b.empty?nullptr:b.snapshot,b.source.index,nullptr);
+        b.slot_displaced=false;return api_.current(context_);
+    }
+    bool copy_cpu_block(BlockCopy& b,void* from,void* to){
+        if(!api_.current(context_))return false;
+        // Public Get/Set perform the original deep native assignment. Borrow
+        // the owned renderer slot only on this held Unity-thread stack, then
+        // restore it immediately. CPU scratch contents need not equal the
+        // renderer slot (unapplied keys and shared scratch blocks are valid).
+        b.slot_displaced=true; // Persistent rollback duty precedes first Set.
+        try {
+            api_.images.block_set(b.source.renderer,from,b.source.index,nullptr);
+            if(!api_.current(context_))return false;
+            api_.images.block_get(b.source.renderer,to,b.source.index,nullptr);
+        } catch(...) {
+            rollback_block(b);throw;
+        }
+        if(!api_.current(context_))return false;
+        return rollback_block(b);
+    }
+    Result auxiliary_fence(){
+        for(size_t i=0;i<fields_count_;++i){void* object=fields_[i].object;
+            if(!api_.is_type(object,"VL.Core.VLActorController")&&!api_.is_type(object,"VL.VLActorFootShadow"))continue;
+            auto* handle=static_cast<uint8_t*>(object)+184;
+            if(!api_.aux_complete||!api_.mapped(handle,16,true))return fail(Result::unsupported,"actor_aux_job_unmapped");
+            api_.aux_complete(handle,nullptr);uint64_t group=0;int32_t version=0;
+            ::memcpy(&group,handle,8);::memcpy(&version,handle+8,4);
+            if(group||version)return fail(Result::waiting,"actor_aux_job_pending");
+            if(api_.is_type(object,"VL.VLActorFootShadow")){
+                auto* scheduled=static_cast<uint8_t*>(object)+180;
+                if(!api_.foot_apply_raw||!api_.mapped(scheduled,1,true)||*scheduled>1)return fail(Result::unsupported,"actor_shadow_pending_state_invalid");
+                // Drain the exact already scheduled source/export work. Any
+                // old queued PreCull delegate then sees false and is a no-op;
+                // unrelated camera callbacks are neither cleared nor removed.
+                if(*scheduled)api_.foot_apply_raw(object,nullptr);
+                if(*scheduled)return fail(Result::waiting,"actor_shadow_apply_pending");
+            }
+            if(!api_.current(context_))return fail(Result::stale,"actor_aux_owner_changed");
+        }
+        return Result::ok;
+    }
+    Result capture_native(void* owner,uint16_t offset,uint16_t stride){
+        if(native_buffer_count_==256)return fail(Result::unsupported,"actor_aux_buffer_limit");
+        NativeBuffer b{};b.owner=owner;b.offset=offset;b.stride=stride;
+        if(!api_.mapped(static_cast<uint8_t*>(owner)+offset,16,false))return fail(Result::unsupported,"actor_aux_array_unmapped");
+        ::memcpy(b.header,static_cast<uint8_t*>(owner)+offset,16);int32_t length=0;
+        ::memcpy(&b.data,b.header,8);::memcpy(&length,b.header+8,4);
+        if(length<0||length>65536)return fail(Result::unsupported,"actor_aux_array_limit");
+        b.length=static_cast<size_t>(length);
+        if(b.length&&(!b.data||!api_.mapped(b.data,b.length*stride,true)||!alloc(b.length*stride,&b.saved)))return fail(Result::unsupported,"actor_aux_array_invalid");
+        if(b.length)::memcpy(b.saved,b.data,b.length*stride);
+        native_buffers_[native_buffer_count_++]=b;return Result::ok;
+    }
+    bool complete()const{
+        return api_.current&&api_.held&&api_.mapped&&api_.is_type&&api_.alive&&api_.class_of&&api_.schema_matches
+            &&api_.retain&&api_.target&&api_.release&&api_.inventory&&api_.array_length&&api_.array_data
+            &&api_.blend_mesh&&api_.blend_count&&api_.blend_get&&api_.blend_set&&api_.material_float_get
+            &&api_.material_float_set&&api_.material_offset_get&&api_.material_offset_set&&api_.initialize_constraints;
+    }
+public:
+    const char* error()const{return error_;}
+    bool active()const{return configured_;}
+    bool captured()const{return captured_;}
+    // Cheap callback/step witness, including the original DSP admission. This
+    // performs no inventory allocation or scene mutation. A bound ADV voice
+    // source must never run inside the private offline frame/RNG domain.
+    bool scalar_owner_current()const {
+        if(!api_.current||!api_.current(context_))return false;
+        for(size_t i=0;i<fields_count_;++i){const auto& f=fields_[i];
+            if(!root_current(f.root,f.object)||api_.class_of(f.object)!=f.klass)return false;
+            size_t at=0;for(size_t j=0;j<f.schema->count;++j){const auto& span=f.schema->fields[j];
+                auto* value=static_cast<uint8_t*>(f.object)+span.offset;
+                if(!api_.mapped(value,span.bytes,!span.identity)||(captured_&&span.identity&&::memcmp(value,f.saved+at,span.bytes)))return false;
+                at+=span.bytes;}
+            if(api_.is_type(f.object,"VL.VLActorTalkFFT")){
+                void* source=nullptr;if(!api_.mapped(static_cast<uint8_t*>(f.object)+80,8,false))return false;
+                ::memcpy(&source,static_cast<uint8_t*>(f.object)+80,8);if(source)return false;
+            }
+        }
+        return true;
+    }
+    bool configure(PresentationApi api,MonoGate* gate,void* context,uint64_t epoch){
+        if(configured_||!gate||!context||!epoch)return false;
+        inventory_={};
+        api_=api;gate_=gate;context_=context;epoch_=epoch;
+        if(!complete()||!api_.current(context_)||!api_.held(context_)){error_="actor_presentation_api_unavailable";return false;}
+        if(!api_.inventory(context_,inventory_)||!inventory_.node_count||inventory_.node_count>256||inventory_.array_count>256
+            ||inventory_.material_count>128||inventory_.renderer_count>128||inventory_.talk_job_count>32
+            ||inventory_.fixed_job_count>256||inventory_.full_material_count>256||inventory_.block_count>512||inventory_.bounds_renderer_count>256||inventory_.shadow_mesh_count>32||!inventory_.callback_count||inventory_.callback_count>max_mono_receivers){error_="actor_presentation_inventory_unsupported";return false;}
+        // Retain receivers before publishing callback ownership. This stops a
+        // pooled/new object at the same address from inheriting an old grant.
+        for(size_t i=0;i<inventory_.node_count;++i){
+            auto& f=fields_[fields_count_++];f.object=inventory_.nodes[i].object;f.schema=inventory_.nodes[i].schema;
+            if(!f.object||!f.schema||!api_.schema_matches(f.object,*f.schema)||!api_.is_type(f.object,f.schema->type)
+                ||!(f.klass=api_.class_of(f.object))||!(f.root=api_.retain(f.object))||!root_current(f.root,f.object)){
+                error_="actor_presentation_node_invalid";release(false);return false;}
+        }
+        for(size_t i=0;i<inventory_.callback_count;++i){bool retained=false;
+            for(size_t j=0;j<fields_count_;++j)retained|=fields_[j].object==inventory_.callbacks[i].object;
+            if(!retained){error_="actor_presentation_receiver_unretained";release(false);return false;}}
+        if(inventory_.fixed_job_count&&(!api_.fixed.mapped||!api_.fixed.current||!api_.fixed.held_fenced)){error_="actor_fixed_job_api_unavailable";release(false);return false;}
+        if(inventory_.talk_job_count&&(!api_.talk.mapped||!api_.talk.job_current||!api_.talk.held_fenced)){error_="actor_presentation_talk_api_unavailable";release(false);return false;}
+        if(!scalar_owner_current()){error_="actor_talk_dsp_source_unsupported";release(false);return false;}
+        const auto& images=api_.images;
+        if((inventory_.full_material_count&&(!images.material_shader||!images.material_new||!images.material_copy||!images.material_destroy))
+            ||(inventory_.block_count&&(!images.block_new||!images.block_valid||!images.block_empty||!images.block_get||!images.block_set||!images.block_dispose))
+            ||(inventory_.bounds_renderer_count&&(!images.renderer_bounds_get||!images.renderer_bounds_set))
+            ||(inventory_.shadow_mesh_count&&(!images.mesh_bounds_get||!images.mesh_bounds_set||!images.mesh_vertices_get||!images.mesh_vertices_set))){
+            error_="actor_presentation_native_image_api_unavailable";release(false);return false;}
+        if(!gate_->publish(api_.mono,context_,epoch_,inventory_.callbacks,inventory_.callback_count)){
+            error_="actor_presentation_gate_unavailable";release(false);return false;}
+        configured_=true;error_="none";return true;
+    }
+    void revoke_grants(){if(gate_&&epoch_)gate_->revoke(epoch_);}
+    Result hold(){
+        if(!configured_||!scalar_owner_current())return fail(Result::stale,"actor_presentation_owner_changed");
+        if(!gate_->hold(epoch_))return fail(Result::stale,"actor_presentation_gate_changed");
+        return auxiliary_fence();
+    }
+    Result grant(uint64_t serial){
+        if(!captured_||!initialized_||!gate_->grant(epoch_,serial))return fail(Result::stale,"actor_presentation_grant_failed");
+        return Result::ok;
+    }
+    Result capture(){
+        if(!configured_||!api_.current(context_)||!api_.held(context_))return fail(Result::stale,"actor_presentation_not_held");
+        if(captured_)return Result::ok;
+        {const Result fence=auxiliary_fence();if(fence!=Result::ok)return fence;}
+        for(size_t i=0;i<fields_count_;++i){auto& f=fields_[i];if(f.saved)continue;
+            for(size_t j=0;j<f.schema->count;++j){const auto& span=f.schema->fields[j];
+                if(span.offset<16||!span.bytes||span.bytes>64||f.bytes>size_t{4096}-span.bytes
+                    ||!api_.mapped(static_cast<uint8_t*>(f.object)+span.offset,span.bytes,!span.identity))return fail(Result::unsupported,"actor_presentation_field_unmapped");
+                f.bytes+=span.bytes;}
+            if(!alloc(f.bytes,&f.saved))return fail(Result::failed,"actor_presentation_allocation_failed");
+            size_t at=0;for(size_t j=0;j<f.schema->count;++j){const auto& span=f.schema->fields[j];
+                ::memcpy(f.saved+at,static_cast<uint8_t*>(f.object)+span.offset,span.bytes);at+=span.bytes;}
+        }
+        for(size_t i=arrays_count_;i<inventory_.array_count;++i){auto& a=arrays_[arrays_count_++];a.object=inventory_.arrays[i];
+            if(!a.object||(!api_.is_type(a.object,"System.Single[]")&&!api_.is_type(a.object,"System.Int32[]")&&!api_.is_type(a.object,"UnityEngine.Vector3[]")&&!api_.is_type(a.object,"UnityEngine.Vector2[]"))
+                ||!(a.root=api_.retain(a.object))||!root_current(a.root,a.object))return fail(Result::unsupported,"actor_presentation_array_invalid");
+            a.stride=api_.is_type(a.object,"UnityEngine.Vector3[]")?12:api_.is_type(a.object,"UnityEngine.Vector2[]")?8:4;
+            a.length=api_.array_length(a.object);a.data=api_.array_data(a.object);
+            if(a.length>65536||(a.length&&(!a.data||!api_.mapped(a.data,a.length*a.stride,true)||!alloc(a.length*a.stride,&a.saved))))return fail(Result::unsupported,"actor_presentation_array_invalid");
+            if(a.length)::memcpy(a.saved,a.data,a.length*a.stride);
+        }
+        for(size_t i=materials_count_;i<inventory_.material_count;++i){auto& m=materials_[materials_count_++];m.object=inventory_.materials[i];
+            if(!api_.is_type(m.object,"UnityEngine.Material")||!api_.alive(m.object)||!(m.root=api_.retain(m.object)))return fail(Result::unsupported,"actor_presentation_material_invalid");
+            m.highlight=api_.material_float_get(m.object);m.offset=api_.material_offset_get(m.object,nullptr);
+            if(!finite(m.highlight)||!finite(m.offset.x)||!finite(m.offset.y))return fail(Result::unsupported,"actor_presentation_material_nonfinite");
+        }
+        for(size_t i=blends_count_;i<inventory_.renderer_count;++i){auto& b=blends_[blends_count_++];b.object=inventory_.renderers[i];
+            if(!api_.is_type(b.object,"UnityEngine.SkinnedMeshRenderer")||!api_.alive(b.object)||!(b.root=api_.retain(b.object))
+                ||!(b.mesh=api_.blend_mesh(b.object,nullptr))||!api_.is_type(b.mesh,"UnityEngine.Mesh")||!api_.alive(b.mesh)
+                ||!(b.mesh_root=api_.retain(b.mesh)))return fail(Result::unsupported,"actor_presentation_mesh_invalid");
+            b.count=api_.blend_count(b.mesh,nullptr);uint8_t* memory=nullptr;
+            if(b.count<0||b.count>4096||(b.count&&!alloc(static_cast<size_t>(b.count)*sizeof(float),&memory)))return fail(Result::unsupported,"actor_presentation_blend_limit");
+            b.weights=reinterpret_cast<float*>(memory);
+            for(int32_t j=0;j<b.count;++j)if(!finite(b.weights[j]=api_.blend_get(b.object,j,nullptr)))return fail(Result::unsupported,"actor_presentation_blend_nonfinite");
+        }
+        if(!dirty_flag_count_)for(size_t i=0;i<fields_count_;++i){void* object=fields_[i].object;
+            if(!api_.is_type(object,"VL.VLDefaultActorController`3"))continue;
+            if(dirty_flag_count_==32||!api_.color_dirty_offset)return fail(Result::unsupported,"actor_color_dirty_api_unavailable");
+            const int32_t offset=api_.color_dirty_offset(object);
+            if(offset<16||offset>65535||!api_.mapped(static_cast<uint8_t*>(object)+offset,1,true))return fail(Result::unsupported,"actor_color_dirty_field_invalid");
+            const uint8_t value=*(static_cast<uint8_t*>(object)+offset);if(value>1)return fail(Result::unsupported,"actor_color_dirty_state_invalid");
+            dirty_flags_[dirty_flag_count_++]={object,api_.class_of(object),static_cast<uint32_t>(offset),value};
+        }
+        if(!native_buffer_count_)for(size_t i=0;i<fields_count_;++i){const auto& f=fields_[i];Result result=Result::ok;
+            if(api_.is_type(f.object,"VL.Core.VLActorController")){
+                result=capture_native(f.object,144,212);if(result!=Result::ok)return result;
+                result=capture_native(f.object,168,12);if(result!=Result::ok)return result;
+            }else if(api_.is_type(f.object,"VL.VLActorFootShadow")){
+                result=capture_native(f.object,96,20);if(result!=Result::ok)return result;
+                result=capture_native(f.object,120,12);if(result!=Result::ok)return result;
+                result=capture_native(f.object,136,24);if(result!=Result::ok)return result;
+            }
+        }
+        for(size_t i=material_copy_count_;i<inventory_.full_material_count;++i){auto& m=material_copies_[material_copy_count_++];m.source=inventory_.full_materials[i];
+            if(!api_.is_type(m.source,"UnityEngine.Material")||!api_.alive(m.source)||!(m.roots[0]=api_.retain(m.source))
+                ||!(m.shader=api_.images.material_shader(m.source,nullptr))||!api_.is_type(m.shader,"UnityEngine.Shader")||!api_.alive(m.shader)
+                ||!(m.roots[1]=api_.retain(m.shader))||!(m.snapshot=api_.images.material_new(m.shader))
+                ||!api_.is_type(m.snapshot,"UnityEngine.Material")||!api_.alive(m.snapshot)||!(m.roots[2]=api_.retain(m.snapshot))
+                ||api_.images.material_shader(m.snapshot,nullptr)!=m.shader)return fail(Result::unsupported,"actor_material_snapshot_failed");
+            api_.images.material_copy(m.snapshot,m.source,nullptr);
+        }
+        for(size_t i=block_copy_count_;i<inventory_.block_count;++i){auto& b=block_copies_[block_copy_count_++];b.source=inventory_.blocks[i];
+            if(b.source.index<0||b.source.index>255||!api_.is_type(b.source.renderer,"UnityEngine.Renderer")||!api_.alive(b.source.renderer)
+                ||!(b.roots[0]=api_.retain(b.source.renderer))||(b.source.original&&(!api_.is_type(b.source.original,"UnityEngine.MaterialPropertyBlock")
+                    ||!api_.images.block_valid(b.source.original)||!(b.roots[1]=api_.retain(b.source.original))))
+                ||!(b.snapshot=api_.images.block_new())||!api_.is_type(b.snapshot,"UnityEngine.MaterialPropertyBlock")
+                ||!api_.images.block_valid(b.snapshot)||!(b.roots[2]=api_.retain(b.snapshot)))return fail(Result::unsupported,"actor_block_snapshot_failed");
+            api_.images.block_get(b.source.renderer,b.snapshot,b.source.index,nullptr);b.empty=api_.images.block_empty(b.snapshot,nullptr);
+            if(b.source.original){
+                b.cpu_snapshot=api_.images.block_new();
+                if(!b.cpu_snapshot||!api_.is_type(b.cpu_snapshot,"UnityEngine.MaterialPropertyBlock")||!api_.images.block_valid(b.cpu_snapshot)
+                    ||!(b.roots[3]=api_.retain(b.cpu_snapshot)))return fail(Result::unsupported,"actor_cpu_block_snapshot_failed");
+                if(!copy_cpu_block(b,b.source.original,b.cpu_snapshot))return fail(Result::stale,"actor_cpu_block_owner_changed");
+            }
+        }
+        for(size_t i=renderer_bounds_count_;i<inventory_.bounds_renderer_count;++i){auto& b=renderer_bounds_[renderer_bounds_count_++];b.object=inventory_.bounds_renderers[i];
+            if(!api_.is_type(b.object,"UnityEngine.Renderer")||!api_.alive(b.object)||!(b.root=api_.retain(b.object)))return fail(Result::unsupported,"actor_renderer_bounds_invalid");
+            api_.images.renderer_bounds_get(b.object,&b.bounds,nullptr);
+        }
+        for(size_t i=mesh_image_count_;i<inventory_.shadow_mesh_count;++i){auto& m=mesh_images_[mesh_image_count_++];m.object=inventory_.shadow_meshes[i];
+            if(!api_.is_type(m.object,"UnityEngine.Mesh")||!api_.alive(m.object)||!(m.roots[0]=api_.retain(m.object))
+                ||!(m.vertices=api_.images.mesh_vertices_get(m.object,nullptr))||!api_.is_type(m.vertices,"UnityEngine.Vector3[]")
+                ||!(m.roots[1]=api_.retain(m.vertices)))return fail(Result::unsupported,"actor_shadow_mesh_invalid");
+            m.length=api_.array_length(m.vertices);if(m.length>65536)return fail(Result::unsupported,"actor_shadow_mesh_too_large");
+            api_.images.mesh_bounds_get(m.object,&m.bounds,nullptr);
+        }
+        for(size_t i=0;i<inventory_.talk_job_count;++i){if(talk_[i].captured())continue;
+            talk_count_=i+1;const Result result=talk_[i].capture(api_.talk,context_,inventory_.talk_jobs[i]);
+            if(result!=Result::ok)return fail(result,talk_[i].error());}
+        for(size_t i=0;i<inventory_.fixed_job_count;++i){if(fixed_[i].captured())continue;fixed_count_=i+1;
+            const Result result=fixed_[i].capture(api_.fixed,context_,inventory_.fixed_jobs[i],presentation_max_snapshot_bytes-bytes_);
+            if(result!=Result::ok){return fail(result,fixed_[i].error());}
+            bytes_+=fixed_[i].bytes();}
+        captured_=true;restored_=false;error_="none";return Result::ok;
+    }
+    Result validate(){
+        if(!configured_||!scalar_owner_current()||!api_.held(context_)||!gate_->current())return fail(Result::stale,"actor_presentation_owner_changed");
+        {const Result fence=auxiliary_fence();if(fence!=Result::ok)return fence;}
+        PresentationInventory now{};if(!api_.inventory(context_,now)||!same_inventory(now))return fail(Result::stale,"actor_presentation_inventory_changed");
+        for(size_t i=0;i<fields_count_;++i){const auto& f=fields_[i];
+            if(!root_current(f.root,f.object)||api_.class_of(f.object)!=f.klass||!api_.schema_matches(f.object,*f.schema))return fail(Result::stale,"actor_presentation_class_changed");
+            size_t at=0;for(size_t j=0;j<f.schema->count;++j){const auto& span=f.schema->fields[j];auto* value=static_cast<uint8_t*>(f.object)+span.offset;
+                if(!api_.mapped(value,span.bytes,!span.identity)||(captured_&&span.identity&&::memcmp(f.saved+at,value,span.bytes)))return fail(Result::stale,"actor_presentation_identity_changed");
+                at+=span.bytes;}
+        }
+        for(size_t i=0;i<arrays_count_;++i){const auto& a=arrays_[i];if(!root_current(a.root,a.object)||api_.array_length(a.object)!=a.length
+            ||api_.array_data(a.object)!=a.data||(a.length&&!api_.mapped(a.data,a.length*a.stride,true)))return fail(Result::stale,"actor_presentation_array_changed");}
+        for(size_t i=0;i<materials_count_;++i){const auto& m=materials_[i];if(!root_current(m.root,m.object)||!api_.alive(m.object))return fail(Result::stale,"actor_presentation_material_changed");}
+        for(size_t i=0;i<blends_count_;++i){const auto& b=blends_[i];if(!root_current(b.root,b.object)||!root_current(b.mesh_root,b.mesh)
+            ||!api_.alive(b.object)||!api_.alive(b.mesh)||api_.blend_mesh(b.object,nullptr)!=b.mesh||api_.blend_count(b.mesh,nullptr)!=b.count)return fail(Result::stale,"actor_presentation_mesh_changed");}
+        for(size_t i=0;i<dirty_flag_count_;++i){const auto& d=dirty_flags_[i];
+            if(api_.class_of(d.object)!=d.klass||api_.color_dirty_offset(d.object)!=static_cast<int32_t>(d.offset)
+                ||!api_.mapped(static_cast<uint8_t*>(d.object)+d.offset,1,true))return fail(Result::stale,"actor_color_dirty_owner_changed");}
+        for(size_t i=0;i<native_buffer_count_;++i){const auto& b=native_buffers_[i];
+            if(!api_.mapped(static_cast<uint8_t*>(b.owner)+b.offset,16,false)||::memcmp(static_cast<uint8_t*>(b.owner)+b.offset,b.header,16)
+                ||(b.length&&!api_.mapped(b.data,b.length*b.stride,true)))return fail(Result::stale,"actor_aux_array_changed");}
+        for(size_t i=0;i<material_copy_count_;++i){const auto& m=material_copies_[i];
+            if(!root_current(m.roots[0],m.source)||!root_current(m.roots[1],m.shader)||!root_current(m.roots[2],m.snapshot)
+                ||!api_.alive(m.source)||!api_.alive(m.snapshot)||!api_.alive(m.shader)
+                ||api_.images.material_shader(m.source,nullptr)!=m.shader||api_.images.material_shader(m.snapshot,nullptr)!=m.shader)
+                return fail(Result::stale,"actor_material_owner_changed");}
+        for(size_t i=0;i<block_copy_count_;++i){const auto& b=block_copies_[i];
+            if(!root_current(b.roots[0],b.source.renderer)||!root_current(b.roots[2],b.snapshot)||!api_.alive(b.source.renderer)||!api_.images.block_valid(b.snapshot)
+                ||(b.source.original&&(!root_current(b.roots[1],b.source.original)||!api_.images.block_valid(b.source.original)
+                    ||!root_current(b.roots[3],b.cpu_snapshot)||!api_.images.block_valid(b.cpu_snapshot))))return fail(Result::stale,"actor_block_owner_changed");}
+        for(size_t i=0;i<renderer_bounds_count_;++i)if(!root_current(renderer_bounds_[i].root,renderer_bounds_[i].object)||!api_.alive(renderer_bounds_[i].object))return fail(Result::stale,"actor_renderer_bounds_changed");
+        for(size_t i=0;i<mesh_image_count_;++i){const auto& m=mesh_images_[i];
+            if(!root_current(m.roots[0],m.object)||!root_current(m.roots[1],m.vertices)||!api_.alive(m.object)||api_.array_length(m.vertices)!=m.length)return fail(Result::stale,"actor_shadow_mesh_changed");}
+        for(size_t i=0;i<talk_count_;++i){const Result result=talk_[i].validate();if(result!=Result::ok)return fail(result,talk_[i].error());}
+        for(size_t i=0;i<fixed_count_;++i){const Result result=fixed_[i].validate();if(result!=Result::ok)return fail(result,fixed_[i].error());}
+        return Result::ok;
+    }
+    Result reset_runtime_history(){
+        Result result=validate();if(result!=Result::ok)return result;
+        if(runtime_history_reset_)return Result::ok;
+        // Preserve authored settings/references. Only these private runtime
+        // scalars start from the original managed-allocation/constructor state;
+        // the subsequent original root zero Evaluate applies authored time-zero
+        // values before the first accepted frame. No DSP input is fabricated.
+        const uint32_t zero=0;const float unset=-1.0f;
+        for(size_t i=0;i<fields_count_;++i){void* object=fields_[i].object;
+            if(api_.is_type(object,"VL.VLActorFacialSystem")){
+                constexpr size_t offsets[]={88,96,104};
+                for(size_t at:offsets)::memcpy(static_cast<uint8_t*>(object)+at,&zero,4);
+                *(static_cast<uint8_t*>(object)+92)=0;*(static_cast<uint8_t*>(object)+108)=0;
+                ::memcpy(static_cast<uint8_t*>(object)+100,&unset,4);
+            }else if(api_.is_type(object,"VL.VLActorTalk")){
+                constexpr size_t offsets[]={128,132,136,144,152,156};
+                for(size_t at:offsets)::memcpy(static_cast<uint8_t*>(object)+at,&zero,4);
+                *(static_cast<uint8_t*>(object)+148)=0;
+            }
+        }
+        for(size_t i=0;i<talk_count_;++i){result=talk_[i].reset_time();if(result!=Result::ok)return fail(result,talk_[i].error());}
+        for(size_t i=0;i<fixed_count_;++i){result=fixed_[i].reset_history();if(result!=Result::ok)return fail(result,fixed_[i].error());}
+        runtime_history_reset_=true;return Result::ok;
+    }
+    Result flush_source(const Owner* owners,size_t count){
+        Result result=validate();if(result!=Result::ok)return result;
+        if(source_flushed_)return Result::ok;
+        for(size_t i=0;i<count;++i){api_.initialize_constraints(owners[i].rig,nullptr);if(!api_.current(context_))return fail(Result::stale,"actor_presentation_owner_changed");}
+        source_flushed_=true;return Result::ok;
+    }
+    Result initialize(const Owner* owners,size_t count){
+        Result result=validate();if(result!=Result::ok)return result;
+        if(initialized_)return Result::ok;
+        // Original zero-pose evaluation changes collider transforms. Refresh
+        // the verified live rig constraints exactly once before solver warmup.
+        for(size_t i=0;i<count;++i){api_.initialize_constraints(owners[i].rig,nullptr);if(!api_.current(context_))return fail(Result::stale,"actor_presentation_owner_changed");}
+        initialized_=true;return Result::ok;
+    }
+    Result restore(){
+        if(restored_)return Result::ok;
+        Result result=validate();if(result!=Result::ok)return result;
+        if(!captured_)return fail(Result::invalid,"actor_presentation_snapshot_missing");
+        // Validate every node and native leaf before the first restoration.
+        for(size_t i=0;i<native_buffer_count_;++i){const auto& b=native_buffers_[i];if(b.length)::memcpy(b.data,b.saved,b.length*b.stride);}
+        for(size_t i=0;i<talk_count_;++i){result=talk_[i].restore();if(result!=Result::ok)return fail(result,talk_[i].error());}
+        for(size_t i=0;i<fixed_count_;++i){result=fixed_[i].restore();if(result!=Result::ok)return fail(result,fixed_[i].error());}
+        for(size_t i=0;i<fields_count_;++i){const auto& f=fields_[i];size_t at=0;
+            for(size_t j=0;j<f.schema->count;++j){const auto& span=f.schema->fields[j];
+                if(!span.identity){::memcpy(static_cast<uint8_t*>(f.object)+span.offset,f.saved+at,span.bytes);}
+                at+=span.bytes;}}
+        for(size_t i=0;i<arrays_count_;++i)if(arrays_[i].length)::memcpy(arrays_[i].data,arrays_[i].saved,arrays_[i].length*arrays_[i].stride);
+        for(size_t i=0;i<materials_count_;++i){const auto& m=materials_[i];api_.material_float_set(m.object,m.highlight);api_.material_offset_set(m.object,m.offset,nullptr);}
+        for(size_t i=0;i<blends_count_;++i){const auto& b=blends_[i];for(int32_t j=0;j<b.count;++j)api_.blend_set(b.object,j,b.weights[j],nullptr);}
+        for(size_t i=0;i<material_copy_count_;++i){const auto& m=material_copies_[i];api_.images.material_copy(m.source,m.snapshot,nullptr);}
+        for(size_t i=0;i<block_copy_count_;++i){auto& b=block_copies_[i];
+            if(b.source.original){
+                if(!copy_cpu_block(b,b.cpu_snapshot,b.source.original))return fail(Result::stale,"actor_cpu_block_owner_changed");
+            }else api_.images.block_set(b.source.renderer,b.empty?nullptr:b.snapshot,b.source.index,nullptr);
+        }
+        for(size_t i=0;i<renderer_bounds_count_;++i){const auto& b=renderer_bounds_[i];api_.images.renderer_bounds_set(b.object,&b.bounds,nullptr);}
+        for(size_t i=0;i<mesh_image_count_;++i){const auto& m=mesh_images_[i];api_.images.mesh_vertices_set(m.object,m.vertices,nullptr);api_.images.mesh_bounds_set(m.object,&m.bounds,nullptr);}
+        for(size_t i=0;i<dirty_flag_count_;++i){const auto& d=dirty_flags_[i];*(static_cast<uint8_t*>(d.object)+d.offset)=d.value;}
+        for(size_t i=0;i<fields_count_;++i){const auto& f=fields_[i];size_t at=0;
+            for(size_t j=0;j<f.schema->count;++j){const auto& span=f.schema->fields[j];
+                if(::memcmp(static_cast<uint8_t*>(f.object)+span.offset,f.saved+at,span.bytes)){return fail(Result::failed,"actor_presentation_field_restore_failed");}
+                at+=span.bytes;}}
+        for(size_t i=0;i<arrays_count_;++i)if(arrays_[i].length&&::memcmp(arrays_[i].data,arrays_[i].saved,arrays_[i].length*arrays_[i].stride))return fail(Result::failed,"actor_presentation_array_restore_failed");
+        for(size_t i=0;i<materials_count_;++i){const auto& m=materials_[i];const auto offset=api_.material_offset_get(m.object,nullptr);
+            if(api_.material_float_get(m.object)!=m.highlight||offset.x!=m.offset.x||offset.y!=m.offset.y)return fail(Result::failed,"actor_presentation_material_restore_failed");}
+        for(size_t i=0;i<blends_count_;++i){const auto& b=blends_[i];for(int32_t j=0;j<b.count;++j)if(api_.blend_get(b.object,j,nullptr)!=b.weights[j])return fail(Result::failed,"actor_presentation_blend_restore_failed");}
+        restored_=true;error_="none";return Result::ok;
+    }
+    Result release(bool owned){
+        if(owned)for(size_t i=0;i<block_copy_count_;++i)if(!rollback_block(block_copies_[i]))return fail(Result::stale,"actor_cpu_block_rollback_unavailable");
+        if(owned&&captured_&&!restored_){const Result result=restore();if(result!=Result::ok)return result;}
+        if(gate_)gate_->release(epoch_);
+        for(size_t i=0;i<fields_count_;++i){if(fields_[i].root)api_.release(fields_[i].root);::free(fields_[i].saved);fields_[i]={};}
+        for(size_t i=0;i<arrays_count_;++i){if(arrays_[i].root)api_.release(arrays_[i].root);::free(arrays_[i].saved);arrays_[i]={};}
+        for(size_t i=0;i<materials_count_;++i){if(materials_[i].root)api_.release(materials_[i].root);materials_[i]={};}
+        for(size_t i=0;i<blends_count_;++i){if(blends_[i].root)api_.release(blends_[i].root);if(blends_[i].mesh_root)api_.release(blends_[i].mesh_root);::free(blends_[i].weights);blends_[i]={};}
+        for(size_t i=0;i<material_copy_count_;++i){auto& m=material_copies_[i];
+            if(m.snapshot&&api_.images.material_destroy)api_.images.material_destroy(m.snapshot);
+            for(auto root:m.roots){if(root)api_.release(root);}
+            m={};}
+        for(size_t i=0;i<block_copy_count_;++i){auto& b=block_copies_[i];
+            if(b.snapshot&&api_.images.block_dispose)api_.images.block_dispose(b.snapshot,nullptr);
+            if(b.cpu_snapshot&&api_.images.block_dispose)api_.images.block_dispose(b.cpu_snapshot,nullptr);
+            for(auto root:b.roots){if(root)api_.release(root);}
+            b={};}
+        for(size_t i=0;i<renderer_bounds_count_;++i){if(renderer_bounds_[i].root)api_.release(renderer_bounds_[i].root);renderer_bounds_[i]={};}
+        for(size_t i=0;i<mesh_image_count_;++i){for(auto root:mesh_images_[i].roots)if(root)api_.release(root);mesh_images_[i]={};}
+        material_copy_count_=block_copy_count_=renderer_bounds_count_=mesh_image_count_=0;
+        for(size_t i=0;i<native_buffer_count_;++i){::free(native_buffers_[i].saved);native_buffers_[i]={};}
+        native_buffer_count_=0;dirty_flag_count_=0;
+        for(size_t i=0;i<talk_count_;++i){talk_[i].clear();}
+        talk_count_=0;
+        for(size_t i=0;i<fixed_count_;++i){fixed_[i].clear();}
+        fixed_count_=0;
+        fields_count_=arrays_count_=materials_count_=blends_count_=bytes_=0;inventory_={};
+        configured_=captured_=restored_=initialized_=source_flushed_=runtime_history_reset_=false;epoch_=0;context_=nullptr;return Result::ok;
+    }
+};
+
+enum class MixerKind:uint8_t {parameter,timeline};
+struct MixerOwner {void* actor=nullptr;void* player=nullptr;void* instance=nullptr;Handle graph{},playable{};MixerKind kind=MixerKind::parameter;uint16_t index=0xffff;};
+struct ManagedMixerApi {
+    bool (*mapped)(const void*,size_t,bool)=nullptr;bool (*is_type)(void*,const char*)=nullptr;
+    uint32_t (*retain)(void*)=nullptr;void* (*target)(uint32_t)=nullptr;void (*release)(uint32_t)=nullptr;
+    size_t (*array_length)(void*)=nullptr;void* (*array_data)(void*)=nullptr;
+    bool (*held_fenced)(void*,const MixerOwner&)=nullptr;
+    // Resolve only this original ActorPlayer's exact base/layer/timeline slot.
+    // New timeline instances require an authorized original Root rebuild token.
+    bool (*resolve)(void*,const MixerOwner&,MixerOwner&)=nullptr;
+    bool (*allow_rebuilt)(void*,const MixerOwner&,const MixerOwner&)=nullptr;
+    bool (*callbacks_safe)(void*,const MixerOwner&)=nullptr;
+};
+// Factory-clean persistent default/layer ParamMixers are supported. Keeping
+// their empty native layer records preserves every handle lifetime. A previous
+// home/ADV clip queue needs a separate logical clone/remap and is rejected here
+// before any export mutation; ResetParam destroys twelve handles, so it is not
+// an acceptable scalar rewind. TimelineMixer is rebuilt by its real producer.
+class ManagedMixerSnapshot {
+    ManagedMixerApi api_{};void* context_=nullptr;MixerOwner source_{};uint32_t roots_[3]{};
+    void* layers_=nullptr;Handle layer_{};void* delegates_[2]{};
+    uint8_t scalars_[40]{};int32_t timeline_inputs_=0,timeline_index_=0;double timeline_delay_=0;
+    bool captured_=false,restored_=false;const char* error_="none";
+    static bool same(Handle a,Handle b){return a.handle==b.handle&&a.version==b.version;}
+    Result fail(Result r,const char* code){error_=code;return r;}
+    template<class T>bool read(const void* p,size_t at,T& value)const{if(!p||!api_.mapped(static_cast<const uint8_t*>(p)+at,sizeof(T),false))return false;::memcpy(&value,static_cast<const uint8_t*>(p)+at,sizeof(T));return true;}
+    bool shape(MixerOwner& now){
+        if(!roots_[2]||api_.target(roots_[2])!=source_.player)return false;
+        if(!api_.resolve(context_,source_,now)||now.actor!=source_.actor||now.player!=source_.player||now.kind!=source_.kind||now.index!=source_.index||!same(now.graph,source_.graph))return false;
+        const char* type=now.kind==MixerKind::parameter?"VL.Playables.VLAnimationClipParamMixerPlayable":"VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable";
+        if(!now.instance||!api_.is_type(now.instance,type)||!api_.held_fenced(context_,now))return false;
+        if(now.instance!=source_.instance||!same(now.playable,source_.playable))return now.kind==MixerKind::timeline&&api_.allow_rebuilt(context_,source_,now);
+        return roots_[0]&&api_.target(roots_[0])==source_.instance;
+    }
+    bool clean(void* p,bool compare){
+        void *array=nullptr,*pass=nullptr,*param=nullptr,*layer_param=nullptr,*previous=nullptr;int32_t count=0;Handle layer{};void* delegates[2]{};
+        if(!read(p,24,layer)||!read(p,40,array)||!read(p,48,count)||!read(p,56,pass)||!read(p,72,param)||!read(p,80,layer_param)||!read(p,88,previous)
+            ||!read(p,112,delegates[0])||!read(p,120,delegates[1])||count||pass||param||layer_param||previous
+            ||!array||!api_.is_type(array,"System.Array")||api_.array_length(array)!=4)return false;
+        void* data=api_.array_data(array);if(!data||!api_.mapped(data,4*48,false))return false;
+        for(size_t i=0;i<4*48;++i)if(static_cast<const uint8_t*>(data)[i])return false;
+        if(compare&&(array!=layers_||!same(layer,layer_)||delegates[0]!=delegates_[0]||delegates[1]!=delegates_[1]||!roots_[1]||api_.target(roots_[1])!=array))return false;
+        if(!compare){layers_=array;layer_=layer;delegates_[0]=delegates[0];delegates_[1]=delegates[1];}
+        return true;
+    }
+    void scalar_copy(void* object,bool restore){
+        constexpr uint16_t offsets[]={16,20,48,64,96,100,104};constexpr uint16_t bytes[]={4,1,4,4,4,4,1};size_t at=0;
+        for(size_t i=0;i<7;++i){if(restore)::memcpy(static_cast<uint8_t*>(object)+offsets[i],scalars_+at,bytes[i]);else ::memcpy(scalars_+at,static_cast<uint8_t*>(object)+offsets[i],bytes[i]);at+=bytes[i];}
+    }
+public:
+    ManagedMixerSnapshot()=default;ManagedMixerSnapshot(const ManagedMixerSnapshot&)=delete;ManagedMixerSnapshot& operator=(const ManagedMixerSnapshot&)=delete;
+    const char* error()const{return error_;}bool captured()const{return captured_;}
+    Result capture(ManagedMixerApi api,void* context,MixerOwner owner){
+        if(captured_){return fail(Result::invalid,"actor_mixer_already_captured");}
+        clear();api_=api;context_=context;source_=owner;
+        if(!api_.mapped||!api_.is_type||!api_.retain||!api_.target||!api_.release||!api_.array_length||!api_.array_data||!api_.held_fenced||!api_.resolve||!api_.allow_rebuilt||!api_.callbacks_safe||!owner.actor||!owner.player||!owner.instance||!owner.graph.handle||!owner.playable.handle)
+            return fail(Result::invalid,"actor_mixer_api_unavailable");
+        roots_[0]=api_.retain(owner.instance);roots_[2]=api_.retain(owner.player);MixerOwner now{};
+        if(!roots_[0]||!roots_[2]||api_.target(roots_[2])!=owner.player||!shape(now)||now.instance!=owner.instance)return fail(Result::stale,"actor_mixer_owner_changed");
+        if(owner.kind==MixerKind::parameter){
+            if(!clean(owner.instance,false)||!api_.callbacks_safe(context_,owner))return fail(Result::unsupported,"actor_mixer_existing_default_queue_unsupported");
+            roots_[1]=api_.retain(layers_);if(!roots_[1]||api_.target(roots_[1])!=layers_||!api_.mapped(owner.instance,128,true))return fail(Result::stale,"actor_mixer_state_unmapped");
+            scalar_copy(owner.instance,false);
+        }else{
+            if(!read(owner.instance,16,timeline_delay_)||!read(owner.instance,24,timeline_inputs_)||!read(owner.instance,48,timeline_index_)
+                ||!__builtin_isfinite(timeline_delay_)||timeline_inputs_<0||timeline_inputs_>4096||timeline_index_<0||timeline_index_>timeline_inputs_)
+                return fail(Result::unsupported,"actor_timeline_mixer_layout_invalid");
+        }
+        captured_=true;restored_=false;return Result::ok;
+    }
+    Result validate(){if(!captured_)return fail(Result::invalid,"actor_mixer_snapshot_missing");MixerOwner now{};
+        if(!shape(now))return fail(Result::stale,"actor_mixer_owner_changed");
+        if(now.kind==MixerKind::parameter&&(!clean(now.instance,true)||!api_.callbacks_safe(context_,now)))return fail(Result::stale,"actor_mixer_default_queue_changed");
+        if(now.kind==MixerKind::timeline){int32_t inputs=0,index=0;if(!read(now.instance,24,inputs)||!read(now.instance,48,index)||inputs!=timeline_inputs_||index!=timeline_index_)
+            {return fail(Result::stale,"actor_timeline_mixer_factory_differs");}}
+        return Result::ok;
+    }
+    Result reset(){Result r=validate();if(r!=Result::ok)return r;MixerOwner now{};if(!shape(now))return fail(Result::stale,"actor_mixer_owner_changed");
+        if(now.kind==MixerKind::parameter){constexpr size_t offsets[]={16,48,64,96,100};const uint32_t zero=0;for(size_t at:offsets)::memcpy(static_cast<uint8_t*>(now.instance)+at,&zero,4);*(static_cast<uint8_t*>(now.instance)+104)=0;}
+        else{const double zero=0;::memcpy(static_cast<uint8_t*>(now.instance)+16,&zero,8);}return Result::ok;
+    }
+    Result restore(){Result r=validate();if(r!=Result::ok)return r;if(restored_)return Result::ok;MixerOwner now{};if(!shape(now))return fail(Result::stale,"actor_mixer_owner_changed");
+        if(now.kind==MixerKind::parameter)scalar_copy(now.instance,true);
+        else ::memcpy(static_cast<uint8_t*>(now.instance)+16,&timeline_delay_,8);
+        restored_=true;return Result::ok;
+    }
+    void clear(){for(auto root:roots_)if(root&&api_.release)api_.release(root);for(auto& root:roots_)root=0;api_={};context_=nullptr;source_={};layers_=nullptr;layer_={};delegates_[0]=delegates_[1]=nullptr;captured_=restored_=false;error_="none";}
+};
+
+namespace temporal = idoly_mp4_native_temporal;
+struct TemporalBinding {
+    temporal::Api api{};const temporal::Layout* layouts=nullptr;size_t layout_count=0;
+    temporal::Input nodes[512]{};size_t node_count=0;
+    ManagedMixerApi mixer_api{};MixerOwner mixers[16]{};size_t mixer_count=0;
+    int32_t (*input_count)(Handle*,Method*)=nullptr;
+    void (*input)(Handle*,int32_t,Handle*,Method*)=nullptr;
+    float (*weight_get)(Handle*,int32_t,Method*)=nullptr;
+    void (*weight_set)(Handle*,int32_t,float,Method*)=nullptr;
+};
+// All nodes include zero-weight/default branches. The checkpoint restores exact
+// surviving node histories, authorized producer remaps and original edge weights;
+// it never rewrites native graph links or copies former Playable handles.
+class GraphTemporalScope {
+    struct Edge {uint16_t parent=0,index=0,child=0xffff;float weight=0;};
+    struct Image {
+        TemporalBinding binding{};temporal::SourceTemporalSnapshot<512> native;
+        ManagedMixerSnapshot mixers[16]{};size_t mixer_count=0;
+        Edge edges[4096]{};size_t edge_count=0;uint64_t epoch=0;temporal::Handle graph{};
+        Image(const TemporalBinding& b,uint64_t e,Handle g):binding(b),native(b.api,b.layouts,b.layout_count),epoch(e),graph{g.handle,g.version,0}{}
+    };
+    Image* image_=nullptr;bool captured_=false,restored_=false;const char* error_="none";
+    static Handle actor_handle(temporal::Handle h){return {h.slot,h.version,h.padding};}
+    static temporal::Handle native_handle(Handle h){return {h.handle,h.version,h.padding};}
+    Result fail(Result r,const char* code){error_=code;return r;}
+    bool ready(const TemporalBinding& b)const{return b.layouts&&b.layout_count==5&&b.node_count&&b.node_count<=512
+        &&b.mixer_count<=16&&b.input_count&&b.input&&b.weight_get&&b.weight_set&&b.api.begin_fence&&b.api.fence_held&&b.api.end_fence
+        &&b.api.source_current&&b.api.inventory_exact&&b.api.remap&&b.api.manager_quiescent;}
+    bool boundary(const temporal::Lease& lease)const{
+        const auto& a=image_->binding.api;
+        return lease.epoch==image_->epoch&&lease.ticket&&a.fence_held(a.context,lease)
+            &&a.source_current(a.context,image_->epoch)&&a.manager_quiescent(a.context,lease);
+    }
+    struct Fence {
+        const temporal::Api& a;temporal::Lease lease{};bool acquired=false;
+        Fence(const temporal::Api& api,uint64_t epoch):a(api){acquired=a.begin_fence(a.context,epoch,lease);}
+        ~Fence(){if(lease.ticket)a.end_fence(a.context,lease);}
+    };
+    bool resolve(temporal::Input* targets){
+        const auto& b=image_->binding;
+        for(size_t i=0;i<b.node_count;++i){targets[i]=b.nodes[i];
+            if(b.nodes[i].lifetime==temporal::Lifetime::rebuilt_logical){
+                temporal::Input now{};
+                if(!b.api.remap(b.api.context,image_->epoch,b.nodes[i],now)||now.kind!=b.nodes[i].kind
+                    ||now.lifetime!=b.nodes[i].lifetime||!temporal::same(now.logical,b.nodes[i].logical))return false;
+                targets[i]=now;
+            }
+            for(size_t j=0;j<i;++j){if(temporal::same(targets[j].handle,targets[i].handle))return false;}
+        }
+        return b.api.inventory_exact(b.api.context,image_->graph,targets,b.node_count);
+    }
+    bool edges_current(temporal::Input* targets){
+        const auto& b=image_->binding;size_t edge=0;
+        for(size_t i=0;i<b.node_count;++i){Handle parent=actor_handle(targets[i].handle);const int32_t count=b.input_count(&parent,nullptr);
+            if(count<0||count>128)return false;
+            for(int32_t j=0;j<count;++j){
+                if(edge==image_->edge_count)return false;
+                const auto& expected=image_->edges[edge++];Handle child{};b.input(&parent,j,&child,nullptr);
+                if(expected.parent!=i||expected.index!=j)return false;
+                if(expected.child==0xffff){if(child.handle)return false;}
+                else if(expected.child>=b.node_count||!temporal::same(native_handle(child),targets[expected.child].handle))return false;
+            }
+        }
+        return edge==image_->edge_count;
+    }
+public:
+    GraphTemporalScope()=default;GraphTemporalScope(const GraphTemporalScope&)=delete;GraphTemporalScope& operator=(const GraphTemporalScope&)=delete;
+    ~GraphTemporalScope(){clear();}
+    const char* error()const{return error_;}bool captured()const{return captured_;}
+    size_t bytes()const{return image_?sizeof(Image):0;}
+    Result capture(TemporalBinding binding,uint64_t epoch,Handle graph,size_t budget){
+        if(captured_)return Result::ok;
+        if(image_||!epoch||!graph.handle||!ready(binding))return fail(Result::unsupported,"actor_temporal_binding_unavailable");
+        if(sizeof(Image)>budget)return fail(Result::unsupported,"actor_temporal_snapshot_too_large");
+        void* memory=::malloc(sizeof(Image));if(!memory)return fail(Result::failed,"actor_temporal_allocation_failed");
+        image_=new(idoly_mp4_actor_placement::Address{memory})Image(binding,epoch,graph);
+        Fence fence(binding.api,epoch);if(!fence.acquired||!boundary(fence.lease))return fail(Result::stale,"actor_temporal_fence_unavailable");
+        for(size_t i=0;i<binding.mixer_count;++i){image_->mixer_count=i+1;
+            const Result result=image_->mixers[i].capture(binding.mixer_api,binding.api.context,binding.mixers[i]);
+            if(result!=Result::ok)return fail(result,image_->mixers[i].error());}
+        for(size_t i=0;i<binding.node_count;++i){Handle parent=actor_handle(binding.nodes[i].handle);const int32_t count=binding.input_count(&parent,nullptr);
+            if(count<0||count>128)return fail(Result::unsupported,"actor_temporal_edge_limit");
+            for(int32_t j=0;j<count;++j){
+                if(image_->edge_count==4096)return fail(Result::unsupported,"actor_temporal_edge_limit");
+                Handle child{};binding.input(&parent,j,&child,nullptr);uint16_t child_index=0xffff;
+                if(child.handle){for(size_t k=0;k<binding.node_count;++k){if(temporal::same(native_handle(child),binding.nodes[k].handle))child_index=static_cast<uint16_t>(k);}
+                    if(child_index==0xffff)return fail(Result::unsupported,"actor_temporal_incomplete_graph");}
+                const float weight=binding.weight_get(&parent,j,nullptr);
+                if(!__builtin_isfinite(weight))return fail(Result::unsupported,"actor_temporal_weight_nonfinite");
+                image_->edges[image_->edge_count++]={static_cast<uint16_t>(i),static_cast<uint16_t>(j),child_index,weight};
+            }
+        }
+        if(!boundary(fence.lease)||!image_->native.capture(epoch,image_->graph,binding.nodes,binding.node_count)||!image_->native.component_closed())
+            return fail(Result::unsupported,"actor_temporal_native_capture_failed");
+        captured_=true;restored_=false;return Result::ok;
+    }
+    Result reset_runtime_history(){
+        if(!captured_||!image_)return fail(Result::invalid,"actor_temporal_snapshot_missing");
+        auto& b=image_->binding;Fence fence(b.api,image_->epoch);
+        if(!fence.acquired||!boundary(fence.lease))return fail(Result::stale,"actor_temporal_fence_unavailable");
+        for(size_t i=0;i<image_->mixer_count;++i){const Result result=image_->mixers[i].validate();if(result!=Result::ok)return fail(result,image_->mixers[i].error());}
+        for(size_t i=0;i<image_->mixer_count;++i){const Result result=image_->mixers[i].reset();if(result!=Result::ok)return fail(result,image_->mixers[i].error());}
+        return Result::ok;
+    }
+    Result preflight_restore(){
+        if(!captured_||!image_)return fail(Result::invalid,"actor_temporal_snapshot_missing");
+        auto& b=image_->binding;Fence fence(b.api,image_->epoch);temporal::Input targets[512]{};
+        if(!fence.acquired||!boundary(fence.lease)||!resolve(targets)||!edges_current(targets))return fail(Result::stale,"actor_temporal_graph_changed");
+        for(size_t i=0;i<image_->mixer_count;++i){const Result result=image_->mixers[i].validate();if(result!=Result::ok)return fail(result,image_->mixers[i].error());}
+        if(!image_->native.validate_scalar_component())return fail(Result::stale,"actor_temporal_native_admission_failed");
+        return boundary(fence.lease)?Result::ok:fail(Result::stale,"actor_temporal_owner_changed");
+    }
+    Result restore(){
+        if(!captured_||!image_)return fail(Result::invalid,"actor_temporal_snapshot_missing");
+        if(restored_)return Result::ok;
+        auto& b=image_->binding;Fence fence(b.api,image_->epoch);temporal::Input targets[512]{};
+        if(!fence.acquired||!boundary(fence.lease)||!resolve(targets)||!edges_current(targets))return fail(Result::stale,"actor_temporal_graph_changed");
+        for(size_t i=0;i<image_->mixer_count;++i){const Result result=image_->mixers[i].validate();if(result!=Result::ok)return fail(result,image_->mixers[i].error());}
+        if(!image_->native.validate_scalar_component())return fail(Result::stale,"actor_temporal_native_admission_failed");
+        for(size_t i=0;i<image_->mixer_count;++i){const Result result=image_->mixers[i].restore();if(result!=Result::ok)return fail(result,image_->mixers[i].error());}
+        // All edge targets are preflighted before native cleanup/scalar writes.
+        // The helper separately preflights every native node/clip binding.
+        if(!image_->native.restore_scalar_component())return fail(Result::failed,"actor_temporal_native_restore_failed");
+        if(!boundary(fence.lease))return fail(Result::stale,"actor_temporal_owner_changed");
+        for(size_t i=0;i<image_->edge_count;++i){const auto& e=image_->edges[i];Handle parent=actor_handle(targets[e.parent].handle);
+            if(!boundary(fence.lease))return fail(Result::stale,"actor_temporal_owner_changed");
+            b.weight_set(&parent,e.index,e.weight,nullptr);
+            if(!boundary(fence.lease)||b.weight_get(&parent,e.index,nullptr)!=e.weight)return fail(Result::failed,"actor_temporal_weight_restore_failed");
+        }
+        restored_=true;return Result::ok;
+    }
+    bool component_closed()const{return captured_&&image_&&image_->native.component_closed();}
+    void clear(){if(image_){image_->~Image();::free(image_);}image_=nullptr;captured_=restored_=false;error_="none";}
+};
+
 struct StateApi {
     // These contextual callbacks prove the selected source, original installed
     // routes, held native clock, and root pose. They are mandatory, not no-op
@@ -292,6 +1389,18 @@ struct StateApi {
     void (*local_scale)(void*, Vector3*, Method*) = nullptr;
     void (*set_local_position_rotation)(void*, const Vector3*, const Quaternion*, Method*) = nullptr;
     void (*set_local_scale)(void*, const Vector3*, Method*) = nullptr;
+    // Exact current owned native clock has consumed logical_serial-1. This
+    // publication witness is checked after the native kernel, when its deltas
+    // are nonzero; a held-clock predicate is deliberately insufficient.
+    bool (*clock_granted)(void*, uint64_t logical_serial) = nullptr;
+    bool (*node_supported)(void*, const Owner&, Handle) = nullptr;
+    bool (*graph_playing)(Handle*,Method*) = nullptr;
+    void (*graph_play)(Handle*,Method*) = nullptr;
+    void (*graph_stop)(Handle*,Method*) = nullptr;
+    // -1 unverified, 0 legitimately inactive/output-weight-zero, 1 an active
+    // AlwaysAnimate target whose installed owned job must consume this step.
+    int32_t (*job_expected)(void*,const Owner&) = nullptr;
+    bool (*temporal_binding)(void*,const Owner&,TemporalBinding&) = nullptr;
 };
 struct StateLayout {
     size_t cached_ptr = 0x10, native_animator_job = 0x238;
@@ -325,22 +1434,26 @@ class Scope {
         Buffer buffers[4]{};
         uint8_t saved_job[actor_job_bytes]{};
         int32_t previous_mode = -1;
+        bool previous_playing=false,playing_captured=false;
         bool mode_changed = false, captured = false;
         uint32_t transforms_root = 0;
         void* transforms_array = nullptr;
         void* root_transform = nullptr;
         PoseEntry* poses = nullptr;
         size_t pose_count = 0;
+        GraphTemporalScope temporal;
         TimeEntry* times = nullptr;
         size_t time_count = 0;
     };
     StateApi api_{};
     StateLayout layout_{};
     WorkerGate* gate_ = nullptr;
+    PresentationScope* presentation_ = nullptr;
     Actor actors_[max_owned_jobs]{};
     size_t count_ = 0, bytes_ = 0, warmed_ = 0;
     void* context_ = nullptr;
-    uint64_t epoch_ = 0, serial_ = 0, simulation_serial_ = 0;
+    uint64_t epoch_ = 0, serial_ = 0, simulation_serial_ = 0, prepared_serial_ = 0, checked_simulation_serial_ = 0;
+    uint32_t expected_jobs_=0,completed_jobs_=0;bool step_failed_=false;
     bool configured_ = false, published_ = false, reset_started_ = false,
         reset_done_ = false, changed_native_ = false, restored_ = false,
         zero_pose_prepared_ = false, witness_captured_ = false;
@@ -369,7 +1482,7 @@ class Scope {
             && api_.playable_input_count && api_.playable_input && api_.playable_time
             && api_.root_transform && api_.actor_transforms && api_.array_length && api_.array_data
             && api_.transform_parent && api_.local_position && api_.local_rotation && api_.local_scale
-            && api_.set_local_position_rotation && api_.set_local_scale;
+            && api_.set_local_position_rotation && api_.set_local_scale && api_.clock_granted;
     }
     bool roots_current(const Actor& actor) const {
         void* values[5] = {actor.source.actor, actor.source.extension, actor.source.rig,
@@ -436,6 +1549,23 @@ class Scope {
             return fail(Result::stale, "actor_state_fence_unmapped");
         if (group || version) return fail(Result::waiting, "actor_state_fence_pending");
         if (!owner_current(actor)) return fail(Result::stale, "actor_state_owner_changed");
+        return Result::ok;
+    }
+    Result prepared_fence_current(Actor& actor) {
+        // Preparation already completed the actual stored handle. Native
+        // TimeManager.Update contains no actor evaluation. Do not execute a
+        // new Complete after its clock grant: an unexpected new job means the
+        // publication window changed and the step must be aborted.
+        if (!owner_current(actor)) return fail(Result::stale, "actor_state_owner_changed");
+        uintptr_t native = 0;
+        if (!read(actor.source.animator, layout_.cached_ptr, native)
+            || native != actor.native_animator || !native)
+            return fail(Result::stale, "actor_state_animator_native_changed");
+        void* handle = reinterpret_cast<void*>(native + layout_.native_animator_job);
+        uint64_t group = 0; int32_t version = 0;
+        if (!api_.mapped(handle, 16, true) || !read(handle, 0, group) || !read(handle, 8, version))
+            return fail(Result::stale, "actor_state_fence_unmapped");
+        if (group || version) return fail(Result::stale, "actor_state_fence_changed_after_prepare");
         return Result::ok;
     }
     Result inspect_job(Actor& actor, bool initial) {
@@ -597,6 +1727,8 @@ class Scope {
         for (size_t i = 0; i < actor.time_count; ++i)
             if (same(actor.times[i].playable, playable)) return Result::ok;
         if (actor.time_count == max_playables) return fail(Result::unsupported, "actor_state_playable_limit");
+        if(presentation_&&(!api_.node_supported||!api_.node_supported(context_,actor.source,playable)))
+            return fail(Result::unsupported,"actor_state_graph_job_unsupported");
         const double time = api_.playable_time(&playable, nullptr);
         if (!__builtin_isfinite(time) || __builtin_fabs(time) > 36000)
             return fail(Result::unsupported, "actor_state_playable_time_invalid");
@@ -662,11 +1794,24 @@ class Scope {
         return Result::ok;
     }
     Result hold_gate() {
+        if (presentation_) {const Result p=presentation_->hold();if(p!=Result::ok)return fail(p,presentation_->error());}
         const Result result = fence_all(); if (result != Result::ok) return result;
         if (gate_->stats().readers)
             return fail(Result::waiting, "actor_state_gate_readers_pending");
         if (published_ && gate_->hold(epoch_, true) != GateResult::ok)
             return fail(Result::stale, "actor_state_gate_changed");
+        prepared_serial_ = 0;
+        if(reset_done_&&simulation_serial_>checked_simulation_serial_&&!step_failed_&&api_.job_expected){
+            uint32_t expected=0,completed=0;
+            for(size_t i=0;i<count_;++i){const auto& actor=actors_[i];
+                const int32_t active=api_.job_expected(context_,actor.source);
+                if(active<0||active>1){step_failed_=true;return fail(Result::unsupported,"actor_state_job_expectation_unverified");}
+                if(active){++expected;if(gate_->consumed(actor.key,epoch_,serial_))++completed;}
+            }
+            expected_jobs_=expected;completed_jobs_=completed;
+            if(completed!=expected){step_failed_=true;return fail(Result::failed,"actor_state_job_step_missing");}
+            checked_simulation_serial_=simulation_serial_;
+        }
         return Result::ok;
     }
     void free_storage() {
@@ -677,9 +1822,12 @@ class Scope {
             ::free(actor.times); actor.times = nullptr;
             if (actor.transforms_root) api_.gc_free(actor.transforms_root);
             for (auto root : actor.roots) if (root) api_.gc_free(root);
-            actor = Actor{};
+            actor.~Actor();
+            new(idoly_mp4_actor_placement::Address{&actor})Actor{};
         }
-        count_ = bytes_ = warmed_ = 0; context_ = nullptr; epoch_ = serial_ = simulation_serial_ = 0;
+        count_ = bytes_ = warmed_ = 0; context_ = nullptr; presentation_ = nullptr;
+        epoch_ = serial_ = simulation_serial_ = prepared_serial_ = checked_simulation_serial_ = 0;
+        expected_jobs_=completed_jobs_=0;step_failed_=false;
         configured_ = published_ = reset_started_ = reset_done_ = changed_native_ = restored_
             = zero_pose_prepared_ = witness_captured_ = false;
     }
@@ -690,6 +1838,23 @@ public:
     const char* error() const { return error_; }
     size_t warmed_steps() const { return warmed_; }
     bool active() const { return configured_; }
+    bool bind_presentation(PresentationScope* presentation) {
+        if (!configured_ || published_ || !presentation || !presentation->active() || presentation_ || !api_.node_supported || !api_.graph_playing || !api_.graph_play || !api_.graph_stop || !api_.job_expected || !api_.temporal_binding) return false;
+        presentation_ = presentation;return true;
+    }
+    bool presentation_bound() const { return presentation_ && presentation_->active(); }
+    uint64_t completed_simulation_serial()const{return checked_simulation_serial_;}
+    uint32_t expected_actor_jobs()const{return expected_jobs_;}
+    uint32_t completed_actor_jobs()const{return completed_jobs_;}
+    bool actor_step_failed()const{return step_failed_;}
+    Result verify_completed_step(){return hold_frame();}
+    // Aborting a partial multi-owner grant must close future entrants even
+    // after the selected scene witness is stale. This touches our storage only.
+    void revoke_grants() {
+        prepared_serial_=0;
+        if(gate_&&epoch_)gate_->revoke(epoch_);
+        if(presentation_)presentation_->revoke_grants();
+    }
     bool configure(StateApi api, WorkerGate* gate, const Owner* owners, size_t count,
             void* context, uint64_t epoch, StateLayout layout = {}) {
         if (configured_ || !gate || !owners || !count || count > max_owned_jobs || !context || !epoch) return false;
@@ -715,6 +1880,8 @@ public:
             if (!api_.graph_mode(&actor.source.graph, &mode) || mode < 0 || mode > 3)
                 return fail(Result::unsupported, "actor_state_graph_mode_unavailable");
             if (actor.previous_mode == -1) actor.previous_mode = mode;
+            if(api_.graph_playing&&!actor.playing_captured){actor.previous_playing=api_.graph_playing(&actor.source.graph,nullptr);actor.playing_captured=true;}
+            if(presentation_){const Result graph=capture_times(actor);if(graph!=Result::ok)return graph;}
         }
         const Result mode = mode_current(); if (mode != Result::ok) return mode;
         const Result held = hold_gate(); if (held != Result::ok) return held;
@@ -735,6 +1902,11 @@ public:
         Result status = ensure_held(); if (status != Result::ok) return status;
         if (!published_) return fail(Result::invalid, "actor_state_not_quiesced");
         status = hold_gate(); if (status != Result::ok) return status;
+        if (presentation_) {
+            Owner owners[max_owned_jobs]{};for(size_t i=0;i<count_;++i)owners[i]=actors_[i].source;
+            status=presentation_->flush_source(owners,count_);if(status!=Result::ok)return fail(status,presentation_->error());
+            status=presentation_->capture();if(status!=Result::ok)return fail(status,presentation_->error());
+        }
         for (size_t i = 0; i < count_; ++i) {
             auto& actor = actors_[i]; if (actor.captured) continue;
             status = inspect_job(actor, false); if (status != Result::ok) return status;
@@ -747,6 +1919,13 @@ public:
                 if (!buffer.saved) return fail(Result::failed, "actor_state_snapshot_allocation_failed");
                 bytes_ += buffer.bytes;
                 ::memcpy(buffer.saved, reinterpret_cast<void*>(buffer.data), buffer.bytes);
+            }
+            if(presentation_&&!actor.temporal.captured()){
+                TemporalBinding binding{};
+                if(!api_.temporal_binding(context_,actor.source,binding))return fail(Result::unsupported,"actor_temporal_binding_unavailable");
+                status=actor.temporal.capture(binding,epoch_,actor.source.graph,max_snapshot_bytes-bytes_);
+                if(status!=Result::ok)return fail(status,actor.temporal.error());
+                bytes_+=actor.temporal.bytes();
             }
             status = capture_pose(actor); if (status != Result::ok) return status;
             actor.captured = true;
@@ -783,6 +1962,8 @@ public:
             // selected spring solver is gated. Keep pose restoration duty
             // before entering that original callback.
             changed_native_ = true;
+            if(presentation_){status=presentation_->reset_runtime_history();if(status!=Result::ok)return fail(status,presentation_->error());}
+            if(presentation_)for(size_t i=0;i<count_;++i){status=actors_[i].temporal.reset_runtime_history();if(status!=Result::ok)return fail(status,actors_[i].temporal.error());}
             status = api_.prepare_zero_pose(context_); if (status != Result::ok) return status;
             if (!owner_current()) return fail(Result::stale, "actor_state_owner_changed");
             zero_pose_prepared_ = true;
@@ -790,6 +1971,11 @@ public:
         if (!__builtin_isfinite(api_.root_time(context_)) || __builtin_fabs(api_.root_time(context_)) > 0.000001)
             return fail(Result::unsupported, "actor_state_warmup_root_not_zero");
         if (!reset_started_) {
+            status=hold_gate();if(status!=Result::ok)return status;
+            if (presentation_) {
+                Owner owners[max_owned_jobs]{};for(size_t i=0;i<count_;++i)owners[i]=actors_[i].source;
+                status=presentation_->initialize(owners,count_);if(status!=Result::ok)return fail(status,presentation_->error());
+            }
             for (size_t i = 0; i < count_; ++i) {
                 auto& actor = actors_[i];
                 status = inspect_job(actor, false); if (status != Result::ok) return status;
@@ -837,6 +2023,10 @@ public:
         }
         if (warmed_ != warmup_steps) return fail(Result::waiting, "actor_state_warmup_pending");
         for (size_t i = 0; i < count_; ++i) {
+            if(api_.graph_playing&&!api_.graph_playing(&actors_[i].source.graph,nullptr)){
+                api_.graph_play(&actors_[i].source.graph,nullptr);
+                if(!owner_current()||!api_.graph_playing(&actors_[i].source.graph,nullptr))return fail(Result::failed,"actor_state_private_graph_start_failed");
+            }
             api_.graph_set_mode(&actors_[i].source.graph, 1, nullptr);
             int32_t mode = -1;
             if (!api_.graph_mode(&actors_[i].source.graph, &mode) || mode != 1)
@@ -857,17 +2047,81 @@ public:
         }
         if (gate_->grant(++serial_, epoch_, true) != GateResult::ok)
             return fail(Result::stale, "actor_state_gate_changed");
+        if(presentation_){status=presentation_->grant(simulation_serial);if(status!=Result::ok){gate_->revoke(epoch_);return fail(status,presentation_->error());}}
         simulation_serial_ = simulation_serial; error_ = "none"; return Result::ok;
+    }
+    Result prepare_grant(uint64_t simulation_serial) {
+        if(step_failed_)return fail(Result::failed,"actor_state_prior_job_step_missing");
+        Result status = ensure_held(); if (status != Result::ok) return status;
+        if (!reset_done_ || !published_ || !simulation_serial
+            || simulation_serial_ == ~uint64_t(0) || simulation_serial != simulation_serial_ + 1
+            || serial_ == ~uint64_t(0))
+            return fail(Result::invalid, "actor_state_simulation_grant_invalid");
+        status = hold_gate(); if (status != Result::ok) return status;
+        for (size_t i = 0; i < count_; ++i) {
+            status = inspect_job(actors_[i], false); if (status != Result::ok) return status;
+            int32_t mode = -1;
+            if (!api_.graph_mode(&actors_[i].source.graph, &mode) || mode != 1)
+                return fail(Result::stale, "actor_state_graph_mode_changed");
+        }
+        // Nothing is published and neither logical nor worker serial is
+        // consumed. A native F8 rejection can safely prepare this same step.
+        prepared_serial_ = simulation_serial; error_ = "none"; return Result::ok;
+    }
+    Result commit_grant(uint64_t simulation_serial) {
+        if(step_failed_)return fail(Result::failed,"actor_state_prior_job_step_missing");
+        if (!configured_ || !reset_done_ || !published_ || !simulation_serial
+            || prepared_serial_ != simulation_serial || simulation_serial_ == ~uint64_t(0)
+            || simulation_serial != simulation_serial_ + 1 || serial_ == ~uint64_t(0))
+            return fail(Result::invalid, "actor_state_simulation_grant_not_prepared");
+        if (!owner_current() || !api_.routes_ready(context_))
+            return fail(Result::stale, "actor_state_owner_changed");
+        if (!api_.clock_granted(context_, simulation_serial))
+            return fail(Result::waiting, "actor_state_clock_grant_not_consumed");
+        if (gate_->stats().readers)
+            return fail(Result::stale, "actor_state_readers_changed_after_prepare");
+        for (size_t i = 0; i < count_; ++i) {
+            Result status = prepared_fence_current(actors_[i]); if (status != Result::ok) return status;
+            status = inspect_job(actors_[i], false); if (status != Result::ok) return status;
+            int32_t mode = -1;
+            if (!api_.graph_mode(&actors_[i].source.graph, &mode) || mode != 1)
+                return fail(Result::stale, "actor_state_graph_mode_changed");
+        }
+        if (!owner_current() || !api_.clock_granted(context_, simulation_serial))
+            return fail(Result::stale, "actor_state_clock_grant_changed");
+        const uint64_t worker_serial = serial_ + 1;
+        if (gate_->grant(worker_serial, epoch_, true) != GateResult::ok)
+            return fail(Result::stale, "actor_state_gate_changed");
+        if(presentation_){const Result p=presentation_->grant(simulation_serial);if(p!=Result::ok){gate_->revoke(epoch_);return fail(p,presentation_->error());}}
+        serial_ = worker_serial; simulation_serial_ = simulation_serial; prepared_serial_ = 0;
+        error_ = "none"; return Result::ok;
     }
     Result restore() {
         Result status = ensure_held(); if (status != Result::ok) return status;
         if (restored_) return Result::ok;
         status = hold_gate(); if (status != Result::ok) return status;
+        if(presentation_&&presentation_->captured()){status=presentation_->validate();if(status!=Result::ok)return fail(status,presentation_->error());}
+        // Restore stopped/playing ownership before temporal/managed/physical
+        // history. Stop is a source lifecycle mutation here, never a fence.
+        for(size_t i=0;i<count_;++i){auto& actor=actors_[i];
+            if(actor.playing_captured&&api_.graph_playing(&actor.source.graph,nullptr)!=actor.previous_playing){
+                if(actor.previous_playing)api_.graph_play(&actor.source.graph,nullptr);else api_.graph_stop(&actor.source.graph,nullptr);
+                if(!owner_current()||api_.graph_playing(&actor.source.graph,nullptr)!=actor.previous_playing)return fail(Result::failed,"actor_state_source_graph_playstate_restore_failed");
+            }
+        }
+        if(presentation_)for(size_t i=0;i<count_;++i){auto& actor=actors_[i];
+            if(actor.mode_changed){api_.graph_set_mode(&actor.source.graph,3,nullptr);int32_t mode=-1;
+                if(!api_.graph_mode(&actor.source.graph,&mode)||mode!=3)return fail(Result::failed,"actor_state_graph_hold_failed");}
+        }
         // Validate the entire selected set before any raw history/pose write.
         for (size_t i = 0; i < count_; ++i) if (changed_native_ && actors_[i].captured) {
             status = inspect_job(actors_[i], false); if (status != Result::ok) return status;
             if (!pose_current(actors_[i])) return fail(Result::stale, "actor_state_pose_owner_changed");
         }
+        if(presentation_)for(size_t i=0;i<count_;++i)if(actors_[i].temporal.captured()){
+            status=actors_[i].temporal.preflight_restore();if(status!=Result::ok)return fail(status,actors_[i].temporal.error());}
+        if(presentation_)for(size_t i=0;i<count_;++i)if(actors_[i].temporal.captured()){
+            status=actors_[i].temporal.restore();if(status!=Result::ok)return fail(status,actors_[i].temporal.error());}
         for (size_t i = 0; i < count_; ++i) {
             auto& actor = actors_[i];
             if (actor.mode_changed) {
@@ -899,6 +2153,7 @@ public:
                     return fail(Result::failed, "actor_state_graph_restore_failed");
             }
         }
+        if(presentation_&&presentation_->captured()){status=presentation_->restore();if(status!=Result::ok)return fail(status,presentation_->error());}
         restored_ = true; error_ = "none"; return Result::ok;
     }
     Result release(bool scene_owned) {
@@ -915,6 +2170,7 @@ public:
             gate_->detach_stale(epoch_);
             if (gate_->stats().readers) return fail(Result::waiting, "actor_state_gate_readers_pending");
         }
+        if(presentation_){const Result p=presentation_->release(scene_owned);if(p!=Result::ok)return fail(p,presentation_->error());}
         free_storage(); error_ = "none"; return Result::ok;
     }
 };

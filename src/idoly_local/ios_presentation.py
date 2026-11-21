@@ -11,9 +11,9 @@ import tempfile
 from zipfile import ZipFile
 
 PROFILE = Path(__file__).resolve().parents[2] / "client-presentation/ios/profile.json"
-PROFILE_SHA256 = "60ecc264edd253ed482519c1035264647c8e67b960fe5b3b99e1c909d9a309b0"
-PROFILE_ENTRY_COUNT = 137
-PROFILE_HOOK_COUNT = 62
+PROFILE_SHA256 = "b007a0a16be57d19a7da5757113829517b00dad3087d32656efe509b665ffadc"
+PROFILE_ENTRY_COUNT = 170
+PROFILE_HOOK_COUNT = 95
 SOURCE_SHA256 = "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
 BOOTSTRAP_SHA256 = "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce"
 IPA_SHA256 = "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848"
@@ -109,6 +109,28 @@ def render_header(plan, profile=None):
     return "\n".join(lines).encode("utf-8")
 
 
+def _profile_native_relays(profile):
+    primary = profile.get("native_relay_region")
+    extra = profile.get("native_extra_relay_regions", [])
+    if primary is None:
+        if extra:
+            raise ValueError("Extra native relays require the original clock relay")
+        return []
+    if type(primary) is not dict or primary.get("name") != "mp4_native_time" or type(extra) is not list or len(extra) > 1:
+        raise ValueError("Native relay identities differ")
+    result = [primary, *extra]
+    if extra and (type(extra[0]) is not dict or extra[0].get("name") != "mp4_fixed_loop_condition"):
+        raise ValueError("Fixed-loop native relay identity differs")
+    fields = {"name", "rva", "bytes", "original_zero", "gap_begin", "gap_end", "after_section", "before_section"}
+    for item in result:
+        if set(item) != fields or any(type(item.get(key)) is not int for key in ("rva", "bytes", "gap_begin", "gap_end")):
+            raise ValueError("Native relay schema differs")
+    spans = sorted((item["rva"], item["rva"] + item["bytes"]) for item in result)
+    if any(a[1] > b[0] for a, b in zip(spans, spans[1:])):
+        raise ValueError("Native relays overlap")
+    return result
+
+
 def make_plan():
     profile = load_profile()
     target = profile["target"]
@@ -125,16 +147,17 @@ def make_plan():
             or slot < data["section_end"] or slot < data["rva"] + data["filesize"]
             or slot + 8 * PROFILE_HOOK_COUNT > data["rva"] + data["vmsize"]):
         raise ValueError("Gateway would overlap original code or data sections")
-    relay = profile["native_relay_region"]
-    native = profile["aliases"][relay["name"]]
-    if (relay["name"] != "mp4_native_time" or relay["bytes"] != 8
-            or relay["original_zero"] is not True
-            or native["relay_in"] != relay["rva"] or native["relay_out"] != relay["rva"] + 4
-            or relay["rva"] % 4 or relay["rva"] < relay["gap_begin"]
-            or relay["rva"] + 8 > relay["gap_end"]
-            or relay["gap_end"] > text["rva"] + text["filesize"]
-            or relay["rva"] + 8 > cave):
-        raise ValueError("Native gateway relay extent differs")
+    relays = _profile_native_relays(profile)
+    relay_by_name = {item["name"]: item for item in relays}
+    for relay in relays:
+        native = profile["aliases"][relay["name"]]
+        if (relay["bytes"] != 8 or relay["original_zero"] is not True
+                or native["relay_in"] != relay["rva"] or native["relay_out"] != relay["rva"] + 4
+                or relay["rva"] % 4 or relay["rva"] < relay["gap_begin"]
+                or relay["rva"] + 8 > relay["gap_end"]
+                or relay["gap_end"] > text["rva"] + text["filesize"]
+                or relay["rva"] + 8 > cave):
+            raise ValueError("Native gateway relay extent differs")
     plan = {"schema": 1, "target": "ios-arm64-6.1.1-156", "source_unity_sha256": SOURCE_SHA256,
             "bootstrap_unity_sha256": BOOTSTRAP_SHA256, "metadata_sha256": METADATA_SHA256,
             "uuid": target["uuid"], "profile_sha256": PROFILE_SHA256,
@@ -144,7 +167,7 @@ def make_plan():
         c, s = cave + 32 * i, slot + 8 * i
         displaced = bytes.fromhex(row["prefix16"][:8])
         relay_in, relay_out = row.get("relay_in"), row.get("relay_out")
-        if (relay_in is None) != (relay_out is None) or (relay_in is not None and name != relay["name"]):
+        if (relay_in is None) != (relay_out is None) or ((relay_in is not None) != (name in relay_by_name)):
             raise ValueError("Native gateway relay identity differs")
         code = gateway(c, s, row["rva"], displaced, return_target=relay_out)
         plan["entries"][name] = {"rva": row["rva"], "original16": row["prefix16"],
@@ -162,8 +185,8 @@ def make_plan():
 
 def _validate_native_relay(native, profile):
     """Verify the relay is in original RX TEXT alignment slack, never a section."""
-    relay = profile.get("native_relay_region")
-    if relay is None:
+    relays = _profile_native_relays(profile)
+    if not relays:
         return  # Small synthetic ownership fixtures have no Mach-O relay.
     if len(native) < 32 or struct.unpack_from("<II", native) != (0xFEEDFACF, 0x0100000C):
         raise ValueError("Original iOS Mach-O header differs")
@@ -199,14 +222,17 @@ def _validate_native_relay(native, profile):
                         raise ValueError("Original iOS TEXT section extent differs")
                     sections[section] = (start, start + extent)
         cursor += length
-    start, end = relay["rva"], relay["rva"] + relay["bytes"]
-    if (cursor != 32 + size or uuid != profile["target"]["uuid"] or text is None
-            or end > min(text) or end > len(native)
-            or sections.get(relay["after_section"], (None, None))[1] != relay["gap_begin"]
-            or sections.get(relay["before_section"], (None, None))[0] != relay["gap_end"]
-            or any(start < hi and lo < end for lo, hi in sections.values())
-            or any(native[start:end])):
-        raise ValueError("Original iOS native relay mapping or zero slack differs")
+    if cursor != 32 + size or uuid != profile["target"]["uuid"] or text is None:
+        raise ValueError("Original iOS native relay image differs")
+    for relay in relays:
+        start, end = relay["rva"], relay["rva"] + relay["bytes"]
+        if (end > min(text) or end > len(native)
+                or sections.get(relay["after_section"], (None, None))[1] != relay["gap_begin"]
+                or sections.get(relay["before_section"], (None, None))[0] != relay["gap_end"]
+                or any(start < hi and lo < end for lo, hi in sections.values())
+                or any(native[start:end])):
+            raise ValueError("Original iOS native relay mapping or zero slack differs")
+
 
 
 def validate_plan(plan):
@@ -298,8 +324,8 @@ def prepare_presentation(source, plan_output, header_output):
                for r in profile["aliases"].values()]
     cave = profile["gateway_region"]
     regions.append((cave["rva"], cave["rva"] + cave["bytes"], b"\0" * cave["bytes"]))
-    relay = profile["native_relay_region"]
-    regions.append((relay["rva"], relay["rva"] + relay["bytes"], b"\0" * relay["bytes"]))
+    for relay in _profile_native_relays(profile):
+        regions.append((relay["rva"], relay["rva"] + relay["bytes"], b"\0" * relay["bytes"]))
     seen = [bytearray(end - start) for start, end, _ in regions]
     with ZipFile(source) as archive:
         with archive.open(UNITY) as stream:

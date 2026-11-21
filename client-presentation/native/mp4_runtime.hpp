@@ -35,6 +35,8 @@ static std::atomic<bool> native_engine_clock_installed{false};
 // Published only by the completed owned frame coordinator. Dependency
 // helpers alone cannot enable export or fall back to the old manual loop.
 static bool (*native_owned_boundary)(void*,double)=nullptr;
+static uint64_t native_entries=0;
+inline bool native_render_boundary(void*,double);
 inline bool install_native_clock(idoly_mp4_engine_clock::Api api){
     if(native_engine_clock_installed.load(std::memory_order_acquire)||!native_engine_clock.install(api))return false;
     native_engine_clock_installed.store(true,std::memory_order_release);return true;
@@ -43,6 +45,7 @@ inline bool native_clock_available(){return native_engine_clock_installed.load(s
 inline idoly_mp4_engine_clock::Scope& native_clock_scope(){return native_engine_clock;}
 inline bool native_clock_tick(void* manager,double wall){
     if(!native_clock_available())return false;
+    if(native_entries<9007199254740991ULL)++native_entries;
     // Passive installation is transparent. The owned frame coordinator is
     // connected only after scene/dependent-state and worker coverage validate.
     // This wrapper owns the native call; the bridge must never call it again
@@ -192,6 +195,10 @@ inline void increment_counter(uint64_t& value){if(value<9007199254740991ULL)++va
 static idoly_mp4_game::GameAdapter game;
 static idoly_mp4_selection::Capture selection;
 struct NativeSceneControl {
+    Result (*admit)(void*)=nullptr;
+    Result (*prepare_step)(void*,uint64_t,double)=nullptr;
+    void (*attest)(void*,bool*,bool*)=nullptr;
+    const char* (*error)(void*)=nullptr;
     // Main-thread operations on the exact retained scene. hold must finish
     // the previously authorized jobs before closing its worker grant; grant
     // receives a zero-based simulation tick (not an output frame index) and
@@ -202,18 +209,41 @@ struct NativeSceneControl {
     // Ownership alone is insufficient when rebasing global fixed time. The
     // verified scene host must also close the concrete physics dependencies.
     bool (*source_clock_restorable)(void*)=nullptr;
-    bool valid()const{return hold&&grant&&source_clock_restorable;}
+    // Pure scalar/atomic cancellation of future permits, even after clock or
+    // scene ownership is lost. This is NOT a native-job completion fence.
+    void (*revoke_grants)(void*)=nullptr;
+    // Arm only an unrendered, already accepted tick. This must not reopen
+    // simulation/Brain/Actor grants while capture setup waits under held time.
+    Result (*prepare_render)(void*,uint64_t)=nullptr;
+    // End temporary global/RNG/render-reference leases before an original
+    // replacement initializer runs. Separate from pure grant revocation.
+    void (*restore_globals_before_source_change)(void*)=nullptr;
+    // Scalar-only invalidation after a failed synchronous handoff. It MUST
+    // NOT retry a Unity setter/owner query or let an old finally write globals
+    // after original replacement initialization. Keep unresolved resources.
+    void (*abandon_globals)(void*)=nullptr;
+    bool valid()const{return admit&&prepare_step&&attest&&error&&hold&&grant&&source_clock_restorable&&revoke_grants&&prepare_render&&restore_globals_before_source_change&&abandon_globals;}
 };
 static NativeSceneControl native_scene_control;
 static void* native_scene_context=nullptr;
 static bool native_scene_installed=false,native_scene_required=false;
 inline void require_native_scene_pipeline(){native_scene_required=true;}
+inline const char* native_scene_error(const char* fallback){
+    const char* code=native_scene_control.error?native_scene_control.error(native_scene_context):nullptr;
+    if(!code||!code[0]||!strcmp(code,"none"))return fallback;
+    for(size_t i=0;;++i){
+        if(i>=95)return fallback;
+        const char c=code[i];if(!c)return code;
+        if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'))return fallback;
+    }
+}
 static uint64_t selected_identity=0;
 // Invalidation is scalar-only so lifecycle/host callbacks never enter Unity
 // or acquire the queue owner lock while holding the control lock.
 static uint64_t queue_selection_generation=1;
 static char queue_selection_reason[65]="selected_mv_snapshot_missing";
 static void* observed_presenter_scope=nullptr; // Compared only on Unity.
+static void* observed_camera_controller_scope=nullptr;
 inline void invalidate_queue_selection_locked(const char* reason){
     if(queue_selection_generation)queue_selection_generation=queue_selection_generation==~uint64_t(0)?0:queue_selection_generation+1;
     snprintf(queue_selection_reason,sizeof(queue_selection_reason),"%s",queue_selection_generation?reason:"selection_generation_exhausted");
@@ -224,7 +254,7 @@ inline void invalidate_queue_selection(const char* reason="selected_mv_snapshot_
 inline void queue_tick();
 inline void queue_refresh_candidate(Result readiness);
 static bool installed=false;
-enum class Stage{idle,begin,audio_request,audio_response,audio_load,audio_mix,audio_finalize,frame_request,frame_wait,frame_submit,finishing,retiring};
+enum class Stage{idle,begin,scene_acquire,audio_setup,render_setup,audio_request,audio_response,audio_load,audio_mix,audio_finalize,frame_request,frame_wait,frame_submit,finishing,retiring};
 // BEGIN_MP4_NATIVE_FRAME_SCHEDULE
 // The simulation proposal and the encoder acknowledgment are separate commits.
 // A rejected native clock grant must never roll back a previously accepted
@@ -282,14 +312,124 @@ struct Job {
     struct stat pcm_identity{},bundle_identity{};
     uint64_t finalized_audio=0;
     uint32_t expected_width=0,expected_height=0;
+    FrameSchedule schedule{};
+    uint64_t generation=0,source_generation=0;
+    uint64_t acquired_source_identity=0;
+    double acquired_source_time=0;
+    bool acquired_source_valid=false,acquired_source_paused=false;
+    uint64_t restored_source_identity=0;
+    double restored_source_time=0;
+    bool restored_source_valid=false,restored_source_paused=false;
+    uint64_t last_rendered_tick=0,rendered_ticks=0;
+    bool have_rendered_tick=false,prewarm_requested=false,prewarm_inflight=false,prewarm_completed=false;
+    bool automatic=false,scene_acquired=false,auto_started=false,capture_requested=false,
+        scene_restored=false,clock_lost=false,restoration_verified=false,
+        clock_settings_restored=false,camera_audio_restored=false,dependent_state_restored=false;
+    bool cancel_encoder_pending=false;
     bool pcm_owned=false,bundle_owned=false,pending_broker=false,audible_energy=false,captured=false,terminal_success=false,terminal_cancel=false;
 };
 static Job job;
+static uint64_t next_job_generation=1;
+struct NativeObservation {
+    uint64_t loop=0,identity=0,tick=0,accepted=0,acquired_identity=0;
+    uint64_t restored_identity=0;
+    uint64_t rendered_ticks=0;
+    uint32_t render_width=0,render_height=0;
+    double source_time=0,acquired_time=0,restored_time=0;
+    bool source_valid=false,source_paused=false,photography=false,active=false,rendered=false,
+        clock_owned=false,clock_held=false,has_tick=false,restored=false,
+        clock_restored=false,camera_audio=false,dependents=false,world=false,
+        acquired_valid=false,acquired_paused=false,restored_valid=false,restored_paused=false;
+};
+static NativeObservation native_observation;
+// Read-only source admission evidence is independent of enabling rendering.
+// HTTP only reads this cached copy; it never calls Unity or a component probe.
+struct NativeSceneDiagnosticPart {int32_t result=-1;char error[96]="not_probed";};
+struct NativeSceneDiagnostics {
+    bool available=false;
+    uint64_t identity=0,loop=0;
+    NativeSceneDiagnosticPart parts[4]{}; // Actor, Camera, Stage, World.
+};
+using NativeSceneDiagnosticProbe=void(*)(void*,NativeSceneDiagnostics*);
+static NativeSceneDiagnosticProbe native_diagnostic_probe=nullptr;
+static void* native_diagnostic_context=nullptr;
+static NativeSceneDiagnostics native_diagnostics;
+inline bool install_native_scene_diagnostic_probe(void* context,NativeSceneDiagnosticProbe probe){
+    if(!context||!probe)return false;
+    pthread_mutex_lock(&control_mutex);
+    const bool vacant=!native_diagnostic_probe;
+    if(vacant){native_diagnostic_context=context;native_diagnostic_probe=probe;}
+    const bool same=native_diagnostic_context==context&&native_diagnostic_probe==probe;
+    pthread_mutex_unlock(&control_mutex);return same;
+}
+inline void refresh_native_diagnostics(bool source_valid,uint64_t identity,bool active){
+    if(active)return; // Never invoke fresh admission against a captured export.
+    static bool sampled=false,sampled_source_valid=false;
+    static uint64_t sampled_at=0,sampled_identity=0,sampled_generation=0;
+    NativeSceneDiagnosticProbe probe=nullptr;void* context=nullptr;uint64_t generation=0;
+    pthread_mutex_lock(&control_mutex);
+    probe=native_diagnostic_probe;context=native_diagnostic_context;generation=queue_selection_generation;
+    pthread_mutex_unlock(&control_mutex);
+    const uint64_t now=milliseconds();
+    if(sampled&&source_valid==sampled_source_valid&&identity==sampled_identity&&generation==sampled_generation&&now>=sampled_at&&now-sampled_at<250)return;
+    NativeSceneDiagnostics next{};
+    if(source_valid&&probe&&context){
+        try{probe(context,&next);}
+        catch(...){next={};for(auto&part:next.parts)snprintf(part.error,sizeof(part.error),"diagnostic_observer_exception");}
+    }else for(auto&part:next.parts)snprintf(part.error,sizeof(part.error),"%s",source_valid?"diagnostic_probe_unavailable":"selected_source_not_ready");
+    next.identity=identity;next.loop=native_entries;
+    // Bound and escape the only strings crossing from host diagnostics to JSON.
+    for(auto&part:next.parts){
+        part.error[sizeof(part.error)-1]=0;
+        for(char* c=part.error;*c;++c)if(!((*c>='a'&&*c<='z')||(*c>='A'&&*c<='Z')||(*c>='0'&&*c<='9')||*c=='_'))*c='_';
+    }
+    pthread_mutex_lock(&control_mutex);native_diagnostics=next;pthread_mutex_unlock(&control_mutex);
+    sampled=true;sampled_source_valid=source_valid;sampled_at=now;sampled_identity=identity;sampled_generation=generation;
+}
+static bool last_admission_verified=false;
+inline bool busy_stage();
+inline void refresh_native_observation(bool rendered=false){
+    NativeObservation next{};
+    next.source_valid=installed&&game.observe_source(next.source_time,next.source_paused);
+    next.photography=game.scene_kind()==idoly_mp4_game::SceneKind::photography;
+    next.identity=selected_identity;next.loop=native_entries;next.active=job.automatic&&busy_stage();next.rendered=rendered;
+    next.clock_owned=native_engine_clock.active();next.clock_held=native_engine_clock.held();
+    next.has_tick=job.automatic&&job.schedule.next_tick()>0;
+    next.tick=next.has_tick?job.schedule.next_tick()-1:0;next.accepted=job.schedule.accepted_frames();
+    next.render_width=job.status.source_width;next.render_height=job.status.source_height;
+    next.rendered_ticks=job.rendered_ticks;
+    next.restored=job.restoration_verified;next.clock_restored=job.clock_settings_restored;
+    next.camera_audio=job.camera_audio_restored;next.dependents=job.dependent_state_restored;
+    next.world=last_admission_verified;
+    next.acquired_valid=job.acquired_source_valid;next.acquired_identity=job.acquired_source_identity;
+    next.acquired_time=job.acquired_source_time;next.acquired_paused=job.acquired_source_paused;
+    next.restored_valid=job.restored_source_valid;next.restored_identity=job.restored_source_identity;
+    next.restored_time=job.restored_source_time;next.restored_paused=job.restored_source_paused;
+    refresh_native_diagnostics(next.source_valid,next.identity,next.active);
+    pthread_mutex_lock(&control_mutex);native_observation=next;pthread_mutex_unlock(&control_mutex);
+}
 inline bool busy_stage(){return job.stage!=Stage::idle;}
 inline void publish(){pthread_mutex_lock(&control_mutex);const bool ready=published.ready;published=job.status;published.ready=ready;published.pausable=job.stage!=Stage::idle&&job.stage!=Stage::finishing&&job.stage!=Stage::retiring;pthread_mutex_unlock(&control_mutex);}
 inline void progress(){job.activity=milliseconds();}
 inline void phase(const char* value){snprintf(job.status.phase,sizeof(job.status.phase),"%s",value);progress();publish();}
 inline void stable_error(const char* value){size_t at=0;for(;value&&value[at]&&at<sizeof(job.status.error)-1;++at){char c=value[at];job.status.error[at]=((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')?c:'_';}job.status.error[at]=0;if(!at)snprintf(job.status.error,sizeof(job.status.error),"export_failed");}
+inline void terminal(const char*,bool);
+inline void export_observer_failed(){
+    if(!busy_stage()){
+        pthread_mutex_lock(&control_mutex);published.ready=false;native_observation.source_valid=false;
+        snprintf(readiness_error,sizeof(readiness_error),"%s","original_observation_exception");pthread_mutex_unlock(&control_mutex);return;
+    }
+    job.terminal_success=false;stable_error("original_callback_exception");
+    if(job.automatic&&native_scene_control.revoke_grants)native_scene_control.revoke_grants(native_scene_context);
+    try{terminal("original_callback_exception",false);}catch(...){job.stage=Stage::retiring;}
+    try{
+        if(job.automatic&&native_engine_clock.active()){
+            if(native_engine_clock.hold_for_boundary(native_engine_clock.latest_manager(),native_engine_clock.last_wall_timestamp())
+                &&job.scene_acquired)native_scene_control.hold(native_scene_context);
+        }
+    }catch(...){job.clock_lost=true;}
+    game.discard_capture();
+}
 inline bool active_broker() {
     int fd=openat(job.config.root,"active",rd|nofollow|nonblock);uint8_t raw[16]{};
     const bool good=private_file(fd,16)&&exact_read(fd,raw,sizeof(raw))&&!memcmp(raw,"IDMPACT1",8)&&get64(raw+8)==job.config.epoch;
@@ -299,16 +439,92 @@ inline bool active_broker() {
 inline bool cleanup_bundle(){if(!game.private_audio_quiescent())return false;if(job.bundle_owned){unlink_owned(job.config.prepared,job.bundle_name,job.bundle_identity);job.bundle_owned=false;}return true;}
 inline void terminal(const char* error,bool cancelled=false) {
     if(job.stage==Stage::idle||job.stage==Stage::retiring)return;
+    if(job.automatic&&native_scene_control.revoke_grants)native_scene_control.revoke_grants(native_scene_context);
     job.terminal_success=false;job.terminal_cancel=cancelled;stable_error(error);
-    if(game.restore()!=Result::ok)stable_error(game.last_error());
+    if(!job.automatic&&game.restore()!=Result::ok)stable_error(game.last_error());
     if(job.encoder)job.api.cancel(job.encoder);
     job.stage=Stage::retiring;phase(cancelled?"cancelling":"failed");
 }
 inline bool valid_options(const Options& o){return o.fps_den==1&&(o.fps_num==30||o.fps_num==60)&&(o.codec==1||o.codec==2)&&idoly_mp4_output::bitrate(o.bitrate)&&o.audio_bitrate==192000&&idoly_mp4_output::requested_dimensions(o.output_width,o.output_height);}
-inline Result probe_readiness(Snapshot& snapshot){
+// Typed outer URP hooks call these on Unity only. Neither CapturePass nor an
+// arbitrary end-camera notification can consume a render ticket. An output
+// tick waits for its capture request before its FIRST draw; held retries reuse
+// that image and never run dithering/grain/history a second time.
+inline bool native_render_job_current(){
+    if(!installed||!job.automatic||!job.scene_acquired||!busy_stage()||job.stage==Stage::retiring
+        ||job.clock_lost||!native_engine_clock.active()||job.source_generation!=game.owned_scene_generation())return false;
+    pthread_mutex_lock(&control_mutex);
+    const bool allowed=!cancel_pending&&requested_pause_reason==IDMP4_PAUSE_NONE;
+    pthread_mutex_unlock(&control_mutex);return allowed;
+}
+inline uint64_t claim_native_prewarm_render(){
+    if(!native_render_job_current()||job.auto_started||!job.prewarm_requested||job.prewarm_inflight
+        ||(job.stage!=Stage::render_setup&&job.stage!=Stage::frame_request)||!native_engine_clock.held())return 0;
+    job.prewarm_requested=false;job.prewarm_inflight=true;return job.generation;
+}
+// A typed outer render hook can wait for a previous private GPU resource fence
+// before it has called the original renderer. Return that unconsumed claim;
+// WAIT is neither a completed prewarm nor a failed draw. Never call this after
+// entering the original outer renderer, which instead owes complete(...).
+inline void release_native_prewarm_render_claim(uint64_t generation){
+    if(generation!=job.generation||!job.prewarm_inflight)return;
+    job.prewarm_inflight=false;
+    if(job.automatic&&job.scene_acquired&&!job.auto_started&&job.stage!=Stage::retiring
+        &&job.source_generation==game.owned_scene_generation())job.prewarm_requested=true;
+}
+inline void complete_native_prewarm_render(uint64_t generation,bool succeeded){
+    if(generation!=job.generation||!job.prewarm_inflight)return;
+    job.prewarm_inflight=false;
+    if(!succeeded){terminal("selected_camera_prewarm_failed");return;}
+    if(job.stage==Stage::retiring)return;
+    if(job.source_generation!=game.owned_scene_generation()){terminal("selected_scene_changed");return;}
+    job.prewarm_completed=true;progress();
+}
+inline uint64_t native_simulation_render_generation(uint64_t tick){
+    if(!native_render_job_current()||!job.auto_started||!job.schedule.next_tick()
+        ||tick!=job.schedule.next_tick()-1||!native_engine_clock.have_tick()||native_engine_clock.tick()!=tick
+        ||(job.have_rendered_tick&&job.last_rendered_tick==tick))return 0;
+    if(job.schedule.awaiting_frame()&&!job.capture_requested)return 0;
+    return job.generation;
+}
+inline void complete_native_simulation_render(uint64_t generation,uint64_t tick,bool succeeded){
+    if(generation!=job.generation||!job.automatic||!job.auto_started||job.stage==Stage::retiring)return;
+    if(!succeeded){terminal("selected_camera_render_failed");return;}
+    if(job.have_rendered_tick&&job.last_rendered_tick==tick)return; // Outer/end-camera deduplication.
+    if(job.source_generation!=game.owned_scene_generation()||!job.schedule.next_tick()
+        ||tick!=job.schedule.next_tick()-1||tick!=job.rendered_ticks){terminal("native_render_tick_out_of_order");return;}
+    job.have_rendered_tick=true;job.last_rendered_tick=tick;++job.rendered_ticks;progress();
+}
+inline Result probe_readiness(Snapshot& snapshot,bool force_native_admission=true){
+    // Only Unity calls this function. The full native admission allocates
+    // original component/PlayerLoop arrays and traverses owned state islands;
+    // do not repeat that work at display frame rate while merely showing UI.
+    // Snapshot/geometry/queue graphics remain fresh on every idle observation.
+    // A start and the native acquisition boundary ALWAYS run fresh admission.
+    static bool admission_known=false;
+    static uint64_t admission_at=0,admission_generation=0,admission_identity=0;
+    static Result admission_result=Result::waiting;
+    static char admission_error[96]="selected_scene_admission_failed";
     Result result=game.snapshot(snapshot);const char* error=result==Result::ok?"none":game.last_error();
+    if(result!=Result::ok)admission_known=false;
     if(result==Result::ok&&native_scene_required&&!native_scene_installed){
         result=Result::unsupported;error="offline_pipeline_not_verified";
+    }
+    if(result==Result::ok&&native_scene_installed){
+        pthread_mutex_lock(&control_mutex);
+        const uint64_t generation=queue_selection_generation,identity=selected_identity;
+        pthread_mutex_unlock(&control_mutex);
+        const uint64_t now=milliseconds();
+        if(force_native_admission||!admission_known||admission_generation!=generation
+            ||admission_identity!=identity||now<admission_at||now-admission_at>=250){
+            admission_known=false; // An original callback exception must not revive an older positive.
+            admission_result=native_scene_control.admit(native_scene_context);
+            snprintf(admission_error,sizeof(admission_error),"%s",admission_result==Result::ok?"none":
+                native_scene_error("selected_scene_admission_failed"));
+            admission_at=now;admission_generation=generation;admission_identity=identity;admission_known=true;
+        }
+        result=admission_result;error=admission_error;
+        last_admission_verified=result==Result::ok;
     }
     int32_t width=0,height=0;
     if(result==Result::ok&&game.has_source_geometry_probe()){
@@ -381,11 +597,14 @@ inline bool install_native_scene_api(
         idoly_mp4_playback::Dependents dependents,void* context,NativeSceneControl controls,
         idoly_mp4_playback::ShaderLeaseApi shader){
     // Partial dependency installations never enable the new render loop.
-    if(!native_owned_boundary||!context||!controls.valid()||native_scene_installed)return false;
+    if(!context||!controls.valid()||native_scene_installed)return false;
     if(!install_dependent_api(original,dependents,context,shader))return false;
-    native_scene_control=controls;native_scene_context=context;native_scene_installed=true;return true;
+    native_scene_control=controls;native_scene_context=context;
+    native_owned_boundary=native_render_boundary;native_scene_installed=true;return true;
 }
 inline void observe_presenter(void* presenter){if(installed){
+    if(native_scene_installed&&presenter&&presenter!=observed_presenter_scope&&game.automatic())
+        native_scene_control.restore_globals_before_source_change(native_scene_context);
     game.observe_presenter(presenter);void* scope=game.selected_presenter();const uint64_t identity=selection.identity(game.selected_player());
     pthread_mutex_lock(&control_mutex);
     if(scope!=observed_presenter_scope||(identity&&selected_identity&&identity!=selected_identity))
@@ -395,6 +614,8 @@ inline void observe_presenter(void* presenter){if(installed){
 inline void observe_presenter_ended(void* presenter){
     if(!installed)return;
     const bool selected=game.selected_presenter()==presenter;
+    if(native_scene_installed&&game.owns_automatic_source_raw(presenter))
+        native_scene_control.restore_globals_before_source_change(native_scene_context);
     game.release_shader_lease_for_scene(presenter);
     game.observe_presenter_ended(presenter);
     if(selected){pthread_mutex_lock(&control_mutex);selected_identity=0;observed_presenter_scope=nullptr;published.ready=false;
@@ -403,8 +624,42 @@ inline void observe_presenter_ended(void* presenter){
         snprintf(controller_discovery.reason,sizeof(controller_discovery.reason),"%s","selected_mv_ended");
         snprintf(readiness_error,sizeof(readiness_error),"%s","selected_mv_ended");pthread_mutex_unlock(&control_mutex);}
 }
-inline void observe_player_initializing(void* player,void* param){if(installed){game.release_shader_lease_for_scene(player);game.invalidate_owned_scene(player);invalidate_queue_selection("selected_mv_reinitializing");selection.observe(player,param);}}
-inline void observe_photography_initializing(void* player,void* data,void* descriptors){if(installed){game.release_shader_lease_for_scene(player);game.invalidate_owned_scene(player);invalidate_queue_selection("selected_mv_reinitializing");selection.observe_photography(player,data,descriptors);}}
+inline void observe_source_will_change(void* source){
+    if(!installed||!source)return;
+    if(native_scene_installed&&game.owns_automatic_source_raw(source))
+        native_scene_control.restore_globals_before_source_change(native_scene_context);
+    // Return the owned global shader baseline before the original lifecycle
+    // method can initialize a replacement scene. Generation invalidation is
+    // scalar-only; it must not make this old lease outlive the new scene.
+    game.release_shader_lease_for_scene(source);
+    game.invalidate_owned_scene(source);
+    invalidate_queue_selection("selected_mv_reinitializing");
+}
+// A pre-initialize observer is auxiliary to the original game lifecycle. If
+// it throws, the typed host forwards the original exactly once and calls this
+// pure poison path. No Unity restoration/GC/encoder action runs in this catch.
+inline void observe_source_handoff_failed(void* source) noexcept {
+    const bool owned=game.source_handoff_failed(source);
+    if(!owned)return; // Unrelated lifecycle observers cannot poison this MV.
+    if(native_scene_installed){
+        try{native_scene_control.revoke_grants(native_scene_context);}catch(...){}
+        try{native_scene_control.abandon_globals(native_scene_context);}catch(...){}
+    }
+    if(job.automatic&&busy_stage()){
+        job.clock_lost=true;job.terminal_success=false;job.terminal_cancel=false;
+        job.cancel_encoder_pending=true;job.stage=Stage::retiring;
+        stable_error("source_handoff_failed");
+        snprintf(job.status.phase,sizeof(job.status.phase),"%s","failed");
+    }
+    pthread_mutex_lock(&control_mutex);
+    if(job.automatic&&busy_stage())published=job.status;
+    published.ready=false;native_observation.source_valid=false;
+    invalidate_queue_selection_locked("source_handoff_failed");
+    snprintf(readiness_error,sizeof(readiness_error),"%s","source_handoff_failed");
+    pthread_mutex_unlock(&control_mutex);
+}
+inline void observe_player_initializing(void* player,void* param){if(installed){observe_source_will_change(player);selection.observe(player,param);}}
+inline void observe_photography_initializing(void* player,void* data,void* descriptors){if(installed){observe_source_will_change(player);selection.observe_photography(player,data,descriptors);}}
 inline void observe_photography_transition(void* player,void* transition){
     if(!installed)return;
     selection.attach_photography_transition(player,transition);
@@ -413,9 +668,23 @@ inline void observe_photography_transition(void* player,void* transition){
         invalidate_queue_selection_locked("selected_mv_selection_changed");
     selected_identity=identity;pthread_mutex_unlock(&control_mutex);
 }
-inline void observe_camera_controller(void* camera){if(installed)game.observe_camera_controller(camera);}
-inline void capture_pass_did_execute(void* pass,const void*data){if(installed)game.observe_capture_pass(pass,data);}
-inline void camera_did_render(void*camera){if(installed&&job.stage==Stage::frame_wait&&!job.captured&&game.after_camera(camera)){job.captured=true;pthread_mutex_lock(&control_mutex);increment_counter(capture_acks);pthread_mutex_unlock(&control_mutex);}}
+inline void observe_camera_controller(void* camera){if(installed){
+    if(native_scene_installed&&camera&&camera!=observed_camera_controller_scope&&game.automatic())
+        native_scene_control.restore_globals_before_source_change(native_scene_context);
+    game.observe_camera_controller(camera);observed_camera_controller_scope=camera;
+}}
+inline void capture_pass_did_execute(void* pass,const void*data){try{if(installed)game.observe_capture_pass(pass,data);}catch(...){export_observer_failed();}}
+inline void camera_did_render(void*camera){try{if(installed&&job.stage==Stage::frame_wait&&!job.captured
+    &&(!job.automatic||(job.capture_requested&&job.schedule.awaiting_frame()
+        &&job.source_generation==game.owned_scene_generation()))&&game.after_camera(camera)){
+    if(job.automatic&&game.validate_automatic_frame(static_cast<double>(job.frame)*job.options.fps_den/job.options.fps_num)!=Result::ok){
+        terminal(game.last_error());return;
+    }
+    job.captured=true;pthread_mutex_lock(&control_mutex);increment_counter(capture_acks);pthread_mutex_unlock(&control_mutex);}}catch(...){export_observer_failed();}
+    try{if(installed){idoly_mp4_game::SceneWitness witness{};
+        if(game.selected_scene_witness(witness)&&witness.camera==camera)refresh_native_observation(true);
+    }}catch(...){pthread_mutex_lock(&control_mutex);native_observation.source_valid=false;pthread_mutex_unlock(&control_mutex);}
+}
 inline bool camera_delta_override(void*brain,float*delta){return installed&&game.camera_delta_override(brain,delta);}
 
 inline bool begin_job() {
@@ -430,29 +699,36 @@ inline bool begin_job() {
         job.expected_width=pending_queue_width;job.expected_height=pending_queue_height;
         pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;
     }
-    start_pending=false;job.stage=Stage::begin;pthread_mutex_unlock(&control_mutex);
+    start_pending=false;job.stage=Stage::begin;job.automatic=native_scene_required;
+    if(next_job_generation){job.generation=next_job_generation;next_job_generation=next_job_generation==~uint64_t(0)?0:next_job_generation+1;}
+    pthread_mutex_unlock(&control_mutex);
+    if(!job.generation){terminal("export_generation_exhausted");return true;}
     job.api=platform_encoder();job.status.fps_num=job.options.fps_num;job.status.fps_den=job.options.fps_den;job.status.video_codec=job.options.codec;
     if(!job.status.id[0]){uint8_t id[16]{};if(!random_bytes(id,sizeof(id))){terminal("random_unavailable");return true;}hex(id,sizeof(id),job.status.id);}
     if(!job.api.valid()){terminal("platform_encoder_unavailable");return true;}
     if(!active_broker()){terminal("audio_broker_retired");return true;}
     if(probe_readiness(job.snapshot)!=Result::ok){terminal(readiness_error);return true;}
+    if(job.automatic){job.stage=Stage::scene_acquire;phase("preparing_audio");return true;}
+    if(game.begin_manual()!=Result::ok){terminal(game.last_error());return true;}
+    job.stage=Stage::audio_setup;return true;
+}
+inline void setup_audio_job(){
     int32_t source_width=0,source_height=0;const Result geometry=game.source_geometry(source_width,source_height);
     uint32_t output_width=job.options.output_width,output_height=job.options.output_height;
     if(geometry==Result::ok&&!idoly_mp4_output::resolved_dimensions(source_width,source_height,output_width,output_height,output_width,output_height)){
-        terminal("output_geometry_invalid");return true;
+        terminal("output_geometry_invalid");return;
     }
-    if(game.begin_manual()!=Result::ok){terminal(game.last_error());return true;}
     const bool normalize_odd=geometry==Result::ok&&((source_width&1)||(source_height&1));
     if(job.options.output_width||normalize_odd){
-        if(!output_width||!output_height){terminal("output_render_geometry_unavailable");return true;}
-        if(game.set_output_geometry(output_width,output_height)!=Result::ok){terminal(game.last_error());return true;}
+        if(!output_width||!output_height){terminal("output_render_geometry_unavailable");return;}
+        if(game.set_output_geometry(output_width,output_height)!=Result::ok){terminal(game.last_error());return;}
         job.expected_width=output_width;job.expected_height=output_height;
     }
-    for(size_t i=0;i<job.snapshot.audio.count;++i){const auto& c=job.snapshot.audio.clips[i];if(!c.muted&&c.track_gain*c.clip_gain*c.source_gain>0){if(!job.rate)job.rate=static_cast<uint32_t>(c.sample_rate);if(job.rate!=static_cast<uint32_t>(c.sample_rate)){terminal("mixed_sample_rates_unsupported");return true;}}}
-    if(!job.rate){terminal("selected_mv_has_no_audible_music");return true;}
+    for(size_t i=0;i<job.snapshot.audio.count;++i){const auto& c=job.snapshot.audio.clips[i];if(!c.muted&&c.track_gain*c.clip_gain*c.source_gain>0){if(!job.rate)job.rate=static_cast<uint32_t>(c.sample_rate);if(job.rate!=static_cast<uint32_t>(c.sample_rate)){terminal("mixed_sample_rates_unsupported");return;}}}
+    if(!job.rate){terminal("selected_mv_has_no_audible_music");return;}
     job.total_audio=static_cast<uint64_t>(__builtin_llround(job.snapshot.duration_seconds*job.rate));
     job.total_frames=(job.total_audio*job.options.fps_num+static_cast<uint64_t>(job.rate)*job.options.fps_den-1)/(static_cast<uint64_t>(job.rate)*job.options.fps_den);
-    if(!job.total_audio||!job.total_frames||job.total_audio>static_cast<uint64_t>(job.rate)*900){terminal("audio_duration_invalid");return true;}
+    if(!job.total_audio||!job.total_frames||job.total_audio>static_cast<uint64_t>(job.rate)*900){terminal("audio_duration_invalid");return;}
     job.status.total_audio=job.total_audio;job.status.total_frames=job.total_frames;
     snprintf(job.pcm_name,sizeof(job.pcm_name),"%s.pcm",job.status.id);
     char partial_name[48]{},final_name[48]{};
@@ -460,11 +736,11 @@ inline bool begin_job() {
     snprintf(final_name,sizeof(final_name),"%s.mp4",job.status.id);
     if(!join_path(job.pcm_path,sizeof(job.pcm_path),job.config.output,job.pcm_name)
         ||!join_path(job.partial_path,sizeof(job.partial_path),job.config.output,partial_name)
-        ||!join_path(job.final_path,sizeof(job.final_path),job.config.output,final_name)){terminal("export_path_too_long");return true;}
+        ||!join_path(job.final_path,sizeof(job.final_path),job.config.output,final_name)){terminal("export_path_too_long");return;}
     job.pcm=openat(job.config.exports,job.pcm_name,rw|create|exclusive|nofollow,0600);
     job.pcm_owned=job.pcm>=0&&fstat(job.pcm,&job.pcm_identity)==0;
-    if(job.pcm<0||ftruncate(job.pcm,static_cast<int64_t>(job.total_audio*8))!=0){terminal("pcm_file_create_failed");return true;}
-    job.stage=Stage::audio_request;phase("preparing_audio");return true;
+    if(job.pcm<0||ftruncate(job.pcm,static_cast<int64_t>(job.total_audio*8))!=0){terminal("pcm_file_create_failed");return;}
+    job.stage=Stage::audio_request;phase("preparing_audio");
 }
 inline bool request_audio() {
     if(!cleanup_bundle())return false;
@@ -542,34 +818,39 @@ inline void mix_audio() {
 }
 inline void finalize_audio() {
     uint64_t remaining=job.total_audio-job.finalized_audio;size_t frames=static_cast<size_t>(remaining>8192?8192:remaining);
-    if(!frames){if(!job.audible_energy){terminal("selected_music_is_silent");return;}if(fsync(job.pcm)!=0){terminal("pcm_sync_failed");return;}close(job.pcm);job.pcm=-1;job.stage=Stage::frame_request;phase("rendering");return;}
+    if(!frames){if(!job.audible_energy){terminal("selected_music_is_silent");return;}if(fsync(job.pcm)!=0){terminal("pcm_sync_failed");return;}close(job.pcm);job.pcm=-1;job.stage=job.automatic?Stage::render_setup:Stage::frame_request;phase("rendering");return;}
     size_t bytes=frames*8;int64_t offset=static_cast<int64_t>(job.finalized_audio*8);
     if(!transfer_at(job.pcm,job.mixed_pcm,bytes,offset,false)){terminal("pcm_read_failed");return;}
     for(size_t i=0;i<frames*2;++i){float value=job.mixed_pcm[i];if(!__builtin_isfinite(value)){terminal("audio_mix_nonfinite");return;}if(value>0.000000001f||value< -0.000000001f)job.audible_energy=true;job.mixed_pcm[i]=value>1?1:value< -1?-1:value;}
     if(!transfer_at(job.pcm,job.mixed_pcm,bytes,offset,true)){terminal("pcm_write_failed");return;}
     job.finalized_audio+=frames;job.status.audio=job.finalized_audio;progress();publish();
 }
-inline void request_frame() {
-    if(job.frame>=job.total_frames){if(!job.encoder||job.api.finish(job.encoder)<0){terminal("encoder_finish_rejected");return;}job.stage=Stage::finishing;phase("finishing");return;}
-    const double time=static_cast<double>(job.frame)*job.options.fps_den/job.options.fps_num;
-    if(game.evaluate(time)!=Result::ok||game.request_capture()!=Result::ok){terminal(game.last_error());return;}
-    int32_t width=0,height=0;if(game.capture_geometry(width,height)!=Result::ok){terminal(game.last_error());return;}
+inline bool prepare_frame_output(){
+    int32_t width=0,height=0;if(game.capture_geometry(width,height)!=Result::ok){terminal(game.last_error());return false;}
     if((job.expected_width&&job.expected_width!=static_cast<uint32_t>(width))
-        ||(job.expected_height&&job.expected_height!=static_cast<uint32_t>(height))){terminal("queued_capture_geometry_changed");return;}
-    if(!idoly_mp4_output::source_dimensions(static_cast<uint32_t>(width),static_cast<uint32_t>(height))){terminal("capture_geometry_not_supported");return;}
-    if(job.status.source_width&&(job.status.source_width!=static_cast<uint32_t>(width)||job.status.source_height!=static_cast<uint32_t>(height))){terminal("capture_geometry_changed");return;}
+        ||(job.expected_height&&job.expected_height!=static_cast<uint32_t>(height))){terminal("queued_capture_geometry_changed");return false;}
+    if(!idoly_mp4_output::source_dimensions(static_cast<uint32_t>(width),static_cast<uint32_t>(height))){terminal("capture_geometry_not_supported");return false;}
+    if(job.status.source_width&&(job.status.source_width!=static_cast<uint32_t>(width)||job.status.source_height!=static_cast<uint32_t>(height))){terminal("capture_geometry_changed");return false;}
     job.status.source_width=static_cast<uint32_t>(width);job.status.source_height=static_cast<uint32_t>(height);
     job.status.width=job.options.output_width?job.options.output_width:static_cast<uint32_t>(width)&~1U;
     job.status.height=job.options.output_height?job.options.output_height:static_cast<uint32_t>(height)&~1U;
     job.status.video_codec=job.options.codec;
     job.status.video_bitrate=idoly_mp4_output::resolved_bitrate(job.options.bitrate,job.status.width,job.status.height,job.options.fps_num,job.options.codec);
-    if(!job.status.video_bitrate){terminal("invalid_export_options");return;}
+    if(!job.status.video_bitrate){terminal("invalid_export_options");return false;}
     const size_t needed=static_cast<size_t>(width)*static_cast<size_t>(height)*4;
-    if(!job.rgba){job.rgba=static_cast<uint8_t*>(malloc(needed));job.rgba_capacity=needed;if(!job.rgba){terminal("frame_buffer_allocation_failed");return;}}
+    if(!job.rgba){job.rgba=static_cast<uint8_t*>(malloc(needed));job.rgba_capacity=needed;if(!job.rgba){terminal("frame_buffer_allocation_failed");return false;}}
+    if(job.rgba_capacity!=needed){terminal("frame_buffer_geometry_changed");return false;}
     if(job.status.width!=static_cast<uint32_t>(width)||job.status.height!=static_cast<uint32_t>(height)){
-        terminal("output_render_geometry_mismatch");return;
+        terminal("output_render_geometry_mismatch");return false;
     }
-    if(!job.encoder){IDMP4EncoderConfig c{};c.struct_size=sizeof(c);c.abi_version=1;c.width=job.status.width;c.height=job.status.height;c.fps_num=job.options.fps_num;c.fps_den=job.options.fps_den;c.video_codec=job.options.codec;c.video_bitrate=job.status.video_bitrate;c.audio_sample_rate=job.rate;c.audio_channels=2;c.audio_bitrate=job.options.audio_bitrate;c.audio_sample_frames=job.total_audio;c.video_frame_count=job.total_frames;c.pcm_f32_path=job.pcm_path;c.partial_path=job.partial_path;c.final_path=job.final_path;char error[192]{};job.encoder=job.api.create(&c,error,sizeof(error));if(!job.encoder){terminal(error);return;}}
+    if(!job.encoder){IDMP4EncoderConfig c{};c.struct_size=sizeof(c);c.abi_version=1;c.width=job.status.width;c.height=job.status.height;c.fps_num=job.options.fps_num;c.fps_den=job.options.fps_den;c.video_codec=job.options.codec;c.video_bitrate=job.status.video_bitrate;c.audio_sample_rate=job.rate;c.audio_channels=2;c.audio_bitrate=job.options.audio_bitrate;c.audio_sample_frames=job.total_audio;c.video_frame_count=job.total_frames;c.pcm_f32_path=job.pcm_path;c.partial_path=job.partial_path;c.final_path=job.final_path;char error[192]{};job.encoder=job.api.create(&c,error,sizeof(error));if(!job.encoder){terminal(error);return false;}}
+    return true;
+}
+inline void request_frame() {
+    if(job.frame>=job.total_frames){if(!job.encoder||job.api.finish(job.encoder)<0){terminal("encoder_finish_rejected");return;}job.stage=Stage::finishing;phase("finishing");return;}
+    const double time=static_cast<double>(job.frame)*job.options.fps_den/job.options.fps_num;
+    if(game.evaluate(time)!=Result::ok||game.request_capture()!=Result::ok){terminal(game.last_error());return;}
+    if(!prepare_frame_output())return;
     job.captured=false;job.stage=Stage::frame_wait;progress();publish();
 }
 inline void encoder_poll() {
@@ -582,9 +863,16 @@ inline void encoder_poll() {
     if(s.phase==IDMP4_FAILED){terminal(s.error_code);return;}
     if(s.phase==IDMP4_CANCELLED&&job.stage!=Stage::retiring){terminal("encoder_cancelled",true);return;}
     if(s.phase==IDMP4_COMPLETED&&job.stage==Stage::finishing){job.terminal_success=true;job.stage=Stage::retiring;
-        if(game.restore()!=Result::ok){job.terminal_success=false;stable_error(game.last_error());}phase("finishing");}
+        if(!job.automatic&&game.restore()!=Result::ok){job.terminal_success=false;stable_error(game.last_error());}phase("finishing");}
+}
+inline void service_deferred_encoder_cancel(){
+    if(!job.cancel_encoder_pending)return;
+    if(job.encoder)job.api.cancel(job.encoder);
+    job.cancel_encoder_pending=false;
 }
 inline void retire() {
+    if(job.automatic&&!job.scene_restored)return;
+    service_deferred_encoder_cancel();
     if(game.restoration_pending()){
         const Result restored=game.restore();
         if(restored!=Result::ok&&restored!=Result::waiting){
@@ -605,8 +893,313 @@ inline void retire() {
     job.stage=Stage::idle;phase(job.terminal_success?"completed":job.terminal_cancel?"cancelled":"failed");
     pthread_mutex_lock(&control_mutex);control_busy=false;cancel_pending=false;pthread_mutex_unlock(&control_mutex);
 }
-inline void on_unity_tick() {
+// BEGIN_MP4_NATIVE_BOUNDARY
+struct NativeBoundaryCall {bool called=false;};
+static NativeBoundaryCall* active_boundary_call=nullptr;
+inline bool native_boundary_clock_tick(void* manager,double wall,idoly_mp4_engine_clock::Grant grant={}){
+    if(active_boundary_call){
+        if(active_boundary_call->called){terminal("native_clock_double_dispatch");return false;}
+        active_boundary_call->called=true;
+    }
+    return native_engine_clock.native_tick(manager,wall,grant);
+}
+// All source restoration runs at the same native boundary as simulation.
+// Quality.Update only services commands, private audio and encoder completion.
+inline Result restore_owned_scene(void* manager,double wall){
+    if(job.scene_restored)return Result::ok;
+    if(!job.automatic)return Result::invalid;
+    auto& clock=native_engine_clock;
+    if(clock.active()&&!clock.hold_for_boundary(manager,wall))job.clock_lost=true;
+    if(!clock.active())job.clock_lost=true;
+    bool source_owned=false;
+    Result result=Result::ok;
+    if(game.automatic()){
+        if(!job.clock_lost){
+            result=game.prepare_restore();
+            if(result==Result::waiting)return result;
+            if(result!=Result::ok)job.clock_lost=true;
+        }
+        if(!job.clock_lost){
+            source_owned=game.owned_primary_scene_current()
+                &&native_scene_control.source_clock_restorable(native_scene_context);
+            if(!source_owned||!clock.rebase_for_restore(manager,wall,true))job.clock_lost=true;
+        }
+        if(job.clock_lost&&clock.active()){
+            // Cleanup-only release may itself wait for Unity async teardown.
+            // The replacement scene must not inherit our frozen counters.
+            clock.restore(manager,wall,false);
+            job.clock_settings_restored=false;
+        }
+        result=job.clock_lost?game.abandon_automatic("native_clock_or_scene_ownership_lost"):game.restore();
+        if(result==Result::waiting)return result;
+        if(result!=Result::ok){job.terminal_success=false;stable_error(game.last_error());}
+        if(game.restoration_pending()){
+            // A permanent dependency failure cannot be repaired by retrying
+            // raw writes to unknown buffers. Next boundary cleans up only.
+            if(result!=Result::ok)job.clock_lost=true;
+            return Result::waiting;
+        }
+    }else source_owned=!job.clock_lost&&game.owned_primary_scene_current();
+    if(clock.active()){
+        const bool safe=!job.clock_lost&&source_owned;
+        job.clock_settings_restored=clock.restore(manager,wall,safe)&&safe;
+        if(!job.clock_settings_restored){job.terminal_success=false;stable_error(clock.error());}
+    }
+    // Release the native clock BEFORE private bundle/AsyncOperation cleanup;
+    // their original frame-based completion must be allowed to run again.
+    job.scene_restored=!clock.active()&&!game.restoration_pending();
+    if(job.scene_restored&&!job.clock_lost&&source_owned&&result==Result::ok){
+        native_scene_control.attest(native_scene_context,&job.camera_audio_restored,&job.dependent_state_restored);
+        // Record actual source state at this boundary, before ordinary source
+        // playback is allowed to continue. HTTP polling cannot freeze a source
+        // that was originally playing, nor infer restoration from later time.
+        job.restored_source_valid=game.observe_source(job.restored_source_time,job.restored_source_paused);
+        job.restored_source_identity=selected_identity;
+        job.restoration_verified=job.clock_settings_restored&&job.camera_audio_restored&&job.dependent_state_restored
+            &&job.restored_source_valid&&job.acquired_source_valid
+            &&job.restored_source_identity==job.acquired_source_identity
+            &&job.restored_source_paused==job.acquired_source_paused
+            &&std::fabs(job.restored_source_time-job.acquired_source_time)<=.0001;
+        if(!job.restoration_verified){job.terminal_success=false;stable_error("source_restoration_not_verified");}
+    }
+    return job.scene_restored?Result::ok:Result::waiting;
+}
+inline bool native_capture_request(){
+    if(job.capture_requested)return true;
+    const Result capture=game.request_capture();
+    if(capture==Result::waiting)return false;
+    if(capture!=Result::ok){terminal(game.last_error());return false;}
+    if(!prepare_frame_output())return false;
+    job.capture_requested=true;job.captured=false;job.stage=Stage::frame_wait;
+    progress();return true;
+}
+inline bool native_command_hold(){
+    pthread_mutex_lock(&control_mutex);
+    const bool cancelled=cancel_pending,paused=requested_pause_reason!=IDMP4_PAUSE_NONE;
+    if(paused&&!cancelled){pause_acknowledged=true;reset_watchdog_pending=true;}
+    pthread_mutex_unlock(&control_mutex);
+    if(cancelled)terminal("cancelled_by_user",true);
+    return cancelled||paused;
+}
+inline bool native_abort_after_clock(void* manager,double wall,const char* error){
+    native_scene_control.revoke_grants(native_scene_context);
+    terminal(error);
+    if(native_engine_clock.active()&&native_engine_clock.hold_for_boundary(manager,wall)){
+        const Result held=native_scene_control.hold(native_scene_context);
+        if(held!=Result::ok&&held!=Result::waiting)job.clock_lost=true;
+    }else job.clock_lost=true;
+    return false;
+}
+inline bool native_render_boundary_impl(void* manager,double wall){
+    auto& clock=native_engine_clock;
+    // This function owns the sole call to the original clock kernel. None of
+    // its callers may retry the original when this function returns false.
+    if(!job.automatic||!busy_stage())return native_boundary_clock_tick(manager,wall);
+    // Close every prior/future permit before any clock/source check can fail.
+    // A partial aggregate commit must not leave a worker or Mono callback
+    // authorized just because quiescence later rejects a changed owner.
+    native_scene_control.revoke_grants(native_scene_context);
+    pthread_mutex_lock(&control_mutex);
+    const bool cancelled=cancel_pending;
+    const bool paused=requested_pause_reason!=IDMP4_PAUSE_NONE;
+    pthread_mutex_unlock(&control_mutex);
+    if(cancelled)terminal("cancelled_by_user",true);
+    if(clock.active()&&!clock.hold_for_boundary(manager,wall)){
+        job.clock_lost=true;terminal(clock.error());
+    }
+    if(job.scene_acquired&&!job.clock_lost&&job.stage!=Stage::retiring){
+        if(job.source_generation!=game.owned_scene_generation()||!game.owned_primary_scene_current())
+            terminal("selected_scene_changed");
+        else {
+            const Result hold=native_scene_control.hold(native_scene_context);
+            if(hold==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(hold!=Result::ok)terminal(native_scene_error("selected_dependent_hold_failed"));
+        }
+    }
+    if(job.stage==Stage::retiring){
+        service_deferred_encoder_cancel();
+        restore_owned_scene(manager,wall);
+        return native_boundary_clock_tick(manager,wall);
+    }
+    if(paused){
+        pthread_mutex_lock(&control_mutex);
+        pause_acknowledged=true;reset_watchdog_pending=true;
+        pthread_mutex_unlock(&control_mutex);
+        return native_boundary_clock_tick(manager,wall);
+    }
+    if(job.stage==Stage::scene_acquire){
+        if(!clock.active()){
+            const Result admission=native_scene_control.admit(native_scene_context);
+            last_admission_verified=admission==Result::ok;
+            if(admission==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(admission!=Result::ok){terminal(native_scene_error("selected_scene_admission_failed"));return native_boundary_clock_tick(manager,wall);}
+            if(!clock.acquire(manager,wall,60)){
+                if(!strcmp(clock.error(),"engine_clock_engine_paused"))return native_boundary_clock_tick(manager,wall);
+                terminal(clock.error());return native_boundary_clock_tick(manager,wall);
+            }
+        }
+        if(!job.acquired_source_valid){
+            if(!game.observe_source(job.acquired_source_time,job.acquired_source_paused))
+                return native_boundary_clock_tick(manager,wall);
+            job.acquired_source_identity=selected_identity;job.acquired_source_valid=true;
+        }
+        const Result acquired=game.begin_automatic();
+        if(acquired==Result::ok){
+            job.scene_acquired=true;job.source_generation=game.owned_scene_generation();
+            job.stage=Stage::audio_setup;progress();
+        }else if(acquired!=Result::waiting)terminal(game.last_error());
+        return native_boundary_clock_tick(manager,wall);
+    }
+    if(!clock.active()){
+        job.clock_lost=true;terminal("native_clock_ownership_lost");
+        restore_owned_scene(manager,wall);return native_boundary_clock_tick(manager,wall);
+    }
+    if(job.stage==Stage::render_setup){
+        // Materialize/verify the real capture target before consuming frame0.
+        // This preparatory image is never acknowledged as an export frame.
+        const Result requested=game.request_capture();
+        if(requested==Result::ok){
+            const bool prepared=prepare_frame_output();game.discard_capture();
+            if(prepared){job.stage=Stage::frame_request;job.prewarm_requested=!job.prewarm_completed;}
+        }else if(requested==Result::waiting)job.prewarm_requested=true;
+        else terminal(game.last_error());
+        return native_boundary_clock_tick(manager,wall);
+    }
+    if(job.stage!=Stage::frame_request&&job.stage!=Stage::frame_wait&&job.stage!=Stage::frame_submit)
+        return native_boundary_clock_tick(manager,wall);
+    if(!job.auto_started){
+        if(!job.prewarm_completed||job.prewarm_inflight||job.prewarm_requested)
+            return native_boundary_clock_tick(manager,wall);
+        const Result started=game.start_automatic();
+        if(started==Result::waiting)return native_boundary_clock_tick(manager,wall);
+        if(started!=Result::ok){terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
+        if(!native_scene_control.source_clock_restorable(native_scene_context)
+            ||!job.schedule.reset(job.generation,job.options.fps_num,job.total_frames)
+            ||!clock.set_owned_loop_quiescent(true)){
+            terminal("owned_simulation_not_verified");return native_boundary_clock_tick(manager,wall);
+        }
+        job.auto_started=true;progress();
+    }
+    if(job.schedule.next_tick()){
+        const double previous=static_cast<double>(job.schedule.next_tick()-1)/60.;
+        if(game.validate_automatic_frame(previous)!=Result::ok){terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
+        const uint64_t tick=job.schedule.next_tick()-1;
+        if(!job.have_rendered_tick||job.last_rendered_tick!=tick){
+            if(job.schedule.awaiting_frame()&&!job.capture_requested)native_capture_request();
+            if(job.stage!=Stage::retiring&&native_simulation_render_generation(tick)){
+                const Result ready=native_scene_control.prepare_render(native_scene_context,tick);
+                if(ready!=Result::ok&&ready!=Result::waiting)terminal(native_scene_error("selected_render_prepare_failed"));
+            }
+            return native_boundary_clock_tick(manager,wall);
+        }
+    }
+    if(job.schedule.awaiting_frame()){
+        if(!job.capture_requested){
+            native_capture_request();return native_boundary_clock_tick(manager,wall);
+        }
+        if(!job.schedule.pixels_received()){
+            if(!job.captured)return native_boundary_clock_tick(manager,wall);
+            size_t count=0;int32_t width=0,height=0;
+            const Result readback=game.readback_rgba(job.rgba,job.rgba_capacity,count,width,height);
+            if(readback==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(readback!=Result::ok){terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
+            if(count!=job.rgba_capacity||static_cast<uint32_t>(width)!=job.status.width
+                ||static_cast<uint32_t>(height)!=job.status.height
+                ||!job.schedule.readback_received(job.generation,job.frame)){
+                terminal("native_capture_identity_changed");return native_boundary_clock_tick(manager,wall);
+            }
+            job.stage=Stage::frame_submit;progress();
+        }
+        const int append=job.api.append(job.encoder,job.rgba,static_cast<size_t>(job.status.width)*4,job.frame);
+        if(append==IDMP4_RETRY)return native_boundary_clock_tick(manager,wall);
+        if(append!=IDMP4_ACCEPTED||!job.schedule.encoder_accepted(job.generation,job.frame)){
+            terminal("encoder_frame_rejected");return native_boundary_clock_tick(manager,wall);
+        }
+        ++job.frame;job.status.frames=job.frame;job.captured=job.capture_requested=false;
+        job.stage=Stage::frame_request;progress();
+        if(job.schedule.complete()){
+            if(job.api.finish(job.encoder)<0)terminal("encoder_finish_rejected");
+            else {job.stage=Stage::finishing;phase("finishing");}
+            return native_boundary_clock_tick(manager,wall);
+        }
+    }
+    if(native_command_hold())return native_boundary_clock_tick(manager,wall);
+    const auto proposal=job.schedule.propose(job.generation);
+    if(!proposal.advance)return native_boundary_clock_tick(manager,wall);
+    const double seconds=static_cast<double>(proposal.tick)/60.;
+    if(!native_scene_control.source_clock_restorable(native_scene_context)){
+        terminal("native_world_ownership_lost");return native_boundary_clock_tick(manager,wall);
+    }
+    const Result prepared=native_scene_control.prepare_step(native_scene_context,proposal.tick,seconds);
+    if(prepared==Result::waiting)return native_boundary_clock_tick(manager,wall);
+    if(prepared!=Result::ok){
+        terminal(native_scene_error("selected_step_prepare_failed"));return native_boundary_clock_tick(manager,wall);
+    }
+    if(native_command_hold()){
+        native_scene_control.hold(native_scene_context);
+        return native_boundary_clock_tick(manager,wall);
+    }
+    const bool advanced=native_boundary_clock_tick(manager,wall,{true,proposal.tick});
+    if(!advanced){
+        if(strcmp(clock.error(),"engine_clock_engine_paused")){job.clock_lost=true;terminal(clock.error());}
+        else {
+            native_scene_control.hold(native_scene_context);
+        }
+        // No schedule or Actor serial was consumed. The next attempt prepares
+        // this same proposal after the native engine can accept it again.
+        return false;
+    }
+    if(!job.schedule.commit(job.generation,proposal)){
+        return native_abort_after_clock(manager,wall,"native_simulation_grant_failed");
+    }
+    if(game.prepare_automatic_frame(seconds)!=Result::ok){
+        return native_abort_after_clock(manager,wall,game.last_error());
+    }
+    if(native_scene_control.grant(native_scene_context,proposal.tick)!=Result::ok){
+        return native_abort_after_clock(manager,wall,native_scene_error("native_simulation_grant_failed"));
+    }
+    if(proposal.frame>=0){
+        if(static_cast<uint64_t>(proposal.frame)!=job.frame)return native_abort_after_clock(manager,wall,"native_frame_order_mismatch");
+        native_capture_request();
+        if(job.stage==Stage::retiring)return native_abort_after_clock(manager,wall,job.status.error);
+    }
+    if(native_simulation_render_generation(proposal.tick)){
+        const Result ready=native_scene_control.prepare_render(native_scene_context,proposal.tick);
+        if(ready!=Result::ok&&ready!=Result::waiting)
+            return native_abort_after_clock(manager,wall,native_scene_error("selected_render_prepare_failed"));
+    }
+    publish();return true;
+}
+inline bool native_render_boundary(void* manager,double wall){
+    if(active_boundary_call){terminal("native_clock_reentered");return false;}
+    NativeBoundaryCall call{};active_boundary_call=&call;bool result=false;
+    try{result=native_render_boundary_impl(manager,wall);}
+    catch(...){
+        const bool restoring=job.stage==Stage::retiring;
+        job.terminal_success=false;stable_error("original_callback_exception");
+        try{native_scene_control.revoke_grants(native_scene_context);}catch(...){job.clock_lost=true;}
+        if(restoring)job.clock_lost=true;
+        try{terminal("original_callback_exception");}catch(...){
+            job.terminal_success=false;job.stage=Stage::retiring;stable_error("original_callback_exception");
+        }
+        try{
+            if(native_engine_clock.active()){
+                if(native_engine_clock.hold_for_boundary(manager,wall)&&job.scene_acquired)
+                    native_scene_control.hold(native_scene_context);
+            }
+        }catch(...){job.clock_lost=true;}
+        if(!call.called){try{result=native_boundary_clock_tick(manager,wall);}catch(...){result=false;job.clock_lost=true;}}
+    }
+    active_boundary_call=nullptr;
+    try{refresh_native_observation();}catch(...){
+        pthread_mutex_lock(&control_mutex);native_observation.source_valid=false;pthread_mutex_unlock(&control_mutex);
+    }
+    return result;
+}
+// END_MP4_NATIVE_BOUNDARY
+inline void on_unity_tick_impl() {
     if(!installed)return;
+    struct ObserveExit {~ObserveExit(){try{refresh_native_observation();}catch(...){pthread_mutex_lock(&control_mutex);native_observation.source_valid=false;pthread_mutex_unlock(&control_mutex);}}} observe_exit;
     queue_tick();
     pthread_mutex_lock(&control_mutex);
     increment_counter(unity_ticks);
@@ -624,7 +1217,8 @@ inline void on_unity_tick() {
     }
     const bool can_park=start_pending||(busy_stage()&&job.stage!=Stage::finishing&&job.stage!=Stage::retiring);
     if(requested_pause_reason!=IDMP4_PAUSE_NONE&&!should_cancel&&can_park){
-        pause_acknowledged=true;reset_watchdog_pending=true;
+        if(!job.automatic)pause_acknowledged=true;
+        reset_watchdog_pending=true;
         pthread_mutex_unlock(&control_mutex);return;
     }
     const bool reset_watchdog=reset_watchdog_pending;
@@ -633,7 +1227,8 @@ inline void on_unity_tick() {
     if(reset_watchdog&&busy_stage())progress();
     game.maintenance();
     if(!busy_stage()){
-        Snapshot ready{};const Result readiness=probe_readiness(ready);
+        pthread_mutex_lock(&control_mutex);const bool force_admission=start_pending;pthread_mutex_unlock(&control_mutex);
+        Snapshot ready{};const Result readiness=probe_readiness(ready,force_admission);
         queue_refresh_candidate(readiness);
         pthread_mutex_lock(&control_mutex);const bool pending=start_pending;pthread_mutex_unlock(&control_mutex);
         if(pending&&readiness==Result::waiting){
@@ -655,40 +1250,79 @@ inline void on_unity_tick() {
     if(job.stage!=Stage::retiring&&!active_broker())terminal("audio_broker_retired");
     encoder_poll();
     switch(job.stage){
+        case Stage::audio_setup:setup_audio_job();break;
         case Stage::audio_request:request_audio();break;
         case Stage::audio_response:poll_audio_response();break;
         case Stage::audio_load:{Result r=game.poll_private_audio();if(r==Result::ok){job.stage=Stage::audio_mix;progress();}else if(r!=Result::waiting)terminal(game.last_error());break;}
         case Stage::audio_mix:{uint64_t began=milliseconds();for(unsigned chunk=0;chunk<4&&job.stage==Stage::audio_mix;++chunk){mix_audio();if(milliseconds()-began>=8)break;}break;}
         case Stage::audio_finalize:{uint64_t began=milliseconds();for(unsigned chunk=0;chunk<4&&job.stage==Stage::audio_finalize;++chunk){finalize_audio();if(milliseconds()-began>=8)break;}break;}
-        case Stage::frame_request:request_frame();break;
-        case Stage::frame_wait:if(job.captured){size_t count=0;int32_t w=0,h=0;Result r=game.readback_rgba(job.rgba,job.rgba_capacity,count,w,h);if(r==Result::ok){
+        case Stage::frame_request:if(!job.automatic)request_frame();break;
+        case Stage::frame_wait:if(!job.automatic&&job.captured){size_t count=0;int32_t w=0,h=0;Result r=game.readback_rgba(job.rgba,job.rgba_capacity,count,w,h);if(r==Result::ok){
             if(static_cast<uint32_t>(w)!=job.status.source_width||static_cast<uint32_t>(h)!=job.status.source_height||count!=job.rgba_capacity){terminal("capture_geometry_changed");break;}
             job.stage=Stage::frame_submit;progress();}else if(r!=Result::waiting)terminal(game.last_error());}break;
-        case Stage::frame_submit:{int r=job.api.append(job.encoder,job.rgba,static_cast<size_t>(job.status.width)*4,job.frame);if(r==IDMP4_ACCEPTED){++job.frame;job.status.frames=job.frame;job.stage=Stage::frame_request;progress();}else if(r!=IDMP4_RETRY)terminal("encoder_frame_rejected");break;}
+        case Stage::frame_submit:{if(job.automatic)break;int r=job.api.append(job.encoder,job.rgba,static_cast<size_t>(job.status.width)*4,job.frame);if(r==IDMP4_ACCEPTED){++job.frame;job.status.frames=job.frame;job.stage=Stage::frame_request;progress();}else if(r!=IDMP4_RETRY)terminal("encoder_frame_rejected");break;}
         case Stage::finishing:break;
         case Stage::retiring:retire();break;
         default:break;
     }
     publish();
 }
+inline void on_unity_tick(){
+    try{on_unity_tick_impl();}
+    catch(...){export_observer_failed();publish();}
+}
 inline size_t status(char*buffer,size_t capacity){
     if(!buffer||!capacity)return 0;
     pthread_mutex_lock(&control_mutex);
     const PublicStatus s=published;char readiness[96]{};snprintf(readiness,sizeof(readiness),"%s",readiness_error);
     const ControllerDiscovery discovery=controller_discovery;
+    const NativeObservation observed=native_observation;
+    const NativeSceneDiagnostics diagnostics=native_diagnostics;
     const uint64_t ticks=unity_ticks,acks=capture_acks;
     const bool requested=control_busy&&s.pausable&&requested_pause_reason!=IDMP4_PAUSE_NONE,paused=requested&&pause_acknowledged;
     const int reason=requested?requested_pause_reason:IDMP4_PAUSE_NONE;
     pthread_mutex_unlock(&control_mutex);
     const char* current_phase=requested?(paused?"paused":"pausing"):s.phase;
-    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u}}",
+    char observation[2048]{},diagnostic_json[768]{},tick[32]="null";
+    const int diagnostic_count=snprintf(diagnostic_json,sizeof(diagnostic_json),
+        "{\"schema\":1,\"available\":%s,\"source_identity\":\"%016llx\",\"playerloop_frame\":%llu,"
+        "\"actor\":{\"result\":%d,\"error\":\"%s\"},\"camera\":{\"result\":%d,\"error\":\"%s\"},"
+        "\"stage\":{\"result\":%d,\"error\":\"%s\"},\"world\":{\"result\":%d,\"error\":\"%s\"}}",
+        diagnostics.available?"true":"false",static_cast<unsigned long long>(diagnostics.identity),static_cast<unsigned long long>(diagnostics.loop),
+        diagnostics.parts[0].result,diagnostics.parts[0].error,diagnostics.parts[1].result,diagnostics.parts[1].error,
+        diagnostics.parts[2].result,diagnostics.parts[2].error,diagnostics.parts[3].result,diagnostics.parts[3].error);
+    if(diagnostic_count<=0||static_cast<size_t>(diagnostic_count)>=sizeof(diagnostic_json))return 0;
+    if(observed.has_tick)snprintf(tick,sizeof(tick),"%llu",static_cast<unsigned long long>(observed.tick));
+    const int observed_count=snprintf(observation,sizeof(observation),
+        "{\"schema\":1,\"pipeline\":\"owned_native_clock\",\"source_valid\":%s,\"playerloop_frame\":%llu,"
+        "\"source_kind\":\"%s\",\"source_identity\":\"%016llx\",\"source_time\":%.17g,\"source_paused\":%s,"
+        "\"acquired_source_valid\":%s,\"acquired_source_identity\":\"%016llx\",\"acquired_source_time\":%.17g,\"acquired_source_paused\":%s,"
+        "\"render_width\":%u,\"render_height\":%u,"
+        "\"rendered_simulation_ticks\":%llu,"
+        "\"restored_source_valid\":%s,\"restored_source_identity\":\"%016llx\",\"restored_source_time\":%.17g,\"restored_source_paused\":%s,"
+        "\"sample_phase\":\"%s\",\"coordinator_active\":%s,\"native_clock_owned\":%s,\"native_clock_held\":%s,\"simulation_tick\":%s,"
+        "\"accepted_frames\":%llu,\"source_restored\":%s,\"clock_settings_restored\":%s,"
+        "\"camera_audio_restored\":%s,\"dependent_state_restored\":%s,\"world_admission\":\"%s\"}",
+        observed.source_valid?"true":"false",static_cast<unsigned long long>(observed.loop),
+        observed.source_valid&&observed.photography?"photography_3d":"unavailable",static_cast<unsigned long long>(observed.identity),
+        observed.source_time,observed.source_paused?"true":"false",
+        observed.acquired_valid?"true":"false",static_cast<unsigned long long>(observed.acquired_identity),observed.acquired_time,observed.acquired_paused?"true":"false",
+        observed.render_width,observed.render_height,
+        static_cast<unsigned long long>(observed.rendered_ticks),
+        observed.restored_valid?"true":"false",static_cast<unsigned long long>(observed.restored_identity),observed.restored_time,observed.restored_paused?"true":"false",
+        observed.rendered?"rendered":"control",observed.active?"true":"false",
+        observed.clock_owned?"true":"false",observed.clock_held?"true":"false",tick,
+        static_cast<unsigned long long>(observed.accepted),observed.restored?"true":"false",observed.clock_restored?"true":"false",
+        observed.camera_audio?"true":"false",observed.dependents?"true":"false",observed.world?"verified":"unverified");
+    if(observed_count<=0||static_cast<size_t>(observed_count)>=sizeof(observation))return 0;
+    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u},\"observation\":%s,\"scene_diagnostics\":%s}",
         static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",readiness,current_phase,
         paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,
         static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),
         static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.source_width,s.source_height,
         s.video_codec,s.video_bitrate,s.fps_num,s.fps_den,static_cast<unsigned long long>(s.bytes),
         discovery.reason,discovery.source,discovery.counts.listed_directors,discovery.counts.unique_directors,
-        discovery.counts.assets,discovery.counts.output_tracks,discovery.counts.camera_tracks,discovery.counts.null_assets,discovery.candidates);
+        discovery.counts.assets,discovery.counts.output_tracks,discovery.counts.camera_tracks,discovery.counts.null_assets,discovery.candidates,observation,diagnostic_json);
     return n>0&&static_cast<size_t>(n)<capacity?static_cast<size_t>(n):0;
 }
 } // namespace idoly_mp4_runtime

@@ -207,15 +207,31 @@ def test_compiled_scope_no_grant_leaves_original_fixed_loop_no_extra_work(compil
 def test_compiled_scope_new_scene_preserves_its_time_origin(compiled_scope):
     engine = Engine(*compiled_scope)
     assert engine.call("acquire", SCOPE, 60, wall=1000.) == 1
+    assert engine.call("quiescent", SCOPE, 1) == 1
     assert engine.call("tick", SCOPE, 0, 1, wall=1000.1) == 1
     assert engine.call("tick", SCOPE, 1, 1, wall=1005.) == 1
     virtual = engine.get(0x60, "d")
     reset = int(engine.profile["bindings"]["level_reset"]["rva"], 16)
     engine.call(reset, MANAGER)
     assert engine.get(0xf0, "d") == -virtual
+    # A replacement initializer can run before old-job cleanup completes. Its
+    # time origin and frame receipt must survive cleanup-only release, rather
+    # than being combined with the old scene's saved epoch/counters.
+    source_frame = engine.get(0xc8, "Q")
+    assert engine.call("hold_boundary", SCOPE, wall=1007.) == 0
+    assert engine.get(0x60, "d") == virtual and engine.get(0xc8, "Q") == source_frame
     assert engine.call("restore", SCOPE, 0, wall=1010.) == 1
     assert engine.get(0x60, "d") + engine.get(0xf0, "d") == 0
     assert engine.get(0xe0, "d") == pytest.approx(1010. - virtual)
+    assert engine.get(0xc8, "Q") == source_frame
+    assert engine.call("tick", SCOPE, 0, 0, wall=1010.01) == 1
+    # Original level_reset's one-shot deliberately holds the first scaled
+    # sample; the next sample accounts for the elapsed time at source scale.
+    assert engine.get(0x60, "d") + engine.get(0xf0, "d") == 0
+    assert engine.get(0xc8, "Q") == source_frame + 1
+    assert engine.call("tick", SCOPE, 0, 0, wall=1010.02) == 1
+    assert engine.get(0x60, "d") + engine.get(0xf0, "d") == pytest.approx(.01, abs=1e-7)
+    assert engine.get(0xc8, "Q") == source_frame + 2
 
 
 def test_compiled_scope_native_pause_preserves_counters_without_consuming_grant(compiled_scope):
@@ -320,7 +336,7 @@ def test_engine_profile_header_matches_generated_original_bindings():
     spec = importlib.util.spec_from_file_location("clock_audit", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.render_header(PROFILE) == (ROOT / "client-presentation/native/mp4_engine_clock_profile.hpp").read_text()
+    assert module.render_scope_header(PROFILE) == (ROOT / "client-presentation/native/mp4_engine_clock.hpp").read_text()
     for profile in PROFILE.values():
         assert profile["layout"]["capture_delta"] == {"offset": 216, "kind": "float"}
         assert profile["preserve"]["native_frame_counter"]["offset"] == 0xc8

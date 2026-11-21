@@ -31,7 +31,7 @@ struct Scene {
     unsigned sets=0,evaluates=0,rebuilds=0,captures=0,prepares=0,resets=0,restores=0,releases=0,quiesces=0;
     unsigned pending_jobs=1;bool quiesce_ready=true;
     bool fence=true,reset_ready=true,restore_ready=true,release_ready=true,rebuild_ready=true,exclusive=true;
-    bool fail_reset=false,old_valid=false;bool released_owned=true;
+    bool source_ready=true;unsigned verifications=0;bool fail_reset=false,old_valid=false;bool released_owned=true;
     std::string switch_on;std::vector<std::string> calls;
 } s;
 void primary(){assert(s.owner&&"no original scene read/write after identity loss");}
@@ -62,6 +62,7 @@ p::Result prepare(void*){primary();++s.prepares;s.volume=0;event("prepare");retu
 p::Result reset(void*){primary();++s.resets;if(!s.reset_ready)return p::Result::waiting;if(s.fail_reset)return p::Result::unsupported;s.history=0;event("reset");return p::Result::ok;}
 p::Result restore(void*){primary();++s.restores;if(!s.restore_ready)return p::Result::waiting;s.history=s.saved_history;s.volume=s.saved_volume;event("restore");return p::Result::ok;}
 p::Result release(void*,bool owned){++s.releases;s.released_owned=owned;if(!s.release_ready)return p::Result::waiting;s.calls.emplace_back("release");return p::Result::ok;}
+p::Result verify_source(void*){primary();++s.verifications;assert(s.time==13.25&&s.history==s.saved_history&&s.volume==s.saved_volume);assert(!s.calls.empty()&&(s.verifications>1||s.calls.back()=="paused_flag"));return s.source_ready?p::Result::ok:p::Result::waiting;}
 const char* dependent_error(void*){return s.fail_reset?"actor_history_unverified":"actor_fence_pending";}
 p::OriginalApi<Graph> api(){
     p::OriginalApi<Graph> a{};a.director_state=state;a.director_mode=mode;a.director_set_mode=setmode;
@@ -69,7 +70,7 @@ p::OriginalApi<Graph> api(){
     a.director_play=play;a.director_pause=pause;a.director_resume=resume;a.director_rebuild=rebuild;
     a.player_playing=playing;a.player_paused=paused;a.player_set_playing=setplaying;a.player_set_paused=setpaused;return a;
 }
-p::Dependents dependents(){return {current,quiesce,capture,prepare,reset,restore,release,dependent_error};}
+p::Dependents dependents(){return {current,quiesce,capture,prepare,reset,restore,release,dependent_error,verify_source};}
 int main(int argc,char** argv){
     assert(argc==2);std::string scenario=argv[1];p::Scope<Graph> scope;
     if(scenario=="paused"){s.state=0;s.paused=true;}
@@ -77,13 +78,14 @@ int main(int argc,char** argv){
     const int source_state=s.state,source_mode=s.mode;const bool source_playing=s.playing,source_paused=s.paused;
     auto a=api();auto d=dependents();if(scenario=="missing_dependency")d.capture=nullptr;
     if(scenario=="missing_quiesce")d.quiesce=nullptr;
+    if(scenario=="missing_source_verify")d.verify_source_restored=nullptr;
     if(scenario=="missing_api")a.director_rebuild=nullptr;
     assert(scope.install(a,d));
     if(scenario=="clock_unowned"||scenario=="clock_not_held"){
         assert(scope.acquire(&s.player,&s.director,&s,{scenario!="clock_unowned",false})==p::Result::waiting);
         assert(!scope.active()&&s.calls.empty()&&s.captures==0);return 0;
     }
-    if(scenario=="missing_dependency"||scenario=="missing_api"||scenario=="missing_quiesce"){
+    if(scenario=="missing_dependency"||scenario=="missing_api"||scenario=="missing_quiesce"||scenario=="missing_source_verify"){
         assert(scope.acquire(&s.player,&s.director,&s,{true,true})==p::Result::unsupported);
         assert(!scope.active()&&s.calls.empty()&&s.captures==0);return 0;
     }
@@ -137,6 +139,16 @@ int main(int argc,char** argv){
     const auto sets=s.sets,evaluates=s.evaluates;
     for(int frame=0;frame<120;++frame){s.time=frame/60.;assert(scope.validate_frame(s.time)==p::Result::ok);s.history=frame;}
     assert(s.sets==sets&&s.evaluates==evaluates&&sets==1&&evaluates==0);
+    if(scenario=="abandon"||scenario=="abandon_wait"){
+        const auto calls=s.calls.size();const auto quiesces=s.quiesces,rebuilds=s.rebuilds;
+        s.owner=false;s.time=88;s.history=99;
+        if(scenario=="abandon_wait"){
+            s.release_ready=false;assert(scope.abandon()==p::Result::waiting&&scope.active());s.release_ready=true;
+        }
+        assert(scope.abandon()==p::Result::stale&&!scope.active()&&!s.released_owned);
+        assert(s.quiesces==quiesces&&s.rebuilds==rebuilds&&s.calls.size()==calls+1&&s.time==88&&s.history==99);
+        assert(scope.abandon()==p::Result::ok);return 0;
+    }
     if(scenario=="wrong_time"){assert(scope.validate_frame(9)==p::Result::failed&&!std::strcmp(scope.error(),"original_playback_frame_time_mismatch"));}
     if(scenario=="changed_graph"){
         ++s.version;s.time=66;s.history=77;s.volume=.9f;
@@ -149,6 +161,7 @@ int main(int argc,char** argv){
         assert(!s.released_owned&&s.time==66&&s.history==77&&s.volume==.9f);return 0;
     }
     if(scenario=="restore_wait")s.restore_ready=false;
+    if(scenario=="source_verify_wait")s.source_ready=false;
     if(scenario=="restore_quiesce_wait"){s.quiesce_ready=false;s.pending_jobs=3;}
     if(scenario=="release_wait")s.release_ready=false;
     if(scenario=="owner_restore_evaluate")s.switch_on="evaluate";
@@ -163,6 +176,11 @@ int main(int argc,char** argv){
     if(scenario=="restore_wait"){
         assert(result==p::Result::waiting&&scope.active()&&s.rebuilds==2&&s.restores==1);
         s.restore_ready=true;result=scope.restore({true,true});assert(s.rebuilds==2&&s.restores==2);
+    }
+    if(scenario=="source_verify_wait"){
+        assert(result==p::Result::waiting&&scope.active()&&s.rebuilds==2&&s.restores==1&&s.verifications==1);
+        const auto prior=s.calls.size();s.source_ready=true;result=scope.restore({true,true});
+        assert(s.calls.size()==prior+2&&s.rebuilds==2&&s.restores==1&&s.verifications==2);
     }
     if(scenario=="release_wait"){
         assert(result==p::Result::waiting&&scope.active()&&s.rebuilds==2&&s.restores==1);
@@ -187,8 +205,8 @@ def playback_binary(tmp_path_factory):
     return binary
 
 
-@pytest.mark.parametrize("scenario",["playing","paused","not_started","clock_unowned","clock_not_held",
-    "missing_dependency","missing_api","missing_quiesce","quiesce_wait","capture_wait","cancel_capture","cancel_held","owner_capture",
+@pytest.mark.parametrize("scenario",["playing","paused","not_started","abandon","abandon_wait","clock_unowned","clock_not_held",
+    "missing_dependency","missing_api","missing_quiesce","missing_source_verify","source_verify_wait","quiesce_wait","capture_wait","cancel_capture","cancel_held","owner_capture",
     "rebuild_wait","reset_wait","reset_graph_changed","reset_unsupported","owner_rebuild","wrong_time","changed_graph",
     "changed_owner","restore_quiesce_wait","restore_wait","release_wait","owner_restore_evaluate"])
 def test_original_game_time_held_clock_dependent_closure_and_restoration(playback_binary,scenario):

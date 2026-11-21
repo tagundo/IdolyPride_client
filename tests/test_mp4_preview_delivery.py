@@ -17,7 +17,7 @@ PHOTOGRAPHY_HEADERS = {"client-presentation/native/" + name for name in (
     "mp4_photography_replay_factory.hpp", "mp4_photography_replay_profile.hpp",
     "mp4_camera_owner.hpp", "mp4_timeline_camera.hpp", "mp4_timeline_audio.hpp")}
 OWNED_CLOCK_HEADERS = {"client-presentation/native/" + name for name in (
-    "mp4_engine_clock.hpp", "mp4_engine_clock_profile.hpp", "mp4_playback_state.hpp",
+    "mp4_engine_clock.hpp", "mp4_playback_state.hpp", "mp4_stage_state.hpp",
     "mp4_actor_state.hpp", "mp4_actor_state_profile.hpp")}
 
 
@@ -664,7 +664,8 @@ def test_android_first_job_has_only_android_dependency_and_distinct_proof_withou
     raw = (delivery.ROOT / delivery.WORKFLOW).read_text()
     job = raw.split("  android-draft-stage:\n", 1)[1].split("  ios-build:\n", 1)[0]
     assert "needs: [android-build]" in job and "ios-build" not in job
-    assert "github.event_name == 'push' || inputs.upload_draft" in job
+    assert "github.event_name == 'workflow_dispatch' && inputs.upload_draft" in job
+    assert "github.event_name == 'push' || inputs.upload_draft" not in raw
     assert "stage-android --source" in job
     assert "ANDROID_ARTIFACT_ID: ${{ needs.android-build.outputs.artifact_id }}" in job
     assert "ANDROID_ARTIFACT_SHA: ${{ needs.android-build.outputs.artifact_sha }}" in job

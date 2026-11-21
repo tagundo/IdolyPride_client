@@ -124,7 +124,7 @@ void *install(void *) {
     if (!header) { set_state("unsupported"); return nullptr; }
     image_base=reinterpret_cast<uintptr_t>(header);
     if (!verify_static_image(header)) { set_state("unsupported"); return nullptr; }
-    if(!mp4_prepare_native_clock(image_base)){set_state("unsupported");return nullptr;}
+    if(!mp4_prepare_native_clock(image_base)||!mp4_prepare_fixed_root()||!mp4_prepare_animation_root()){set_state("unsupported");return nullptr;}
     load_calls();
     shared_cache_load_calls();
 #define HOOK(entry, replacement, original) {&pin::entry,reinterpret_cast<void *>(replacement),reinterpret_cast<void **>(&original)}
@@ -182,6 +182,39 @@ void *install(void *) {
         HOOK(mp4_shader_reset,mp4_shader_reset_hook,mp4_shader_reset_original),
         HOOK(mp4_actor_process,mp4_actor_process_hook,mp4_actor_process_original),
         HOOK(mp4_actor_burst,mp4_actor_burst_hook,mp4_actor_burst_original),
+        HOOK(mp4_psyllium_execute,mp4_psyllium_execute_hook,mp4_psyllium_execute_original),
+        HOOK(mp4_particle_simulate,mp4_particle_simulate_hook,mp4_particle_simulate_original),
+        HOOK(mp4_live_particle_simulate,mp4_live_particle_simulate_hook,mp4_live_particle_simulate_original),
+        HOOK(mp4_presenter_end,mp4_presenter_end_hook,mp4_presenter_end_original),
+        HOOK(mp4_actor_update,mp4_actor_update_hook,mp4_actor_update_original),
+        HOOK(mp4_actor_late,mp4_actor_late_hook,mp4_actor_late_original),
+        HOOK(mp4_actor_eye_late,mp4_actor_eye_late_hook,mp4_actor_eye_late_original),
+        HOOK(mp4_actor_face_late,mp4_actor_face_late_hook,mp4_actor_face_late_original),
+        HOOK(mp4_actor_foot_apply,mp4_actor_foot_apply_hook,mp4_actor_foot_apply_original),
+        HOOK(mp4_actor_derived_late_ref,mp4_actor_derived_late_ref_hook,mp4_actor_derived_late_ref_original),
+        HOOK(mp4_actor_derived_late_shared,mp4_actor_derived_late_shared_hook,mp4_actor_derived_late_shared_original),
+        HOOK(mp4_particle_control_simulate,mp4_particle_control_simulate_hook,mp4_particle_control_simulate_original),
+        HOOK(mp4_equipment_late,mp4_equipment_late_hook,mp4_equipment_late_original),
+        HOOK(mp4_photography_is_end,mp4_photography_is_end_hook,mp4_photography_is_end_original),
+        HOOK(mp4_player_is_end,mp4_player_is_end_hook,mp4_player_is_end_original),
+        HOOK(mp4_render_stack,mp4_render_stack_hook,mp4_render_stack_original),
+        HOOK(mp4_render_camera,mp4_render_camera_hook,mp4_render_camera_original),
+        HOOK(mp4_vlb_draw,mp4_vlb_draw_hook,mp4_vlb_draw_original),
+        HOOK(mp4_selected_renderer,mp4_selected_renderer_hook,mp4_selected_renderer_original),
+        HOOK(mp4_volume_update,mp4_volume_update_hook,mp4_volume_update_original),
+        HOOK(mp4_material_ctor_shader,mp4_material_ctor_shader_hook,mp4_material_ctor_shader_original),
+        HOOK(mp4_render_library_ctor,mp4_render_library_ctor_hook,mp4_render_library_ctor_original),
+        HOOK(mp4_cine_apply,mp4_cine_apply_hook,mp4_cine_apply_original),
+        HOOK(mp4_cine_game_object_ctor,mp4_cine_game_object_ctor_hook,mp4_cine_game_object_ctor_original),
+        HOOK(mp4_cine_volume_enable,mp4_cine_volume_enable_hook,mp4_cine_volume_enable_original),
+        HOOK(mp4_mirror_late,mp4_mirror_late_hook,mp4_mirror_late_original),
+        HOOK(mp4_mirror_parameters,mp4_mirror_parameters_hook,mp4_mirror_parameters_original),
+        HOOK(mp4_mirror_destroy,mp4_mirror_destroy_hook,mp4_mirror_destroy_original),
+        HOOK(mp4_fog_enable,mp4_fog_enable_hook,mp4_fog_enable_original),
+        HOOK(mp4_fog_disable,mp4_fog_disable_hook,mp4_fog_disable_original),
+        HOOK(mp4_fog_late,mp4_fog_late_hook,mp4_fog_late_original),
+        HOOK(mp4_context_submit,mp4_context_submit_hook,mp4_context_submit_original),
+        HOOK(mp4_fixed_loop_condition,mp4_fixed_loop_condition_hook,mp4_fixed_loop_condition_original),
     };
 #undef HOOK
     for (auto &hook:hooks) {
@@ -189,7 +222,7 @@ void *install(void *) {
         *hook.original=reinterpret_cast<void *>(image_base+hook.entry->gateway+20);
     }
     if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready() || !sound_tracker.ready()) { set_state("init_failed"); return nullptr; }
-    if(!mp4_install_native_clock_api()){set_state("init_failed");return nullptr;}
+    if(!mp4_install_native_clock_api()||!mp4_install_fixed_root()){set_state("init_failed");return nullptr;}
     // All originals are valid before the first replacement is visible. Any
     // concurrent invocation during publication takes the original path.
     for (auto &hook:hooks) __atomic_store_n(reinterpret_cast<uintptr_t *>(image_base+hook.entry->slot),

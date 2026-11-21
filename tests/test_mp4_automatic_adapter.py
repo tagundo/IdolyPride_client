@@ -16,8 +16,9 @@ EXTRA=r'''
 namespace playback=idoly_mp4_playback;
 playback::ClockState fixed_clock{true,true};
 int play_state=1,root_version=7,dependent_history=37,original_history=0,dep_release_calls=0;
+bool verify_owner_witness=false;int owner_depth=0;
 bool dependency_owner=true,dep_fence=true,dep_restore_ready=true,dep_owned_release=true;
-bool dep_release_ready=true;
+bool dep_release_ready=true;float saved_bgm=0,saved_voice=0;
 unsigned pending_native_jobs=1,quiesce_calls=0;bool quiesce_ready=true;
 bool shader_lease_live=false,shader_lease_custom=false;float shader_lease_saved=0;
 unsigned shader_generation=1,shader_owned_generation=0,shader_finishes=0;
@@ -38,13 +39,14 @@ bool flag_playing(void* value,Method*){return static_cast<uint8_t*>(value)[0x71]
 bool flag_paused(void* value,Method*){return static_cast<uint8_t*>(value)[0x72];}
 void flag_set_playing(void* value,bool flag,Method*){static_cast<uint8_t*>(value)[0x71]=flag;}
 void flag_set_paused(void* value,bool flag,Method*){static_cast<uint8_t*>(value)[0x72]=flag;}
-bool dep_owner(void* value){assert(value==&dependent_history);return dependency_owner;}
+bool dep_owner(void* value){assert(value==&dependent_history);if(verify_owner_witness){assert(++owner_depth==1);SceneWitness witness{};assert(clock_game&&clock_game->selected_scene_witness(witness));assert(witness.player==ptr(player)&&witness.director==ptr(director));--owner_depth;}return dependency_owner;}
 playback::Result dep_quiesce(void*){assert(fixed_clock.owned&&fixed_clock.held);++quiesce_calls;if(!quiesce_ready)return playback::Result::waiting;pending_native_jobs=0;return playback::Result::ok;}
-playback::Result dep_capture(void*){assert(!pending_native_jobs);if(!dep_fence)return playback::Result::waiting;original_history=dependent_history;return playback::Result::ok;}
-playback::Result dep_prepare(void*){assert(bgm_volume==0&&voice_volume==0);return playback::Result::ok;}
+playback::Result dep_capture(void*){assert(!pending_native_jobs);if(!dep_fence)return playback::Result::waiting;original_history=dependent_history;saved_bgm=bgm_volume;saved_voice=voice_volume;return playback::Result::ok;}
+playback::Result dep_prepare(void*){bgm_volume=voice_volume=0;return playback::Result::ok;}
 playback::Result dep_reset(void*){dependent_history=0;return playback::Result::ok;}
-playback::Result dep_restore(void*){if(!dep_restore_ready)return playback::Result::waiting;auto quiet=dep_quiesce(nullptr);if(quiet!=playback::Result::ok)return quiet;dependent_history=original_history;return playback::Result::ok;}
+playback::Result dep_restore(void*){if(!dep_restore_ready)return playback::Result::waiting;auto quiet=dep_quiesce(nullptr);if(quiet!=playback::Result::ok)return quiet;dependent_history=original_history;bgm_volume=saved_bgm;voice_volume=saved_voice;return playback::Result::ok;}
 playback::Result dep_release(void*,bool owned){++dep_release_calls;dep_owned_release=owned;return dep_release_ready?playback::Result::ok:playback::Result::waiting;}
+playback::Result dep_verify_source(void*){assert(dependent_history==original_history&&bgm_volume==.6f&&voice_volume==.4f);assert(!shader_lease_live);return playback::Result::ok;}
 const char* dep_error(void*){return "actor_fence_pending";}
 bool tracked_projection(void* value,bool){assert(value==ptr(camera_controller));++projection_updates;return true;}
 bool tracked_geometry(void* value,int32_t width,int32_t height){if(value)assert(!pending_native_jobs);return resize_output(value,width,height);}
@@ -54,7 +56,7 @@ void lease_finish(void* context){assert(context==&dependent_history&&shader_leas
 '''
 DRIVER=r'''
 int main(int argc,char**argv){
-    assert(argc==2);const std::string scenario=argv[1];
+    assert(argc==2);const std::string scenario=argv[1];verify_owner_witness=scenario=="owner_witness";
     // SETUP
     selected_api.director_graph_injected=original_graph;selected_api.graph_valid=original_graph_valid;
     selected_api.director_set_time=original_set_time;selected_api.director_evaluate=original_evaluate;
@@ -64,7 +66,7 @@ int main(int argc,char**argv){
     p.director_state=original_state;p.director_play=original_play;p.director_pause=original_pause;
     p.director_resume=original_resume;p.director_rebuild=original_rebuild;
     p.player_playing=flag_playing;p.player_paused=flag_paused;p.player_set_playing=flag_set_playing;p.player_set_paused=flag_set_paused;
-    selected_api.automatic_dependents={dep_owner,dep_quiesce,dep_capture,dep_prepare,dep_reset,dep_restore,dep_release,dep_error};
+    selected_api.automatic_dependents={dep_owner,dep_quiesce,dep_capture,dep_prepare,dep_reset,dep_restore,dep_release,dep_error,dep_verify_source};
     selected_api.automatic_shader={lease_begin,lease_set,lease_finish};
     selected_api.automatic_context=&dependent_history;selected_api.automatic_clock_state=clock_state;
     write(player,0x71,uint8_t(1));write(player,0x72,uint8_t(scenario=="paused"));
@@ -80,7 +82,7 @@ int main(int argc,char**argv){
     const auto original_shader=selected_api.automatic_shader;selected_api.automatic_shader={};
     selected_api.automatic_playback={};selected_api.automatic_dependents={};
     selected_api.automatic_context=nullptr;selected_api.automatic_clock_state=nullptr;
-    GameAdapter a(selected_api);a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));
+    GameAdapter a(selected_api);clock_game=&a;a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));
     Snapshot snapshot{};assert(a.snapshot(snapshot)==Result::ok);
     const auto observed_handles=handles.size();
     if(scenario=="late_install_private_audio"){
@@ -95,6 +97,7 @@ int main(int argc,char**argv){
     scalar_no_managed_calls=false;
     assert(installed==(scenario!="missing_dependency"&&scenario!="missing_quiesce"&&scenario!="missing_original_call"&&scenario!="missing_shader_lease"));
     assert(handles.size()==observed_handles);
+    if(installed){double actual=0;bool is_paused=false;assert(a.observe_source(actual,is_paused)&&actual==13.25&&is_paused==(scenario=="paused"));}
     const auto initial_generation=a.owned_scene_generation();
     auto result=a.begin_automatic();
     if(scenario=="missing_dependency"||scenario=="missing_quiesce"||scenario=="missing_original_call"||scenario=="missing_shader_lease"){
@@ -121,6 +124,10 @@ int main(int argc,char**argv){
         assert(a.start_automatic()==Result::ok&&root_version==version&&direct_sets==sets);
     }else assert(a.start_automatic()==Result::ok);
     assert(mode==1&&play_state==1&&time_value==0&&actor_mode==1);
+    if(scenario=="discard_capture"){
+        assert(a.request_capture()==Result::ok);a.discard_capture();a.discard_capture();
+        assert(a.request_capture()==Result::ok);a.discard_capture();
+    }
     // Our intentional original RebuildGraph does not start another scene.
     assert(a.owned_scene_generation()==owned_generation);
     const unsigned set_before=direct_sets,evaluate_before=root_evaluates,project_before=projection_updates;
@@ -135,6 +142,38 @@ int main(int argc,char**argv){
     assert(direct_sets==set_before&&root_evaluates==evaluate_before&&actor_steps==0&&graph_steps==0&&actor_resets==0);
     assert(camera_steps==0&&projection_updates==project_before+120);
     assert(a.prepare_automatic_frame(123)==Result::invalid);
+    if(scenario=="abandon"||scenario=="abandon_wait"){
+        scalar_no_managed_calls=true;assert(a.owns_automatic_source_raw(ptr(player))&&a.owns_automatic_source_raw(ptr(presenter)));assert(!a.owns_automatic_source_raw(ptr(brain))&&!a.owns_automatic_source_raw(nullptr));scalar_no_managed_calls=false;
+        fixed_clock={false,false};dependency_owner=false;
+        const auto quiesces=quiesce_calls,sets=direct_sets,evaluates=root_evaluates;
+        const auto geometry_before=geometry_calls.size();
+        if(scenario=="abandon_wait"){
+            dep_release_ready=false;assert(a.abandon_automatic("native_owner_lost")==Result::waiting&&a.restoration_pending());
+            assert(!shader_lease_live&&shader_finishes==1&&geometry_cleanup_calls==1);scalar_no_managed_calls=true;assert(!a.owns_automatic_source_raw(ptr(player)));scalar_no_managed_calls=false;dep_release_ready=true;
+        }
+        assert(a.abandon_automatic("native_owner_lost")==Result::stale&&!a.automatic()&&!a.restoration_pending());
+        assert(quiesce_calls==quiesces&&direct_sets==sets&&root_evaluates==evaluates);
+        assert(geometry_calls.size()==geometry_before&&geometry_cleanup_calls==1&&!dep_owned_release);
+        assert(!shader_lease_live&&shader_finishes==1&&!std::strcmp(a.last_error(),"native_owner_lost"));
+        a.reset_observations();assert(handles.empty());return 0;
+    }
+    if(scenario=="handoff_fault"){
+        const auto finish_before=shader_finishes;const auto generation=a.owned_scene_generation();
+        scalar_no_managed_calls=true;
+        assert(!a.source_handoff_failed(nullptr)&&!a.source_handoff_failed(ptr(brain)));
+        assert(a.source_handoff_failed(ptr(player))&&a.owned_scene_generation()==generation+1);
+        assert(!std::strcmp(a.last_error(),"source_handoff_failed")&&!a.owns_automatic_source_raw(ptr(player)));
+        // Even an already invalidated owner must retire the still-owned raw
+        // presenter without entering any managed/global restoration callback.
+        assert(a.source_handoff_failed(ptr(presenter))&&a.owned_scene_generation()==generation+2);
+        scalar_no_managed_calls=false;
+        fixed_clock={false,false};dependency_owner=false;
+        assert(a.abandon_automatic("source_handoff_failed")==Result::stale);
+        assert(shader_finishes==finish_before&&!dep_owned_release);
+        // The concrete bridge independently abandons its failed global lease.
+        shader_lease_live=false;
+        a.reset_observations();assert(handles.empty());return 0;
+    }
     if(scenario=="shader_superseded"){
         // An external setter of exactly the same value revokes ownership.
         const float externally_set=shader;++shader_generation;custom=true;
@@ -147,6 +186,14 @@ int main(int argc,char**argv){
         assert(pending_native_jobs&&a.prepare_restore()==Result::ok&&!pending_native_jobs);
         assert(geometry_calls.size()==geometry_before&&direct_sets==sets_before&&root_evaluates==evaluate_before);
         assert(mode==1&&play_state==1&&time_value==119/60.&&bgm_volume==0&&voice_volume==0);
+    }
+    if(scenario=="out_game_ended"){
+        a.release_shader_lease_for_scene(ptr(presenter));assert(!shader_lease_live&&shader_finishes==1&&!custom);
+        a.observe_presenter_ended(ptr(presenter));
+        assert(a.owned_scene_generation()==owned_generation+1&&a.selected_presenter()==nullptr&&a.scene_kind()==SceneKind::none);
+        const auto quiet=quiesce_calls;assert(a.prepare_restore()==Result::stale&&quiesce_calls==quiet);
+        assert(a.restore()==Result::stale&&!a.restoration_pending()&&!dep_owned_release&&quiesce_calls==quiet);
+        a.reset_observations();assert(handles.empty());return 0;
     }
     if(scenario=="changed_owner"||scenario=="reinitialized"||scenario=="presenter_reinitialized"){
         if(scenario!="changed_owner"){
@@ -164,7 +211,7 @@ int main(int argc,char**argv){
             }
             if(scenario=="reinitialized")a.observe_player_initializing(ptr(player));
             else a.invalidate_owned_scene(ptr(presenter));
-            assert(a.owned_scene_generation()==owned_generation+1);
+            assert(a.owned_scene_generation()==owned_generation+1);assert(!a.owns_automatic_source_raw(ptr(player))&&!a.owns_automatic_source_raw(ptr(presenter)));
             scalar_no_managed_calls=false;
             time_value=9;mode=2;bgm_volume=.3f;voice_volume=.7f;
         }else{take_over_scene();++shader_generation;dependency_owner=false;}
@@ -199,9 +246,11 @@ int main(int argc,char**argv){
         dep_restore_ready=true;
     }
     assert(a.restore()==Result::ok&&!a.automatic()&&!a.restoration_pending()&&!a.manual());
+    scalar_no_managed_calls=true;assert(!a.owns_automatic_source_raw(ptr(player))&&!a.owns_automatic_source_raw(ptr(presenter)));scalar_no_managed_calls=false;
     assert(time_value==13.25&&mode==0&&play_state==(scenario=="paused"?0:1));
     assert(flag_playing(ptr(player),nullptr)&&flag_paused(ptr(player),nullptr)==(scenario=="paused"));
     assert(bgm_volume==.6f&&voice_volume==.4f&&dependent_history==37&&!custom&&actor_mode==1&&dep_release_calls==1&&dep_owned_release);
+    {double actual=0;bool is_paused=false;assert(a.observe_source(actual,is_paused)&&actual==13.25&&is_paused==(scenario=="paused"));}
     assert(!shader_lease_live&&shader_finishes==1);
     assert(geometry_calls.back()[0]==0&&geometry_calls.back()[1]==0);
     const auto retired_generation=a.owned_scene_generation();scalar_no_managed_calls=true;
@@ -234,7 +283,7 @@ def automatic_adapter_binary(tmp_path_factory):
     return binary
 
 
-@pytest.mark.parametrize("scenario",["playing","paused","clock_wait","capture_wait","missing_dependency","missing_quiesce","missing_original_call","missing_shader_lease","shader_superseded","late_install_private_audio","adoption_wait","prepare_restore","restore_clock_wait","restore_quiesce_wait","restore_wait","changed_owner","reinitialized","presenter_reinitialized"])
+@pytest.mark.parametrize("scenario",["playing","owner_witness","paused","discard_capture","abandon","abandon_wait","clock_wait","capture_wait","missing_dependency","missing_quiesce","missing_original_call","missing_shader_lease","shader_superseded","handoff_fault","late_install_private_audio","adoption_wait","prepare_restore","restore_clock_wait","restore_quiesce_wait","restore_wait","changed_owner","reinitialized","presenter_reinitialized","out_game_ended"])
 def test_automatic_adapter_preserves_original_paused_state_and_never_manual_steps(automatic_adapter_binary,scenario):
     ran=subprocess.run([str(automatic_adapter_binary),scenario],capture_output=True,text=True,timeout=5)
     assert ran.returncode==0,ran.stdout+ran.stderr

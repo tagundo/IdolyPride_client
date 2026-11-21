@@ -29,7 +29,7 @@ REPO = "tagundo/IdolyPride_client"
 WORKFLOW = ".github/workflows/build-mp4-preview.yml"
 CODEC_WORKFLOW = ".github/workflows/verify-mp4-codecs.yml"
 BRANCH = "refs/heads/feat/ios-unified-server"
-VERSION = "2026.11.21.11"
+VERSION = "2026.11.22.1"
 APK = "IdolyPride-Unified-" + VERSION + "-prototype.apk"
 APK_REPORT = APK.removesuffix(".apk") + ".provenance.json"
 VERIFICATION = "MP4-PREVIEW-VERIFICATION.json"
@@ -42,7 +42,7 @@ MP4_NATIVE = {"client-presentation/native/" + name for name in (
     "mp4_session_api.h", "mp4_queue.hpp", "mp4_queue_runtime.hpp", "mp4_queue_cleanup.hpp", "mp4_selection_capture.hpp",
     "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp", "mp4_output_policy.hpp",
     "mp4_controller_profile.hpp", "mp4_type_descriptor.hpp",
-    "mp4_engine_clock.hpp", "mp4_engine_clock_profile.hpp", "mp4_playback_state.hpp",
+    "mp4_engine_clock.hpp", "mp4_playback_state.hpp", "mp4_stage_state.hpp",
     "mp4_actor_state.hpp", "mp4_actor_state_profile.hpp",
     "mp4_photography_replay_factory.hpp", "mp4_photography_replay_profile.hpp",
     "mp4_camera_owner.hpp", "mp4_timeline_camera.hpp", "mp4_timeline_audio.hpp",
@@ -298,7 +298,7 @@ def ios_files(folder, source):
                 need(hashlib.file_digest(incoming, "sha256").hexdigest() == members[row.filename], "ipa_member_bytes_differ")
         app = "Payload/IDOLY PRIDE.app/"
         info = plistlib.loads(archive.read(app + "Info.plist"))
-        need(info.get("CFBundleVersion") == "2026.1121.11", "ipa_preview_version_differs")
+        need(info.get("CFBundleVersion") == "2026.1122.1", "ipa_preview_version_differs")
         need(members[app + "Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer"] == native["post_sign_binary_sha256"]
              and members[app + "Frameworks/IdolyPresentation.dylib"] == presentation["sha256"], "ipa_native_source_binding_differs")
         need(members[app + "LocalServer/ServerData.zip"] == korean.output_pin()["sha256"], "ipa_server_data_pin_differs")

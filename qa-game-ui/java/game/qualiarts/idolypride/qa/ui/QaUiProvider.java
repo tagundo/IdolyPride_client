@@ -58,6 +58,18 @@ public final class QaUiProvider extends ContentProvider {
             String packageName = context.getPackageName();
             String profile = marker.optString("input_profile", "diagnostic-aes");
             boolean supportedProfile = DIAGNOSTIC_PACKAGE.equals(packageName) && "diagnostic-aes".equals(profile);
+            if (DIAGNOSTIC_PACKAGE.equals(packageName) && "unified-current".equals(profile)) {
+                JSONObject provenance = marker.optJSONObject("provenance");
+                String source = marker.optString("source_commit", "");
+                supportedProfile = provenance != null && source.matches("[0-9a-f]{40}")
+                    && source.equals(provenance.optString("source_commit", ""))
+                    && marker.optString("input_apk_sha256", "").matches("[0-9a-f]{64}")
+                    && marker.optString("input_apk_sha256", "").equals(provenance.optString("current_unified_apk_sha256", ""))
+                    && !provenance.optBoolean("sdk_aes_store_adaptations", true)
+                    && (DIAGNOSTIC_PACKAGE + ".qa.ui").equals(marker.optString("authority", ""))
+                    && !marker.optBoolean("exported", true) && marker.optBoolean("debuggable", false)
+                    && marker.optBoolean("loopback_only", false);
+            }
             if (NORMAL_PACKAGE.equals(packageName)) {
                 supportedProfile = "normal-local".equals(profile)
                     && NORMAL_INPUT_SHA256.equals(marker.optString("input_apk_sha256", ""))

@@ -33,7 +33,7 @@ Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeStartV2(
 }
 extern "C" JNIEXPORT jstring JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeStatus(JNIEnv*env,jclass) {
-    char json[2048]{};
+    char json[4096]{};
     return env->NewStringUTF(IDMP4SessionStatus(json,sizeof(json))?json:"{\"phase\":\"failed\",\"error_code\":\"status_unavailable\"}");
 }
 extern "C" JNIEXPORT void JNICALL

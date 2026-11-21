@@ -35,6 +35,10 @@ final class UnityDispatcher implements LoopbackUiServer.Actions {
     }
 
     @Override public String snapshot() { return execute(false, 0, 0); }
+    @Override public String mp4Status() {
+        if (stopped || SystemClock.elapsedRealtime() >= sessionDeadline) return LoopbackUiServer.error("session_ended");
+        return QaMp4Observation.snapshot(context);
+    }
     @Override public String click(int instanceId, long generation) { return execute(true, instanceId, generation); }
 
     private String execute(boolean click, int instanceId, long generation) {

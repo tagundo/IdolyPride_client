@@ -1,0 +1,38 @@
+{
+  "android": {
+    "engine_sha256": "c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85",
+    "getter": 7547316,
+    "converter": 7587748,
+    "converter_bytes": 60,
+    "target_got": 21339552,
+    "barrier_got": 21336088,
+    "target_cell": 21923904,
+    "barrier_cell": 21923816,
+    "target_export": 68805224,
+    "barrier_export": 68805268,
+    "getter_prefix": "082840f9c80000b4095840b93f090071",
+    "getter_body": "082840f9c80000b4095840b93f090071a1000054003040f9c0035fd6e0031faac0035fd6e00308aa72270014",
+    "converter_prefix": "fe0f1ff8e86800b008d146f9080140f9",
+    "converter_body": "fe0f1ff8e86800b008d146f9080140f900013fd6e86800b0080d40f9e20300aae1230091e0031faa080140f900013fd6e00740f9fe0741f8c0035fd6",
+    "target_prefix": "a549ff17ff8300d1e1fb00a9e00300f9",
+    "barrier_prefix": "e00301aae10302aa414dff17e0031f2a"
+  },
+  "ios": {
+    "engine_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+    "getter": 14453168,
+    "converter": 14492584,
+    "converter_bytes": 48,
+    "target_got": 0,
+    "barrier_got": 0,
+    "target_cell": 0,
+    "barrier_cell": 0,
+    "target_export": 136226668,
+    "barrier_export": 136226716,
+    "getter_prefix": "082840f9c80000b4095840b93f090071",
+    "getter_body": "082840f9c80000b4095840b93f090071a1000054003040f9c0035fd6000080d2c0035fd6e00308aa74260014",
+    "converter_prefix": "ff8300d1fd7b01a9fd430091ee60d095",
+    "converter_body": "ff8300d1fd7b01a9fd430091ee60d095e20300aae1230091000080d2f660d095e00740f9fd7b41a9ff830091c0035fd6",
+    "target_prefix": "430d0014ff8300d1fd7b01a9fd430091",
+    "barrier_prefix": "e00301aae10302aa871f2d1600008052"
+  }
+}

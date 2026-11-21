@@ -1,0 +1,221 @@
+name: Verify actual paused 3D MV export (manual, no release)
+
+# This is the original game's normal Photography 3D flow in an official Google
+# ARM translation guest. A codec/environment probe alone can never pass it.
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source:
+        description: Exact 40-character source commit expected by the caller
+        required: true
+        type: string
+      song_label:
+        description: Exact visible normal 3D MV song label (no account data)
+        required: true
+        default: Bittersweet Echo
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actual-mv-export-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: ${{ github.sha }}
+  EXPECTED_SOURCE: ${{ inputs.expected_source }}
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONPATH: src
+
+jobs:
+  current-input:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    outputs:
+      artifact_id: ${{ steps.transport.outputs.artifact-id }}
+      artifact_digest: ${{ steps.transport.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Require the exact caller source and strict runtime-verdict tests
+        run: |
+          test "$EXPECTED_SOURCE" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          python -m pip install --disable-pip-version-check pytest==8.4.2 protobuf==6.33.0 pycryptodome==3.23.0
+          python -B -m pytest -q -p no:cacheprovider tests/test_actual_mv_export_qa.py tests/test_actual_mv_qa_input.py tests/test_package_qa_ui_client.py qa-game-ui/tests/test_loopback_server.py qa-game-ui/tests/test_session_policy.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned build toolchain
+        run: sdkmanager 'platforms;android-34' 'platforms;android-35' 'build-tools;34.0.0' 'ndk;26.3.11579264'
+      - name: Fetch the normal immutable client and embedded server inputs on this runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -B tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/actual-mv-inputs"
+      - name: Build the current normal unified game without SDK or AES adaptations
+        run: |
+          mkdir "$RUNNER_TEMP/actual-mv-native" "$RUNNER_TEMP/actual-mv-product" "$RUNNER_TEMP/actual-mv-transport"
+          python -B client-presentation/native/build_native.py --source-commit "$SOURCE_SHA" \
+            --ndk "$ANDROID_HOME/ndk/26.3.11579264" --cache-dir "$RUNNER_TEMP/actual-mv-native-deps" \
+            --output "$RUNNER_TEMP/actual-mv-native/libidoly_presentation.so"
+          umask 077
+          printf '%s\n' android > "$RUNNER_TEMP/actual-mv-development-password.txt"
+          python -B tools/package_android_unified.py --prototype --source-root "$PWD" --source-commit "$SOURCE_SHA" \
+            --client-apk "$RUNNER_TEMP/actual-mv-inputs/client-ko.apk" \
+            --client-ja-apk "$RUNNER_TEMP/actual-mv-inputs/client-ja.apk" \
+            --client-en-apk "$RUNNER_TEMP/actual-mv-inputs/client-en.apk" \
+            --server-apk "$RUNNER_TEMP/actual-mv-inputs/server.apk" \
+            --chaquopy-jar "$RUNNER_TEMP/actual-mv-inputs/chaquopy.jar" \
+            --apkeditor "$RUNNER_TEMP/actual-mv-inputs/APKEditor.jar" \
+            --android-jar "$ANDROID_HOME/platforms/android-35/android.jar" \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" --jdk-bin "$JAVA_HOME/bin" \
+            --keystore android-diagnostics/local-diagnostics-development.keystore \
+            --password-file "$RUNNER_TEMP/actual-mv-development-password.txt" \
+            --native-bridge "$RUNNER_TEMP/actual-mv-native/libidoly_presentation.so" \
+            --native-receipt "$RUNNER_TEMP/actual-mv-native/build-receipt.json" \
+            --output "$RUNNER_TEMP/actual-mv-product/current-unified.apk"
+      - name: Append only the emulator-only observer and bind it to the current producer
+        run: |
+          python -B qa-game-ui/native/build_native.py --ndk "$ANDROID_HOME/ndk/26.3.11579264" \
+            --output "$RUNNER_TEMP/actual-mv-observer-native"
+          INPUT_SHA=$(sha256sum "$RUNNER_TEMP/actual-mv-product/current-unified.apk" | cut -d' ' -f1)
+          python -B tools/package_qa_ui_client.py "$RUNNER_TEMP/actual-mv-product/current-unified.apk" \
+            --input-profile unified-current --emulator-only --session-millis 21600000 \
+            --current-source-receipt "$RUNNER_TEMP/actual-mv-product/current-unified.provenance.json" \
+            --source-commit "$SOURCE_SHA" --expected-source-sha256 "$INPUT_SHA" \
+            --native-library "$RUNNER_TEMP/actual-mv-observer-native/lib/arm64-v8a/libidoly_qa_ui_bridge.so" \
+            --apkeditor "$RUNNER_TEMP/actual-mv-inputs/APKEditor.jar" \
+            --android-jar "$ANDROID_HOME/platforms/android-35/android.jar" \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" --java "$JAVA_HOME/bin/java" \
+            --output "$RUNNER_TEMP/actual-mv-transport/current-unified-observer.apk"
+          cp "$RUNNER_TEMP/actual-mv-product/current-unified.provenance.json" "$RUNNER_TEMP/actual-mv-transport/"
+          cp "$RUNNER_TEMP/actual-mv-observer-native/native-provenance.json" "$RUNNER_TEMP/actual-mv-transport/observer-native-provenance.json"
+          python -B tools/emulator_environment_probe/build.py --sdk "$ANDROID_HOME" \
+            --ndk "$ANDROID_HOME/ndk/26.3.11579264" --java "$JAVA_HOME/bin" \
+            --output "$RUNNER_TEMP/actual-mv-transport/EnvironmentProbe.apk" \
+            > "$RUNNER_TEMP/actual-mv-transport/environment-build.json"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v4
+        id: transport
+        with:
+          name: actual-mv-runner-input-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/actual-mv-transport/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  actual-game:
+    needs: current-input
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: landscape-30
+            fps: 30
+            width: 256
+            height: 144
+            extra: --queue-replay
+          - case: square-60
+            fps: 60
+            width: 192
+            height: 192
+            extra: ''
+    env:
+      DISPLAY: ':99'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+      SONG_LABEL: ${{ inputs.song_label }}
+      INPUT_DIR: ${{ runner.temp }}/actual-mv-input
+      EVIDENCE_DIR: ${{ runner.temp }}/actual-mv-evidence
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.current-input.outputs.artifact_id }}
+          path: ${{ runner.temp }}/actual-mv-input
+          merge-multiple: true
+      - name: Verify exact input checkout and retain producer identity
+        run: |
+          test "$EXPECTED_SOURCE" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir "$EVIDENCE_DIR"
+          cp "$INPUT_DIR"/*.json "$EVIDENCE_DIR/"
+          printf '%s\n' '${{ needs.current-input.outputs.artifact_digest }}' > "$EVIDENCE_DIR/transport-artifact-digest.txt"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare official Google guest and software graphics without modifying limits
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xvfb xauth mesa-utils libgl1-mesa-dri libegl-mesa0 mesa-vulkan-drivers libpulse0 ffmpeg
+          Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp -ac > "$EVIDENCE_DIR/xvfb.log" 2>&1 &
+          for attempt in $(seq 1 20); do
+            if glxinfo -B > "$EVIDENCE_DIR/host-glxinfo.txt" 2>&1; then break; fi
+            sleep 1
+          done
+          grep -E 'OpenGL renderer string:.*llvmpipe' "$EVIDENCE_DIR/host-glxinfo.txt"
+          sdkmanager emulator
+          "$ANDROID_HOME/emulator/emulator" -version > "$EVIDENCE_DIR/emulator-version.txt" 2>&1
+          "$ANDROID_HOME/emulator/emulator" -help-gpu > "$EVIDENCE_DIR/emulator-gpu-options.txt" 2>&1
+          grep -w lavapipe "$EVIDENCE_DIR/emulator-gpu-options.txt"
+      - name: Run the real game, pause its MV, export, decode, restore and save
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          cores: 4
+          ram-size: 4096M
+          disk-size: 8G
+          disable-linux-hw-accel: false
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu lavapipe -accel on
+          script: |
+            python -B tools/emulator_environment_probe/run_probe.py --apk "$INPUT_DIR/EnvironmentProbe.apk" --output "$EVIDENCE_DIR/environment" --timeout 60 --record-root
+            python -B tools/run_actual_mv_export_qa.py --apk "$INPUT_DIR/current-unified-observer.apk" --qa-evidence "$INPUT_DIR/current-unified-observer.apk.evidence.json" --source-commit "$SOURCE_SHA" --output-directory "$EVIDENCE_DIR/runtime" --song-label "$SONG_LABEL" --fps '${{ matrix.fps }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}' --startup-timeout 1800 --export-timeout 16200 ${{ matrix.extra }}
+      - name: Retain small proof even when the actual game cannot launch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-mv-proof-${{ matrix.case }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/actual-mv-evidence/
+            !${{ runner.temp }}/actual-mv-evidence/video/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Retain the bounded actual-game movie separately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-mv-movie-${{ matrix.case }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/actual-mv-evidence/video/*.mp4
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7
