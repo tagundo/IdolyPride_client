@@ -1795,7 +1795,9 @@ void* mp4_normalize_photography_descriptors(void* data) {
         ||read<int32_t>(source,0x18)!=static_cast<int32_t>(count))return nullptr;
     using SetField=void(*)(void*,void*,void*);
     auto set_field=reinterpret_cast<SetField>(image_base+mp4_replay_profile.field_set_value.rva);
-    set_field(data,field,&array); // Public IL2CPP setter includes the GC write barrier.
+    // The pinned IL2CPP reference-field dispatcher takes the managed object
+    // itself. Passing &array would persist a native stack address in data.
+    set_field(data,field,array); // Includes the original GC write barrier.
     return read<void*>(data,0x20)==array?array:nullptr;
 }
 using Mp4PhotographyInitialize=Mp4UniTask(*)(void*,void*,void*,Mp4CancellationToken,Method*);

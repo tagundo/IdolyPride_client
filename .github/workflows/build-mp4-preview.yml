@@ -8,6 +8,9 @@ on:
       - .github/workflows/build-mp4-preview.yml
       - tools/stage_mp4_preview.py
       - tests/test_mp4_preview_delivery.py
+      - tests/test_mp4_field_reference_abi.py
+      - tests/test_mp4_photography_bridge.py
+      - tests/test_mp4_replay_factories.py
       - tools/package_android_unified.py
       - tests/test_android_unified_badging.py
       - tests/test_ios_mp4_queue_host.py
@@ -49,8 +52,8 @@ jobs:
           python-version: '3.13'
       - name: Check draft delivery guards
         run: |
-          python -m pip install --disable-pip-version-check pytest==8.4.2 protobuf==6.33.0 pycryptodome==3.23.0
-          python -B -m pytest -q -p no:cacheprovider tests/test_mp4_preview_delivery.py
+          python -m pip install --disable-pip-version-check pytest==8.4.2 protobuf==6.33.0 pycryptodome==3.23.0 unicorn==2.1.4
+          python -B -m pytest -q -p no:cacheprovider tests/test_mp4_preview_delivery.py tests/test_mp4_field_reference_abi.py tests/test_mp4_photography_bridge.py tests/test_mp4_replay_factories.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -67,7 +70,7 @@ jobs:
         run: python -B tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/mp4-android-inputs"
       - name: Build current native bridge and signed MP4 preview APK
         env:
-          IDOLY_RELEASE_VERSION: 2026.11.21.7
+          IDOLY_RELEASE_VERSION: 2026.11.21.8
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
@@ -91,7 +94,7 @@ jobs:
             --password-file "$RUNNER_TEMP/mp4-public-development-password.txt" \
             --native-bridge "$RUNNER_TEMP/mp4-native/libidoly_presentation.so" \
             --native-receipt "$RUNNER_TEMP/mp4-native/build-receipt.json" \
-            --output "$RUNNER_TEMP/mp4-android-output/IdolyPride-Unified-2026.11.21.7-prototype.apk"
+            --output "$RUNNER_TEMP/mp4-android-output/IdolyPride-Unified-2026.11.21.8-prototype.apk"
           python -B tools/stage_mp4_preview.py check-android --source "$SOURCE_SHA" \
             --directory "$RUNNER_TEMP/mp4-android-output"
           test -z "$(git status --porcelain)"
@@ -169,18 +172,18 @@ jobs:
         run: python -B ios-unified/fetch_inputs.py --output "$RUNNER_TEMP/mp4-ios-inputs"
       - name: Install exact build verification dependencies
         run: |
-          python -m pip install --disable-pip-version-check pytest==8.4.2 pycryptodome==3.23.0 UnityPy==1.25.4 astc-encoder-py==0.1.12 Pillow==13.0.0
+          python -m pip install --disable-pip-version-check pytest==8.4.2 unicorn==2.1.4 pycryptodome==3.23.0 UnityPy==1.25.4 astc-encoder-py==0.1.12 Pillow==13.0.0
           python -m pip install --no-index "$RUNNER_TEMP"/mp4-ios-inputs/wheels/*.whl
       - name: Compile the real iOS and Simulator MP4 interface and exercise the Apple codecs
         run: |
           mkdir "$RUNNER_TEMP/mp4-ios-preflight"
-          python -B -m pytest -q tests/test_mp4_queue.py tests/test_ios_mp4_queue_host.py tests/test_ios_mp4_options.py tests/test_ios_mp4_menu_readiness.py tests/test_ios_probe_account_guard.py tests/test_ios_probe_process_termination.py tests/test_mp4_runtime_type_validation.py
+          python -B -m pytest -q tests/test_mp4_queue.py tests/test_ios_mp4_queue_host.py tests/test_ios_mp4_options.py tests/test_ios_mp4_menu_readiness.py tests/test_ios_probe_account_guard.py tests/test_ios_probe_process_termination.py tests/test_mp4_runtime_type_validation.py tests/test_mp4_field_reference_abi.py tests/test_mp4_photography_bridge.py tests/test_mp4_replay_factories.py
           python -B ios-unified/native/test_mp4_ui_compile.py > "$RUNNER_TEMP/mp4-ios-preflight/mp4-ui-compile.json"
           python -B ios-unified/native/test_mv_encoder.py --output-directory "$RUNNER_TEMP/mp4-apple-codec"
       - name: Build current-source IPA and verify five cold language processes in a fresh Simulator
         env:
           GH_TOKEN: ${{ github.token }}
-          IDOLY_RELEASE_VERSION: 2026.11.21.7
+          IDOLY_RELEASE_VERSION: 2026.11.21.8
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"

@@ -252,7 +252,7 @@ inline bool camera_delta_override(void*brain,float*delta){return installed&&game
 inline bool begin_job() {
     pthread_mutex_lock(&control_mutex);
     if(!start_pending){pthread_mutex_unlock(&control_mutex);return false;}
-    job=Job{};job.options=pending_options;job.config=configured;
+    idoly_mp4_queue::detail::reset_value(job);job.options=pending_options;job.config=configured;
     job.config.root=dup(configured.root);job.config.req=dup(configured.req);job.config.rsp=dup(configured.rsp);job.config.prepared=dup(configured.prepared);job.config.exports=dup(configured.exports);
     if(pending_queue_output[0]){
         snprintf(job.status.id,sizeof(job.status.id),"%s",pending_queue_output);

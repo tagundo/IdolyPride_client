@@ -21,6 +21,8 @@ struct Calls {
     void*(*target)(uint32_t)=nullptr;
     void(*release)(uint32_t)=nullptr;
     int32_t(*type_get_type)(const void*)=nullptr;
+    // Pinned IL2CPP API: reference fields take the object itself (or null).
+    // Primitive/value fields instead take an address to the value storage.
     void(*field_set_value)(void*,void*,void*)=nullptr;
 };
 struct Classes {
@@ -97,7 +99,7 @@ public:
             method_pointer<Constructor>(list_ctor_)(list.get(),list_ctor_);
             // Attach before the temporary root is released. The retained
             // descriptor owns this list across the caller's next allocation.
-            void* value=list.get();api_.field_set_value(owner_root.get(),fields_[assets_index_].field,&value);
+            api_.field_set_value(owner_root.get(),fields_[assets_index_].field,list.get());
             error_="none";return list.get();
         } catch(...) {fail("factory_list_construction_exception");return nullptr;}
     }
@@ -122,7 +124,7 @@ public:
         try {
             Root owner_root(api_,owner),value_root(api_,value);
             if(!owner_root||(value&&!value_root))return fail("factory_gc_handle_failed");
-            void* managed=value_root.get();api_.field_set_value(owner_root.get(),field.field,&managed);
+            api_.field_set_value(owner_root.get(),field.field,value_root.get());
             error_="none";return true;
         } catch(...) {return fail("factory_field_assignment_exception");}
     }

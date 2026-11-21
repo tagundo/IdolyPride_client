@@ -182,6 +182,13 @@ public final class CombinedDiagnosticExportHost {
    calls++;return new JSONObject(value);
   }
  }
+ static final class PreviousProcessExits {
+  static int calls;static String value="{\"scope\":\"self_package\",\"supported\":true,\"status\":\"complete\",\"records\":[{\"reason\":5,\"status\":11,\"pid\":1234}]}";
+  static JSONObject collect(Context context) {
+   check(Looper.myLooper()==Looper.WORKER,"historical exits collected off main");calls++;
+   return new JSONObject(value);
+  }
+ }
  static final class Looper {
   static final Looper MAIN=new Looper(),WORKER=new Looper();static Looper current=MAIN;
   static Looper myLooper(){return current;}static Looper getMainLooper(){return MAIN;}
@@ -336,6 +343,7 @@ public final class CombinedDiagnosticExportHost {
   ServerService.exportDiagnostics(activity,new Uri());
   check(service.worker.tasks.isEmpty()&&ServerService.EXPORT_IO.tasks.size()==1,"stopped service uses retained diagnostic snapshot");
   ServerService.EXPORT_IO.drain();idle();emit(activity);
+  check(PreviousProcessExits.calls==2,"stopped-server export collects previous exits without service restart");
 
   UnifiedRuntime.enabled=true;
   freshStream(activity);ServerService.activeService=service;service.worker.rejected=true;
@@ -352,6 +360,12 @@ public final class CombinedDiagnosticExportHost {
   ServerService.EXPORT_IO.drain();idle();emit(activity);
 
   ServerService.activeService=null;
+  for(String history:new String[]{"{\"scope\":\"self_package\",\"supported\":false,\"status\":\"unsupported\",\"records\":[]}",
+    "{\"scope\":\"self_package\",\"supported\":true,\"status\":\"failed\",\"error_code\":\"history_query_failed\",\"records\":[]}"}){
+   PreviousProcessExits.value=history;freshStream(activity);ServerService.exportDiagnostics(activity,new Uri());
+   check(service.worker.tasks.isEmpty(),"exit collection must not restart or query stopped server");
+   ServerService.EXPORT_IO.drain();idle();emit(activity);
+  }
   for(int failure=0;failure<3;failure++) {
    freshStream(activity);activity.resolver.stream.failWrite=failure==0;
    activity.resolver.stream.failClose=failure==1;activity.resolver.nullStream=failure==2;
@@ -398,10 +412,10 @@ public final class CombinedDiagnosticExportHost {
     assert "combined diagnostic export and exception caller checks passed" in result.stdout
     documents = [json.loads(base64.b64decode(line.removeprefix("JSON:"), validate=True))
                  for line in result.stdout.splitlines() if line.startswith("JSON:")]
-    assert len(documents) == 4
+    assert len(documents) == 6
     for index, document in enumerate(documents):
         expected = {"schema", "server_version", "server_version_code", "bundled_data_sha256",
-                    "runtime", "diagnostics", "server_logs", "server_settings"}
+                    "runtime", "diagnostics", "server_logs", "server_settings", "previous_process_exits"}
         if index >= 2:
             expected.add("native_shared_resources")
             expected.add("mp4_export")
@@ -418,5 +432,8 @@ public final class CombinedDiagnosticExportHost {
     assert documents[1]["server_logs"] == ["보관된 기록"]
     assert documents[2]["mp4_export"] == {"ready": False, "readiness_error": "selected_capture_geometry_not_ready", "source_width": 1921}
     assert documents[3]["mp4_export"] == {"ready": True, "source_width": 1280}
+    assert all(document["previous_process_exits"]["records"] == [{"reason": 5, "status": 11, "pid": 1234}] for document in documents[:4])
+    assert documents[4]["previous_process_exits"]["status"] == "unsupported"
+    assert documents[5]["previous_process_exits"]["error_code"] == "history_query_failed"
     assert all(document["diagnostics"] == {"phase": "retained"} and document["server_logs"] == ["retained log"]
                for document in documents[2:])

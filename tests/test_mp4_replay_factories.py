@@ -51,7 +51,20 @@ const void* field_type(void* f){return &static_cast<Field*>(f)->type;}
 void* class_from_type(const void* t){return static_cast<const Type*>(t)->klass;}
 int32_t type_kind(const void* t){return static_cast<const Type*>(t)->kind;}
 void* object_new(void* c){return allocate(static_cast<Class*>(c));}
-void field_set(void* value,void* field,void* input){auto* o=static_cast<Object*>(value);auto* f=static_cast<Field*>(field);assert(o&&o->alive&&input);++barriers;if(f->type.kind==2)o->values[f]=*static_cast<uint8_t*>(input);else if(f->type.kind==8||f->type.kind==17)o->values[f]=*static_cast<int32_t*>(input);else {auto* ref=*static_cast<Object**>(input);assert(!ref||(ref->alive&&ref->klass==f->type.klass));o->refs[f]=ref;}}
+void field_set(void* value,void* field,void* input){
+    auto* o=static_cast<Object*>(value);auto* f=static_cast<Field*>(field);assert(o&&o->alive);++barriers;
+    if(f->type.kind==2){assert(input);o->values[f]=*static_cast<uint8_t*>(input);}
+    else if(f->type.kind==8||f->type.kind==17){assert(input);o->values[f]=*static_cast<int32_t*>(input);}
+    else {
+        // Actual pinned Field.SetValueRaw(w3=0) reference branch stores input
+        // directly. A native address-of-object-pointer must never enter the
+        // managed object graph, even if dereferencing it would look plausible.
+        auto* ref=static_cast<Object*>(input);bool registered=!ref;
+        for(const auto& candidate:objects)if(candidate.get()==ref)registered=true;
+        assert(registered&&(!ref||(ref->alive&&ref->klass==f->type.klass)));
+        o->refs[f]=ref;
+    }
+}
 void original_ctor(void* value,Method* method);
 void original_add(void* list,void* value,Method* method);
 ManagedMethod ctor_method{reinterpret_cast<void(*)()>(original_ctor)},add_method{reinterpret_cast<void(*)()>(original_add)};

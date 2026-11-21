@@ -45,7 +45,9 @@ const void*font_method(void*p,const char*n,int32_t count){assert(p==ptr(descript
 void*font_field(void*p,const char*n){assert(p==ptr(data)&&std::string(n)=="<ActorDescriptors>k__BackingField");return field_ok?reinterpret_cast<void*>(71):nullptr;}
 void field_set(void*p,void*f,void*v){
  assert(p==ptr(data)&&f==reinterpret_cast<void*>(71)&&roots.size()==3);++field_sets;order.push_back(2);
- auto array=*static_cast<void**>(v);std::memcpy(static_cast<uint8_t*>(p)+0x20,&array,sizeof array);
+ // Both pinned IL2CPP reference-field dispatchers store the supplied object
+ // directly. A native address-of-object temporary is not a managed reference.
+ assert(v==ptr(result));std::memcpy(static_cast<uint8_t*>(p)+0x20,&v,sizeof v);
 }
 void*to_array(void*p,const void*m){
  assert(p==ptr(descriptors)&&m==&info&&roots.size()==2);++to_arrays;order.push_back(1);
@@ -70,6 +72,7 @@ Mp4UniTask original_root(void*p,void*t,void*c,Mp4CancellationToken token,Method*
 }
 Mp4UniTask original_player(void*p,void*d,Mp4CancellationToken token,Method*m){
  assert(p==ptr(player)&&d==ptr(data)&&token.source==reinterpret_cast<void*>(81)&&m==reinterpret_cast<void*>(82));
+ if(available)assert(read<void*>(d,0x20)==ptr(result));
  assert(roots.empty());++originals;order.push_back(4);return {reinterpret_cast<void*>(83),-91,{1,2,3,4,5,6}};
 }
 void original_end(void*p,Method*){assert(p==ptr(presenter));++originals;order.push_back(5);}

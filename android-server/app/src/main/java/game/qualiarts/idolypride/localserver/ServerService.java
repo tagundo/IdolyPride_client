@@ -651,6 +651,7 @@ public final class ServerService extends Service {
                 document.put("diagnostics", new JSONObject(snapshot));
                 document.put("server_logs", new JSONArray(lines));
                 document.put("server_settings", readServerSettings(context));
+                document.put("previous_process_exits", PreviousProcessExits.collect(context));
                 if (mp4 != null) document.put("mp4_export", new JSONObject(mp4));
                 if (UnifiedRuntime.isEnabled(context)) document.put("native_shared_resources", UnifiedSharedResources.snapshot());
                 byte[] encoded = document.toString(2).getBytes(StandardCharsets.UTF_8);

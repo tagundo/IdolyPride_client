@@ -522,10 +522,10 @@ def test_unknown_d8_synthetic_kinds_or_malformed_suffixes_remain_rejected(suffix
     assert not tool.own_synthetic(origin + suffix, {origin + ";"})
 
 
-def test_only_nine_server_sources_are_frozen_without_installer_or_client_builder():
-    assert len(tool.JAVA_FILES) == 9
+def test_only_ten_server_sources_are_frozen_without_installer_or_client_builder():
+    assert len(tool.JAVA_FILES) == 10
     assert {Path(name).stem for name in tool.JAVA_FILES} == {
-        "MainActivity", "ServerService", "CryptoBridge", "PresentationSettings", "PlaybackSettings", "PlaybackStorage",
+        "MainActivity", "ServerService", "PreviousProcessExits", "CryptoBridge", "PresentationSettings", "PlaybackSettings", "PlaybackStorage",
         "RenderingExperiment", "LibrarySettings", "ResourceTransfers"}
     assert not any("Installer" in name or "PresentationStorage" in name for name in tool.SOURCE_FILES)
     assert not hasattr(tool, "presentation")

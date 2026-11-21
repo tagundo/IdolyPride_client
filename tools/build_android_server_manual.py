@@ -53,7 +53,7 @@ JAVA_ROOT = JAVA_SOURCE_ROOT + PACKAGE.replace(".", "/") + "/"
 RES_ROOT = "android-server/app/src/main/res/"
 MANIFEST = "android-server/app/src/main/AndroidManifest.xml"
 GRADLE = "android-server/app/build.gradle.kts"
-JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "CryptoBridge",
+JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "PreviousProcessExits", "CryptoBridge",
     "PresentationSettings", "PlaybackSettings", "PlaybackStorage", "RenderingExperiment",
     "LibrarySettings", "ResourceTransfers"))
 RESOURCE_FILES = (RES_ROOT + "values/strings.xml", RES_ROOT + "drawable/ic_server.xml")

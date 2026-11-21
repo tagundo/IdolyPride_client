@@ -92,6 +92,18 @@ template<class T>inline T*allocate(){void*memory=malloc(sizeof(T));if(!memory)re
     return new(memory)T{};
 #endif
 }
+// Reconstruct plain value storage directly at its destination. Assigning a
+// large T{} can materialize the full value on a small Unity callback stack;
+// placement construction preserves member defaults without that temporary.
+template<class T>inline void reset_value(T& value){
+    static_assert(__is_trivially_copyable(T),"reset_value requires plain value storage");
+    value.~T();
+#ifdef IDOLY_DARWIN_BRIDGE
+    new(idoly_mp4_queue_placement::Address{&value})T{};
+#else
+    new(static_cast<void*>(&value))T{};
+#endif
+}
 #ifdef IDOLY_DARWIN_BRIDGE
 constexpr int rd=0,wr=1,rw=2,create=0x200,exclusive=0x800,nofollow=0x100,directory=0x100000,nonblock=4;
 inline int error_number(){return *__error();}
@@ -192,7 +204,7 @@ inline bool decode(Reader&r,Job&j,uint32_t version=3){
     if(version>=2){o.output_width=r.u32();o.output_height=r.u32();}
     else {o.output_width=o.output_height=0;}
     Graphics&g=o.graphics;g.revision=static_cast<int64_t>(r.u64());uint32_t custom=r.u32();g.quality=static_cast<int32_t>(r.u32());g.target_fps=static_cast<int32_t>(r.u32());uint32_t scale=r.u32();memcpy(&g.render_scale,&scale,4);g.max_buffer_pixel=static_cast<int32_t>(r.u32());g.aa_mode=static_cast<int32_t>(r.u32());g.shadow_resolution=static_cast<int32_t>(r.u32());uint32_t expanded=r.u32();if(custom>1||expanded>1)return false;g.custom_graphics=static_cast<uint8_t>(custom);g.expand_photography=static_cast<uint8_t>(expanded);
-    Descriptor&d=j.descriptor;d.photo=PhotoSelection{};r.str(d.stage_asset,name_capacity);r.str(d.timeline_asset,name_capacity);d.stage_max_capacity=static_cast<int32_t>(r.u32());uint32_t detach=r.u32();if(detach>1)return false;d.detach_actors_on_player_destroyed=static_cast<uint8_t>(detach);d.actor_count=r.u32();if(d.actor_count>max_actors)return false;
+    Descriptor&d=j.descriptor;reset_value(d.photo);r.str(d.stage_asset,name_capacity);r.str(d.timeline_asset,name_capacity);d.stage_max_capacity=static_cast<int32_t>(r.u32());uint32_t detach=r.u32();if(detach>1)return false;d.detach_actors_on_player_destroyed=static_cast<uint8_t>(detach);d.actor_count=r.u32();if(d.actor_count>max_actors)return false;
     for(size_t i=0;i<d.actor_count;++i){Actor&a=d.actors[i];r.str(a.character_id,name_capacity);r.str(a.descriptor_name,name_capacity);a.actor_index=static_cast<int32_t>(r.u32());a.track_index=static_cast<int32_t>(r.u32());a.audience_amount=static_cast<int32_t>(r.u32());a.psyllium_color_type=static_cast<int32_t>(r.u32());a.collider_type=static_cast<int32_t>(r.u32());a.render_layer_base=static_cast<int32_t>(r.u32());uint32_t human=r.u32(),trigger=r.u32(),blink=r.u32(),adv=r.u32(),isnull=r.u32();if(human>1||trigger>1||blink>1||adv>1||isnull>1)return false;a.humanoid=static_cast<uint8_t>(human);a.trigger=static_cast<uint8_t>(trigger);a.auto_blink_disabled=static_cast<uint8_t>(blink);a.use_adv_settings=static_cast<uint8_t>(adv);a.name_is_null=static_cast<uint8_t>(isnull);a.asset_count=r.u32();if(a.asset_count>max_assets)return false;for(size_t k=0;k<a.asset_count;++k)r.str(a.assets[k],name_capacity);}
     if(version>=3){
         PhotoSelection&p=d.photo;p.source_kind=r.u32();uint32_t preview=r.u32(),original=r.u32(),screen=r.u32();
@@ -253,7 +265,7 @@ public:
         if(!detail::descriptor(d))return Error::invalid_descriptor;
         if(!detail::options(o))return Error::invalid_options;
         if(state_->count==max_jobs)return Error::full;
-        char id[33]{};if(!new_id(id))return Error::random_failed;Store*next=clone();if(!next)return Error::io;Job&j=next->jobs[next->count++];j=Job{};j.descriptor=d;j.options=o;j.state=State::pending;memcpy(j.id,id,33);Error e=commit(next);if(e==Error::ok&&out)memcpy(out,id,33);return e;
+        char id[33]{};if(!new_id(id))return Error::random_failed;Store*next=clone();if(!next)return Error::io;Job&j=next->jobs[next->count++];detail::reset_value(j);j.descriptor=d;j.options=o;j.state=State::pending;memcpy(j.id,id,33);Error e=commit(next);if(e==Error::ok&&out)memcpy(out,id,33);return e;
     }
     Error claim_next(char out[33]){
         if(!state_||blocked_)return Error::not_open;
@@ -268,7 +280,7 @@ public:
     // Call for active jobs only after the renderer has acknowledged cancellation.
     Error cancel(const char*id){return transition(id,State::cancelled,nullptr);}
     Error retry(const char*id){return transition(id,State::pending,nullptr);}
-    Error remove(const char*id){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(active(state_->jobs[i]))return Error::busy;Store*next=clone();if(!next)return Error::io;for(size_t k=static_cast<size_t>(i)+1;k<next->count;++k)next->jobs[k-1]=next->jobs[k];--next->count;next->jobs[next->count]=Job{};return commit(next);}
+    Error remove(const char*id){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(active(state_->jobs[i]))return Error::busy;Store*next=clone();if(!next)return Error::io;for(size_t k=static_cast<size_t>(i)+1;k<next->count;++k)next->jobs[k-1]=next->jobs[k];--next->count;detail::reset_value(next->jobs[next->count]);return commit(next);}
     Error move(const char*id,size_t target){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(target>=state_->count)return Error::invalid_argument;if(state_->jobs[i].state!=State::pending)return Error::invalid_state;if(target==static_cast<size_t>(i))return Error::ok;Store*next=clone();if(!next)return Error::io;Job*saved=detail::allocate<Job>();if(!saved){free(next);return Error::io;}*saved=next->jobs[i];if(target<static_cast<size_t>(i))for(size_t k=static_cast<size_t>(i);k>target;--k)next->jobs[k]=next->jobs[k-1];else for(size_t k=static_cast<size_t>(i);k<target;++k)next->jobs[k]=next->jobs[k+1];next->jobs[target]=*saved;free(saved);return commit(next);}
 private:
     // Keep the owned path/lock stable while the checked header advances to v3.

@@ -3,6 +3,7 @@ import copy
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile, ZipInfo
@@ -257,6 +258,7 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
     scoped = raw.split("    paths:\n", 1)[1].split("  workflow_dispatch:", 1)[0]
     assert [line.strip()[2:] for line in scoped.splitlines() if line.strip()] == [delivery.WORKFLOW,
         "tools/stage_mp4_preview.py", "tests/test_mp4_preview_delivery.py",
+        "tests/test_mp4_field_reference_abi.py", "tests/test_mp4_photography_bridge.py", "tests/test_mp4_replay_factories.py",
         "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py"]
     assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 4
     assert "needs: [android-build, ios-build]" in raw and "inputs.upload_draft" in raw
@@ -268,6 +270,14 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
     assert "ANDROID_ARTIFACT_ID: ${{ needs.android-build.outputs.artifact_id }}" in raw
     assert "IOS_ARTIFACT_ID: ${{ needs.ios-build.outputs.artifact_id }}" in raw
     assert "continue-on-error" not in raw
+    for producer in ("android-build", "ios-build"):
+        tail = raw.split("  " + producer + ":\n", 1)[1]
+        job = re.split(r"(?m)^  [A-Za-z][A-Za-z0-9_-]*:\s*$", tail, maxsplit=1)[0]
+        # Each producer must reject the reference-store regression before it
+        # can generate an installation file, including the early APK delivery.
+        assert "unicorn==2.1.4" in job
+        for regression in ("test_mp4_field_reference_abi.py", "test_mp4_photography_bridge.py", "test_mp4_replay_factories.py"):
+            assert any("python -B -m pytest" in line and regression in line for line in job.splitlines())
 
 
 def stage_fixture(monkeypatch, *, corrupt_readback=False, untagged_final=False, android_only=False,

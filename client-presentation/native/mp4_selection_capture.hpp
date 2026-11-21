@@ -45,7 +45,7 @@ public:
         slot->valid=false;slot->sequence=++sequence_;
         slot->error="invalid_selection_parameter";
         if(!is(param,"Solis.OutGame.OutGameLivePlayerParam"))return fail_entry(*slot,Result::unsupported,"unsupported_selection_parameter");
-        scratch_=Descriptor{};
+        idoly_mp4_queue::detail::reset_value(scratch_);
         if(!text(field<void*>(param,layout_.stage),scratch_.stage_asset)
             ||!text(field<void*>(param,layout_.timeline),scratch_.timeline_asset))
             return fail_entry(*slot,Result::invalid,"selection_asset_name_invalid");
@@ -85,10 +85,10 @@ public:
             slot->handle=api_.retain(player);if(!slot->handle)return fail(Result::failed,"selection_handle_failed");
         }
         if(slot->transition){api_.release(slot->transition);slot->transition=0;}
-        slot->valid=false;slot->descriptor=Descriptor{};slot->sequence=++sequence_;slot->error="invalid_photography_selection";
+        slot->valid=false;idoly_mp4_queue::detail::reset_value(slot->descriptor);slot->sequence=++sequence_;slot->error="invalid_photography_selection";
         if(!is(data,"Solis.Common.Photography.PhotographyLiveData"))
             return fail_entry(*slot,Result::unsupported,"unsupported_photography_parameter");
-        scratch_=Descriptor{};
+        idoly_mp4_queue::detail::reset_value(scratch_);
         if(!text(field<void*>(data,layout_.photo_stage),scratch_.stage_asset)
             ||!text(field<void*>(data,layout_.photo_timeline),scratch_.timeline_asset))
             return fail_entry(*slot,Result::invalid,"selection_asset_name_invalid");
