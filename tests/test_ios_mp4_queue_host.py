@@ -225,9 +225,15 @@ int main(int argc,char**argv){@autoreleasepool{
  puts("PASS Foundation queue host requests and private outputs");
 }return 0;}
 ''')
-    compiler = subprocess.check_output(["xcrun","--find","clang"],text=True).strip()
-    subprocess.run([compiler,"-fobjc-arc","-fblocks","-Wall","-Wextra","-Werror",
-                    "-I",str(ROOT / "ios-unified/native"),str(source),"-framework","Foundation","-o",str(output)],
-                   check=True,capture_output=True,text=True,timeout=60)
-    result = subprocess.run([str(output),str(tmp_path)],check=True,capture_output=True,text=True,timeout=10)
+    compiler = subprocess.check_output(["xcrun","--sdk","macosx","--find","clang"],
+                                       stderr=subprocess.STDOUT,text=True).strip()
+    sdk = subprocess.check_output(["xcrun","--sdk","macosx","--show-sdk-path"],
+                                  stderr=subprocess.STDOUT,text=True).strip()
+    compiled = subprocess.run([compiler,"-isysroot",sdk,"-mmacosx-version-min=12.0",
+                               "-fobjc-arc","-fblocks","-Wall","-Wextra","-Werror",
+                               "-I",str(ROOT / "ios-unified/native"),str(source),"-framework","Foundation","-o",str(output)],
+                              check=False,capture_output=True,text=True,timeout=60)
+    assert compiled.returncode == 0, "Foundation queue host compilation failed:\n" + compiled.stdout + compiled.stderr
+    result = subprocess.run([str(output),str(tmp_path)],check=False,capture_output=True,text=True,timeout=10)
+    assert result.returncode == 0, "Foundation queue host execution failed:\n" + result.stdout + result.stderr
     assert result.stdout.strip() == "PASS Foundation queue host requests and private outputs"

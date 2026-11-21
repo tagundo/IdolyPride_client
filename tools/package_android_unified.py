@@ -440,7 +440,7 @@ def preflight(parent, baseline_oom):
         raise ValueError("OOM kill count changed during build")
 
 
-def run(command, env, *, timeout=180):
+def run(command, env, *, timeout=180, complete_output_limit=None):
     # Logs are bounded and kept private: SDK tools can emit whole resource trees.
     with tempfile.TemporaryFile() as log:
         process = subprocess.run([str(x) for x in command], stdin=subprocess.DEVNULL,
@@ -449,9 +449,29 @@ def run(command, env, *, timeout=180):
         length = log.tell()
         log.seek(max(0, length - 8192))
         tail = log.read().decode("utf-8", "replace")
+        if process.returncode == 0 and complete_output_limit is not None:
+            if not isinstance(complete_output_limit, int) or not 1 <= complete_output_limit <= MIB:
+                raise ValueError("Invalid complete command output bound")
+            if length > complete_output_limit:
+                raise ValueError("Build command output exceeds bound: " + Path(str(command[0])).name
+                                 + " (" + str(length) + " bytes)")
+            log.seek(0)
+            return log.read(complete_output_limit).decode("utf-8", "replace")
     if process.returncode:
         raise ValueError("Build command failed: " + Path(str(command[0])).name + "\n" + tail)
     return tail
+
+
+def validate_final_badging(badging):
+    """Validate complete bounded tool output; log tails are not an identity source."""
+    package_lines = re.findall(r"^package: (.+)$", badging, re.M)
+    packages = [{key: match[1] if (match := re.search(r"(?:^| )" + key + r"='([^']*)'", line)) else None
+                 for key in ("name", "versionCode")} for line in package_lines]
+    sdks = re.findall(r"^sdkVersion:'([^']*)'$", badging, re.M)
+    launchers = re.findall(r"^launchable-activity: name='([^']*)'", badging, re.M)
+    if (packages != [{"name": PACKAGE, "versionCode": "414"}] or sdks != ["30"] or launchers != [MENU_ACTIVITY]):
+        observed = {"packages": packages[:2], "min_sdk": sdks[:2], "launchers": launchers[:2]}
+        raise ValueError("Final manifest identity/launcher differs: " + json.dumps(observed, ensure_ascii=True)[:1024])
 
 
 def build_resources(work, blobs, tools, env):
@@ -793,10 +813,8 @@ def build(args):
                 raise ValueError("Final compiled manifest differs from verified windowing policy")
         if language_data.validate_data_archive(aligned, client, embedded=True) != data_descriptor:
             raise ValueError("Final language object store differs")
-        badging = run([tools["aapt2"], "dump", "badging", aligned], env)
-        if (f"package: name='{PACKAGE}' versionCode='414'" not in badging or "sdkVersion:'30'" not in badging
-                or f"launchable-activity: name='{MENU_ACTIVITY}'" not in badging):
-            raise ValueError("Final manifest identity/launcher differs")
+        badging = run([tools["aapt2"], "dump", "badging", aligned], env, complete_output_limit=64 * 1024)
+        validate_final_badging(badging)
         final_blobs, _, _ = source_snapshot(root, args.source_commit, args.allow_working_tree)
         if final_blobs != blobs:
             raise ValueError("Compiled source snapshot changed during build")
