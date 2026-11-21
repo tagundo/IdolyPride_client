@@ -172,7 +172,8 @@ inline CaptureDecision queue_capture_readiness(const QueueRequest& request){
     const uint64_t now=milliseconds();
     if(!queue_capture_wait_started)queue_capture_wait_started=now;
     if(now<queue_capture_wait_started||now-queue_capture_wait_started>15000){
-        queue_set_error("selected_mv_resume_timeout");return CaptureDecision::failed;
+        queue_set_error(readiness==Result::ok&&geometry==Result::ok
+            ?"selected_graphics_snapshot_unavailable":"selected_mv_resume_timeout");return CaptureDecision::failed;
     }
     return CaptureDecision::waiting;
 }

@@ -19,6 +19,7 @@ on:
       - tests/test_mp4_timeline_audio_adapter.py
       - tests/test_mp4_selected_controller.py
       - tests/test_mp4_controller_diagnostics.py
+      - tests/test_mp4_graphics_snapshot.py
       - tools/package_android_unified.py
       - tests/test_android_unified_badging.py
       - tests/test_ios_mp4_queue_host.py
@@ -62,7 +63,7 @@ jobs:
       - name: Check draft delivery guards
         run: |
           python -m pip install --disable-pip-version-check pytest==8.4.2 protobuf==6.33.0 pycryptodome==3.23.0 unicorn==2.1.4 capstone==5.0.9
-          python -B -m pytest -q -p no:cacheprovider tests/test_mp4_preview_delivery.py tests/test_mp4_field_reference_abi.py tests/test_mp4_photography_bridge.py tests/test_mp4_replay_factories.py tests/test_mp4_small_stack.py tests/test_mp4_camera_owner.py tests/test_mp4_timeline_camera.py tests/test_mp4_timeline_audio.py tests/test_mp4_timeline_camera_adapter.py tests/test_mp4_timeline_audio_adapter.py tests/test_mp4_selected_controller.py tests/test_mp4_controller_diagnostics.py
+          python -B -m pytest -q -p no:cacheprovider tests/test_mp4_preview_delivery.py tests/test_mp4_field_reference_abi.py tests/test_mp4_photography_bridge.py tests/test_mp4_replay_factories.py tests/test_mp4_small_stack.py tests/test_mp4_camera_owner.py tests/test_mp4_timeline_camera.py tests/test_mp4_timeline_audio.py tests/test_mp4_timeline_camera_adapter.py tests/test_mp4_timeline_audio_adapter.py tests/test_mp4_selected_controller.py tests/test_mp4_controller_diagnostics.py tests/test_mp4_graphics_snapshot.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -79,7 +80,7 @@ jobs:
         run: python -B tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/mp4-android-inputs"
       - name: Build current native bridge and signed MP4 preview APK
         env:
-          IDOLY_RELEASE_VERSION: 2026.11.21.9
+          IDOLY_RELEASE_VERSION: 2026.11.21.10
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
@@ -103,7 +104,7 @@ jobs:
             --password-file "$RUNNER_TEMP/mp4-public-development-password.txt" \
             --native-bridge "$RUNNER_TEMP/mp4-native/libidoly_presentation.so" \
             --native-receipt "$RUNNER_TEMP/mp4-native/build-receipt.json" \
-            --output "$RUNNER_TEMP/mp4-android-output/IdolyPride-Unified-2026.11.21.9-prototype.apk"
+            --output "$RUNNER_TEMP/mp4-android-output/IdolyPride-Unified-2026.11.21.10-prototype.apk"
           python -B tools/stage_mp4_preview.py check-android --source "$SOURCE_SHA" \
             --directory "$RUNNER_TEMP/mp4-android-output"
           test -z "$(git status --porcelain)"
@@ -186,13 +187,13 @@ jobs:
       - name: Compile the real iOS and Simulator MP4 interface and exercise the Apple codecs
         run: |
           mkdir "$RUNNER_TEMP/mp4-ios-preflight"
-          python -B -m pytest -q tests/test_mp4_queue.py tests/test_ios_mp4_queue_host.py tests/test_ios_mp4_options.py tests/test_ios_mp4_menu_readiness.py tests/test_ios_probe_account_guard.py tests/test_ios_probe_process_termination.py tests/test_mp4_runtime_type_validation.py tests/test_mp4_field_reference_abi.py tests/test_mp4_photography_bridge.py tests/test_mp4_replay_factories.py tests/test_mp4_camera_owner.py tests/test_mp4_timeline_camera.py tests/test_mp4_timeline_audio.py tests/test_mp4_timeline_camera_adapter.py tests/test_mp4_timeline_audio_adapter.py tests/test_mp4_selected_controller.py tests/test_mp4_controller_diagnostics.py
+          python -B -m pytest -q tests/test_mp4_queue.py tests/test_ios_mp4_queue_host.py tests/test_ios_mp4_options.py tests/test_ios_mp4_menu_readiness.py tests/test_ios_probe_account_guard.py tests/test_ios_probe_process_termination.py tests/test_mp4_runtime_type_validation.py tests/test_mp4_field_reference_abi.py tests/test_mp4_photography_bridge.py tests/test_mp4_replay_factories.py tests/test_mp4_camera_owner.py tests/test_mp4_timeline_camera.py tests/test_mp4_timeline_audio.py tests/test_mp4_timeline_camera_adapter.py tests/test_mp4_timeline_audio_adapter.py tests/test_mp4_selected_controller.py tests/test_mp4_controller_diagnostics.py tests/test_mp4_graphics_snapshot.py
           python -B ios-unified/native/test_mp4_ui_compile.py > "$RUNNER_TEMP/mp4-ios-preflight/mp4-ui-compile.json"
           python -B ios-unified/native/test_mv_encoder.py --output-directory "$RUNNER_TEMP/mp4-apple-codec"
       - name: Build current-source IPA and verify five cold language processes in a fresh Simulator
         env:
           GH_TOKEN: ${{ github.token }}
-          IDOLY_RELEASE_VERSION: 2026.11.21.9
+          IDOLY_RELEASE_VERSION: 2026.11.21.10
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"

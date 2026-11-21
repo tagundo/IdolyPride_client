@@ -1188,7 +1188,9 @@ bool mp4_queue_snapshot_graphics(idoly_mp4_queue::Graphics& out){
     if(!manager||!object_alive(manager,nullptr))return false;
     if(!current.custom_graphics||!current.quality)current.quality=read<int32_t>(manager,0x24);
     if(!current.custom_graphics||!current.target_fps){
-        const float observed=read<float>(manager,0x20);
+        // Both pinned originals' FPS getter/setter access _targetFrameRate at
+        // 0xa0. 0x20 is FrameChangeScale (usually near 1), not a frame rate.
+        const float observed=read<float>(manager,0xa0);
         if(!std::isfinite(observed)||observed<0||observed>120||std::fabs(observed-std::round(observed))>.001f)return false;
         current.target_fps=static_cast<int>(observed);
     }

@@ -268,6 +268,7 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
         "tests/test_mp4_timeline_audio_adapter.py",
         "tests/test_mp4_selected_controller.py",
         "tests/test_mp4_controller_diagnostics.py",
+        "tests/test_mp4_graphics_snapshot.py",
         "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py",
         "tests/test_ios_probe_process_termination.py"]
     assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 4

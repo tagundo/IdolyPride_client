@@ -54,7 +54,8 @@ replay::UniTask16 rp_awaiter(replay::UniTask16* task,replay::Method*){return *ta
 void rp_result(replay::UniTask16* task,replay::Method*){assert(task->source==ptr(close_source)&&!close_consumed&&!close_ticks);close_consumed=true;router_top=router_home;objects.erase(ptr(closing_presenter));objects.erase(ptr(closing_player));}
 bool rp_ready(void* value,replay::Method*){return alive(value)&&get<uint8_t>(value,0x70)!=0;}
 replay::Api replay_api(){replay::Api a{};a.is_type=istype;a.alive=alive;a.retain=retain;a.retained=target;a.release=release;a.new_object=rp_new;a.new_string=string_new;a.new_field_list=rp_list;a.list_add=rp_add;a.set_object=rp_set_object;a.set_i32=rp_set_i32;a.set_bool=rp_set_bool;a.out_game_param_ctor=rp_param_ctor;a.actor_descriptor_ctor=rp_noop_ctor;a.transition_param_ctor=rp_noop_ctor;a.param_add_actor=rp_param_actor;a.scene_instance=rp_scene;a.scene_busy=rp_busy;a.live_state=rp_state;a.tree_with_param=rp_tree;a.open_tree=rp_open;a.top_screen=rp_top;a.presenter_end=rp_end;a.task_status=rp_task_status;a.task_get_awaiter=rp_awaiter;a.task_get_result=rp_result;a.player_ready=rp_ready;return a;}
-bool graphics_snapshot(qm::Graphics& out){out=current_graphics;return true;}
+bool queue_graphics_valid=true;
+bool graphics_snapshot(qm::Graphics& out){if(!queue_graphics_valid)return false;out=current_graphics;return true;}
 bool graphics_apply(const qm::Graphics* value){graphics_override=value!=nullptr;if(value){effective_graphics=*value;applied_scales.push_back(value->render_scale);}else effective_graphics=current_graphics;return true;}
 int32_t pixel_width(void*,Method*){return reported_width;}int32_t pixel_height(void*,Method*){return 16;}
 void pump(){
@@ -119,10 +120,18 @@ int main(int argc,char** argv){
         }else if(scenario=="capture_resume_timeout"){
             assert(session_core::queue_capture_wait_started);session_core::queue_capture_wait_started=session_core::milliseconds()-16000;pump();
             assert(!std::strcmp(session_core::queue_error,"selected_mv_resume_timeout"));
+        }else if(scenario=="capture_resume_graphics_timeout"){
+            queue_source_valid=true;queue_graphics_valid=false;
+            assert(session_core::queue_capture_wait_started);session_core::queue_capture_wait_started=session_core::milliseconds()-16000;pump();
+            assert(!std::strcmp(session_core::queue_error,"selected_graphics_snapshot_unavailable"));
+        }else if(scenario=="capture_resume_graphics_restore"){
+            queue_source_valid=true;queue_graphics_valid=false;pump();
+            assert(session_core::queue_request.kind==session_core::QueueCommandKind::enqueue&&session_core::queue_store().count()==0);
+            queue_graphics_valid=true;
         }
         queue_source_valid=true;pump();
         assert(session_core::queue_request.kind==session_core::QueueCommandKind::none);
-        if(scenario=="capture_resume_restore"){
+        if(scenario=="capture_resume_restore"||scenario=="capture_resume_graphics_restore"){
             assert(session_core::queue_store().count()==1);const auto* saved=session_core::queue_store().at(0);
             assert(!std::strcmp(saved->descriptor.timeline_asset,"timeline_A")&&!std::strcmp(saved->descriptor.actors[0].assets[0],"body_A"));
             assert(saved->options.fps_num==60&&saved->options.fps_den==1&&saved->options.codec==2&&saved->options.video_bitrate==32000000&&saved->options.audio_bitrate==192000);
@@ -365,12 +374,20 @@ def test_paused_enqueue_waits_for_original_target_and_preserves_selection_option
     assert result["session"]["ready"] is True
 
 
-@pytest.mark.parametrize("scenario,error", [("changed", "selection_changed_before_enqueue"), ("timeout", "selected_mv_resume_timeout")])
+@pytest.mark.parametrize("scenario,error", [("changed", "selection_changed_before_enqueue"), ("timeout", "selected_mv_resume_timeout"), ("graphics_timeout", "selected_graphics_snapshot_unavailable")])
 def test_paused_enqueue_does_not_substitute_selection_or_wait_forever(run_queue, scenario, error):
     result = run_queue("capture_resume_" + scenario)
     assert result["queue"]["jobs"] == []
     assert result["queue"]["command_pending"] is False
     assert result["queue"]["error_code"] == error
+
+
+def test_ready_mv_waits_for_graphics_snapshot_then_persists_one_job(run_queue):
+    result = run_queue("capture_resume_graphics_restore")
+    assert result["queue"]["command_pending"] is False
+    assert result["queue"]["error_code"] == "none"
+    assert len(result["queue"]["jobs"]) == 1
+    assert result["session"]["ready"] is True
 
 
 def test_host_pause_wins_over_pending_run_before_unity_tick(run_queue):
