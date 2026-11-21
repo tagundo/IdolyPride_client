@@ -181,7 +181,7 @@ def ios_files(folder, source):
     need(native.get("codesign_strict_verified") is True and native.get("smoke_probe_only") is False
          and native.get("MachO", {}).get("platform") == 2, "ios_native_target_differs")
     source_pins(native.get("source_sha256"), ROOT / "ios-unified/native", {
-        "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMVEncoder.mm", "IdolyEmbeddedServer.m", "IdolySettings.m", "MP4LifecyclePolicy.h",
+        "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMVEncoder.mm", "IdolyEmbeddedServer.m", "IdolySettings.m", "MP4LifecyclePolicy.h", "MP4FinalizationPolicy.h",
         "../../client-presentation/native/mp4_encoder_api.h"})
     presentation = read(folder / "presentation-native-build.json")
     source_pins(presentation.get("source_sha256"), ROOT, MP4_NATIVE)

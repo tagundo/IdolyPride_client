@@ -1,24 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #import "IdolyMP4UI.h"
 #import "IdolyEmbeddedServer.h"
+#import "MP4FinalizationPolicy.h"
 
 static NSString *IDMP4Language = @"system";
 static BOOL IDMP4FileSheetVisible;
-static UIBackgroundTaskIdentifier IDMP4FinalizationTask = UIBackgroundTaskInvalid;
-static void IDMP4EndFinalizationTask(void) {
-    UIBackgroundTaskIdentifier task = IDMP4FinalizationTask;
-    IDMP4FinalizationTask = UIBackgroundTaskInvalid;
-    if (task != UIBackgroundTaskInvalid) [UIApplication.sharedApplication endBackgroundTask:task];
+static IDMP4FinalizationPolicy IDMP4Finalization;
+static void IDMP4EndFinalizationGeneration(uint64_t generation) {
+    uintptr_t identifier = 0;
+    if (IDMP4FinalizationEnd(&IDMP4Finalization,generation,&identifier))
+        [UIApplication.sharedApplication endBackgroundTask:(UIBackgroundTaskIdentifier)identifier];
 }
+static void IDMP4EndFinalizationTask(void) { IDMP4EndFinalizationGeneration(0); }
 static void IDMP4AllowFinalization(void) {
     // Only the encoder's already captured frames may finish here. This bounded
     // assertion never promises background Unity rendering or begins another MV.
-    if (!IdolyEmbeddedServerMP4IsFinishing() || IDMP4FinalizationTask != UIBackgroundTaskInvalid) return;
-    IDMP4FinalizationTask = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"Idoly MP4 finalization"
-        expirationHandler:^{ IDMP4EndFinalizationTask(); }];
-    UIBackgroundTaskIdentifier token = IDMP4FinalizationTask;
+    if (!IdolyEmbeddedServerMP4IsFinishing()) return;
+    uint64_t generation = IDMP4FinalizationBegin(&IDMP4Finalization);
+    if (!generation) return;
+    UIBackgroundTaskIdentifier task = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"Idoly MP4 finalization"
+        expirationHandler:^{ IDMP4EndFinalizationGeneration(generation); }];
+    BOOL valid = task != UIBackgroundTaskInvalid;
+    if (!IDMP4FinalizationGrant(&IDMP4Finalization,generation,(uintptr_t)task,valid)) {
+        if (valid) [UIApplication.sharedApplication endBackgroundTask:task];
+        return;
+    }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        if (IDMP4FinalizationTask == token) IDMP4EndFinalizationTask();
+        IDMP4EndFinalizationGeneration(generation);
     });
 }
 static NSString *IDMP4Text(NSString *ko, NSString *ja, NSString *en) {

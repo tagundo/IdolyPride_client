@@ -19,7 +19,7 @@ def main() -> None:
         raise SystemExit("Actual macOS Xcode SDKs required for UIKit compilation")
     here = Path(__file__).resolve().parent
     paths = [here / name for name in ("IdolyMP4UI.m", "IdolyMP4UI.h", "IdolySettings.m",
-                                     "IdolyEmbeddedServer.h", "IdolyNativeUI.h")]
+                                     "IdolyEmbeddedServer.h", "IdolyNativeUI.h", "MP4FinalizationPolicy.h")]
     source_hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
     architecture = "arm64" if platform.machine() == "arm64" else "x86_64"
     commands = []
