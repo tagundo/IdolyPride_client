@@ -651,3 +651,60 @@ def test_all_six_home_projection_survives_authenticated_application_overlay(six_
     assert extra.bannerAssetId=="img_banner_l_event-love-25-0426" and extra.isUnlocked
     assert home.loveInfo.isUnlocked and home.loveInfo.existsUnplayedLove
     assert database(game.state)==before and not game.state.has_love_progress("player")
+
+
+def test_saved_media_choices_and_frozen_home_entries_agree_without_overriding_explicit_extra_off(
+        six_event_home_game, monkeypatch):
+    from idoly_local import event_settings
+    from test_event_settings import catalog
+    game = six_event_home_game
+    supported = catalog()
+    source = supported["events"][0]
+    supported["events"] = [{**source, "id": identity, "title": identity}
+                           for identity in sorted(game.plan["events"])]
+    monkeypatch.setattr(event_settings, "_catalog", lambda root, override=None: copy.deepcopy(supported))
+    root = game.master.parent
+    normal = event_settings.EventSettingsState(root)
+    normal.save(settings(EV), expected_revision=0)
+    normal_before = (root / event_settings.FILENAME).read_bytes()
+    account_before = database(game.state)
+
+    # An untouched viewing profile exposes all six, including the independent
+    # Extra banner. It does not borrow the normal account's one-event schedule.
+    frozen = event_settings.freeze_event_settings(root, media_mode=True)
+    assert {row["event_id"] for row in frozen["love_events"]} == set(game.plan["events"])
+    game.love.media_mode = True
+    game.love.settings = frozen
+    observed = event_settings.event_settings_status(root, effective=frozen, media_mode=True)
+    assert observed["media_default_all"] and observed["media_all_supported"]
+    assert not observed["restart_required"]
+    assert [row.id for row in game.love.home_info()[1]] == [EV, EXTRA]
+    assert invoke(game, "TitleExtra", loveId=EXTRA).loveInfo.loveId == EXTRA
+
+    # Older explicit choices remain explicit. The current runtime retains its
+    # frozen choice until restart; the saved/effective status describes that.
+    five = copy.deepcopy(frozen)
+    five["love_events"] = [row for row in five["love_events"] if row["event_id"] != EXTRA]
+    status = event_settings.event_settings_command(root, "events_save", {
+        "mode": "media", "settings": five, "expected_revision": frozen["revision"]}, effective=frozen)
+    assert status["restart_required"] and len(status["saved"]["love_events"]) == 5
+    assert len(status["effective"]["love_events"]) == 6
+    assert not status["media_default_all"] and not status["media_all_supported"]
+    assert [row.id for row in game.love.home_info()[1]] == [EV, EXTRA]
+    game.love.settings = event_settings.freeze_event_settings(root, media_mode=True)
+    assert [row.id for row in game.love.home_info()[1]] == [EV]
+    with pytest.raises(RpcFailure, match="event_disabled_or_outside_period"):
+        invoke(game, "TitleExtra", loveId=EXTRA)
+
+    # Explicitly enabling Extra is projected after the next runtime freeze.
+    both = copy.deepcopy(status["saved"])
+    both["love_events"].append({"event_id": EXTRA, "start_time_ms": 0, "end_time_ms": 0})
+    event_settings.event_settings_command(root, "events_save", {
+        "mode": "media", "settings": both, "expected_revision": both["revision"]}, effective=game.love.settings)
+    game.love.settings = event_settings.freeze_event_settings(root, media_mode=True)
+    current = event_settings.event_settings_status(root, effective=game.love.settings, media_mode=True)
+    assert not current["restart_required"] and current["media_all_supported"]
+    assert [row.id for row in game.love.home_info()[1]] == [EV, EXTRA]
+    assert invoke(game, "TitleExtra", loveId=EXTRA).titleAssetId == "love-25-0426"
+    assert database(game.state) == account_before and not game.state.has_love_progress("player")
+    assert (root / event_settings.FILENAME).read_bytes() == normal_before

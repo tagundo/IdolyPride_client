@@ -275,6 +275,16 @@ def test_event_catalog_adds_three_bounded_ui_labels_without_replacing_original_t
     assert observed["catalog"]["events"][0]["titles"]["ko"] != observed["catalog"]["events"][0]["title"]
 
 
+def test_extra_event_label_keeps_the_recognizable_title(tmp_path, producer):
+    original = "サキュ×まほ ~KISS AND MAGIC!~"
+    producer["events"][1]["title"] = original
+    extra = next(row for row in subject.event_settings_status(tmp_path)["catalog"]["events"]
+                 if row["id"] == "love-extra-25-0426")
+    assert extra["title"] == original and extra["titles"]["ja"] == original
+    assert extra["titles"]["ko"] == "사큐×마호 ~KISS AND MAGIC!~"
+    assert "KISS AND MAGIC!" in extra["titles"]["en"]
+
+
 @pytest.mark.parametrize("media_mode,no_op", [(False, False), (True, False), (True, True)])
 def test_successful_acknowledgement_keeps_own_snapshot_if_another_writer_commits_before_status(
         tmp_path, producer, monkeypatch, media_mode, no_op):

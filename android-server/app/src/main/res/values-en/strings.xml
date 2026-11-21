@@ -69,6 +69,7 @@
     <string name="events_catalog">Supported event</string>
     <string name="events_empty">No supported events</string>
     <string name="events_enabled">Enable the selected event</string>
+    <string name="events_extra_entry">Game Home → Event → Succu × Magic</string>
     <string name="events_start">Start: %1$s</string>
     <string name="events_end">End: %1$s</string>
     <string name="events_start_name">Local start time</string>

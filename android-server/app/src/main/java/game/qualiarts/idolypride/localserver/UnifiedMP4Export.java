@@ -42,6 +42,8 @@ public final class UnifiedMP4Export {
     private static boolean pendingQueueRun;
     private static WeakReference<Activity> game = new WeakReference<>(null);
     private static boolean resumed, stopped = true, userPaused, polling;
+    private static boolean gameFocused;
+    private static volatile boolean foregroundSelectionReady;
     private static long pendingDeadline;
     private static int[] pending;
     private static LinearLayout overlay;
@@ -74,6 +76,7 @@ public final class UnifiedMP4Export {
     /** Only ServerService's trusted worker supplies this private Python descriptor. */
     static boolean prepare(Context context, String descriptor) {
         configured = false;
+        foregroundSelectionReady = false;
         titleCatalog = Mp4TitleCatalog.empty();
         if (!UnifiedRuntime.isEnabled(context)) return false;
         try {
@@ -111,7 +114,7 @@ public final class UnifiedMP4Export {
     }
 
     static void serverStopped() {
-        configured = false; queueConfigured = false;
+        configured = false; queueConfigured = false; foregroundSelectionReady = false;
         MAIN.post(() -> { cancel(); pending = null; wake(); });
     }
     static boolean available() { return configured; }
@@ -119,7 +122,14 @@ public final class UnifiedMP4Export {
         if (!configured || pending != null || busy() || saving) return false;
         Activity current = game.get();
         if (current == null || current.isDestroyed() || current.isFinishing()) return false;
+        // Opening the separate server Activity pauses Unity. Retain only this
+        // live Activity's last verified foreground selection to offer a request;
+        // actual capture still revalidates after the original player resumes.
+        if ((!resumed || !gameFocused) && foregroundSelectionReady) return true;
         try { return nativeReady(); } catch (LinkageError unavailable) { return false; }
+    }
+    private static void observeForegroundReadiness(boolean nativeReady) {
+        if (resumed && gameFocused && !busy()) foregroundSelectionReady = nativeReady;
     }
     static JSONObject snapshot() {
         try { return new JSONObject(last.toString()); } catch (Exception ignored) { return new JSONObject(); }
@@ -133,7 +143,7 @@ public final class UnifiedMP4Export {
         return pendingQueueRun || lastQueue.optBoolean("running") || lastQueue.optBoolean("command_pending");
     }
     static boolean requestEnqueue(Activity caller, int fps, int codec, int bitrate) {
-        if (!queueConfigured || (fps != 30 && fps != 60) || (codec != 1 && codec != 2)
+        if (!queueConfigured || !ready() || (fps != 30 && fps != 60) || (codec != 1 && codec != 2)
                 || (bitrate != 8_000_000 && bitrate != 16_000_000 && bitrate != 32_000_000)) return false;
         Activity current = game.get();
         if (current == null || current.isDestroyed() || current.isFinishing()) return false;
@@ -264,6 +274,7 @@ public final class UnifiedMP4Export {
 
     static void attachGame(Activity activity) {
         game = new WeakReference<>(activity);
+        foregroundSelectionReady = false; gameFocused = false;
         LinearLayout bar = new LinearLayout(activity); bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL); bar.setBackgroundColor(0xe6222630);
         int padding = Math.round(10 * activity.getResources().getDisplayMetrics().density);
@@ -294,7 +305,12 @@ public final class UnifiedMP4Export {
     }
     static void gamePaused(Activity activity) {
         if (game.get() != activity) return;
-        resumed = false;
+        // Called before super.onPause: preserve a positive native observation.
+        // A focus-loss frame may already report not-ready; it must not erase a
+        // verified MV just because the server menu is being opened.
+        if (initialized) try { if (nativeReady()) foregroundSelectionReady = true; }
+        catch (LinkageError unavailable) { /* Optional addon. */ }
+        resumed = false; gameFocused = false;
         // Original Unity keeps a visible multi-window player running onPause.
         // Focus and resumed state alone do not mean its render surface is lost.
         if (!activity.isInMultiWindowMode()) suspendForLifecycle();
@@ -346,16 +362,23 @@ public final class UnifiedMP4Export {
         } catch (RuntimeException | LinkageError unavailable) { return false; }
     }
     static void geometryChanged(Activity activity) {
-        if (game.get() == activity && pending == null && !UnifiedMP4Background.ownsSurface(activity)) cancel();
+        if (game.get() == activity && pending == null && !UnifiedMP4Background.ownsSurface(activity)) {
+            foregroundSelectionReady = false; cancel();
+        }
     }
     static void focusChanged(Activity activity, boolean focused) {
         // A notification shade or another split-screen window can take focus
         // without pausing Unity. onPause/onStop own the lifecycle decision.
-        if (game.get() == activity) { if (!focused) UnifiedMP4Background.focusLost(activity); wake(); }
+        if (game.get() == activity) {
+            gameFocused = focused;
+            if (!focused) UnifiedMP4Background.focusLost(activity);
+            wake();
+        }
     }
     static void gameDestroyed(Activity activity) {
         if (game.get() != activity) return;
         cancel(); pending = null; game.clear(); resumed = false; stopped = true;
+        foregroundSelectionReady = false; gameFocused = false;
         if (overlay != null && overlay.getParent() instanceof ViewGroup) ((ViewGroup) overlay.getParent()).removeView(overlay);
         overlay = null; overlayText = null; overlaySave = null; overlayCancel = null; overlayPause = null; overlayDismiss = null;
     }
@@ -380,6 +403,7 @@ public final class UnifiedMP4Export {
         } catch (Exception | LinkageError unavailable) { /* Keep last complete user-visible snapshot. */ }
         UnifiedMP4Background.sample(last);
         Activity activity = game.get();
+        if (activity != null) observeForegroundReadiness(last.optBoolean("ready"));
         if (activity != null && resumed && !userPaused && (busy() || backgroundQueueHasWork())
                 && UnifiedMP4Background.snapshot().optString("state").equals("off")) prepareBackground(activity);
         if (overlay != null && activity != null) {

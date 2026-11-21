@@ -97,14 +97,14 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
     if not javac or not java:
         pytest.skip("JDK required")
     source = SOURCE.read_text()
-    selected = [method(source, name) for name in ["privateDirectory", "completedFile", "busy", "ready", "requestStart",
+    selected = [method(source, name) for name in ["privateDirectory", "completedFile", "busy", "ready", "observeForegroundReadiness", "requestStart", "requestEnqueue",
                 "beginPending", "gameResumed", "gamePaused", "gameStarted", "gameStopped", "suspendForLifecycle",
                 "resumeForLifecycle", "togglePause", "requestPause", "requestResume", "focusChanged", "gameDestroyed", "cancel"]]
-    prefix = r'''
+    prefix = r'''package game.qualiarts.idolypride.localserver;
 import java.io.*;import java.nio.file.*;import java.lang.ref.WeakReference;import java.util.*;
 public final class ControllerHarness {
-  static boolean configured=true,initialized=true,saving,resumed,stopped=true,userPaused,allowNative=true,dismissed=true,pendingQueueRun;
-  static int[] pending,startedOptions;static long pendingDeadline;static int starts,cancels,suspends,resumes,reason,wakes;
+  static boolean configured=true,initialized=true,queueConfigured=true,saving,resumed,stopped=true,userPaused,allowNative=true,dismissed=true,pendingQueueRun,gameFocused,foregroundSelectionReady;
+  static int[] pending,startedOptions;static long pendingDeadline;static int starts,cancels,suspends,resumes,reason,wakes,enqueues;static boolean enqueueWasResumed;
   static WeakReference<Activity> game=new WeakReference<>(null);
   static JSONObject last=new JSONObject(),lastQueue=new JSONObject();static final Handler MAIN=new Handler();static final Runnable BEGIN=()->{};
   static ViewGroup overlay;static Object overlayText,overlaySave,overlayCancel,overlayPause,overlayDismiss;
@@ -126,6 +126,7 @@ public final class ControllerHarness {
   static void nativeCancel(){cancels++;}static void nativeSuspend(int value){suspends++;reason=value;}
   static void nativeResume(){resumes++;}static void wake(){wakes++;}
   static int nativeQueueRun(){return 0;}static void prepareBackground(Activity a){}
+  static int nativeQueueEnqueue(int n,int d,int c,int v,int a){enqueues++;enqueueWasResumed=resumed;return 0;}
   static class UnifiedMP4Background {static void stopCurrent(){}static void focusLost(Activity a){}}
   static void require(boolean b,String message){if(!b)throw new AssertionError(message);}
   interface Action {void run()throws Exception;}
@@ -160,6 +161,23 @@ public final class ControllerHarness {
     android.os.SystemClock.now=pendingDeadline+1;beginPending();require(pending==null&&starts==1,"bounded stale launch");
     pending=new int[]{30,1,1,8000000,192000};gameDestroyed(live);
     require(game.get()==null&&pending==null&&cancels==1&&stopped,"destroy clears weak owner and pending work");
+    Activity selected=new Activity();game=new WeakReference<>(selected);last=new JSONObject();
+    allowNative=true;resumed=true;gameFocused=true;observeForegroundReadiness(true);
+    gamePaused(selected);allowNative=false;
+    observeForegroundReadiness(false);
+    require(ready(),"opening server menu preserves a verified paused MV selection");
+    Mp4QueueUiState.Controls menuControls=new Mp4QueueUiState.Controls(true,false,false,false,false,ready(),true,0,0);
+    require(menuControls.immediate&&menuControls.enqueue,"both real server-menu buttons stay enabled for paused MV");
+    require(requestEnqueue(menu,30,1,8000000)&&enqueues==1&&!enqueueWasResumed,"queue request retains selection identity before returning to game");
+    require(starts==1,"adding a paused selection does not capture while original Unity is stopped");
+    require(requestStart(menu,30,1,8000000),"one-shot request accepted from paused server menu");
+    beginPending();require(starts==1&&pending!=null,"do not capture before original Activity resume");
+    gameResumed(selected);beginPending();require(starts==1&&pending!=null,"foreground cache cannot bypass genuine resumed native readiness");
+    allowNative=true;beginPending();require(starts==2&&pending==null,"capture starts only after resumed native revalidation");
+    last=new JSONObject();allowNative=false;gameFocused=true;observeForegroundReadiness(false);
+    require(!foregroundSelectionReady&&!ready(),"leaving MV while focused invalidates cached eligibility");
+    resumed=false;require(!ready()&&!requestEnqueue(menu,30,1,8000000)&&enqueues==1,"cold or invalid selections remain disabled");
+    gameDestroyed(selected);require(!foregroundSelectionReady&&!ready(),"destroyed owner cannot keep MV eligibility");
     File root=new File(args[0]).getCanonicalFile();root.mkdirs();File out=new File(root,"exports");out.mkdir();
     require(privateDirectory(root,out.getPath()).equals(out),"private output root");
     rejects(()->privateDirectory(root,new File(root,"../elsewhere").getPath()));
@@ -181,10 +199,11 @@ public final class ControllerHarness {
     clock = tmp_path / "android/os/SystemClock.java"
     clock.parent.mkdir(parents=True)
     clock.write_text("package android.os; public class SystemClock {public static long now;public static long uptimeMillis(){return now;}}")
-    compile_result = subprocess.run([javac, "-J-Xmx128m", "--release", "17", "-d", str(tmp_path / "classes"), str(harness), str(clock)],
+    policy = SOURCE.with_name("Mp4QueueUiState.java")
+    compile_result = subprocess.run([javac, "-J-Xmx128m", "--release", "17", "-d", str(tmp_path / "classes"), str(harness), str(clock), str(policy)],
                                     capture_output=True, text=True, timeout=30)
     assert compile_result.returncode == 0, compile_result.stderr
-    run = subprocess.run([java, "-Xmx128m", "-cp", str(tmp_path / "classes"), "ControllerHarness", str(tmp_path / "files")],
+    run = subprocess.run([java, "-Xmx128m", "-cp", str(tmp_path / "classes"), "game.qualiarts.idolypride.localserver.ControllerHarness", str(tmp_path / "files")],
                          capture_output=True, text=True, timeout=15)
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == "PASS controller"

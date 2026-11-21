@@ -179,6 +179,22 @@ env.elements.get('interface_language').value='en';env.elements.get('interface_la
 """)
 
 
+def test_extra_event_shows_its_separate_game_entry_in_all_interface_languages():
+    run_js(EVENT_JS+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);const initial=eventStatus();
+initial.runtime.event_settings.catalog.events[1]={id:'love-extra-25-0426',title:'サキュ×まほ',supported:true};
+env.respond(env.posted[0],initial);await flush();
+for (const [language,expected] of [['ko','게임 홈 → 이벤트 → 사큐×마호'],['ja','ゲームホーム → イベント → サキュ×まほ'],['en','Game Home → Event → Succu × Magic']]) {
+ env.elements.get('interface_language').value=language;env.elements.get('interface_language').fire('change');await flush();
+ const cards=env.elements.get('events-list').children;
+ assert.equal((cards[0].children[1].children || []).length,0,'Standard events do not use the Extra entry');
+ assert.equal(cards[1].children[1].children[1].textContent,expected);
+ assert.equal(cards[1].eventInput.value,'love-extra-25-0426');
+}
+assert.equal(env.posted.some(request=>request.action==='events_save'),false,'Viewing directions never edits event choices');app.dispose();
+""")
+
+
 def test_mode_navigation_waits_for_pending_save_and_does_not_accept_old_mode_status():
     run_js(EVENT_JS+r"""
 const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);env.respond(env.posted[0],eventStatus());await flush();

@@ -6,6 +6,12 @@
 
 `もしも君と恋をしたら`(もし恋, 모시코이)는 일반 이벤트 스토리 목록과 별도의 `api.Love` 기능입니다. 원본 6.1.1 프로토콜에는 17개 RPC가 있습니다. 이번 작업은 서버 설정에서 콘텐츠를 선택하는 기능과 실제 계정별 플레이 상태를 함께 연결합니다. 공개 릴리즈는 보류하며, 이 문서는 실제 게임 검증 완료를 뜻하지 않습니다.
 
+## 사큐×마호 입구
+
+서버의 **콘텐츠 → 모시코이 설정**에서 `사큐×마호 ~KISS AND MAGIC!~`를 켜고 적용한 뒤, **게임 홈 → 이벤트 → 사큐×마호 배너**에서 엽니다. 일반 모시코이의 캐릭터 선택과는 입구가 다릅니다. 설정을 저장한 뒤 현재 적용에 반영되지 않았다면 서버를 다시 시작해야 합니다. 감상 계정은 별도 선택을 저장하지 않은 경우 여섯 이벤트를 모두 켭니다.
+
+원본 Android 6.1.1 정적 분석에서 홈 이벤트 버튼은 `MenuButtonUtility.OnClickAsync` (`0x5250d48`)를 통해 `HomeEventInfo.EventCount` (`0x49ed0c0`)를 확인합니다. 이 값은 `loveEventInfos.Count`도 합산하고, 목록의 `AllInfos`는 해당 행을 열거합니다. 이벤트 목록 클릭 처리 (`0x55e74cc`)는 `baseType == 2`이면 행의 `id`를 `LoveExtraTitleTransitionParam.loveId`로 보내 Extra 타이틀을 엽니다. 현재 응답은 `love-extra-25-0426`, `baseType=2`, `limitedExtraTitleAssetId=love-25-0426`을 제공합니다. 무기한 표시의 `endTime=0`은 원본 `TimeManager.IsExpired` (`0x45d1e4c`)에서 만료로 처리되지 않습니다. 이 근거는 코드상의 진입 경로 확인이며 실제 기기 재생 검증과 구분합니다.
+
 ## 보존 자료와 확인 한계
 
 원본 공개 마스터의 `LoveStoryEpisode` 72개, `LoveLevel` 57개, `LoveHomeAction` 243개, `LoveColor` 1개와 `Story`·`Setting`·`Item`을 사용합니다. 72개 에피소드는 재사용되는 파일을 포함한 ADV 69개에 대응합니다. 기존 보관본에는 이 중 68개가 있으며 `love_2411_04_02`의 원문은 확인 중입니다. 누락된 원문의 분기 검증을 완료한 것으로 표시하지 않습니다. 에피소드의 `rewardId`는 비어 있으므로 일반 스토리 읽기의 돌 보상을 붙이지 않습니다.

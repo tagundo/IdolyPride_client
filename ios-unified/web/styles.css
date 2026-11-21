@@ -164,6 +164,7 @@ section[aria-labelledby="events-heading"] input[type="datetime-local"] { font: i
 .event-card:has(input:checked) { background: var(--soft); border-color: var(--accent); }
 .event-card input { flex: 0 0 auto; width: 1.5rem; height: 1.5rem; margin: 0; accent-color: var(--accent); }
 .event-card span { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.event-card .event-entry { display: block; margin-top: .25rem; color: var(--muted); font-size: .875rem; }
 .event-bulk { margin: .5rem 0; }
 .event-period-editor { margin: .75rem 0; }
 .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1.25rem; }

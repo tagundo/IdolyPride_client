@@ -69,6 +69,7 @@
     <string name="events_catalog">対応イベント</string>
     <string name="events_empty">対応イベントなし</string>
     <string name="events_enabled">選択したもしコイを有効にする</string>
+    <string name="events_extra_entry">ゲームホーム → イベント → サキュ×まほ</string>
     <string name="events_start">開始: %1$s</string>
     <string name="events_end">終了: %1$s</string>
     <string name="events_start_name">ローカル開始日時</string>

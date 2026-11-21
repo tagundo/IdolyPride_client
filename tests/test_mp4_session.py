@@ -79,7 +79,9 @@ std::vector<float> camera_deltas;
 unsigned delayed_ticks=0;
 bool was_cancelled=false,private_lifetime_verified=false;
 bool cancel_marker_written=false;
-unsigned suspension_checks=0;
+unsigned suspension_checks=0,source_wait_checks=0;
+bool source_geometry_valid=true;
+bool session_source_geometry(void* controller,int32_t* width,int32_t* height){assert(controller==ptr(camera_controller));if(!source_geometry_valid)return false;*width=16;*height=16;return true;}
 double session_duration(void*,Method*){return selected_duration;}
 int32_t session_samples(void*,Method*){return sample_rate*2;}
 int32_t session_rate(void*,Method*){return sample_rate;}
@@ -227,11 +229,24 @@ int main(int argc,char** argv){
     selected.bundle_load_file_async=session_load_bundle;selected.audio_clip_get_data=session_get_data;
     selected.bundle_unload=session_unload;
     selected.brain_manual_update=session_brain_update;selected.camera_clock_ok=session_camera_clock_ok;
+    if(scenario=="source_lost_before_begin")selected.source_geometry=session_source_geometry;
     session_core::install_game_api(selected,Layout{});session_core::observe_presenter(ptr(presenter));session_core::observe_camera_controller(ptr(camera_controller));
     session_core::on_unity_tick();
     bool configured=session_core::configure(directory,epoch,argv[3],output_root.c_str(),platform);
     if(!configured){std::printf("{\"configured\":false}\n");return 0;}
     assert(session_core::start({static_cast<uint32_t>(fps),1,1,16000000,192000}));
+    if(scenario=="source_lost_before_begin"){
+        const int graphs=graph_steps,actors=actor_steps,before_loads=loads,before_data=data_calls;const double before=time_value;
+        source_geometry_valid=false;
+        for(int i=0;i<4;++i){
+            session_core::on_unity_tick();char waiting[2048]{};
+            assert(session_core::start_pending&&session_core::control_busy&&!session_core::busy_stage());
+            assert(graph_steps==graphs&&actor_steps==actors&&loads==before_loads&&data_calls==before_data&&time_value==before);
+            assert(IDMP4SessionStatus(waiting,sizeof(waiting))&&std::strstr(waiting,"\"ready\":false")&&std::strstr(waiting,"\"readiness_error\":\"selected_capture_geometry_not_ready\""));
+            ++source_wait_checks;
+        }
+        source_geometry_valid=true;
+    }
     if(scenario=="pause_before_start"||scenario=="pause_before_start_cancel")
         check_suspension(scenario=="pause_before_start_cancel");
     auto* pass=make("VL.Rendering.VLCapturePass");auto* rendering=make("RenderingData");
@@ -281,8 +296,8 @@ int main(int argc,char** argv){
     assert(brain_mode==1&&brain_blend==0);float outside=0;assert(!session_core::camera_delta_override(ptr(brain),&outside));
     for(const auto& path:loaded_bundles)assert(access(path.c_str(),F_OK)!=0);
     char status[2048]{};assert(session_core::status(status,sizeof(status)));
-    std::printf("{\"configured\":true,\"session\":%s,\"loads\":%d,\"unloads\":%d,\"data_calls\":%d,\"retries\":%d,\"destroy_retries\":%d,\"graph_steps\":%d,\"actor_steps\":%d,\"private_lifetime_verified\":%s,\"delayed_ticks\":%u,\"suspension_checks\":%u,\"times\":[",
-        status,loads,unloads,data_calls,retries,destroy_retries,graph_steps,actor_steps,private_lifetime_verified?"true":"false",delayed_ticks,suspension_checks);
+    std::printf("{\"configured\":true,\"source_wait_checks\":%u,\"session\":%s,\"loads\":%d,\"unloads\":%d,\"data_calls\":%d,\"retries\":%d,\"destroy_retries\":%d,\"graph_steps\":%d,\"actor_steps\":%d,\"private_lifetime_verified\":%s,\"delayed_ticks\":%u,\"suspension_checks\":%u,\"times\":[",
+        source_wait_checks,status,loads,unloads,data_calls,retries,destroy_retries,graph_steps,actor_steps,private_lifetime_verified?"true":"false",delayed_ticks,suspension_checks);
     for(size_t i=0;i<submitted_times.size();++i)std::printf("%s%.12f",i?",":"",submitted_times[i]);
     std::printf("],\"camera_deltas\":[");
     for(size_t i=0;i<camera_deltas.size();++i)std::printf("%s%.12f",i?",":"",camera_deltas[i]);
@@ -549,3 +564,13 @@ def test_failed_exclusive_file_creation_never_deletes_foreign_files(run_session,
     files=list(root.glob("*"+suffix))
     assert len(files)==1 and files[0].read_bytes()==b"FOREIGN_FILE_MUST_SURVIVE"
     assert observed["calls"]==[]
+
+
+def test_start_waits_for_temporarily_lost_original_render_target(run_session):
+    observed = run_session("source_lost_before_begin")
+    assert observed["source_wait_checks"] == 4
+    assert observed["session"]["phase"] == "completed"
+    assert observed["session"]["readiness_error"] == "none"
+    assert observed["session"]["frames"] == observed["session"]["total_frames"]
+    assert observed["loads"] == observed["unloads"] == 1
+    assert len(list(Path(observed["configuration"]["export_directory"]).glob("*.mp4"))) == 1

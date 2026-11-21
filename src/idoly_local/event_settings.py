@@ -114,7 +114,7 @@ def _titles(identity, original):
         return {"ko": "만약 당신과 사랑에 빠진다면 · " + names[0] + " 편",
                 "ja": original, "en": "If I Fell in Love with You · " + names[1]}
     if identity == "love-extra-25-0426":
-        return {"ko": "서큐×마법 ~KISS AND MAGIC!~", "ja": original,
+        return {"ko": "사큐×마호 ~KISS AND MAGIC!~", "ja": original,
                 "en": "Succu × Magic ~KISS AND MAGIC!~"}
     return {language: original for language in ("ko", "ja", "en")}
 

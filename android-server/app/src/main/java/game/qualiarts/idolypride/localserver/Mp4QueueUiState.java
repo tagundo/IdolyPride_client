@@ -40,7 +40,8 @@ final class Mp4QueueUiState {
             pause = valid && running && !paused;
             resume = valid && canRunWorld && paused;
             // The existing single export remains usable if only the journal
-            // is unavailable; mvReady still comes from the real native session.
+            // is unavailable. mvReady may retain the current Activity's verified
+            // foreground selection; capture is rechecked after Unity resumes.
             immediate = !commandPending && mvReady && !running && !paused && !exportBusy;
         }
     }

@@ -375,6 +375,7 @@
     <string name="events_catalog">지원 이벤트</string>
     <string name="events_empty">지원 가능한 이벤트 없음</string>
     <string name="events_enabled">선택한 모시코이 사용</string>
+    <string name="events_extra_entry">게임 홈 → 이벤트 → 사큐×마호</string>
     <string name="events_start">시작: %1$s</string>
     <string name="events_end">종료: %1$s</string>
     <string name="events_start_name">로컬 시작 시각</string>

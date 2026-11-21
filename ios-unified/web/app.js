@@ -502,6 +502,8 @@
     const dictionary = UI_TRANSLATIONS[language];
     return typeof value === "string" && dictionary && Object.prototype.hasOwnProperty.call(dictionary, value) ? dictionary[value] : value;
   }
+  Object.assign(UI_TRANSLATIONS.en, {"게임 홈 → 이벤트 → 사큐×마호": "Game Home → Event → Succu × Magic"});
+  Object.assign(UI_TRANSLATIONS.ja, {"게임 홈 → 이벤트 → 사큐×마호": "ゲームホーム → イベント → サキュ×まほ"});
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
   Object.assign(UI_TRANSLATIONS.en, {"MV를 MP4로 내보내기":"Export MV as MP4","게임에서 3D MV를 연 뒤 이 메뉴를 여세요. 현재 렌더 크기로 프레임과 음원을 내보냅니다.":"Open a 3D MV in the game, then open this menu. Frames and soundtrack use the current render size.","3D MV 준비 대기":"Waiting for a 3D MV","MP4 프레임 수":"MP4 frame rate","영상 비트레이트":"Video bitrate","영상 코덱":"Video codec","MP4 진행률":"MP4 progress","MP4 내보내기":"Export MP4","MP4 저장·공유":"Save / Share MP4","취소":"Cancel","음원 준비 중":"Preparing soundtrack","MP4 렌더링":"Rendering MP4","MP4 마무리 중":"Finalizing MP4","MP4 완료":"MP4 complete","MP4 실패":"MP4 failed","게임에서 3D MV를 연 뒤 이 메뉴를 여세요.":"Open a 3D MV in the game, then open this menu.","현재 렌더 크기로 프레임과 음원을 내보냅니다.":"Frames and soundtrack use the current render size.","MP4 기능을 사용할 수 없습니다.":"MP4 export is unavailable.","3D MV 재생 화면에서 다시 시도해 주세요.":"Try again from a playing 3D MV.","다른 MP4 작업을 마친 뒤 다시 시도해 주세요.":"Finish the current MP4 job first."});
   Object.assign(UI_TRANSLATIONS.ja, {"MV를 MP4로 내보내기":"MVをMP4に書き出す","게임에서 3D MV를 연 뒤 이 메뉴를 여세요. 현재 렌더 크기로 프레임과 음원을 내보냅니다.":"ゲームで3D MVを開いてから、このメニューを開いてください。現在の描画サイズでフレームと音源を書き出します。","3D MV 준비 대기":"3D MVの準備待ち","MP4 프레임 수":"MP4フレームレート","영상 비트레이트":"映像ビットレート","영상 코덱":"映像コーデック","MP4 진행률":"MP4進行状況","MP4 내보내기":"MP4を書き出す","MP4 저장·공유":"MP4を保存・共有","취소":"キャンセル","음원 준비 중":"音源を準備中","MP4 렌더링":"MP4レンダリング","MP4 마무리 중":"MP4を仕上げ中","MP4 완료":"MP4完了","MP4 실패":"MP4に失敗","게임에서 3D MV를 연 뒤 이 메뉴를 여세요.":"ゲームで3D MVを開いてから、このメニューを開いてください。","현재 렌더 크기로 프레임과 음원을 내보냅니다.":"現在の描画サイズでフレームと音源を書き出します。","MP4 기능을 사용할 수 없습니다.":"MP4書き出しを利用できません。","3D MV 재생 화면에서 다시 시도해 주세요.":"3D MVの再生画面で再試行してください。","다른 MP4 작업을 마친 뒤 다시 시도해 주세요.":"現在のMP4処理が完了してから再試行してください。"});
@@ -1044,6 +1046,11 @@
           const input = document.createElement("input"); input.type = "checkbox"; input.value = row.id;
           input.addEventListener("change", () => editEventEnabled(row.id,input.checked));
           const title = document.createElement("span"); title.textContent = eventTitle(row);
+          if (row.id === "love-extra-25-0426") {
+            const caption = document.createElement("span"); caption.textContent = eventTitle(row);
+            const entry = document.createElement("small"); entry.className = "event-entry";
+            entry.textContent = t("게임 홈 → 이벤트 → 사큐×마호"); title.replaceChildren(caption,entry);
+          }
           label.replaceChildren(input,title); label.eventInput = input;
           return label;
         });

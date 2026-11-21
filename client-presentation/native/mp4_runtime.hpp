@@ -125,7 +125,9 @@ static pthread_mutex_t control_mutex=PTHREAD_MUTEX_INITIALIZER;
 static Configuration configured;
 static Options pending_options;
 static PublicStatus published;
+static char readiness_error[96]="open_selected_mv_first";
 static bool configured_valid=false,start_pending=false,cancel_pending=false,control_busy=false;
+static uint64_t start_wait_started=0;
 static bool queue_scene_owned=false;
 static char pending_queue_output[33]{},pending_queue_exports[path_capacity]{};
 static int pending_queue_exports_fd=-1;
@@ -177,6 +179,16 @@ inline void terminal(const char* error,bool cancelled=false) {
     job.stage=Stage::retiring;phase(cancelled?"cancelling":"failed");
 }
 inline bool valid_options(const Options& o){return o.fps_den==1&&(o.fps_num==30||o.fps_num==60)&&(o.codec==1||o.codec==2)&&(o.bitrate==8000000||o.bitrate==16000000||o.bitrate==32000000)&&o.audio_bitrate==192000;}
+inline Result probe_readiness(Snapshot& snapshot){
+    Result result=game.snapshot(snapshot);const char* error=result==Result::ok?"none":game.last_error();
+    if(result==Result::ok&&game.has_source_geometry_probe()){
+        int32_t width=0,height=0;result=game.source_geometry(width,height);
+        if(result!=Result::ok)error=result==Result::waiting?"selected_capture_geometry_not_ready":"selected_capture_geometry_unsupported";
+    }
+    pthread_mutex_lock(&control_mutex);published.ready=result==Result::ok;
+    snprintf(readiness_error,sizeof(readiness_error),"%s",error);pthread_mutex_unlock(&control_mutex);
+    return result;
+}
 inline bool configure(const char* broker,uint64_t epoch,const char*cap,const char*output,int platform){
     if(!safe_root(broker)||!safe_root(output)||epoch==0||epoch>9007199254740991ULL||(platform!=1&&platform!=2))return false;
     Configuration next{};if(!decode_capability(cap,next.capability))return false;
@@ -190,7 +202,7 @@ inline bool configure(const char* broker,uint64_t epoch,const char*cap,const cha
     if(control_busy||start_pending){pthread_mutex_unlock(&control_mutex);close_configuration(next);return false;}
     close_configuration(configured);configured=next;configured_valid=true;pthread_mutex_unlock(&control_mutex);return true;
 }
-inline bool start(Options options,bool queued=false){pthread_mutex_lock(&control_mutex);bool ok=configured_valid&&!control_busy&&!start_pending&&(queued||!queue_scene_owned)&&published.ready&&valid_options(options);if(ok){if(!queued){pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;pending_queue_width=pending_queue_height=0;}pending_options=options;start_pending=true;cancel_pending=false;control_busy=true;published.pausable=true;pause_acknowledged=false;snprintf(published.phase,sizeof(published.phase),"preparing_audio");snprintf(published.error,sizeof(published.error),"none");}pthread_mutex_unlock(&control_mutex);return ok;}
+inline bool start(Options options,bool queued=false){pthread_mutex_lock(&control_mutex);bool ok=configured_valid&&!control_busy&&!start_pending&&(queued||!queue_scene_owned)&&published.ready&&valid_options(options);if(ok){if(!queued){pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;pending_queue_width=pending_queue_height=0;}pending_options=options;start_pending=true;start_wait_started=0;cancel_pending=false;control_busy=true;published.pausable=true;pause_acknowledged=false;snprintf(published.phase,sizeof(published.phase),"preparing_audio");snprintf(published.error,sizeof(published.error),"none");}pthread_mutex_unlock(&control_mutex);return ok;}
 inline void cancel(){pthread_mutex_lock(&control_mutex);if(control_busy)cancel_pending=true;pthread_mutex_unlock(&control_mutex);}
 inline void suspend(int reason){
     if(reason<IDMP4_PAUSE_LIFECYCLE_BACKGROUND||reason>IDMP4_PAUSE_USER)return;
@@ -234,7 +246,7 @@ inline bool begin_job() {
     if(!job.status.id[0]){uint8_t id[16]{};if(!random_bytes(id,sizeof(id))){terminal("random_unavailable");return true;}hex(id,sizeof(id),job.status.id);}
     if(!job.api.valid()){terminal("platform_encoder_unavailable");return true;}
     if(!active_broker()){terminal("audio_broker_retired");return true;}
-    if(game.snapshot(job.snapshot)!=Result::ok){terminal(game.last_error());return true;}
+    if(probe_readiness(job.snapshot)!=Result::ok){terminal(readiness_error);return true;}
     if(game.begin_manual()!=Result::ok){terminal(game.last_error());return true;}
     for(size_t i=0;i<job.snapshot.audio.count;++i){const auto& c=job.snapshot.audio.clips[i];if(!c.muted&&c.track_gain*c.clip_gain*c.source_gain>0){if(!job.rate)job.rate=static_cast<uint32_t>(c.sample_rate);if(job.rate!=static_cast<uint32_t>(c.sample_rate)){terminal("mixed_sample_rates_unsupported");return true;}}}
     if(!job.rate){terminal("selected_mv_has_no_audible_music");return true;}
@@ -401,8 +413,15 @@ inline void on_unity_tick() {
     if(reset_watchdog&&busy_stage())progress();
     game.maintenance();
     if(!busy_stage()){
-        Snapshot ready{};bool can=game.snapshot(ready)==Result::ok;
-        pthread_mutex_lock(&control_mutex);published.ready=can;pthread_mutex_unlock(&control_mutex);
+        Snapshot ready{};const Result readiness=probe_readiness(ready);
+        pthread_mutex_lock(&control_mutex);const bool pending=start_pending;pthread_mutex_unlock(&control_mutex);
+        if(pending&&readiness==Result::waiting){
+            const uint64_t now=milliseconds();
+            if(reset_watchdog||!start_wait_started)start_wait_started=now;
+            // A resumed Android player can need several original render ticks
+            // to rebuild its target. Starting must not fail in that interval.
+            if(now>=start_wait_started&&now-start_wait_started<=15000)return;
+        }else start_wait_started=0;
         begin_job();if(!busy_stage())return;
     }
     // Read once more after begin_job: a host command may arrive while its
@@ -429,7 +448,7 @@ inline void on_unity_tick() {
     }
     publish();
 }
-inline size_t status(char*buffer,size_t capacity){if(!buffer||!capacity)return 0;pthread_mutex_lock(&control_mutex);const PublicStatus s=published;const uint64_t ticks=unity_ticks,acks=capture_acks;const bool requested=control_busy&&s.pausable&&requested_pause_reason!=IDMP4_PAUSE_NONE,paused=requested&&pause_acknowledged;const int reason=requested?requested_pause_reason:IDMP4_PAUSE_NONE;pthread_mutex_unlock(&control_mutex);const char* current_phase=requested?(paused?"paused":"pausing"):s.phase;int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu}",static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",current_phase,paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.fps_num,s.fps_den,static_cast<unsigned long long>(s.bytes));return n>0&&static_cast<size_t>(n)<capacity?static_cast<size_t>(n):0;}
+inline size_t status(char*buffer,size_t capacity){if(!buffer||!capacity)return 0;pthread_mutex_lock(&control_mutex);const PublicStatus s=published;char readiness[96]{};snprintf(readiness,sizeof(readiness),"%s",readiness_error);const uint64_t ticks=unity_ticks,acks=capture_acks;const bool requested=control_busy&&s.pausable&&requested_pause_reason!=IDMP4_PAUSE_NONE,paused=requested&&pause_acknowledged;const int reason=requested?requested_pause_reason:IDMP4_PAUSE_NONE;pthread_mutex_unlock(&control_mutex);const char* current_phase=requested?(paused?"paused":"pausing"):s.phase;int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu}",static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",readiness,current_phase,paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.fps_num,s.fps_den,static_cast<unsigned long long>(s.bytes));return n>0&&static_cast<size_t>(n)<capacity?static_cast<size_t>(n):0;}
 } // namespace idoly_mp4_runtime
 
 #include "mp4_queue_runtime.hpp"

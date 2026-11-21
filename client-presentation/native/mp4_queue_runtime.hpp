@@ -12,6 +12,7 @@ struct QueueRequest {
     int operation=0,position=0;uint64_t selection_identity=0;
 };
 static QueueRequest queue_request;
+static uint64_t queue_capture_wait_started=0;
 static pthread_mutex_t queue_owner_mutex=PTHREAD_MUTEX_INITIALIZER;
 // Process-lifetime POD storage has no C++ atexit callback. Per-job reset still
 // releases every managed root on Unity; process teardown must never call a
@@ -122,6 +123,45 @@ inline bool queue_record(queue_model::Error result){
     if(result==queue_model::Error::ok)return true;
     queue_running=false;pthread_mutex_lock(&control_mutex);queue_blocked=true;pthread_mutex_unlock(&control_mutex);queue_set_error(queue_model::error_code(result));
     snprintf(queue_phase,sizeof(queue_phase),"failed");return false;
+}
+enum class CaptureDecision {ready,waiting,failed};
+inline CaptureDecision queue_capture_readiness(const QueueRequest& request){
+    if(queue_blocked)return CaptureDecision::ready; // Preserve the fatal storage reason.
+    void* player=game.selected_player();
+    // Capture admission fixes the logical selection identity on the host
+    // thread. A later scene may never satisfy this pending request instead.
+    if(!request.selection_identity||request.selection_identity!=selection.identity(player)){
+        queue_set_error("selection_changed_before_enqueue");return CaptureDecision::failed;
+    }
+    pthread_mutex_lock(&control_mutex);
+    const bool lifecycle_paused=requested_pause_reason==IDMP4_PAUSE_LIFECYCLE_BACKGROUND
+        ||requested_pause_reason==IDMP4_PAUSE_SURFACE_UNAVAILABLE;
+    const bool resumed=reset_watchdog_pending;
+    pthread_mutex_unlock(&control_mutex);
+    if(lifecycle_paused){queue_capture_wait_started=0;return CaptureDecision::waiting;}
+    if(resumed)queue_capture_wait_started=0;
+    Result readiness=Result::ok;
+    if(game.manual())readiness=game.owned_scene_current()?Result::ok:Result::stale;
+    else {Snapshot snapshot{};readiness=probe_readiness(snapshot);}
+    if(readiness!=Result::ok&&readiness!=Result::waiting){
+        queue_set_error(game.manual()?"selection_changed_before_enqueue":readiness_error);return CaptureDecision::failed;
+    }
+    int32_t width=0,height=0;
+    const Result geometry=readiness==Result::ok?game.source_geometry(width,height):Result::waiting;
+    if(geometry!=Result::ok&&geometry!=Result::waiting){queue_set_error("selected_capture_geometry_unsupported");return CaptureDecision::failed;}
+    queue_model::Graphics graphics{};
+    if(readiness==Result::ok&&geometry==Result::ok&&queue_graphics_snapshot&&queue_graphics_snapshot(graphics))
+        return CaptureDecision::ready;
+    // Opening the Android server Activity stops Unity and can release its
+    // target texture. Even the first resumed tick may precede reconstruction.
+    // Retain the request/options until the original source is valid again;
+    // paused time is excluded and a missing source cannot wait indefinitely.
+    const uint64_t now=milliseconds();
+    if(!queue_capture_wait_started)queue_capture_wait_started=now;
+    if(now<queue_capture_wait_started||now-queue_capture_wait_started>15000){
+        queue_set_error("selected_mv_resume_timeout");return CaptureDecision::failed;
+    }
+    return CaptureDecision::waiting;
 }
 inline void queue_process(const QueueRequest& request){
     if(queue_blocked&&request.kind!=QueueCommandKind::configure)return;
@@ -256,8 +296,20 @@ inline void queue_execute(){
 }
 inline void queue_tick(){
     pthread_mutex_lock(&queue_owner_mutex);
-    QueueRequest request{};pthread_mutex_lock(&control_mutex);request=queue_request;queue_request.kind=QueueCommandKind::none;pthread_mutex_unlock(&control_mutex);
-    if(request.kind!=QueueCommandKind::none)queue_process(request);
+    QueueRequest request{};pthread_mutex_lock(&control_mutex);request=queue_request;pthread_mutex_unlock(&control_mutex);
+    CaptureDecision capture=CaptureDecision::ready;
+    if(request.kind==QueueCommandKind::enqueue)capture=queue_capture_readiness(request);
+    if(capture!=CaptureDecision::waiting){
+        pthread_mutex_lock(&control_mutex);queue_request.kind=QueueCommandKind::none;pthread_mutex_unlock(&control_mutex);
+        queue_capture_wait_started=0;
+        if(request.kind!=QueueCommandKind::none&&capture!=CaptureDecision::failed)queue_process(request);
+        if(request.kind==QueueCommandKind::enqueue&&!queue_active_id[0]&&!queue_running){
+            snprintf(queue_phase,sizeof(queue_phase),"%s",queue_paused?"paused":capture==CaptureDecision::failed?"failed":"idle");
+        }
+    }else {
+        queue_set_error("none");
+        if(!queue_active_id[0])snprintf(queue_phase,sizeof(queue_phase),"waiting_for_scene");
+    }
     pthread_mutex_lock(&control_mutex);const bool reset_clock=reset_watchdog_pending;pthread_mutex_unlock(&control_mutex);
     if(reset_clock)queue_replay().resume_clock(milliseconds());
     bool can_run=false;

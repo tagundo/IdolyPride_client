@@ -143,6 +143,8 @@ public:
     const Snapshot& description() const { return snapshot_; }
     const char* last_error() const { return error_; }
     bool manual() const { return manual_; }
+    bool has_source_geometry_probe()const{return api_.source_geometry!=nullptr;}
+    bool owned_scene_current()const{return manual_&&identities_current();}
     void* selected_presenter()const {void* value=get(presenter_);return value&&live(value)?value:nullptr;}
     void* selected_player()const {void* presenter=selected_presenter();void* value=field<void*>(presenter,layout_.presenter_player);return type(value,"Solis.Common.SolisLivePlayer")&&live(value)?value:nullptr;}
     Result source_geometry(int32_t& width,int32_t& height)const {

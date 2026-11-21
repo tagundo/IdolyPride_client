@@ -1213,6 +1213,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 choice.setContentDescription("idoly.events.toggle." + identifier);
                 choice.setOnCheckedChangeListener((view, checked) -> { if (!eventsLoading) changeEventSelection(identifier, checked); });
                 eventsChoices.addView(choice, new LinearLayout.LayoutParams(-1, -2)); eventChecks.put(identifier, choice);
+                if ("love-extra-25-0426".equals(identifier)) {
+                    TextView entry = text(R.string.events_extra_entry, 14, TEXT_MUTED);
+                    entry.setPadding(dp(42), 0, dp(8), dp(12));
+                    entry.setContentDescription("idoly.events.extra_entry");
+                    eventsChoices.addView(entry, new LinearLayout.LayoutParams(-1, -2));
+                }
             }
             eventsPicker.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
             eventsPicker.setSelection(selectedIndex);
