@@ -11,6 +11,22 @@ qa = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(qa)
 
 
+def test_activity_start_requires_the_actual_menu_activity():
+    qa.verified_activity_start("Starting: Intent\nStatus: ok\nActivity: " + qa.MAIN + "\nComplete\n")
+
+
+@pytest.mark.parametrize("raw,code", [
+    ("Error type 3\nError: Activity class does not exist", "activity_start_rejected"),
+    ("Starting: Intent\nStatus: timeout\n", "activity_start_rejected"),
+    ("Status: ok\nActivity: org.idolypride.environmentprobe/.MainActivity\n", "activity_identity_mismatch"),
+    ("Status: ok\n", "activity_identity_mismatch"),
+    ("Status: ok\nActivity: " + qa.MAIN + "\nActivity: " + qa.MAIN + "\n", "activity_identity_mismatch"),
+])
+def test_adb_process_success_does_not_prove_activity_launch(raw, code):
+    with pytest.raises(qa.Rejected, match=code):
+        qa.verified_activity_start(raw)
+
+
 def snapshot(frame=100, *, complete=False):
     return {"ok": True, "qa_only": True, "read_only": True, "native": {
         "schema": 1, "ready": True, "phase": "completed" if complete else "idle", "error_code": "none",

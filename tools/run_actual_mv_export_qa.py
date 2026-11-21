@@ -29,6 +29,7 @@ HEX64 = re.compile(r"[0-9a-f]{64}")
 HEX32 = re.compile(r"[0-9a-f]{32}")
 MAX_JSON = 72 * 1024
 MAX_MOVIE = 24 * 1024 * 1024
+ENVIRONMENT_PROBE = "org.idolypride.environmentprobe"
 
 
 class Rejected(ValueError):
@@ -38,6 +39,21 @@ class Rejected(ValueError):
 def need(value, code):
     if not value:
         raise Rejected(code)
+
+
+def verified_activity_start(raw, component=MAIN):
+    """am can print an error while adb itself exits successfully."""
+    need(isinstance(raw, str) and len(raw) <= 16384, "activity_start_result_invalid")
+    need(re.search(r"^Status:\s*ok\s*$", raw, re.MULTILINE), "unified_launcher_activity_start_rejected")
+    activities = re.findall(r"^Activity:\s*(\S+)\s*$", raw, re.MULTILINE)
+    def normalized(value):
+        parts = value.split("/")
+        if len(parts) != 2 or not all(parts):
+            return None
+        package, name = parts
+        return package, package + name if name.startswith(".") else name
+    need(len(activities) == 1 and normalized(activities[0]) == normalized(component),
+         "unified_launcher_activity_identity_mismatch")
 
 
 def integer(value, minimum=0, maximum=9007199254740991):
@@ -254,11 +270,12 @@ class Device:
         self.input_source, self.touch_hold_ms = "touchscreen", 150
         self.capture_number = 0
 
-    def adb(self, *args, binary=False, check=True, timeout=30):
+    def adb(self, *args, binary=False, check=True, timeout=30, merge_error=False):
         result = subprocess.run(self.base + list(args), capture_output=True, timeout=timeout)
         if check:
             need(result.returncode == 0, "adb_operation_failed_" + re.sub(r"[^a-zA-Z_]", "_", args[0]))
-        return result.stdout if binary else result.stdout.decode("utf-8", errors="replace")
+        raw = result.stdout + (b"\nSTDERR\n" + result.stderr if merge_error and result.stderr else b"")
+        return raw if binary else raw.decode("utf-8", errors="replace")
 
     def forward(self, port):
         value = self.adb("forward", "tcp:0", "tcp:" + str(port)).strip()
@@ -451,8 +468,15 @@ class ActualRun:
         self.report["target"] = self.device.identity()
         need(not self.device.adb("shell", "pm", "path", PACKAGE, check=False).strip(), "fresh_disposable_install_required")
         self.device.adb("install", str(self.args.apk), timeout=180)
-        self.device.adb("shell", "am", "start", "-W", "-n", MAIN)
-        self.record("unified_launcher_opened")
+        # The preceding environment probe is our own disposable QA app. End
+        # its Activity so a stale probe window cannot be mistaken for a game UI.
+        self.device.adb("shell", "am", "force-stop", ENVIRONMENT_PROBE)
+        self.record("unified_launcher_start_requested")
+        started = self.device.adb("shell", "am", "start", "-W", "-n", MAIN,
+                                  timeout=120, merge_error=True)
+        (self.proof / "launcher-start.txt").write_text(started[:16384])
+        verified_activity_start(started)
+        self.record("unified_launcher_start_accepted")
         # The exact launcher control is source-localized; no startup RPC is injected.
         def launcher_control():
             tree = self.device.android()
@@ -812,6 +836,16 @@ class ActualRun:
             except (Rejected, OSError, ValueError, subprocess.SubprocessError):
                 pass
         finally:
+            try:
+                activities = self.device.adb("shell", "dumpsys", "activity", "activities", check=False)
+                resumed = [line.strip() for line in activities.splitlines()
+                           if "mResumedActivity" in line or "topResumedActivity" in line]
+                (self.proof / "foreground-activity.txt").write_text("\n".join(resumed)[:4096])
+                starts = self.device.adb("logcat", "-d", "-t", "5000", "-v", "brief", "-s", "ActivityTaskManager", check=False)
+                own = [line for line in starts.splitlines() if PACKAGE in line]
+                (self.proof / "own-activity-launch-log.txt").write_text("\n".join(own)[-65536:])
+            except (Rejected, OSError, subprocess.SubprocessError):
+                self.report["activity_collection_unavailable"] = True
             try:
                 pids = self.device.adb("shell", "pidof", PACKAGE, check=False).split()
                 if len(pids) == 1 and pids[0].isdigit():
