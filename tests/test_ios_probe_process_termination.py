@@ -316,15 +316,27 @@ def test_probe_finally_closes_observer_before_simulator_cleanup():
 @pytest.mark.skipif(__import__("sys").platform!="darwin",reason="Actual public Darwin kqueue test requires macOS")
 @pytest.mark.parametrize("ending",["exit","signal"])
 def test_actual_darwin_kqueue_owned_disposable_child_exit_status_and_fd_close(tmp_path,ending):
-    import subprocess,sys,time,signal,select
+    import subprocess,time,signal,select
+    # Python.org's bin/python is a framework launcher that execs another image.
+    # Compile an owned image instead of relaxing the production exact-path gate.
+    clang=subprocess.check_output(["xcrun","--sdk","macosx","--find","clang"],text=True,timeout=10).strip()
+    sdk=subprocess.check_output(["xcrun","--sdk","macosx","--show-sdk-path"],text=True,timeout=10).strip()
+    source=tmp_path/"owned-exit-child.c"
+    source.write_text('#include <unistd.h>\n#include <signal.h>\n'
+        'int main(int argc,char **argv) {char byte;'
+        'if(write(1,"ready\\n",6)!=6 || read(0,&byte,1)!=1)return 77;'
+        'if(argc==2 && argv[1][0]==\'s\'){raise(SIGTERM);return 78;}_exit(23);}\n')
+    executable=tmp_path.resolve(strict=True)/"owned-exit-child"
+    compiled=subprocess.run([clang,"-isysroot",sdk,"-mmacosx-version-min=11.0","-std=c11","-Wall","-Wextra","-Werror",
+        str(source),"-o",str(executable)],capture_output=True,text=True,timeout=30)
+    assert compiled.returncode==0,compiled.stderr
     sampler=probe.OwnedProbeProcessSampler("unused",tmp_path,tmp_path)
     sampler.clear_launch()
-    code="import os,sys,signal;print('ready',flush=True);sys.stdin.buffer.read(1);"+("os._exit(23)" if ending=="exit" else "os.kill(os.getpid(),signal.SIGTERM)")
-    child=subprocess.Popen([sys.executable,"-I","-S","-c",code],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+    child=subprocess.Popen([str(executable),ending],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
     try:
         assert select.select([child.stdout],[],[],5)[0],"Disposable child readiness deadline"
         assert child.stdout.readline(64)==b"ready\n"
-        sampler.pid=child.pid;sampler.launch_ack=time.time();sampler.executable=Path(sys.executable).resolve(strict=True)
+        sampler.pid=child.pid;sampler.launch_ack=time.time();sampler.executable=executable
         birth=sampler._kernel_birth_identity()
         sampler.process_start_identity=sampler._process_identity(sampler.executable)
         assert sampler._kernel_birth_identity()==birth

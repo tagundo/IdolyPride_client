@@ -22,6 +22,7 @@ on:
       - tools/package_android_unified.py
       - tests/test_android_unified_badging.py
       - tests/test_ios_mp4_queue_host.py
+      - tests/test_ios_probe_process_termination.py
   workflow_dispatch:
     inputs:
       upload_draft:
