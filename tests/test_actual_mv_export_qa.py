@@ -131,12 +131,12 @@ def permission_start(component=PERMISSION_COMPONENT):
             + qa.MAIN + " }\nStatus: ok\nLaunchState: COLD\nActivity: " + component + "\nComplete\n")
 
 
-def activity_context(component=PERMISSION_COMPONENT, caller=qa.PACKAGE, token="f298d76"):
+def activity_context(component=PERMISSION_COMPONENT, caller=qa.PACKAGE, token="f298d76", hist_gap="  "):
     return (f"  topResumedActivity=ActivityRecord{{{token} u0 {component} t9}}\n"
-            f"    * Hist #1: ActivityRecord{{{token} u0 {component} t9}}\n"
+            f"    * Hist{hist_gap}#1: ActivityRecord{{{token} u0 {component} t9}}\n"
             f"      launchedFromUid=10210 launchedFromPackage={caller} userId=0\n"
             "      Intent { act=android.content.pm.action.REQUEST_PERMISSIONS (has extras) }\n"
-            f"    * Hist #0: ActivityRecord{{485ba61 u0 {qa.MAIN} t9}}\n"
+            f"    * Hist{hist_gap}#0: ActivityRecord{{485ba61 u0 {qa.MAIN} t9}}\n"
             "      launchedFromUid=0 launchedFromPackage=null userId=0\n")
 
 
@@ -210,6 +210,17 @@ def test_notification_permission_uses_observed_system_control_with_independent_t
         qa.notification_permission_control(tree, activity_context(caller=qa.PACKAGE + ".other"))
 
 
+@pytest.mark.parametrize("gap", [" ", "  ", "\t", " \t "])
+def test_notification_target_hist_record_accepts_actual_horizontal_spacing(gap):
+    tree = permission_ui()
+    assert qa.notification_permission_control(tree, activity_context(hist_gap=gap)) is tree[1]
+
+
+def test_notification_hist_record_cannot_cross_lines_to_borrow_another_target():
+    with pytest.raises(qa.Rejected, match="permission_target_unverified"):
+        qa.notification_permission_control(permission_ui(), activity_context(hist_gap="\n  "))
+
+
 @pytest.mark.parametrize("message", [
     "Allow 아이프라 로컬 to take pictures and record video?", "Allow 아이프라 로컬 to record audio?",
     "Allow 아이프라 로컬 to access this device's location?", "Allow", "알림을 허용하시겠습니까?",
@@ -238,7 +249,7 @@ def test_unrelated_system_overlay_is_neither_dismissed_nor_main_readiness():
                          '<node package="android" text="Close app" resource-id="android:id/aerr_close"/></hierarchy>')
     assert qa.notification_permission_control(tree, activity_context()) is None
     assert qa.launcher_main_control(tree, activity_context(), main_lifecycle("created", "started", "resumed", "paused")) is None
-    wrong_token = activity_context().replace("* Hist #1: ActivityRecord{f298d76", "* Hist #1: ActivityRecord{other")
+    wrong_token = activity_context().replace("* Hist  #1: ActivityRecord{f298d76", "* Hist  #1: ActivityRecord{other")
     with pytest.raises(qa.Rejected, match="permission_target_unverified"):
         qa.notification_permission_control(permission_ui(), wrong_token)
 

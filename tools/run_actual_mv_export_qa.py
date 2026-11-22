@@ -97,7 +97,7 @@ def notification_permission_control(tree, activities):
         return None  # A different system overlay can obscure this Activity.
     # The foreground system Activity's own record binds the dialog to the
     # requested package. A similar app label in a different request is not enough.
-    records = list(re.finditer(r"^\s*\* Hist #\d+:\s*ActivityRecord\{(\S+)\s+u\d+\s+(\S+)[^\n]*", activities, re.MULTILINE))
+    records = list(re.finditer(r"^[ \t]*\*[ \t]+Hist[ \t]+#\d+:[ \t]*ActivityRecord\{(\S+)\s+u\d+\s+(\S+)[^\n]*", activities, re.MULTILINE))
     matches = [(index, row) for index, row in enumerate(records)
                if row[1] == token and normalized_component(row[2]) == component]
     need(len(matches) == 1, "notification_permission_target_unverified")
