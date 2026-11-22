@@ -30,6 +30,8 @@ HEX32 = re.compile(r"[0-9a-f]{32}")
 MAX_JSON = 72 * 1024
 MAX_MOVIE = 24 * 1024 * 1024
 ENVIRONMENT_PROBE = "org.idolypride.environmentprobe"
+PERMISSION_CONTROLLERS = frozenset(("com.android.permissioncontroller", "com.google.android.permissioncontroller"))
+PERMISSION_ACTIVITY = "com.android.permissioncontroller.permission.ui.GrantPermissionsActivity"
 
 
 class Rejected(ValueError):
@@ -41,19 +43,112 @@ def need(value, code):
         raise Rejected(code)
 
 
-def verified_activity_start(raw, component=MAIN):
+def normalized_component(value):
+    parts = value.split("/")
+    if len(parts) != 2 or not all(parts):
+        return None
+    package, name = parts
+    return package, package + name if name.startswith(".") else name
+
+
+def verified_activity_start(raw, component=MAIN, *, notification_interruption=False):
     """am can print an error while adb itself exits successfully."""
     need(isinstance(raw, str) and len(raw) <= 16384, "activity_start_result_invalid")
-    need(re.search(r"^Status:\s*ok\s*$", raw, re.MULTILINE), "unified_launcher_activity_start_rejected")
+    need(re.findall(r"^Status:\s*(\S+)\s*$", raw, re.MULTILINE) == ["ok"], "unified_launcher_activity_start_rejected")
     activities = re.findall(r"^Activity:\s*(\S+)\s*$", raw, re.MULTILINE)
-    def normalized(value):
-        parts = value.split("/")
-        if len(parts) != 2 or not all(parts):
-            return None
-        package, name = parts
-        return package, package + name if name.startswith(".") else name
-    need(len(activities) == 1 and normalized(activities[0]) == normalized(component),
-         "unified_launcher_activity_identity_mismatch")
+    need(len(activities) == 1, "unified_launcher_activity_identity_mismatch")
+    reported = normalized_component(activities[0])
+    if reported == normalized_component(component):
+        return False
+    # Android 13+ can report the notification permission Activity as the result
+    # of a successful explicit MAIN launch. This is an interruption, never proof
+    # that the requested launcher is ready. Its real UI/target and then MAIN's
+    # foreground lifecycle are independently required below.
+    if notification_interruption and reported and reported[0] in PERMISSION_CONTROLLERS and reported[1] == PERMISSION_ACTIVITY:
+        intents = re.findall(r"^Starting:\s*Intent\s*\{([^\n}]*)\}\s*$", raw, re.MULTILINE)
+        requested = re.findall(r"(?:^|\s)cmp=(\S+)", intents[0]) if len(intents) == 1 else []
+        need(len(intents) == 1 and len(requested) == 1
+             and normalized_component(requested[0]) == normalized_component(component)
+             and re.search(r"(?:^|\s)act=android\.intent\.action\.MAIN(?:\s|$)", intents[0])
+             and re.search(r"(?:^|\s)cat=\[android\.intent\.category\.LAUNCHER\](?:\s|$)", intents[0]),
+             "unified_launcher_requested_main_unverified")
+        return True
+    raise Rejected("unified_launcher_activity_identity_mismatch")
+
+
+def foreground_activity(raw):
+    need(isinstance(raw, str) and len(raw) <= 2 * 1024 * 1024, "foreground_activity_context_invalid")
+    pattern = r"^\s*%s\s*[:=]\s*ActivityRecord\{(\S+)\s+u\d+\s+(\S+)"
+    rows = re.findall(pattern % "topResumedActivity", raw, re.MULTILINE)
+    if not rows:
+        rows = re.findall(pattern % "mResumedActivity", raw, re.MULTILINE)
+    identities = {(token, normalized_component(component)) for token, component in rows}
+    need(len(identities) <= 1, "foreground_activity_ambiguous")
+    return next(iter(identities)) if identities else (None, None)
+
+
+def notification_permission_control(tree, activities):
+    """Accept only the actual target app's observed notification request UI."""
+    token, component = foreground_activity(activities)
+    if not component or component[0] not in PERMISSION_CONTROLLERS or component[1] != PERMISSION_ACTIVITY:
+        return None
+    nodes = [node for node in tree.iter("node") if node.get("package") == component[0]]
+    if not nodes:
+        return None  # A different system overlay can obscure this Activity.
+    # The foreground system Activity's own record binds the dialog to the
+    # requested package. A similar app label in a different request is not enough.
+    records = list(re.finditer(r"^\s*\* Hist #\d+:\s*ActivityRecord\{(\S+)\s+u\d+\s+(\S+)[^\n]*", activities, re.MULTILINE))
+    matches = [(index, row) for index, row in enumerate(records)
+               if row[1] == token and normalized_component(row[2]) == component]
+    need(len(matches) == 1, "notification_permission_target_unverified")
+    index, row = matches[0]
+    block = activities[row.end():records[index + 1].start() if index + 1 < len(records) else len(activities)]
+    callers = re.findall(r"\blaunchedFromPackage=([^\s,]+)", block)
+    need(callers == [PACKAGE]
+         and re.search(r"\bact=android\.content\.pm\.action\.REQUEST_PERMISSIONS(?:\s|[}])", block),
+         "notification_permission_target_unverified")
+    def text(value):
+        return " ".join(re.sub(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]", "", value).split())
+    # The official QA guest uses English system UI. Match this permission kind,
+    # not generic Allow text. Its app label is not a package identity (and the
+    # unified app's label differs from the server's app_name resource); the
+    # actual Activity record above supplies that identity independently.
+    message_ids = {package + ":id/permission_message" for package in PERMISSION_CONTROLLERS}
+    allow_ids = {package + ":id/permission_allow_button" for package in PERMISSION_CONTROLLERS}
+    messages = [node for node in nodes if node.get("resource-id") in message_ids]
+    need(len(messages) == 1 and re.fullmatch(r"Allow [^?\r\n]{1,256} to send you notifications\?",
+                                           text(messages[0].get("text", ""))),
+         "notification_permission_kind_unverified")
+    controls = [node for node in nodes if node.get("resource-id") in allow_ids
+                and node.get("enabled") == "true" and node.get("clickable") == "true"
+                and node.get("class") == "android.widget.Button"]
+    need(len(controls) == 1, "notification_permission_control_ambiguous")
+    return controls[0]
+
+
+def launcher_main_control(tree, activities, lifecycle):
+    """A system permission window can never stand in for the real Main UI."""
+    if foreground_activity(activities)[1] != normalized_component(MAIN):
+        return None
+    need(isinstance(lifecycle, str) and len(lifecycle) <= 16384, "unified_launcher_lifecycle_invalid")
+    rows = re.findall(r"^\d+ server (precreated|created|started|resumed|paused|stopped|destroyed) finishing=(true|false) destroyed=(true|false)\s*$",
+                      lifecycle, re.MULTILINE)
+    # Configuration changes can recreate MAIN; require the current incarnation,
+    # not an old resumed line followed by a later pause/destruction.
+    starts = [index for index, row in enumerate(rows) if row[0] == "precreated"]
+    current = rows[starts[-1]:] if starts else rows
+    states = [row[0] for row in current]
+    if not ("created" in states and "started" in states and current
+            and current[-1] == ("resumed", "false", "false")
+            and states.index("created") < states.index("started") < len(states) - 1):
+        return None
+    names = labels("launch_diagnostic_client")
+    controls = [node for node in tree.iter("node") if node.get("package") == PACKAGE
+                and node.get("class") == "android.widget.Button" and node.get("enabled") == "true"
+                and node.get("clickable") == "true"
+                and (node.get("text") in names or node.get("content-desc") in names)]
+    need(len(controls) <= 1, "unified_launch_control_ambiguous")
+    return controls[0] if controls else None
 
 
 def verified_observer_manifest(evidence):
@@ -600,8 +695,9 @@ class ActualRun:
         except (Rejected,OSError,subprocess.SubprocessError):
             self.report["initial_launch_context_collection_unavailable"]=True
             launch_context=""
-        verified_activity_start(started)
-        self.record("unified_launcher_start_accepted")
+        interrupted = verified_activity_start(started, notification_interruption=True)
+        self.record("unified_launcher_notification_interruption_reported" if interrupted
+                    else "unified_launcher_start_reported")
         factory="\n".join(line for line in launch_context.splitlines()if"IdolyLauncher"in line)
         (self.proof / "launcher-constructor.txt").write_text(factory[-16384:])
         starts = self.device.adb("logcat", "-b", "system", "-d", "-t", "5000", "-v", "brief", "-s", "ActivityTaskManager", check=False)
@@ -609,22 +705,28 @@ class ActualRun:
         # The exact launcher control is source-localized; no startup RPC is injected.
         def launcher_control():
             tree = self.device.android()
-            permission = [n for n in tree.iter("node") if n.get("package") in
-                ("com.android.permissioncontroller", "com.google.android.permissioncontroller")
-                and n.get("resource-id", "").endswith(":id/permission_allow_button")
-                and n.get("enabled") == "true"]
-            need(len(permission) <= 1, "notification_permission_control_ambiguous")
-            if permission:
-                self.device.touch(permission[0])
-                self.record("fresh_qa_notification_permission_allowed")
+            activities = self.device.adb("shell", "dumpsys", "activity", "activities", check=False)
+            need(len(activities) <= 2 * 1024 * 1024, "foreground_activity_context_invalid")
+            (self.proof / "launcher-activity-context.txt").write_text(activities[:65536])
+            permission = notification_permission_control(tree, activities)
+            if permission is not None:
+                # Use only observed UI bounds. Never pm-grant/appops a permission
+                # or accept another runtime group merely because it has Allow.
+                (self.proof / "notification-permission-activity.txt").write_text(activities[:65536])
+                (self.proof / "notification-permission-ui.xml").write_text(ET.tostring(tree, encoding="unicode"))
+                self.device.touch(permission)
+                self.record("fresh_qa_notification_permission_allowed", {
+                    "permission": "android.permission.POST_NOTIFICATIONS", "target_package": PACKAGE,
+                    "foreground_activity": "/".join(foreground_activity(activities)[1])})
                 return None
-            names = labels("launch_diagnostic_client")
-            controls = [n for n in tree.iter("node") if n.get("package") == PACKAGE
-                and n.get("class") == "android.widget.Button" and n.get("enabled") == "true"
-                and (n.get("text") in names or n.get("content-desc") in names)]
-            need(len(controls) <= 1, "unified_launch_control_ambiguous")
-            return controls[0] if controls else None
+            lifecycle = self.device.adb("shell", "run-as", PACKAGE, "cat", "files/idoly-qa-lifecycle.txt", check=False)
+            need(len(lifecycle) <= 16384, "unified_launcher_lifecycle_invalid")
+            (self.proof / "launcher-main-lifecycle.txt").write_text(lifecycle)
+            return launcher_main_control(tree, activities, lifecycle)
         launch = self.wait(launcher_control, 120, "unified_launch_control_unavailable")
+        self.report["launcher_main_verified"] = True
+        self.record("unified_launcher_start_accepted", {"requested_component": MAIN,
+                    "foreground_main_and_observed_control": True, "main_lifecycle_resumed": True})
         self.device.touch(launch)
         self.explorer = self.ui.UiExplorer(self.device)
         def title_or_home():

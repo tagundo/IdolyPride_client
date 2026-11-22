@@ -2,6 +2,8 @@
 from copy import deepcopy
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -118,6 +120,216 @@ def test_launch_context_requires_exact_package_and_bounded_input():
 def test_adb_process_success_does_not_prove_activity_launch(raw, code):
     with pytest.raises(qa.Rejected, match=code):
         qa.verified_activity_start(raw)
+
+
+PERMISSION_COMPONENT = "com.google.android.permissioncontroller/" + qa.PERMISSION_ACTIVITY
+
+
+def permission_start(component=PERMISSION_COMPONENT):
+    # Android 13+ am -W reports the system interruption instead of MAIN.
+    return ("Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp="
+            + qa.MAIN + " }\nStatus: ok\nLaunchState: COLD\nActivity: " + component + "\nComplete\n")
+
+
+def activity_context(component=PERMISSION_COMPONENT, caller=qa.PACKAGE, token="f298d76"):
+    return (f"  topResumedActivity=ActivityRecord{{{token} u0 {component} t9}}\n"
+            f"    * Hist #1: ActivityRecord{{{token} u0 {component} t9}}\n"
+            f"      launchedFromUid=10210 launchedFromPackage={caller} userId=0\n"
+            "      Intent { act=android.content.pm.action.REQUEST_PERMISSIONS (has extras) }\n"
+            f"    * Hist #0: ActivityRecord{{485ba61 u0 {qa.MAIN} t9}}\n"
+            "      launchedFromUid=0 launchedFromPackage=null userId=0\n")
+
+
+def permission_ui(message="Allow 아이프라 로컬 to send you notifications?"):
+    tree = ET.Element("hierarchy")
+    package = PERMISSION_COMPONENT.split("/")[0]
+    ET.SubElement(tree, "node", {"package": package, "resource-id": "com.android.permissioncontroller:id/permission_message",
+                               "text": message, "class": "android.widget.TextView"})
+    ET.SubElement(tree, "node", {"package": package, "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+                               "text": "Allow", "class": "android.widget.Button", "enabled": "true", "clickable": "true",
+                               "bounds": "[120,240][280,320]"})
+    return tree
+
+
+def main_ui():
+    tree = ET.Element("hierarchy")
+    ET.SubElement(tree, "node", {"package": qa.PACKAGE, "class": "android.widget.Button", "enabled": "true",
+                               "clickable": "true", "text": sorted(qa.labels("launch_diagnostic_client"))[0],
+                               "bounds": "[20,400][500,460]"})
+    return tree
+
+
+def main_lifecycle(*states):
+    return "observer_registered\n" + "".join(
+        f"{46346 + index} server {state} finishing=false destroyed=false\n" for index, state in enumerate(states))
+
+
+def test_notification_activity_result_only_defers_the_actual_main_verdict():
+    raw = permission_start()
+    with pytest.raises(qa.Rejected, match="activity_identity_mismatch"):
+        qa.verified_activity_start(raw)
+    assert qa.verified_activity_start(raw, notification_interruption=True) is True
+    assert qa.verified_activity_start("Status: ok\nActivity: " + qa.MAIN + "\n",
+                                      notification_interruption=True) is False
+    # System foreground and a lookalike Main button are not Main readiness.
+    assert qa.launcher_main_control(main_ui(), activity_context(), main_lifecycle("created", "started", "resumed")) is None
+
+
+@pytest.mark.parametrize("change", [
+    lambda raw: raw.replace("cmp=" + qa.MAIN, "cmp=org.other/.MainActivity"),
+    lambda raw: raw.replace("act=android.intent.action.MAIN", "act=android.intent.action.VIEW"),
+    lambda raw: raw.replace("cat=[android.intent.category.LAUNCHER]", "cat=[android.intent.category.DEFAULT]"),
+    lambda raw: raw.replace("Starting: Intent", "Intent"),
+    lambda raw: raw + "Starting: Intent { cmp=" + qa.MAIN + " }\n",
+])
+def test_notification_interruption_still_requires_the_exact_requested_main_intent(change):
+    with pytest.raises(qa.Rejected, match="requested_main_unverified"):
+        qa.verified_activity_start(change(permission_start()), notification_interruption=True)
+
+
+@pytest.mark.parametrize("component", [
+    "org.other/" + qa.PERMISSION_ACTIVITY,
+    "com.google.android.permissioncontroller/.OtherActivity",
+    "com.android.settings/.Settings",
+])
+def test_unrelated_reported_activity_cannot_use_the_permission_exception(component):
+    with pytest.raises(qa.Rejected, match="activity_identity_mismatch"):
+        qa.verified_activity_start(permission_start(component), notification_interruption=True)
+
+
+def test_duplicate_activity_start_status_is_not_success():
+    with pytest.raises(qa.Rejected, match="activity_start_rejected"):
+        qa.verified_activity_start(permission_start() + "Status: timeout\n", notification_interruption=True)
+
+
+def test_notification_permission_uses_observed_system_control_with_independent_target_identity():
+    tree = permission_ui("Allow \u2068아이프라 로컬\u2069 to send you notifications?")
+    assert qa.notification_permission_control(tree, activity_context()) is tree[1]
+    # App labels can collide; the system caller package must be the exact target.
+    with pytest.raises(qa.Rejected, match="permission_target_unverified"):
+        qa.notification_permission_control(tree, activity_context(caller=qa.PACKAGE + ".other"))
+
+
+@pytest.mark.parametrize("message", [
+    "Allow 아이프라 로컬 to take pictures and record video?", "Allow 아이프라 로컬 to record audio?",
+    "Allow 아이프라 로컬 to access this device's location?", "Allow", "알림을 허용하시겠습니까?",
+])
+def test_generic_allow_and_other_runtime_groups_are_not_notification_consent(message):
+    with pytest.raises(qa.Rejected, match="permission_kind_unverified"):
+        qa.notification_permission_control(permission_ui(message), activity_context())
+
+
+@pytest.mark.parametrize("mutation,error", [
+    (lambda tree: tree.append(deepcopy(tree[1])), "permission_control_ambiguous"),
+    (lambda tree: tree.append(deepcopy(tree[0])), "permission_kind_unverified"),
+    (lambda tree: tree[1].set("enabled", "false"), "permission_control_ambiguous"),
+    (lambda tree: tree[1].set("resource-id", "org.other:id/permission_allow_button"), "permission_control_ambiguous"),
+    (lambda tree: tree[0].set("resource-id", "org.other:id/permission_message"), "permission_kind_unverified"),
+])
+def test_permission_ui_must_have_one_real_enabled_system_control(mutation, error):
+    tree = permission_ui()
+    mutation(tree)
+    with pytest.raises(qa.Rejected, match=error):
+        qa.notification_permission_control(tree, activity_context())
+
+
+def test_unrelated_system_overlay_is_neither_dismissed_nor_main_readiness():
+    tree = ET.fromstring('<hierarchy><node package="android" text="Pixel Launcher isn\'t responding"/>'
+                         '<node package="android" text="Close app" resource-id="android:id/aerr_close"/></hierarchy>')
+    assert qa.notification_permission_control(tree, activity_context()) is None
+    assert qa.launcher_main_control(tree, activity_context(), main_lifecycle("created", "started", "resumed", "paused")) is None
+    wrong_token = activity_context().replace("* Hist #1: ActivityRecord{f298d76", "* Hist #1: ActivityRecord{other")
+    with pytest.raises(qa.Rejected, match="permission_target_unverified"):
+        qa.notification_permission_control(permission_ui(), wrong_token)
+
+
+@pytest.mark.parametrize("states", [
+    ("created", "started", "resumed", "paused"), ("resumed",), ("started", "created", "resumed"),
+    ("created", "started", "resumed", "destroyed", "precreated", "created", "started"),
+])
+def test_main_readiness_needs_the_current_incarnation_resumed_with_real_ui(states):
+    assert qa.launcher_main_control(main_ui(), activity_context(qa.MAIN), main_lifecycle(*states)) is None
+
+
+def test_main_lifecycle_and_observed_ui_are_both_required_after_permission():
+    tree = main_ui()
+    current = main_lifecycle("precreated", "created", "started", "resumed", "paused", "resumed")
+    assert qa.launcher_main_control(tree, activity_context(qa.MAIN), current) is tree[0]
+    assert qa.launcher_main_control(tree, activity_context(qa.MAIN), current.replace("destroyed=false", "destroyed=true")) is None
+    tree[0].set("package", qa.PACKAGE + ".other")
+    assert qa.launcher_main_control(tree, activity_context(qa.MAIN), current) is None
+    tree[0].set("package", qa.PACKAGE)
+    tree.append(deepcopy(tree[0]))
+    with pytest.raises(qa.Rejected, match="launch_control_ambiguous"):
+        qa.launcher_main_control(tree, activity_context(qa.MAIN), current)
+
+
+@pytest.mark.parametrize("wrong_permission", [False, True])
+def test_normal_launcher_handles_only_notification_ui_then_reverifies_resumed_main(tmp_path, wrong_permission):
+    permission = permission_ui("Allow 아이프라 로컬 to record audio?" if wrong_permission else
+                               "Allow 아이프라 로컬 to send you notifications?")
+    launcher = main_ui()
+
+    class ObservedDevice:
+        phase = 0
+
+        def __init__(self):
+            self.commands, self.touches = [], []
+
+        def identity(self):
+            return {"serial": "emulator-fixture"}
+
+        def adb(self, *args, **kwargs):
+            self.commands.append(args)
+            if args[:5] == ("shell", "am", "start", "-W", "-a"):
+                return permission_start()
+            if args == ("shell", "dumpsys", "activity", "activities"):
+                return activity_context() if self.phase == 0 else activity_context(qa.MAIN)
+            if args[:4] == ("shell", "run-as", qa.PACKAGE, "cat"):
+                return main_lifecycle("precreated", "created", "started", "resumed", "paused", "resumed")
+            return ""
+
+        def android(self):
+            return permission if self.phase == 0 else launcher
+
+        def touch(self, node):
+            assert node is (permission[1] if self.phase == 0 else launcher[0])
+            self.touches.append(node)
+            self.phase += 1
+
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.args = SimpleNamespace(apk=tmp_path / "actual.apk", startup_timeout=10)
+    run.proof, run.report, run.journal = tmp_path, {}, []
+    run.device = ObservedDevice()
+    run.capture_launch_evidence = lambda stage: ""
+    run.handle_dialog = lambda snapshot: False
+    run.ui = SimpleNamespace(UiExplorer=lambda device: SimpleNamespace(_snapshot=lambda: {"ok": True}),
+                             _home_role=lambda snapshot, role: True)
+
+    def wait(action, timeout, code):
+        for _ in range(3):
+            result = action()
+            if result is not None and result is not False:
+                return result
+        raise qa.Rejected(code)
+    run.wait = wait
+    if wrong_permission:
+        with pytest.raises(qa.Rejected, match="permission_kind_unverified"):
+            run.launch()
+        assert not run.device.touches and not run.report.get("launcher_main_verified")
+        return
+    run.launch()
+    assert run.device.touches == [permission[1], launcher[0]]
+    assert run.report["launcher_main_verified"] and run.report["game_boot_verified"]
+    assert [event["phase"] for event in run.journal] == ["unified_launcher_start_requested",
+        "unified_launcher_notification_interruption_reported", "fresh_qa_notification_permission_allowed",
+        "unified_launcher_start_accepted"]
+    assert (tmp_path / "notification-permission-ui.xml").read_text() == ET.tostring(permission, encoding="unicode")
+    assert (tmp_path / "launcher-main-lifecycle.txt").is_file()
+    assert ("shell", "am", "start", "-W", "-a", "android.intent.action.MAIN", "-c",
+            "android.intent.category.LAUNCHER", "-n", qa.MAIN) in run.device.commands
+    assert not any("grant" in command or "appops" in command or "settings" in command
+                   for command in run.device.commands)
 
 
 def snapshot(frame=100, *, complete=False):
