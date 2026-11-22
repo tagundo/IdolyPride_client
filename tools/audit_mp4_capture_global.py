@@ -26,12 +26,14 @@ PUBLICATION={
     'android':{'native_entry':0x45b670,'return':0x923d4e4,'icall_slot':0xa077c20,
         'aot':{'update':(0x923d228,724),'wrapper':(0x9236624,52),'shader_string':(0x8f526c4,112),
             'request':(0x923d4fc,128),'capture_pass':(0x8dfb8bc,352),
-            'wrapper_ctor':(0x92364fc,296),'texture_ctor':(0x8f69e7c,256)},
+            'wrapper_ctor':(0x92364fc,296),'texture_ctor':(0x8f69e7c,256),
+            'descriptor_dynamic_scale':(0x8f6b458,32)},
         'wrapper_return':0x923d380,'texture_return':0x9236580},
     'ios':{'native_entry':0xb04424,'return':0x7bcb81c,'icall_slot':0xa91b680,
         'aot':{'update':(0x7bcb2f8,1344),'shader_string':(0x7811830,168),
             'request':(0x7bcb838,120),'capture_pass':(0x76798d8,368),
-            'wrapper_ctor':(0x7bc3348,308),'texture_ctor':(0x7830f20,256)},
+            'wrapper_ctor':(0x7bc3348,308),'texture_ctor':(0x7830f20,256),
+            'descriptor_dynamic_scale':(0x7832eb0,32)},
         'wrapper_return':0x7bcb6b4,'texture_return':0x7bc33d4},
 }
 QUEUE_PRODUCER={'android':(0x8e01414,128),'ios':(0x76802ec,412)}
@@ -123,6 +125,11 @@ def audit(originals):
         assert any(int(i['rva'],0)==publication['wrapper_return']-4 and i['op']=='bl #'+wrapper_ctor['rva']for i in aot['update']['instructions'])
         assert any(int(i['rva'],0)==publication['texture_return']-4 and i['op']=='bl #'+texture_ctor['rva']for i in aot['wrapper_ctor']['instructions'])
         assert any(int(i['rva'],0)==publication['texture_return']and i['op']=='str x20, [x19, #0x10]'for i in aot['wrapper_ctor']['instructions'])
+        dynamic_scale=original.method('UnityEngine.RenderTextureDescriptor','set_useDynamicScale',1,('System.Boolean',))
+        assert dynamic_scale['rva']==aot['descriptor_dynamic_scale']['rva']
+        assert 'bl #'+dynamic_scale['rva']in aops('update')
+        assert 'and w8, w8, #0xfffffbff'in aops('descriptor_dynamic_scale')
+        assert 'str w8, [x0, #0x2c]'in aops('descriptor_dynamic_scale')
         queue_start,queue_size=QUEUE_PRODUCER[platform]
         queue_bytes=original.b[original.offset(queue_start):original.offset(queue_start)+queue_size]
         queue_rows=[{'rva':hex(i.address),'op':i.mnemonic+' '+i.op_str}for i in cs.disasm(queue_bytes,queue_start)]
@@ -166,7 +173,7 @@ def profile_text(profiles):
 def publication_text(profiles):
     lines=['// BEGIN_MP4_CAPTURE_PUBLICATION_PROFILE','namespace idoly_mp4_capture_publication {',
         'using Binding=idoly_mp4_capture_global_native::Binding;',
-        'struct Profile {Binding native_entry;uintptr_t original_return,icall_slot;Binding update,wrapper,shader_string,wrapper_ctor,texture_ctor;uintptr_t wrapper_return,texture_return;};']
+        'struct Profile {Binding native_entry;uintptr_t original_return,icall_slot;Binding update,wrapper,shader_string,wrapper_ctor,texture_ctor,descriptor_dynamic_scale;uintptr_t wrapper_return,texture_return;};']
     def binding(row):
         if not row:return '{0,{}}'
         return '{'+row['rva']+',{'+','.join(hex(b)for b in bytes.fromhex(row['prefix']))+'}}'
@@ -174,7 +181,7 @@ def publication_text(profiles):
         p=p['owned_publication'];aot=p['aot']
         lines.append('inline constexpr Profile '+platform+'_profile={'+binding(p['entry'])+','+p['original_return']+','+p['icall_slot']+','+
             binding(aot['update'])+','+binding(aot.get('wrapper'))+','+binding(aot['shader_string'])+','+
-            binding(aot['wrapper_ctor'])+','+binding(aot['texture_ctor'])+','+p['wrapper_return']+','+p['texture_return']+'};')
+            binding(aot['wrapper_ctor'])+','+binding(aot['texture_ctor'])+','+binding(aot['descriptor_dynamic_scale'])+','+p['wrapper_return']+','+p['texture_return']+'};')
     lines+=['} // namespace idoly_mp4_capture_publication','// END_MP4_CAPTURE_PUBLICATION_PROFILE']
     return '\n'.join(lines)
 
