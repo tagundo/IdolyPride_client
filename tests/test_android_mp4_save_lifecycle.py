@@ -291,7 +291,7 @@ public final class SaveLifecycleHarness {
   JSONArray traceRows=new JSONArray();
   for(int i=0;i<20;i++)traceRows.put(new JSONObject().put("sequence",i+1).put("stage","source_admission").put("code","offline_pipeline_not_verified").put("frame",i).put("tick",i*2).put("path","/private/not-exported"));
   traceRows.put(new JSONObject().put("stage","/private/path").put("code","bad").put("sequence",Long.MAX_VALUE));
-  JSONObject modules=new JSONObject().put("scene_control",false).put("native_clock",true).put("/private/path",true).put("capability","secret");
+  JSONObject modules=new JSONObject().put("native_scene_control",false).put("native_clock",true).put("/private/path",true).put("capability","secret");
   for(int i=0;i<40;i++)modules.put("module_"+i,false);
   JSONObject trace=new JSONObject().put("schema",1).put("current_stage","source_admission").put("last_error","offline_pipeline_not_verified")
    .put("events",traceRows).put("modules",modules).put("capability","secret").put("address","0x123");
@@ -299,7 +299,7 @@ public final class SaveLifecycleHarness {
   JSONObject exported=UnifiedMP4Export.diagnostics().optJSONObject("export_trace");
   need(exported!=null&&exported.optString("current_stage").equals("source_admission")&&exported.optString("last_error").equals("offline_pipeline_not_verified"),"actual separate JNI diagnostics reaches the exported bundle");
   need(exported.optJSONArray("events").length()==15&&exported.optJSONArray("events").optJSONObject(0).optLong("sequence")==6,"only the last16 native rows are considered and malformed rows are excluded");
-  need(exported.optJSONObject("modules").length()==24&&!exported.optJSONObject("modules").has("capability")&&!exported.optJSONObject("modules").has("/private/path"),"module map is bounded boolean facts only");
+  need(exported.optJSONObject("modules").length()==2&&!exported.optJSONObject("modules").has("capability")&&!exported.optJSONObject("modules").has("/private/path"),"module map is bounded boolean facts only");
   need(!exported.has("capability")&&!exported.has("address")&&!exported.optJSONArray("events").optJSONObject(0).has("path"),"native trace redacts paths, addresses, payloads and unknown keys");
   set("lastNativeTrace",null);set("initialized",false);nativeDiagnosticJson=null;
   JSONObject restarted=UnifiedMP4Export.diagnostics();

@@ -206,37 +206,32 @@ public final class UnifiedMP4Export {
             trace.put("schema", 1);
             for (String key : new String[] {"current_stage", "last_error"}) {
                 Object value = source.opt(key);
-                if (value instanceof String && ((String) value).matches("[A-Za-z0-9_]{1,96}")) trace.put(key, value);
+                if (value instanceof String && ((String) value).matches("[A-Za-z0-9_.-]{1,95}")) trace.put(key, value);
             }
             JSONArray input = source.optJSONArray("events"), events = new JSONArray();
+            long previous = 0;
             if (input != null) for (int i = Math.max(0, input.length() - 16); i < input.length(); i++) {
                 JSONObject row = input.optJSONObject(i); if (row == null) continue;
-                JSONObject event = new JSONObject();
-                for (String key : new String[] {"stage", "code"}) {
-                    Object value = row.opt(key);
-                    if (value instanceof String && ((String) value).matches("[A-Za-z0-9_]{1,96}")) event.put(key, value);
-                }
-                for (String key : new String[] {"sequence", "frame", "tick"}) {
-                    Object value = row.opt(key);
-                    if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long)
-                        event.put(key, Math.max(0L, Math.min(9007199254740991L, ((Number) value).longValue())));
-                }
-                if (event.has("stage") && event.has("code")) events.put(event);
+                Object stage = row.opt("stage"), code = row.opt("code");
+                if (!(stage instanceof String) || !(code instanceof String)
+                        || !((String) stage).matches("[A-Za-z0-9_.-]{1,95}") || !((String) code).matches("[A-Za-z0-9_.-]{1,95}")) continue;
+                Long sequence = traceInteger(row.opt("sequence")), frame = traceInteger(row.opt("frame")), tick = traceInteger(row.opt("tick"));
+                if (sequence == null || frame == null || tick == null || sequence <= previous) continue;
+                previous = sequence;
+                events.put(new JSONObject().put("sequence", sequence).put("stage", stage).put("code", code).put("frame", frame).put("tick", tick));
             }
             trace.put("events", events);
             JSONObject inputModules = source.optJSONObject("modules"), modules = new JSONObject();
-            if (inputModules != null) {
-                java.util.Iterator<String> keys = inputModules.keys(); int count = 0;
-                while (keys.hasNext() && count < 24) {
-                    String key = keys.next(); Object value = inputModules.opt(key);
-                    if (key.matches("[a-z][a-z0-9_]{0,63}") && value instanceof Boolean) {
-                        modules.put(key, value); count++;
-                    }
-                }
+            if (inputModules != null) for (String key : new String[] {"native_scene_control", "scene_parts", "final_playback_handoff", "pending_journal", "frame_coordinator", "default_images", "monitor_ui", "video_coordinator", "proflare_source", "particle_renderer", "graphics_program", "srp_mutations", "audio_frontends", "managed_observers", "native_director_gateway", "capture_queue", "initial_gpu_fence", "render_hold", "native_clock", "game_api"}) {
+                Object value = inputModules.opt(key); if (value instanceof Boolean) modules.put(key, value);
             }
             trace.put("modules", modules);
         } catch (Exception invalid) { return null; }
         return trace.has("current_stage") || trace.has("last_error") || eventsPresent(trace) ? trace : null;
+    }
+    private static Long traceInteger(Object value) {
+        if (!(value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long)) return null;
+        long number = ((Number) value).longValue(); return number >= 0 && number <= 9007199254740991L ? number : null;
     }
     private static boolean eventsPresent(JSONObject trace) {
         JSONArray events = trace.optJSONArray("events"); return events != null && events.length() != 0;

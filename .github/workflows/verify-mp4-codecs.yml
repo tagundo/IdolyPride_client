@@ -9,6 +9,7 @@ on:
       - tools/stage_mp4_preview.py
       - tests/test_mp4_preview_delivery.py
       - client-presentation/native/mp4_encoder_api.h
+      - client-presentation/native/mp4_session_api.h
       - client-presentation/native/mp4_android_encoder.hpp
       - ios-unified/native/IdolyMVEncoder.mm
       - ios-unified/native/IdolyMVEncoderPolicy.h
