@@ -25,11 +25,16 @@ PINS={
 PUBLICATION={
     'android':{'native_entry':0x45b670,'return':0x923d4e4,'icall_slot':0xa077c20,
         'aot':{'update':(0x923d228,724),'wrapper':(0x9236624,52),'shader_string':(0x8f526c4,112),
-            'request':(0x923d4fc,128),'capture_pass':(0x8dfb8bc,352)}},
+            'request':(0x923d4fc,128),'capture_pass':(0x8dfb8bc,352),
+            'wrapper_ctor':(0x92364fc,296),'texture_ctor':(0x8f69e7c,256)},
+        'wrapper_return':0x923d380,'texture_return':0x9236580},
     'ios':{'native_entry':0xb04424,'return':0x7bcb81c,'icall_slot':0xa91b680,
         'aot':{'update':(0x7bcb2f8,1344),'shader_string':(0x7811830,168),
-            'request':(0x7bcb838,120),'capture_pass':(0x76798d8,368)}},
+            'request':(0x7bcb838,120),'capture_pass':(0x76798d8,368),
+            'wrapper_ctor':(0x7bc3348,308),'texture_ctor':(0x7830f20,256)},
+        'wrapper_return':0x7bcb6b4,'texture_return':0x7bc33d4},
 }
+QUEUE_PRODUCER={'android':(0x8e01414,128),'ios':(0x76802ec,412)}
 ABI={
     'static_set':'void(int32 property, NativeTexture*)',
     'static_get':'NativeTexture*(int32 property)',
@@ -111,11 +116,35 @@ def audit(originals):
         assert any(i.startswith('ldur q')and '[x8, #0x18]'in i for i in aops('request'))
         assert any(i.startswith('ldur q')and '[x20, #0x88]'in i for i in aops('capture_pass'))
         assert 'bl #'+blit['rva']in aops('capture_pass')
+        wrapper_ctor=original.method('VL.VLRenderTexture','.ctor',2,
+            ('UnityEngine.RenderTextureDescriptor','System.String'))
+        texture_ctor=original.method('UnityEngine.RenderTexture','.ctor',1,('UnityEngine.RenderTextureDescriptor',))
+        assert wrapper_ctor['rva']==aot['wrapper_ctor']['rva']and texture_ctor['rva']==aot['texture_ctor']['rva']
+        assert any(int(i['rva'],0)==publication['wrapper_return']-4 and i['op']=='bl #'+wrapper_ctor['rva']for i in aot['update']['instructions'])
+        assert any(int(i['rva'],0)==publication['texture_return']-4 and i['op']=='bl #'+texture_ctor['rva']for i in aot['wrapper_ctor']['instructions'])
+        assert any(int(i['rva'],0)==publication['texture_return']and i['op']=='str x20, [x19, #0x10]'for i in aot['wrapper_ctor']['instructions'])
+        queue_start,queue_size=QUEUE_PRODUCER[platform]
+        queue_bytes=original.b[original.offset(queue_start):original.offset(queue_start)+queue_size]
+        queue_rows=[{'rva':hex(i.address),'op':i.mnemonic+' '+i.op_str}for i in cs.disasm(queue_bytes,queue_start)]
+        queue_ops=[i['op']for i in queue_rows]
+        assert original.fields('VL.Rendering.VLSRPCameraController')['_capture']['offset']==168
+        assert original.fields('VL.Rendering.VLSRPCapture')['_captureRequests']['offset']==32
+        assert original.fields('VL.Rendering.VLCapturePass')['_target']['offset']==136
+        if platform=='android':
+            assert 'bl #0x419a194'in queue_ops and 'bl #0x8dfb818'in queue_ops
+            assert 'bl #0x8e15d6c'in queue_ops and 'bl #0x8dfea68'in queue_ops
+        else:
+            assert 'bl #0x81ec46c'in queue_ops and 'stur q0, [x25, #0x88]'in queue_ops
+            assert 'bl #0x7696360'in queue_ops and 'bl #0x4521088'in queue_ops
         entry=publication['native_entry']
         out[platform]['owned_publication']={'entry':{'rva':hex(entry),'prefix':native[offset(entry):offset(entry)+16].hex()},
             'original_return':hex(publication['return']),'icall_slot':hex(publication['icall_slot']),
+            'wrapper_return':hex(publication['wrapper_return']),'texture_return':hex(publication['texture_return']),
             'aot_sha256':hashlib.sha256(original.b).hexdigest(),'aot':aot,
             'direct_output_proof':'CaptureRequest copies controller.A0.identifier40 into Capture(target,event1010). CapturePass reads its own target identifier40 and calls the exact CommandBuffer.Blit(source=1,destination=target) overload; no shader-global read is needed to select that destination.',
+            'capture_queue_producer':{'rva':hex(queue_start),'body':queue_bytes.hex(),'instructions':queue_rows,
+                'proof':'Actual VLSRPRenderer.Setup constructs a NEW VLCapturePass for each capture request, enqueues it, then clears the capture request set. iOS inlines the constructor and set helpers. No pre-existing pass target is overwritten and no Setup/setter exists on VLCapturePass.',
+                'retirement_requires':'Actual request set idle, active renderer queue/issued-pass lifetime closure and completed original capture GPU fence; merely restoring controller.A0 does not prove these.'},
             'proof':'UpdateCapturedTexture exact BL return is preserved by every intervening managed wrapper tail branch to the native Shader icall. Entry x1 is the managed A0.texture object before native marshalling.',
             'runtime_requires':['actual owned typed CaptureRequest receipt','exact current controller.A0.wrapper and wrapper.texture',
                 'private captured wrapper/texture lifetime','exact original x30 and property ID','same authorized request thread',
@@ -137,14 +166,15 @@ def profile_text(profiles):
 def publication_text(profiles):
     lines=['// BEGIN_MP4_CAPTURE_PUBLICATION_PROFILE','namespace idoly_mp4_capture_publication {',
         'using Binding=idoly_mp4_capture_global_native::Binding;',
-        'struct Profile {Binding native_entry;uintptr_t original_return,icall_slot;Binding update,wrapper,shader_string;};']
+        'struct Profile {Binding native_entry;uintptr_t original_return,icall_slot;Binding update,wrapper,shader_string,wrapper_ctor,texture_ctor;uintptr_t wrapper_return,texture_return;};']
     def binding(row):
         if not row:return '{0,{}}'
         return '{'+row['rva']+',{'+','.join(hex(b)for b in bytes.fromhex(row['prefix']))+'}}'
     for platform,p in profiles.items():
         p=p['owned_publication'];aot=p['aot']
         lines.append('inline constexpr Profile '+platform+'_profile={'+binding(p['entry'])+','+p['original_return']+','+p['icall_slot']+','+
-            binding(aot['update'])+','+binding(aot.get('wrapper'))+','+binding(aot['shader_string'])+'};')
+            binding(aot['update'])+','+binding(aot.get('wrapper'))+','+binding(aot['shader_string'])+','+
+            binding(aot['wrapper_ctor'])+','+binding(aot['texture_ctor'])+','+p['wrapper_return']+','+p['texture_return']+'};')
     lines+=['} // namespace idoly_mp4_capture_publication','// END_MP4_CAPTURE_PUBLICATION_PROFILE']
     return '\n'.join(lines)
 
