@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 CASES = '''basic actor runtime notification_empty weight active source_restore missing_delegate current_lost
 restore_unclosed wrong_port cache_lost unknown_script actor_unclosed runtime_unclosed runtime_unknown
-runtime_wrong_parent runtime_foreign_clip userdata_unclosed userdata_changes generation_change list_mutation
+runtime_wrong_parent runtime_parent_fallback runtime_parent_fallback_unproven runtime_foreign_clip userdata_unclosed userdata_changes generation_change list_mutation
 notification_nonempty notification_foreign_source weight_unclosed weight_foreign_output weight_foreign_motion
 weight_unknown_callback active_foreign'''.split()
 

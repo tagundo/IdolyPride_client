@@ -30,8 +30,8 @@ namespace pin{struct Entry{uintptr_t rva=128;unsigned char bytes[16]{};uintptr_t
 bool mp4_mapped(uintptr_t at,size_t n,bool){return at>=reinterpret_cast<uintptr_t>(memory)&&at+n<=reinterpret_cast<uintptr_t>(memory)+sizeof memory;}
 template<class T>T read(void*p,size_t off){T value{};memcpy(&value,static_cast<unsigned char*>(p)+off,sizeof value);return value;}
 #ifndef IDOLY_DARWIN_BRIDGE
-constexpr size_t mp4_managed_hook_capacity=128;
-struct Receipt{uintptr_t base=0,rva=0;void*stub=nullptr,*trampoline=nullptr;void**original_location=nullptr;}mp4_managed_hook_receipts[128]{};
+constexpr size_t mp4_managed_hook_capacity=160;
+struct Receipt{uintptr_t base=0,rva=0;void*stub=nullptr,*trampoline=nullptr;void**original_location=nullptr;}mp4_managed_hook_receipts[mp4_managed_hook_capacity]{};
 std::atomic<size_t>mp4_managed_hook_count{0};
 bool backend_current=true;
 struct Backend{bool receipt(size_t i,uintptr_t target,uintptr_t replacement,uintptr_t gateway,uintptr_t stub,mp4_bootstrap::Install*){
@@ -76,7 +76,7 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];
  if(mode=="wrong_slot")mp4_managed_hook_receipts[0].original_location=nullptr;
  if(mode=="wrong_base")++mp4_managed_hook_receipts[0].base;
  if(mode=="wrong_gateway")mp4_managed_hook_receipts[0].trampoline=reinterpret_cast<void*>(other_body);
- if(mode=="count_overflow")mp4_managed_hook_count.store(129);
+ if(mode=="count_overflow")mp4_managed_hook_count.store(mp4_managed_hook_capacity+1);
 #endif
  assert(mp4_source_factory_gateway_current(saved)==(mode=="valid_early"));return 0;
 }

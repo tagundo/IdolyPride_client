@@ -728,6 +728,9 @@ class PsylliumScope {
  Result fail(Result r,const char*e){error_=e;return r;}
  bool current()const{return configured_&&api_.owner_current(context_)&&(!controller_||(api_.retained(controller_root_)==controller_&&api_.alive(controller_)))&&api_.retained(camera_root_)==camera_&&api_.alive(camera_);}
 public:
+ // Readonly stored-scope state; actual native/CPU completion is a separate duty.
+ bool source_quiescent()const{return configured_&&!pending_&&current();}
+
  const char* error()const{return error_;}
  // Keep the last consumed time for held render retries, but discard every
  // prepared future proposal without touching a possibly replaced source.
@@ -835,6 +838,9 @@ class EquipmentScope {
   configured_=captured_=targets_started_=prepared_=restored_=pending_=have_tick_=advancing_=failed_=false;in_flight_=nullptr;
  }
 public:
+ // Readonly stored-scope state; actual native/CPU completion is a separate duty.
+ bool source_quiescent()const{return configured_&&!pending_&&!advancing_&&!in_flight_&&!failed_&&current();}
+
  const char* error()const{return error_;}bool active()const{return configured_;}
  bool owns(void* controller)const{for(size_t i=0;configured_&&i<count_;++i)if(controllers_[i].object==controller)return true;return false;}
  bool owner_current()const{return current();}

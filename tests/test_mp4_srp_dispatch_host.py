@@ -23,7 +23,7 @@ def host(tmp_path_factory):
     source+=(FIXTURES / "mp4_srp_dispatch_host_driver.cpp.inc").read_text()
     directory=tmp_path_factory.mktemp("mp4-srp-dispatch-host")
     path=directory / "host.cpp";path.write_text(source);binary=directory / "host"
-    result=subprocess.run([shutil.which("g++") or "clang++","-std=c++17","-Wall","-Wextra","-Werror","-Wno-misleading-indentation","-g","-O1","-fsanitize=address,undefined","-fno-pie","-no-pie","-I",str(ROOT / "client-presentation/native"),str(path),"-o",str(binary)],capture_output=True,text=True)
+    result=subprocess.run([shutil.which("g++") or "clang++","-std=c++17","-Wall","-Wextra","-Werror","-Wno-misleading-indentation","-g","-O1","-fsanitize=address,undefined","-fno-pie","-no-pie","-pthread","-I",str(ROOT / "client-presentation/native"),str(path),"-o",str(binary)],capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
     return binary
 
@@ -31,7 +31,7 @@ def host(tmp_path_factory):
 @pytest.mark.parametrize("case",[
     "normal","next_tick","stale_draw","prewarm","frame_frontend","add_frontend","invoke_frontend","mono_add","wrong_caller","wrong_mono","wrong_extension","mono_aabb",
     "root_add","unknown_add","add_exception","unowned_invoke","held_retry","offthread","withdraw","unheld_capture","no_selected",
-    "duplicate_selected","frame_exception","nested_frame","handoff","callback_clear",
+    "duplicate_selected","frame_exception","nested_frame","handoff","callback_clear","unready_held","unready_requested","loop_released","capture_active_foreign","snapshot_foreign","snapshot_main_reentry","active_foreign","foreign_throw",
 ])
 def test_actual_srp_dispatcher(host,case):
     result=subprocess.run([str(host),case],capture_output=True,text=True)

@@ -264,6 +264,12 @@ const FixtureClock&native_clock_scope(){static FixtureClock c;return c;}
 unsigned mono_destroys=0;bool mono_destroy_throw=false;
 void mono_destroy(void*p,Method*){++mono_destroys;if(mono_destroy_throw)throw std::runtime_error("destroy fixture");objects[p].alive=false;put(p,16,uintptr_t(0));}
 
+// Explicit service boundaries: this fixture defaults to a genuinely empty
+// World-authored target roster; the actual World producer is tested separately.
+bool world_inventory_available=true;
+bool mp4_world_volume_light_owners(mp4vm::Owner*,size_t,size_t*count){if(!count||!world_inventory_available)return false;*count=0;return true;}
+bool mp4_volume_source_snapshot_fenced(){return boundary;}
+
 // SHIPPING_VOLUME_MONO_ADAPTER
 void *new_list(const std::vector<void *> &v) {
   void *l = object("System.Collections.Generic.List`1");
@@ -375,10 +381,11 @@ int main(int argc, char **argv) {
   if (mode == "mirror_unprotected")
     mp4_volume_mono_hooks.mesh_protected = nullptr;
   void *manager = object("UnityEngine.Rendering.VolumeManager");
+  if(mode=="world_inventory_missing")world_inventory_available=false;
   bool admitted = mp4_volume_mono_host_admit(manager);
   bool negative = mode == "duplicate_producer" || mode == "unknown_producer" ||
                   mode == "unknown_profile_component" ||
-                  mode == "unknown_lifecycle" || mode == "mirror_unprotected";
+                  mode == "unknown_lifecycle" || mode == "mirror_unprotected" || mode == "world_inventory_missing";
   if (negative) {
     assert(!admitted);
     goto finish;

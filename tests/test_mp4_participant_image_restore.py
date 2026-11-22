@@ -38,13 +38,15 @@ def binary(tmp_path_factory):
 #include <cstdint>
 #include <string>
 #include <vector>
-enum class Mp4SceneResult{ok,waiting,unsupported,stale,invalid,failed};
+enum class Mp4SceneResult:int{ok=0,waiting=1,unsupported=-1,invalid=-2,failed=-3,stale=-4};
 namespace mp4world{using Result=Mp4SceneResult;}
 namespace mp4stage{using Result=Mp4SceneResult;}
+namespace mp4at{enum class Result:uint8_t{ok,waiting,unsupported,stale,failed,invalid};}
 std::vector<int> events;
 bool main_thread=true,inventory=true,controls=true,clock_closed=true;
 Mp4SceneResult world_result=Mp4SceneResult::ok,image_result=Mp4SceneResult::ok;
-Mp4SceneResult activation_result=Mp4SceneResult::ok,equipment_result=Mp4SceneResult::ok;
+mp4at::Result activation_result=mp4at::Result::ok;
+Mp4SceneResult equipment_result=Mp4SceneResult::ok;
 Mp4SceneResult particles_result=Mp4SceneResult::ok,psy_result=Mp4SceneResult::ok;
 bool game_call(){return main_thread;}
 struct ImageScope{bool captured_=false;uint64_t serial=9;
@@ -53,7 +55,7 @@ struct{ImageScope scope;}mp4_target_image_host;
 struct{const ImageScope*scope=nullptr;bool entered=false,completed=false;uint64_t capture=0;}mp4_target_image_capture_receipt;
 Mp4SceneResult mp4_target_image_restore(){events.push_back(2);return image_result;}
 struct{bool captured_=false;bool captured()const{return captured_;}
- Mp4SceneResult restore(){events.push_back(3);return activation_result;}}mp4_activation_targets;
+ mp4at::Result restore(){events.push_back(3);return activation_result;}}mp4_activation_targets;
 bool mp4_activation_targets_capture_completed=false;
 struct{struct{Mp4SceneResult restore(){events.push_back(1);return world_result;}
  bool restorable(){return true;}}scope;bool restoration_verified=true,animation_owned=true;uint64_t epoch=17;}mp4_world_host;
@@ -91,7 +93,11 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
   mp4_activation_targets.captured_=mode!="stage_no_activation";
   mp4_activation_targets_capture_completed=true;
   if(mode=="stage_partial")mp4_activation_targets_capture_completed=false;
-  if(mode=="stage_activation_wait")activation_result=Mp4SceneResult::waiting;
+  if(mode=="stage_activation_wait")activation_result=mp4at::Result::waiting;
+  if(mode=="stage_activation_stale")activation_result=mp4at::Result::stale;
+  if(mode=="stage_activation_failed")activation_result=mp4at::Result::failed;
+  if(mode=="stage_activation_invalid")activation_result=mp4at::Result::invalid;
+  if(mode=="stage_activation_unsupported")activation_result=mp4at::Result::unsupported;
   if(mode=="stage_equipment_wait")equipment_result=Mp4SceneResult::waiting;
   if(mode=="stage_particles_wait")particles_result=Mp4SceneResult::waiting;
   if(mode=="stage_psy_wait")psy_result=Mp4SceneResult::waiting;
@@ -103,6 +109,10 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
   else if(mode=="stage_partial"){assert(result==Mp4SceneResult::stale&&events.empty());}
   else if(mode=="stage_foreign"){assert(result==Mp4SceneResult::waiting&&events.empty());}
   else if(mode=="stage_activation_wait"){assert(result==Mp4SceneResult::waiting&&events==std::vector<int>{3});}
+  else if(mode=="stage_activation_stale"){assert(result==Mp4SceneResult::stale&&events==std::vector<int>{3});}
+  else if(mode=="stage_activation_failed"){assert(result==Mp4SceneResult::failed&&events==std::vector<int>{3});}
+  else if(mode=="stage_activation_invalid"){assert(result==Mp4SceneResult::invalid&&events==std::vector<int>{3});}
+  else if(mode=="stage_activation_unsupported"){assert(result==Mp4SceneResult::unsupported&&events==std::vector<int>{3});}
   else if(mode=="stage_equipment_wait"){assert(result==Mp4SceneResult::waiting&&events==std::vector<int>({3,4}));}
   else if(mode=="stage_particles_wait"){assert(result==Mp4SceneResult::waiting&&events==std::vector<int>({3,4,5}));}
   else if(mode=="stage_psy_wait"){assert(result==Mp4SceneResult::waiting&&events==std::vector<int>({3,4,5,6}));}
@@ -124,7 +134,8 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
 
 @pytest.mark.parametrize('mode', '''world_normal world_no_image world_bare world_partial world_serial
 world_base_wait world_image_wait world_clock_open world_foreign stage_normal stage_no_activation
-stage_partial stage_activation_wait stage_equipment_wait stage_particles_wait stage_psy_wait
+stage_partial stage_activation_wait stage_activation_stale stage_activation_failed stage_activation_invalid
+stage_activation_unsupported stage_equipment_wait stage_particles_wait stage_psy_wait
 stage_inventory stage_controls stage_foreign'''.split())
 def test_actual_participant_image_restoration(binary, mode):
     result = subprocess.run([str(binary), mode], capture_output=True, text=True, timeout=15)

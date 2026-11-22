@@ -80,6 +80,17 @@ Obj *root_obj = nullptr, *tree_obj = nullptr, *entries_obj = nullptr, *active_ob
 bool owner_current = true, restore_closed = true, animation_closed = true, actor_node_closed = true,
      actor_runtime_closed = true, userdata_closed = true, mutate_generation = false, mutate_list = false,
      world_claim = false;
+bool native_parent_receipt=false;unsigned native_parent_calls=0;
+mp4actor::Handle child_mixer_handle{24,1,0};
+// New external finite Animation recipe leaf. Default refusal preserves every
+// old unknown/wrong-parent case; positive case models an exact observed child
+// mixer distinct from the compiled parent, not a general graph ancestry grant.
+bool mp4_animation_runtime_parent(const Mp4TimelineContext&c,const Mp4TimelineRuntime&r,bool state_required){
+ ++native_parent_calls;assert(!state_required);
+ return native_parent_receipt&&c.witness.generation==selected_witness.generation
+  &&r.element==runtime_obj&&r.clip==clip_obj&&r.track==track_obj
+  &&mp4_actor_same_handle(r.playable,leaf_handle)&&mp4_actor_same_handle(r.mixer,child_mixer_handle);
+}
 int world_node_calls = 0;
 Mp4TimelineProofPhase expected_phase = Mp4TimelineProofPhase::admission;
 Obj *list_object(Class *element, bool value, size_t stride, const void *data, size_t count) {
@@ -300,6 +311,12 @@ int main(int argc, char **argv) {
         actor_runtime_closed = false;
     if (mode == "runtime_unknown")
         runtime_obj->klass = klass("unknown runtime");
+    if(mode=="runtime_parent_fallback"||mode=="runtime_parent_fallback_unproven"){
+        native_parent_receipt=mode=="runtime_parent_fallback";
+        set(runtime_obj,48,child_mixer_handle);
+        nodes[1].inputs={child_mixer_handle};nodes.push_back(Node{child_mixer_handle,nullptr,{leaf_handle}});
+        expected=native_parent_receipt;
+    }
     if (mode == "runtime_wrong_parent")
         set(runtime_obj, 48, root_handle);
     if (mode == "runtime_foreign_clip")
@@ -346,6 +363,7 @@ int main(int argc, char **argv) {
         mp4_timeline_script_output_closed(expected_phase, selected_witness, {77, 11, 2, 0, 0, 0}, 101);
     if (mode == "actor_unclosed")
         assert(world_node_calls == 0);
+    if(mode=="runtime_parent_fallback"||mode=="runtime_parent_fallback_unproven")assert(native_parent_calls>0);
     assert(roots.size() == baseline);
     if (result != expected) {
         std::fprintf(stderr, "%s got%d expected%d\n", mode.c_str(), result, expected);

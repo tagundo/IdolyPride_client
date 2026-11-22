@@ -51,6 +51,8 @@ void mp4_audio_abandon_globals()noexcept{}
 void mp4_stage_withdraw_interception()noexcept{}
 unsigned admission_drops=0,admission_withdrawals=0;bool admission_receipt=true;int admission_throw=-1;
 void mp4_source_director_plan_withdraw()noexcept{}
+void mp4_root_capture_withdraw()noexcept{}
+void mp4_srp_source_withdraw()noexcept{}
 bool mp4_source_director_plan_drop(){return true;}
 void mp4_stage_admission_drop()noexcept{++admission_drops;admission_receipt=false;}
 void mp4_stage_admission_withdraw()noexcept{++admission_withdrawals;admission_receipt=false;}
@@ -61,6 +63,7 @@ uint32_t mp4_retain(void* p){if(allocation_fail_after==0)return 0;if(allocation_
 void* weak_get(uint32_t h){auto i=roots.find(h);return i==roots.end()?nullptr:i->second;}
 void weak_free(uint32_t h){roots.erase(h);}
 namespace idoly_mp4_runtime {
+struct Job{uint64_t generation=17;}job;
 struct Game{idoly_mp4_playback::Phase automatic_rebuild_phase(){return idoly_mp4_playback::Phase::held;}uint64_t owned_scene_generation(){return live.generation;}bool selected_scene_witness(W& w){++witness_calls;if(!witness_available)return false;w=live;return true;}bool automatic(){return ::automatic;}}game;
 struct Clock{bool held(){return ::held;}}clock;
 Clock& native_clock_scope(){return clock;}
@@ -68,8 +71,15 @@ Clock& native_clock_scope(){return clock;}
 bool mp4_root_history_initial_sealed(uint64_t){return false;}
 idoly_mp4_playback::Result mp4_scene_source_bootstrap_quiesce(){return idoly_mp4_playback::Result::unsupported;}
 idoly_mp4_playback::Result mp4_scene_source_bootstrap_release(){return idoly_mp4_playback::Result::ok;}
-idoly_mp4_playback::Result mp4_scene_source_bootstrap_before_part_release(bool){return idoly_mp4_playback::Result::ok;}
+unsigned final_handoff=0;bool final_handoff_wait=false;
+idoly_mp4_playback::Result mp4_scene_source_bootstrap_before_part_release(bool own){
+    if(own){++final_handoff;if(final_handoff_wait){assert(!actor_withdrawn&&!camera_withdrawn);return R::waiting;}}
+    return R::ok;
+}
+R mp4_gpu_initial_source_advance(uint64_t,uint64_t,uint64_t*out){*out=1;return R::ok;}
+bool mp4_gpu_initial_source_fenced(uint64_t,uint64_t){return true;}
 // PRODUCTION
+Mp4SceneResult mp4_root_capture_part(size_t,const Mp4ScenePart&part){return part.capture(part.context);}
 struct ScopeWitness{bool active(){return true;}bool frame_granted(){return true;}};
 struct WorldHost{W source{};uint64_t epoch=7;bool invalidated=false;ScopeWitness scope;}mp4_world_host;
 namespace mp4actor{struct Handle{uintptr_t slot=0;uint32_t version=0;};}
@@ -159,6 +169,14 @@ int main(int argc,char** argv){
     if(mode=="abandon_globals"){
         on_thread=false;mp4_scene_abandon_globals(nullptr);
         assert(actor_globals==1&&camera_globals==1&&actor_withdrawn==1&&camera_withdrawn==1);return 0;
+    }
+    if(mode=="final_handoff_before_detach"){
+        begin();assert(mp4_scene_restore(nullptr)==R::ok);assert(mp4_scene_verify_source_restored(nullptr)==R::ok);
+        final_handoff_wait=true;assert(mp4_scene_detach_after_restore(nullptr)==R::waiting);
+        assert(final_handoff==1&&!actor_withdrawn&&!camera_withdrawn&&!parts[3].detached&&!post_begins);
+        final_handoff_wait=false;assert(mp4_scene_detach_after_restore(nullptr)==R::ok);
+        assert(final_handoff==2&&actor_withdrawn==1&&camera_withdrawn==1&&parts[3].detached==1);
+        assert(mp4_scene_detach_after_restore(nullptr)==R::ok&&final_handoff==2);return 0;
     }
     if(mode=="post_begin_failure"||mode=="post_begin_exception"){
         begin();post_begin_throws=mode=="post_begin_exception";post_begin_fails=!post_begin_throws;
@@ -313,7 +331,7 @@ int main(int argc,char** argv){
     return binary
 
 
-@pytest.mark.parametrize("mode",["normal","post_begin_failure","post_begin_exception","detach_partial","detach_pending_end","detach_checkpoint","detach_missing_provider","abandon_globals","abandon_loops_before_resource_wait","pending_end_blocks_detach","global_handoff","render_only","missing_render_arm","smart_callgraph","smart_callgraph_rejected","revoke_stale","cancel_before_reset","prepare_failed_restored","finalize_wait","admit","admit_reject","admit_after_stage_reject","admit_exception","admit_ledger","missing_camera_grant","missing_stage_grant","missing_world_grant","camera_attest_failed","stage_attest_failed","missing_part","unavailable","not_owned_clock","not_automatic","allocation_failure","configure_partial","root_lost","stale_callback","capture_wait","prepare_wait","reset_wait","world_not_restorable","stale_epoch","invalidate","restore_wait","release_wait"])
+@pytest.mark.parametrize("mode",["normal","final_handoff_before_detach","post_begin_failure","post_begin_exception","detach_partial","detach_pending_end","detach_checkpoint","detach_missing_provider","abandon_globals","abandon_loops_before_resource_wait","pending_end_blocks_detach","global_handoff","render_only","missing_render_arm","smart_callgraph","smart_callgraph_rejected","revoke_stale","cancel_before_reset","prepare_failed_restored","finalize_wait","admit","admit_reject","admit_after_stage_reject","admit_exception","admit_ledger","missing_camera_grant","missing_stage_grant","missing_world_grant","camera_attest_failed","stage_attest_failed","missing_part","unavailable","not_owned_clock","not_automatic","allocation_failure","configure_partial","root_lost","stale_callback","capture_wait","prepare_wait","reset_wait","world_not_restorable","stale_epoch","invalidate","restore_wait","release_wait"])
 def test_production_aggregate_preserves_order_roots_and_partial_phase_ownership(aggregate,mode):
     result=subprocess.run([str(aggregate),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

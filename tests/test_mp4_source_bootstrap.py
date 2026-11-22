@@ -50,6 +50,6 @@ def test_shipping_source_bootstrap_gate(tmp_path, platform, family):
                                 env={**os.environ, 'ASAN_OPTIONS':'detect_leaks=1:halt_on_error=1', 'UBSAN_OPTIONS':'halt_on_error=1'})
         assert result.returncode == 0, str(case) + result.stdout + result.stderr
         if family == 'splits':
-            assert '20 source bootstrap literal split cases passed' in result.stdout
+            assert '21 source bootstrap literal split cases passed' in result.stdout
         if family == 'scope':
             assert '47 source bootstrap latching/cleanup cases' in result.stdout

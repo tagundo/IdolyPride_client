@@ -259,6 +259,27 @@ public:
         if(manual_||automatic_||automatic_scope_.active()||!begin||!end)return false;
         api_.capture_operation_begin=begin;api_.capture_operation_end=end;return true;
     }
+    // BEGIN_MP4_ADAPTER_CAPTURE_WORKERS
+    // Pure cached duty data. No GC/object/graph query and no completion call.
+    // The original operation and synchronous ReadPixels body mint these facts;
+    // discard/restore never relabel unfinished work as a completed readback.
+    struct CaptureWorkers {
+        uint64_t sequence=0,operation=0,request_returned=0,readback_issued=0,readback_returned=0;
+        bool request_active=false,readback_active=false,pending=false,pass_seen=false,submitted=false;
+        bool quiet(uint64_t expected_operation)const noexcept {
+            if(request_active||readback_active||pending||pass_seen||submitted)return false;
+            if(!expected_operation)return true; // no capture issued by THIS Frame host
+            return operation==expected_operation&&sequence&&request_returned==sequence
+                &&readback_issued==sequence&&readback_returned==sequence;
+        }
+    };
+    CaptureWorkers capture_worker_snapshot()const noexcept {
+        auto value=capture_workers_;
+        value.request_active=capture_request_running_;
+        value.pending=capture_pending_;value.pass_seen=capture_pass_seen_;value.submitted=capture_submitted_;
+        return value;
+    }
+    // END_MP4_ADAPTER_CAPTURE_WORKERS
     void discard_capture(){capture_pending_=capture_pass_seen_=capture_submitted_=false;}
     Result capture_geometry(int32_t& width,int32_t& height) const;
     void maintenance();
@@ -442,6 +463,7 @@ private:
     bool manual_=false,output_geometry_applied_=false,shader_was_custom_=false,capture_pending_=false,
         capture_pass_seen_=false,capture_submitted_=false;
     uint64_t capture_last_issued_=0,capture_inflight_=0;
+    CaptureWorkers capture_workers_{};
     void* capture_operation_controller_=nullptr;
     bool capture_request_running_=false;
     SceneKind scene_kind_=SceneKind::none;
@@ -1060,6 +1082,7 @@ inline Result GameAdapter::request_capture() {
         return fail(Result::unsupported,"capture_api_unavailable");
     if(automatic_&&(!api_.capture_operation_begin||!api_.capture_operation_end))
         return fail(Result::unsupported,"capture_operation_proof_unavailable");
+    if(capture_workers_.sequence==~uint64_t(0))return fail(Result::unsupported,"capture_worker_sequence_exhausted");
     uint64_t operation=0;
     capture_operation_controller_=get(camera_controller_);
     if(api_.capture_operation_begin){
@@ -1068,6 +1091,7 @@ inline Result GameAdapter::request_capture() {
         if(!operation||operation<=capture_last_issued_)return fail(Result::failed,"capture_operation_serial_invalid");
     }
     capture_inflight_=operation;
+    ++capture_workers_.sequence;capture_workers_.operation=operation;
     try{api_.camera_capture_request(capture_operation_controller_,nullptr);}
     catch(...){if(operation&&api_.capture_operation_end)try{(void)api_.capture_operation_end(capture_operation_controller_,operation,false);}catch(...){}throw;}
     if(operation&&(!api_.capture_operation_end||!api_.capture_operation_end(capture_operation_controller_,operation,true)))
@@ -1084,7 +1108,8 @@ inline Result GameAdapter::request_capture() {
     if(width<16||height<16||width>4096||height>4096)
         return fail(Result::unsupported,"capture_geometry_not_supported");
     snapshot_.width=width;snapshot_.height=height;
-    capture_pending_=true;capture_pass_seen_=capture_submitted_=false;return Result::ok;
+    capture_pending_=true;capture_pass_seen_=capture_submitted_=false;
+    capture_workers_.request_returned=capture_workers_.sequence;return Result::ok;
 }
 inline void GameAdapter::observe_capture_pass(void* pass,const void* data) {
     if(!manual_||!capture_pending_||!pass||!data||!identities_current())return;
@@ -1105,6 +1130,10 @@ inline Result GameAdapter::readback_rgba(uint8_t* dst,size_t capacity,size_t& by
     bytes=0;width=height=0;
     if(!manual_||!identities_current())return fail(Result::stale,"selected_scene_changed");
     if(!capture_pending_||!capture_submitted_)return Result::waiting;
+    if(capture_workers_.readback_active)return fail(Result::invalid,"readback_reentered");
+    const uint64_t worker_sequence=capture_workers_.sequence;
+    capture_workers_.readback_active=true;capture_workers_.readback_issued=worker_sequence;
+    struct ReadbackExit {bool&active;~ReadbackExit(){active=false;}} readback_exit{capture_workers_.readback_active};
     if(output_geometry_applied_&&(!api_.output_projection||!api_.output_projection(get(camera_controller_),false)))
         return fail(Result::unsupported,"output_projection_verification_failed");
     if(!dst||!api_.rt_active_get||!api_.rt_active_set||!api_.new_texture2d||!api_.texture2d_ctor_rgba
@@ -1158,7 +1187,8 @@ inline Result GameAdapter::readback_rgba(uint8_t* dst,size_t capacity,size_t& by
         for(int32_t x=0;x<snapshot_.width;++x)output[static_cast<size_t>(x)*4+3]=255;
     }
     bytes=total;width=snapshot_.width;height=snapshot_.height;
-    capture_pending_=capture_pass_seen_=capture_submitted_=false;return Result::ok;
+    capture_pending_=capture_pass_seen_=capture_submitted_=false;
+    capture_workers_.readback_returned=worker_sequence;return Result::ok;
 }
 inline Result GameAdapter::begin_private_audio(const char* path,const AudioClipProgram& expected) {
     if(audio_request_||audio_bundle_||audio_clip_)return fail(Result::invalid,"private_audio_already_open");

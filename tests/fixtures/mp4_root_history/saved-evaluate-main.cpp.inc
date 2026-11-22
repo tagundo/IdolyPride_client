@@ -1,0 +1,14 @@
+int main(int argc,char**argv){assert(argc==2);const int m=atoi(argv[1]);Mp4TimelineContext c;auto&r=mp4_main_control_bank.requests[0];
+ auto&rs=mp4_main_control_bank.requests[1];rs.mutation.call.kind=mp4_director_maintenance::Kind::stop;rs.mutation.call.method=5;
+ if(m>=20){mp4_scene_host.source.director=(void*)9;}
+ if(m==1)model.thread=false;if(m==2)c.phase=Mp4TimelineProofPhase::active;if(m==3)model.current=false;if(m==4)model.held=false;if(m==5)mp4_raw_original_operation.depth=1;if(m==6)model.fields=false;if(m==7)model.sealed=false;if(m==8)mp4_root_history_initial_cohort.ready=false;if(m==9)++idoly_mp4_runtime::job.generation;if(m==10)++mp4_root_capture_withdraw_sequence;if(m==11)model.count=2;if(m==12)++model.source.owner.epoch;if(m==13)model.source.root_asset=8;if(m==14)model.parent=false;if(m==15)r.complete=false;if(m==16)r.mutation.issued=false;if(m==17)r.mutation.returned=false;if(m==18)r.mutation.call.serial=0;if(m==19)r.mutation.call.original_receipt=0;
+ if(m==21)model.checkpoint=false;if(m==22)++model.saved.epoch;if(m==23)++model.saved.root_asset;if(m==24)++model.saved.director;if(m==25)++model.saved.time;if(m==26)++model.saved.mode;if(m==27)++model.saved.state;if(m==28)++model.saved.graph.handle;if(m==29)++model.saved.root.version;if(m==30)model.saved.saved_evaluate.kind=mp4_director_maintenance::Kind::rebuild;if(m==31)model.saved.saved_evaluate.serial=0;if(m==32)model.saved.saved_evaluate.original_receipt=0;if(m==33)++model.saved.saved_evaluate.epoch;if(m==34)++model.saved.saved_evaluate.source_asset;if(m==35)++model.saved.saved_evaluate.receiver;if(m==36)model.saved.saved_evaluate.method=0;
+ if(m==37){mp4_scene_host.source.director=(void*)1;r.mutation.call.receiver=8;}if(m==38){mp4_scene_host.source.director=(void*)1;r.mutation.call.source_asset=8;}if(m==39){mp4_scene_host.source.director=(void*)1;r.mutation.call.method=0;}if(m==40)c.phase=Mp4TimelineProofPhase::source_restored;
+ if(m>=41)mp4_scene_host.source.director=(void*)1;
+ if(m==41)rs.complete=false;if(m==42)rs.mutation.issued=false;if(m==43)rs.mutation.returned=false;if(m==44)rs.mutation.call.kind=mp4_director_maintenance::Kind::saved_evaluate;
+ if(m==45)rs.mutation.call.serial=0;if(m==46)rs.mutation.call.original_receipt=0;if(m==47)rs.mutation.call.receiver=9;if(m==48)rs.mutation.call.epoch=8;if(m==49)rs.mutation.call.source_asset=9;if(m==50)rs.mutation.call.method=9;if(m==51)rs.source.owner.epoch=9;
+ if(m==52)model.parent=false;if(m==53)model.time=false;if(m==54)model.mode=false;if(m==55)model.state=false;if(m==56)model.bindings=false;
+ if(m==57){model.source.state=r.source.state=rs.source.state=1;rs.mutation.call.kind=mp4_director_maintenance::Kind::play;rs.mutation.call.method=7;}
+ if(m==58)r.source.mode++;if(m==59)rs.source.time++;
+ const bool good=m==0||m==20||m==40||m==57;assert(mp4_root_history_saved_evaluate_current(c)==good);if(m==1)assert(!model.calls);
+}

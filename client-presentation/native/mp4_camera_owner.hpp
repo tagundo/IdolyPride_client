@@ -1690,8 +1690,12 @@ inline constexpr size_t source_max_volumes=1024,source_max_profiles=1024,
 enum class Result:int {ok=0,waiting=1,unsupported=-1,invalid=-2,failed=-3,stale=-4};
 enum class ValueKind:uint8_t {flat,texture2d,cubemap,mesh,curve,texture3d};
 enum class ProfileAccess:uint8_t {readonly_input,mutable_owned};
-enum Capability:uint32_t {restore_flat=1,restore_enabled=2,restore_layer=4,external_restore=8,activation_restore=16};
+enum Capability:uint32_t {restore_flat=1,restore_enabled=2,restore_layer=4,external_restore=8,activation_restore=16,profile_restore=32};
 struct OwnerWitness {void*volume=nullptr;void*game_object=nullptr;uintptr_t owner=0,asset=0;uint64_t epoch=0,receipt=0;uint32_t capabilities=0;};
+// A genuine completed Source Scope image; no native graph/operation authority.
+struct CapturedVolumeImage {OwnerWitness owner{};void*shared=nullptr,*internal=nullptr;
+ uint8_t scalar[16]{};int32_t layer=0,previous_layer=0;float previous_priority=0;
+ bool enabled=false,active=false;uint64_t capture=0;};
 struct DynamicVolumeWitness {void*volume=nullptr,*game_object=nullptr,*profile=nullptr;uintptr_t producer_method=0,asset=0;uint64_t epoch=0,receipt=0;bool newly_created=false;};
 struct ProfileWitness {void*profile=nullptr;uintptr_t asset=0;uint64_t epoch=0,receipt=0;ProfileAccess access=ProfileAccess::readonly_input;};
 struct FieldSpan {uint16_t offset=0,bytes=0;uint8_t float_lanes=0;};
@@ -1754,7 +1758,7 @@ class Scope {
     Component components_[components_max]{};Parameter parameters_[parameters_max]{};
     void* saved_order_[volumes_max]{};uint8_t curve_bytes_[curve_bytes_max]{};
     size_t roots_count_=0,volume_count_=0,profile_count_=0,component_count_=0,parameter_count_=0,
-        order_count_=0,curve_used_=0;bool captured_=false,writes_done_=false;const char*error_="none";
+        order_count_=0,curve_used_=0;uint64_t capture_receipt_=0;bool captured_=false,writes_done_=false;const char*error_="none";
     Result fail(Result r,const char*text){error_=text;return r;}
     template<class T>bool read(void*object,size_t offset,T&out)const{
         const uintptr_t p=reinterpret_cast<uintptr_t>(object),at=p+offset;
@@ -1873,7 +1877,7 @@ class Scope {
             ||!read(object,56,v.previous_layer)||!read(object,60,v.previous_priority)||!keep(v.shared)||!keep(v.internal))
             return fail(Result::stale,"volume_source_fields_unreadable");
         v.enabled=api_.enabled(object);v.active=api_.active_hierarchy(v.go);v.layer=api_.layer(v.go);v.owned=owner(object,v.owner);
-        if(v.owned&&(v.owner.capabilities&(external_restore|activation_restore))&&!api_.delegated_restored)
+        if(v.owned&&(v.owner.capabilities&(external_restore|activation_restore|profile_restore))&&!api_.delegated_restored)
             return fail(Result::unsupported,"volume_source_delegated_restore_unavailable");
         float priority=0;::memcpy(&priority,v.scalar+4,4);
         if(v.scalar[0]>1||!finite(v.scalar+4,12,3)||!std::isfinite(v.previous_priority)||v.layer<0||v.layer>31)
@@ -1988,7 +1992,7 @@ class Scope {
         for(size_t i=0;i<volume_count_;++i){const Volume&v=volumes_[i];void*go=api_.game_object(v.object),*shared=nullptr,*internal=nullptr;uint8_t scalar[16]{};
             if(!api_.alive(v.object)||go!=v.go||!api_.alive(go)||!read(v.object,48,shared)||!read(v.object,64,internal)
                 ||!bytes(v.object,32,scalar,16))return fail(Result::stale,"volume_source_reference_changed");
-            const bool delegated=v.owned&&(v.owner.capabilities&external_restore);
+            const bool delegated=v.owned&&(v.owner.capabilities&(external_restore|profile_restore));
             if(!delegated&&(shared!=v.shared||internal!=v.internal))return fail(Result::stale,"volume_source_reference_changed");
             if(scalar[0]>1||!finite(scalar+4,12,3))return fail(Result::unsupported,"volume_source_value_invalid");
             const bool enabled=api_.enabled(v.object),active=api_.active_hierarchy(go);const int32_t layer=api_.layer(go);
@@ -2003,6 +2007,11 @@ class Scope {
                         return fail(Result::waiting,"volume_source_delegated_owner_not_restored");
                     continue;
                 }
+                // Exact Mono restores only profile/cache references; this Source
+                // Scope still owns Timeline-changed priority/weight/registration.
+                if((w.capabilities&profile_restore)&&restore
+                    &&(!api_.delegated_restored(context_,v.object,w)||shared!=v.shared||internal!=v.internal))
+                    return fail(Result::waiting,"volume_source_profile_owner_not_restored");
                 if(w.capabilities&activation_restore){
                     if(restore&&(!api_.delegated_restored(context_,v.object,w)||active!=v.active))return fail(Result::waiting,"volume_source_activation_owner_not_restored");
                 }else if(active!=v.active)return fail(Result::unsupported,"volume_source_activation_not_restored");
@@ -2084,7 +2093,7 @@ public:
     ~Scope(){clear();}const char*error()const{return error_;}
     void clear(){for(size_t i=roots_count_;i>0;--i)if(roots_[i-1].token)api_.release_root(roots_[i-1].token);
         roots_count_=volume_count_=profile_count_=component_count_=parameter_count_=order_count_=curve_used_=0;
-        captured_=writes_done_=false;context_=manager_=roster_=baseline_sorted_=baseline_dirty_=published_sorted_=published_dirty_=nullptr;epoch_=0;asset_=0;}
+        capture_receipt_=0;captured_=writes_done_=false;context_=manager_=roster_=baseline_sorted_=baseline_dirty_=published_sorted_=published_dirty_=nullptr;epoch_=0;asset_=0;}
     Result capture_attempt(Api api,void*context){
         if(captured_||roots_count_)return fail(Result::invalid,"volume_source_already_captured");
         api_=api;context_=context;
@@ -2108,13 +2117,33 @@ public:
             const int index=volume_index(owned[i]);if(index<0||!volumes_[size_t(index)].owned)return fail(Result::unsupported,"volume_source_owned_inventory_unverified");}
         for(size_t i=0;i<volume_count_;++i){const auto&v=volumes_[i];Result r=profile(v.shared,!v.owned);if(r==Result::ok)r=profile(v.internal,!v.owned);if(r!=Result::ok)return r;}
         List after{};if(!list(roster_,after,volumes_max,false)||!same(original,after)||!current())return fail(Result::stale,"volume_source_roster_changed");
-        captured_=true;Result result=preflight(false);if(result==Result::ok)error_="none";return result;
+        captured_=true;Result result=preflight(false);
+        if(result==Result::ok){static uint64_t sequence=0;
+            if(sequence==~uint64_t(0))return fail(Result::unsupported,"volume_source_capture_receipt_exhausted");
+            capture_receipt_=++sequence;error_="none";
+        }return result;
     }
     Result capture(Api api,void*context){
         if(captured_||roots_count_)return fail(Result::invalid,"volume_source_already_captured");
         const Result result=capture_attempt(api,context);
         if(result!=Result::ok){const char*reason=error_;clear();error_=reason;}return result;
     }
+    // Read-only saved image query. It never reads a saved/retired native graph.
+    // All source roots, exact owner capability and actual held fence are checked
+    // independently of captured_, including failed-final-preflight captures.
+    bool captured_image(void*object,CapturedVolumeImage*out)noexcept{try{
+        if(out)*out={};
+        if(!out||!capture_receipt_||!captured_||!current()||!api_.fenced(context_))return false;
+        const int index=volume_index(object);if(index<0)return false;const auto&v=volumes_[size_t(index)];OwnerWitness now{};
+        if(!v.owned||!owner(object,now)||now.owner!=v.owner.owner||now.receipt!=v.owner.receipt
+            ||now.capabilities!=v.owner.capabilities||!api_.alive(v.object)||!api_.alive(v.go)||api_.game_object(v.object)!=v.go)return false;
+        CapturedVolumeImage saved{};saved.owner=v.owner;saved.shared=v.shared;saved.internal=v.internal;
+        ::memcpy(saved.scalar,v.scalar,16);saved.layer=v.layer;saved.previous_layer=v.previous_layer;saved.previous_priority=v.previous_priority;
+        saved.enabled=v.enabled;saved.active=v.active;saved.capture=capture_receipt_;
+        if(!current()||!api_.fenced(context_))return false;
+        *out=saved;return true;
+    }catch(...){if(out)*out={};return false;}}
+    uint64_t capture_receipt_raw()const noexcept{return captured_?capture_receipt_:0;}
     bool owns_volume(void*object){
         if(!captured_||!current())return false;
         const int index=volume_index(object);
@@ -2817,6 +2846,7 @@ public:
     Request()=default;Request(const Request&)=delete;Request&operator=(const Request&)=delete;
     ~Request(){if(active_)finish();}
     struct Abort {};
+    static bool stack_unwound()noexcept{return current_==nullptr;}
     static bool historical_origin(void*controller,uint64_t*serial=nullptr)noexcept{
         if(serial)*serial=0;
         const auto*s=current_;
@@ -3025,6 +3055,11 @@ public:
   invalid_=true;return false;
  }
  bool valid()const{return configured_&&!invalid_;}uint32_t count()const{return count_;}
+ // Historical typed stack closure, independent of a former source validity.
+ bool scopes_unwound()const noexcept{try{if(!configured_||!api_.thread||!api_.thread())return false;
+  for(auto*scope=cursor_;scope;scope=scope->parent)if(scope->bank==this)return false;
+  return true;}catch(...){return false;}}
+ static bool all_scopes_unwound()noexcept{return cursor_==nullptr;}
  bool publication_origin(void*controller,uint64_t request)const noexcept{
   const auto*s=cursor_;return s&&s->bank==this&&s->kind==Kind::update&&s->origin
    &&s->controller==controller&&s->request==request;

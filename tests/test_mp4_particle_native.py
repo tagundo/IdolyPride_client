@@ -31,6 +31,12 @@ BLOCKS = {
     "particle-renderer-presentation-host.inc": "PARTICLE_RENDERER_PRESENTATION_HOST",
     "particle-source-program-host.inc": "PARTICLE_SOURCE_PROGRAM_HOST",
     "particle-native-coordinator-host.inc": "PARTICLE_NATIVE_COORDINATOR_HOST",
+    "particle-native-coordinator-cache-host.inc": "PARTICLE_NATIVE_COORDINATOR_HOST",
+    "particle-renderer-reader-host.inc": "PARTICLE_RENDERER_READER_HOST",
+    "particle-data-image-host.inc": "PARTICLE_DATA_IMAGE_HOST",
+    "particle-renderer-invalidate-host.inc": "PARTICLE_RENDERER_INVALIDATE_HOST",
+    "particle-retained-worker-inventory-host.inc": "PARTICLE_RETAINED_WORKER_INVENTORY_HOST",
+    "particle-operation-finish-host.inc": "PARTICLE_OPERATION_FINISH_HOST",
     "particle-source-bootstrap-adapter.inc": "PARTICLE_SOURCE_BOOTSTRAP_ADAPTER",
     "source-control-ps-plan.inc": "SOURCE_CONTROL_PS_PLAN",
     "particle-cache-gate.inc": "PARTICLE_RENDERER_SOURCE_CACHE_GATE",
@@ -47,6 +53,8 @@ def test_shipping_particle_native_hosts(tmp_path: Path) -> None:
         (tmp_path / filename).write_text(source[start:stop] + "\n")
     for fixture in FIXTURES.glob("*.cpp"):
         shutil.copyfile(fixture, tmp_path / fixture.name)
+    for model in FIXTURES.glob("*.inc"):
+        shutil.copyfile(model, tmp_path / model.name)
     env = dict(os.environ, ASAN_OPTIONS="detect_leaks=1:abort_on_error=1",
                UBSAN_OPTIONS="halt_on_error=1")
     for platform in ("android", "ios"):

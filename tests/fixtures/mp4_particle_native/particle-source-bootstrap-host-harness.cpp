@@ -326,6 +326,23 @@ mp4psrreg::Api mp4_renderer_registration_api(){return{nullptr,reg_current,reg_he
 bool mp4_builtin_cache_refresh(void*r,uint64_t plan,uint64_t exclusion,uint64_t*out){*out=0;if(r!=renderer||plan!=builtin_plan.receipt||!mp4_builtin_context.held_current||!mp4_builtin_context.held_current(builtin_plan.source,exclusion))return false;*out=83;return true;}
 bool mp4_builtin_mesh_cache_current(void*r,uintptr_t n,int32_t id,uint64_t plan,uint64_t cache,uint64_t exclusion,float out[6]){if(!cache_current||r!=renderer||n!=(uintptr_t)rnative||id!=19||plan!=builtin_plan.receipt||cache!=83||!mp4_builtin_context.held_current||!mp4_builtin_context.held_current(builtin_plan.source,exclusion))return false;for(unsigned i=0;i<6;++i)out[i]=0;return true;}
 bool mp4_builtin_mesh_retire(){builtin_plan={};return true;}
+int cache_mode=0,data_releases=0,data_captures=0,cache_captures=0,cache_restores=0,reader_finishes=0;
+bool reader_done=false;uint64_t reader_boundary=0,reader_generation=0;
+bool mp4_particle_renderer_reader_bindings(){return cache_mode!=1;}
+bool mp4_particle_data_bit_resize_current(){return cache_mode!=2;}
+bool mp4_particle_renderer_invalidate_bindings(){return cache_mode!=3;}
+bool mp4_particle_renderer_reader_finish(){++reader_finishes;reader_done=cache_mode!=4;reader_boundary=mp4_particle_mutation_boundary.serial;reader_generation=mp4_particle_mutation_host.generation;return reader_done;}
+bool mp4_particle_renderer_reader_current(){return reader_done&&reader_boundary==mp4_particle_mutation_boundary.serial&&reader_generation==mp4_particle_mutation_host.generation;}
+void mp4_particle_renderer_reader_withdraw(){reader_done=false;}
+struct Mp4ParticleDataImage{mp4ps::Owner owner{};bool captured=false,restored=false;};
+struct Mp4ParticleRendererCacheImage{bool captured=false,invalidated=false;};
+bool mp4_particle_data_capture(const mp4ps::Owner&o,Mp4ParticleDataImage&i){assert(mp4_particle_renderer_reader_current());++data_captures;if(cache_mode==5)return false;i={o,true,false};return true;}
+bool mp4_particle_renderer_cache_capture(const mp4ps::Owner&,Mp4ParticleRendererCacheImage&i){assert(data_captures);++cache_captures;if(cache_mode==6)return false;i.captured=true;return true;}
+bool mp4_particle_data_restore(Mp4ParticleDataImage&i,uint64_t r){assert(r&&public_restored&&((uint8_t*)state)[0x22]==0&&((uint8_t*)modules)[0x480]==0);if(cache_mode==7)return false;i.restored=true;return true;}
+bool mp4_particle_data_verify(const Mp4ParticleDataImage&i){return i.captured&&i.restored&&cache_mode!=8;}
+bool mp4_particle_renderer_cache_restore(Mp4ParticleRendererCacheImage&i,uint64_t r){assert(r&&public_restored);++cache_restores;if(cache_mode==9)return false;i.invalidated=true;return true;}
+void mp4_particle_data_release(Mp4ParticleDataImage&i){if(i.captured)++data_releases;i={};}
+
 #include "particle-native-coordinator-host.inc"
 void*manager=nullptr,*manager_global=nullptr,*manager_rows=nullptr;
 void full_setup(){setup();extra_setup();present_setup();program_setup();manager=alloc(64);manager_global=alloc(8);manager_rows=alloc(8);registration_table=alloc(16);}

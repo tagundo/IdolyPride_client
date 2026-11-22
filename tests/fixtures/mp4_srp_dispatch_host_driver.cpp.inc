@@ -18,6 +18,7 @@ void original_invoke(void*self,Method*method){
 }
 void original_frame(void*self,Mp4RenderContext context,void*cameras,Method*method){
  assert(self==controller);++frame_calls;if(original_throws)throw std::runtime_error("actual frame");
+ assert(!mp4_srp_read_depth&&mp4_renderer_srp_source_callbacks_closed(current_scene)&&!mp4_srp_read_depth);
  if(clear_during_callback)assert(active_host&&!mp4_srp_dispatch_clear(*active_host));
  if(source_handoff){assert(active_host);mp4_srp_dispatch_withdraw(*active_host);source_ok=false;}
  if(nested_frame){nested_frame=false;mp4_srp_dispatch_frame(original_frame,self,context,cameras,method,777);}
@@ -26,11 +27,54 @@ void original_frame(void*self,Mp4RenderContext context,void*cameras,Method*metho
 void actor_late(void*,mp4actor::Method*){mp4_srp_dispatch_add(original_add,controller,current_action,nullptr,mono_caller);}
 void other_late(void*,mp4actor::Method*){actor_late(nullptr,nullptr);}
 void run_mono(void*receiver,bool wrong=false){mp4actor::MonoReceiver route{receiver,mp4actor::MonoPhase::actor_late};assert(mp4_actor_mono_gate.publish({mono_current,mono_thread,rng_get,rng_set},&route,7,&route,1)&&mp4_actor_mono_gate.hold(7)&&mp4_actor_mono_gate.grant(7,1));mp4_actor_mono_gate.invoke(route.phase,wrong?other_late:mp4_actor_late_original,receiver,nullptr);mp4_actor_mono_gate.revoke(7);}
+std::atomic<bool>foreign_entered{false},foreign_return{false};std::thread snapshot_foreign_thread;
+void blocking_foreign_original(void*,void*,Method*){foreign_entered.store(true,std::memory_order_release);while(!foreign_return.load(std::memory_order_acquire))std::this_thread::yield();}
+void throwing_foreign_original(void*,void*,Method*){throw 91;}
 int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];initialize_source();mp4_actor_late_original=actor_late;
  Mp4SrpControllerHost state;Mp4SrpDispatchHost host;active_host=&host;auto*ctx=&host;auto render_context=Mp4RenderContext{reinterpret_cast<void*>(0x1234)};
  camera_array=array(cls("UnityEngine.Camera[]",array_class),{camera});current_action=callback(action_class,foot,105,method_foot);mono_caller=image_base+mp4_srp_foot_add_return;
- if(mode=="unheld_capture"){held_now=false;assert(!mp4_srp_dispatch_capture(host,state,current_scene,ctx,7,9,source_current,dispatch_held,root_add));assert(roots.empty());return 0;}
- assert(mp4_srp_dispatch_capture(host,state,current_scene,ctx,7,9,source_current,dispatch_held,root_add));assert(mp4_srp_dispatch_current(host));
+ if(mode=="capture_active_foreign"){
+  mp4_srp_add_precull_original=blocking_foreign_original;
+  std::thread foreign([&]{thread=false;mp4_srp_add_precull_hook(controller,current_action,nullptr);});
+  while(!foreign_entered.load(std::memory_order_acquire))std::this_thread::yield();
+  assert(!mp4_srp_dispatch_capture(host,state,current_scene,ctx,7,9,source_current,dispatch_held,root_add,dispatch_held));
+  assert(roots.empty()&&!host.state&&!mp4_srp_dispatch_clear(host));
+  foreign_return.store(true,std::memory_order_release);foreign.join();
+ }
+ if(mode=="snapshot_foreign"||mode=="snapshot_main_reentry"){
+  mp4_srp_add_precull_original=original_add;
+  if(mode=="snapshot_foreign")field_get_callback=[](){
+   snapshot_foreign_thread=std::thread([]{thread=false;mp4_srp_add_precull_hook(controller,current_action,nullptr);});
+   while(!mp4_srp_dispatch_foreign_dirty.load(std::memory_order_acquire))std::this_thread::yield();
+   assert(!mp4_srp_observer_idle()&&add_calls==0); // original cannot touch the queue before snapshot exit
+  };else field_get_callback=[](){mp4_srp_add_precull_hook(controller,current_action,nullptr);};
+  assert(!mp4_srp_dispatch_capture(host,state,current_scene,ctx,7,9,source_current,dispatch_held,root_add,dispatch_held));
+  if(snapshot_foreign_thread.joinable())snapshot_foreign_thread.join();assert(add_calls==1);
+  assert(mp4_srp_observer_idle()&&mp4_srp_dispatch_foreign_dirty.load(std::memory_order_acquire)&&!mp4_srp_dispatch_published.load(std::memory_order_acquire));
+  Mp4SrpControllerHost other_state;Mp4SrpDispatchHost other;
+  assert(!mp4_srp_dispatch_capture(other,other_state,current_scene,&other,7,9,source_current,dispatch_held,root_add,dispatch_held));
+  assert(!mp4_srp_dispatch_clear(other));assert(mp4_srp_dispatch_clear(host)&&roots.empty());return 0;
+ }
+ if(mode=="unheld_capture"){held_now=false;assert(!mp4_srp_dispatch_capture(host,state,current_scene,ctx,7,9,source_current,dispatch_held,root_add,dispatch_held));assert(roots.empty());return 0;}
+ assert(mp4_srp_dispatch_capture(host,state,current_scene,ctx,7,9,source_current,dispatch_held,root_add,dispatch_held));assert(mp4_srp_dispatch_current(host)&&!renderer_detail_calls);
+ if(mode=="active_foreign"||mode=="foreign_throw"){
+  const auto retained=roots.size();
+  if(mode=="active_foreign"){
+   mp4_srp_add_precull_original=blocking_foreign_original;
+   std::thread foreign([&]{thread=false;mp4_srp_add_precull_hook(controller,current_action,nullptr);});
+   while(!foreign_entered.load(std::memory_order_acquire))std::this_thread::yield();
+   assert(!mp4_srp_dispatch_clear(host)&&roots.size()==retained&&!mp4_srp_dispatch_current(host));
+   foreign_return.store(true,std::memory_order_release);foreign.join();
+  }else{
+   mp4_srp_add_precull_original=throwing_foreign_original;std::atomic<bool>threw{false};
+   std::thread foreign([&]{thread=false;try{mp4_srp_add_precull_hook(controller,current_action,nullptr);}catch(int n){assert(n==91);threw.store(true,std::memory_order_release);}});foreign.join();assert(threw.load(std::memory_order_acquire));
+  }
+  assert(mp4_srp_observer_idle()&&mp4_srp_dispatch_foreign_dirty.load(std::memory_order_acquire));
+  assert(mp4_srp_dispatch_clear(host)&&roots.empty());
+  assert(mp4_srp_dispatch_capture(host,state,current_scene,ctx,7,9,source_current,dispatch_held,root_add,dispatch_held));
+  assert(mp4_srp_dispatch_current(host)&&!mp4_srp_dispatch_foreign_dirty.load(std::memory_order_acquire));
+  assert(mp4_srp_dispatch_clear(host)&&roots.empty());return 0;
+ }
  if(mode=="mono_add"||mode=="wrong_caller"||mode=="wrong_mono"||mode=="wrong_extension"||mode=="mono_aabb"){
   if(mode=="wrong_caller")++mono_caller;
   if(mode=="mono_aabb")current_action=callback(action_class,actor,104,method_aabb);
@@ -44,9 +88,20 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];ini
  }else if(mode=="add_frontend"){
   mp4_srp_add_precull_original=original_add;mp4_srp_add_precull_hook(controller,current_action,nullptr);assert(add_calls==1&&state.lease.poisoned());
  }else if(mode=="invoke_frontend"){
-  mp4_srp_invoke_precull_original=original_invoke;mp4_srp_invoke_precull_hook(controller,reinterpret_cast<Method*>(0xdeadbeef));assert(invoke_calls==1&&state.lease.poisoned());
+  mp4_srp_invoke_precull_original=original_invoke;mp4_srp_invoke_precull_hook(controller,reinterpret_cast<Method*>(0xdeadbeef));assert(invoke_calls==0&&state.lease.poisoned());
  }else if(mode=="unowned_invoke"){
-  mp4_srp_dispatch_invoke(original_invoke,controller,reinterpret_cast<Method*>(0xdeadbeef),333);assert(invoke_calls==1&&state.lease.poisoned());
+  mp4_srp_dispatch_invoke(original_invoke,controller,reinterpret_cast<Method*>(0xdeadbeef),333);assert(invoke_calls==0&&state.lease.poisoned());
+ }else if(mode=="unready_held"){
+  source_ok=false;idoly_mp4_runtime::render_allowed=false;
+  mp4_srp_dispatch_frame(original_frame,controller,render_context,camera_array,nullptr,333);
+  assert(!frame_calls&&!invoke_calls&&!state.lease.poisoned());
+ }else if(mode=="unready_requested"){
+  source_ok=false;mp4_srp_dispatch_frame(original_frame,controller,render_context,camera_array,nullptr,333);
+  assert(!frame_calls&&!invoke_calls&&state.lease.poisoned());
+ }else if(mode=="loop_released"){
+  held_now=false;idoly_mp4_runtime::render_allowed=false;
+  mp4_srp_dispatch_frame(original_frame,controller,render_context,camera_array,nullptr,333);
+  assert(frame_calls==1&&invoke_calls==1&&!state.lease.poisoned());
  }else if(mode=="held_retry"){
   idoly_mp4_runtime::render_allowed=false;mp4_srp_dispatch_frame(original_frame,controller,render_context,camera_array,nullptr,333);assert(!frame_calls&&!invoke_calls&&!state.lease.poisoned());
  }else if(mode=="offthread"){
@@ -78,6 +133,6 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];ini
    if(mode=="next_tick"){idoly_mp4_runtime::native_engine_clock.value=1;mp4_srp_dispatch_frame(original_frame,controller,render_context,camera_array,nullptr,333);assert(frame_calls==2&&invoke_calls==2&&host.frame_receipt==2);}
   }
  }
- if(!state.lease.poisoned()&&mode!="offthread"&&mode!="withdraw")assert(state.lease.restore());
+ if(!state.lease.poisoned()&&mode!="offthread"&&mode!="withdraw"&&mode!="unready_held"&&mode!="loop_released")assert(state.lease.restore());
  assert(mp4_srp_dispatch_clear(host)&&roots.empty()&&!mp4_srp_entered&&!mp4_srp_dispatch_published.load());
 }

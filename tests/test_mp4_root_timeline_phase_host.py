@@ -25,7 +25,7 @@ def spine(tmp_path_factory):
         pytest.skip('C++ host compiler required')
     text = (ROOT / 'client-presentation/native/bridge.cpp').read_text()
     actual = ''.join(function(text, name) for name in (
-        'mp4_timeline_current', 'mp4_timeline_phase_witness_current', 'mp4_timeline_phase_current',
+        'mp4_timeline_source_plan_phase', 'mp4_timeline_current', 'mp4_timeline_phase_witness_current', 'mp4_timeline_phase_current',
         'mp4_timeline_original_rebuild_complete', 'mp4_timeline_restoration_plan_closed',
         'mp4_timeline_visit_owned_contexts'))
     fixture = (ROOT / 'tests/fixtures/mp4_root_timeline_phase_host.cpp.inc').read_text()
@@ -38,7 +38,7 @@ def spine(tmp_path_factory):
     assert built.returncode == 0, built.stdout + built.stderr
     return binary
 
-@pytest.mark.parametrize('mode', '''capture_partial capture_unconfigured capture_wrong_phase capture_clock_running
+@pytest.mark.parametrize('mode', '''bootstrap_plan bootstrap_missing_receipt bootstrap_other_source capture_partial capture_unconfigured capture_wrong_phase capture_clock_running
 capture_admission restore_partial restore_plan restore_final_visitor restore_unprepared restore_nonheld
 admission admission_after_stage_cleanup admission_receipt_lost admission_other_source admission_unpublished active_stage_source_lost current_missing_callback current_foreign_graph
 active_held_partial active_started_partial active_started_complete restore_plan_before_children

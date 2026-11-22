@@ -40,15 +40,25 @@ Mp4SceneResult mp4_scene_part_result(const PartApi&,Mp4SceneResult r){return r;}
 Mp4SceneResult mp4_scene_configure(){if(!source_current)return Mp4SceneResult::stale;++configure_calls;events.push_back("configure");return Mp4SceneResult::ok;}
 void mp4_scene_revoke_grants(void*)noexcept{events.push_back("withdraw");}
 void mp4_scene_drop_roots(){events.push_back("drop");mp4_scene_host.active=false;mp4_scene_host.source={};mp4_scene_host.source.player=nullptr;mp4_scene_host.root_asset=nullptr;}
+unsigned catalogue_clears=0;
+void mp4_birth_catalogue_clear(){++catalogue_clears;events.push_back("catalogue");}
 struct{bool active=false;int acquires=0,releases=0;bool started()const{return active;}bool current()const{return active&&source_current;}
  Mp4SceneResult acquire(){events.push_back("gate");++acquires;active=true;return Mp4SceneResult::ok;}
  Mp4SceneResult release_after_fence(){events.push_back("ungate");++releases;active=false;return Mp4SceneResult::ok;}}mp4_early_source_gates;
+bool srp_captured=false,srp_capture_ready=true,srp_current_ready=true,srp_release_ready=true,srp_restore_ready=true,srp_mutated=false,srp_restored=false;
+int srp_capture_calls=0,srp_restore_calls=0;
+bool mp4_srp_source_capture(){if(!srp_capture_ready)return false;if(!srp_captured){++srp_capture_calls;events.push_back("srp");srp_captured=true;}return srp_current_ready;}
+bool mp4_srp_source_initial_current(){return srp_captured&&srp_current_ready;}
+void mp4_srp_source_withdraw()noexcept{events.push_back("srp-withdraw");}
+bool mp4_srp_source_restore(){if(!srp_captured||!srp_mutated||srp_restored)return true;++srp_restore_calls;events.push_back("srp-restore");if(!srp_restore_ready)return false;srp_restored=true;return true;}
+bool mp4_srp_source_release(){if(!srp_release_ready||(srp_mutated&&!srp_restored))return false;events.push_back("unsrp");srp_captured=srp_mutated=srp_restored=false;return true;}
 struct{bool captured=false;}mp4_volume_assembly;
 bool mp4_camera_source_baselines_capture_or_verify(){if(!mp4_volume_assembly.captured){++baseline_calls;events.push_back("baseline");mp4_volume_assembly.captured=true;}return source_current;}
 Mp4SceneResult mp4_camera_source_baselines_release(){events.push_back("unbaseline");mp4_volume_assembly.captured=false;return Mp4SceneResult::ok;}
 struct{unsigned completed=0;}mp4_stage_source_logical;
 struct Logical{bool current()const{return mp4_stage_source_logical.completed==7&&source_current;}}mp4_control_assets,mp4_director_nodes,mp4_activation_nodes;
 Mp4SceneResult mp4_stage_source_logical_capture(){++logical_calls;events.push_back("logical");mp4_stage_source_logical.completed=7;return Mp4SceneResult::ok;}
+Mp4SceneResult mp4_root_capture_logical(){return mp4_stage_source_logical_capture();}
 bool mp4_stage_source_logical_release(){events.push_back("unlogical");mp4_stage_source_logical.completed=0;return true;}
 struct{uint64_t serial=0;bool finalized=false;}mp4_child_readonly_source;
 bool full_child=false;
@@ -104,6 +114,9 @@ void bind(){for(unsigned i=0;i<4;++i)mp4_scene_host.parts[i]={&part_models[i],qu
  mp4_source_bootstrap_joins.context=&recipes;mp4_source_bootstrap_joins.source_producers=external<0>();mp4_source_bootstrap_joins.provisional_roots=external<1>();mp4_source_bootstrap_joins.physical_cohort=external<2>();mp4_source_bootstrap_joins.initial_commit=initial_commit;mp4_source_bootstrap_joins.before_part_release=before_part_release;}
 size_t event(const std::string&v){auto at=std::find(events.begin(),events.end(),v);assert(at!=events.end());return size_t(at-events.begin());}
 int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];bind();
+ if(mode=="srp_capture_refuses")srp_capture_ready=false;
+ if(mode=="srp_restore_wait"){srp_mutated=true;srp_restore_ready=false;}
+ if(mode=="srp_release_wait")srp_mutated=true;
  if(mode=="missing_producer")mp4_source_bootstrap_joins.source_producers={};
  if(mode=="before_wait"||mode=="outer_abort")before_wait=true;
  if(mode=="before_throw")throw_before=true;
@@ -126,6 +139,7 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];bin
   assert(mp4_scene_release(nullptr,false)==Mp4SceneResult::ok&&!mp4_early_source_gates.active&&!mp4_scene_host.active&&late_source_reads==0);
   return 0;
  }
+ if(mode=="srp_capture_refuses"){assert(result!=Mp4SceneResult::ok&&baseline_calls==0&&logical_calls==0&&!mp4_early_source_gates.active);return 0;}
  if(mode=="missing_producer"){assert(result==Mp4SceneResult::unsupported&&mp4_early_source_gates.acquires==0&&baseline_calls==0&&logical_calls==0&&commit_calls==0);return 0;}
  if(mode=="before_wait"||mode=="cleanup_wait"){
   assert(result==Mp4SceneResult::waiting&&configure_calls==1&&baseline_calls==1&&logical_calls==1&&readonly_calls==0&&mp4_early_source_gates.current());
@@ -143,6 +157,25 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];bin
  assert(result==Mp4SceneResult::ok&&mp4_scene_source_bootstrap.scope.transferred()&&mp4_root_history_initial_sealed(1));
  assert(event("gate")<event("quiet0")&&event("quiet2")<event("external0")&&event("baseline")<event("logical")&&event("logical")<event("external1")&&event("external1")<event("readonly")&&event("readonly")<event("world")&&event("world")<event("capture0")&&event("capture3")<event("external2")&&event("external2")<event("finalize")&&event("finalize")<event("commit"));
  assert(cohort_calls==1&&commit_calls==1);
+ assert(event("external0")<event("srp")&&event("srp")<event("baseline"));
+ if(mode=="srp_current_lost"){
+  srp_current_ready=false;auto&h=mp4_scene_source_bootstrap;const auto i=static_cast<size_t>(mp4sb::Phase::source_baselines);
+  assert(!mp4_scene_bootstrap_current(&h,h.key,h.receipt[i],i));srp_current_ready=true;
+ }
+ if(mode=="srp_restore_wait"){
+  assert(mp4_scene_source_bootstrap_before_part_release(true)==Mp4SceneResult::waiting&&srp_captured&&!srp_restored);
+  for(const auto&p:part_models){assert(p.release==0);}
+  assert(promotion_calls==0);srp_restore_ready=true;
+ }
+
+ if(mode=="foreign_release"){
+  const auto seen=events.size();owner=false;
+  assert(mp4_scene_source_bootstrap_quiesce()==Mp4SceneResult::waiting);
+  assert(mp4_scene_source_bootstrap_before_part_release(true)==Mp4SceneResult::waiting);
+  assert(mp4_scene_source_bootstrap_release()==Mp4SceneResult::waiting);
+  assert(events.size()==seen&&catalogue_clears==0&&mp4_early_source_gates.active);
+  owner=true;
+ }
  if(mode=="idempotent"){assert(mp4_scene_source_bootstrap_quiesce()==Mp4SceneResult::ok&&commit_calls==1&&part_models[0].capture==1);return 0;}
  if(mode=="missing_handoff"){
   assert(mp4_scene_source_bootstrap_before_part_release(true)==Mp4SceneResult::unsupported&&mp4_early_source_gates.active);
@@ -155,15 +188,25 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];bin
  assert(mp4_scene_source_bootstrap_before_part_release(true)==Mp4SceneResult::ok);
  assert(mp4_scene_source_bootstrap_before_part_release(true)==Mp4SceneResult::ok&&promotion_calls==(promotion_wait?2:1));
  assert(mp4_scene_bootstrap_parts_release()==Mp4SceneResult::ok);
+ if(mode=="srp_release_wait"){
+  assert(srp_restored&&srp_restore_calls==1);srp_release_ready=false;srp_restore_ready=false;
+  assert(mp4_scene_source_bootstrap_release()==Mp4SceneResult::waiting&&srp_captured&&mp4_early_source_gates.active);
+  assert(srp_restore_calls==1);srp_release_ready=true;
+ }
+
  if(mode=="transferred_release_wait"){
   assert(mp4_scene_source_bootstrap_release()==Mp4SceneResult::waiting&&mp4_early_source_gates.active&&mp4_scene_source_bootstrap.retiring);
+  assert(catalogue_clears==0);
   assert(release_calls[2]==1&&release_calls[1]==1&&mp4_child_readonly_source.serial==0);
   assert(mp4_scene_source_bootstrap_quiesce()==Mp4SceneResult::waiting);
  }
  assert(mp4_scene_source_bootstrap_release()==Mp4SceneResult::ok&&!mp4_early_source_gates.active&&!mp4_scene_source_bootstrap.scope.transferred()&&!mp4_root_history_initial_sealed(1));
  assert(release_calls[2]==1&&release_calls[0]==1);
+ assert(catalogue_clears==1&&event("catalogue")>event("ungate")&&event("catalogue")>event("xrelease2"));
  assert(event("xwithdraw0")<event("xrelease2")&&event("xwithdraw1")<event("xrelease2"));
  assert(event("promote")<event("release0"));
+ if(mode=="srp_restore_wait"||mode=="srp_release_wait")assert(event("srp-restore")<event("promote"));
+ assert(event("unbaseline")<event("unsrp")&&event("unsrp")<event("ungate"));
  assert(event("release0")<event("ungate")&&event("xrelease2")<event("ungate"));
  if(mode=="reuse"){
   ++idoly_mp4_runtime::job.generation;mp4_scene_host.released=mp4_scene_host.captured=0;

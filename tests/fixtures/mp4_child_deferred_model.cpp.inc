@@ -76,6 +76,8 @@ void collect_phase(void*temporary,void*){uintptr_t cursor=QueueFixture::get<uint
  QueueFixture::put(f->queue,0,uintptr_t(0));QueueFixture::put(f->queue,8,QueueFixture::get<uint64_t>(f->queue,8)+count);QueueFixture::put(temporary,0,QueueFixture::ptr(f->data));QueueFixture::put(temporary,16,uint64_t(count));QueueFixture::put(temporary,24,uint64_t(64));}
 void unexpected_phase(){++unexpected_phases;}
 void push_registered(){auto h=f->handle();f->spans.push_back({&h,sizeof h});mp4_child_pending_host.enqueue(f->manager,1,&h);f->spans.pop_back();}
+bool mp4_child_deferred_planned(const Call&,Call*,uint64_t*,mp4_director_birth::SourceTuple*);
+bool(*deferred_fixture_future)(void*,const Call&)=nullptr;
 void actual_phase5(){++native_phases;assert(mp4_animation_gate.maintenance_inflight(7)&&mp4_raw_original_operation.kind==6&&mp4_raw_original_operation.invoked);
  mp4_child_pending_host.collect(f->temporary,f->queue);f->next_node=0;
  if((scenario=="reappend"&&native_phases==1)||scenario=="budget"){push_registered();}
@@ -85,7 +87,12 @@ void(*mp4_animation_original[8])()={unexpected_phase,unexpected_phase,unexpected
 #include "deferred-host.inc"
 void parent_original(){if(scenario!="no_work")push_registered();}
 int main(int argc,char**argv){assert(argc==2);scenario=argv[1];QueueFixture fixture;f=&fixture;current_graph=f->handle();
- auto api=f->api();api.call_origin=[](void*,const Call&c){return mp4_child_planned_operation(c);};api.hook_origin=[](void*,Hook h,uintptr_t r,const Call&){return mp4_child_pending_host.native_entry(h,r);};
+ auto api=f->api();deferred_fixture_future=api.future_producers_closed;
+ api.future_producers_closed=[](void*c,const Call&call){
+  if(call.kind==Kind::maintenance){Call parent{};uint64_t ticket=0;mp4_director_birth::SourceTuple owner{};
+   assert(mp4_child_deferred_planned(call,&parent,&ticket,&owner)&&ticket==17&&owner.director==0x55&&parent.kind==Kind::stop);}
+  return deferred_fixture_future(c,call);};
+ api.call_origin=[](void*,const Call&c){return mp4_child_planned_operation(c);};api.hook_origin=[](void*,Hook h,uintptr_t r,const Call&){return mp4_child_pending_host.native_entry(h,r);};
  Originals originals{enqueue_original,{append_original,append_original},collect_phase,reset_original,{manager_original,manager_original}};mp4_director_maintenance::HostApi ha{};ha.bindings_current=[](void*,const Originals&){return bindings;};ha.quarantine=[](void*,const char*){++quarantines;};assert(mp4_child_pending_host.configure(api,originals,ha));
  mp4_child_execution_hooks.entered=[](uint64_t,const mp4child::State&,const Call&){return true;};
  mp4_child_execution_hooks.returned=[](uint64_t,const mp4child::State&,const mp4child::Mutation&){return true;};
@@ -93,7 +100,7 @@ int main(int argc,char**argv){assert(argc==2);scenario=argv[1];QueueFixture fixt
  mp4world::AnimationApi animation{};animation.owner_thread=game_call;for(size_t i=0;i<8;++i)animation.original[i]=mp4_animation_original[i];assert(mp4_animation_gate.install(animation)&&mp4_animation_gate.acquire(7));
  mp4child::State s{};s.owner={0x55,0x222,0x333,0x444,0x555,7,50};s.root_asset=0xabc;s.graph=current_graph;mp4child::Mutation mutation{};
  {Mp4OriginalOperationScope scope(7,2,reinterpret_cast<void*>(0x55),reinterpret_cast<uintptr_t>(parent_original),0);assert(scope.valid);const auto&r=mp4_raw_original_operation;Call call{Kind::stop,r.epoch,r.serial,r.root_asset,r.director,r.method,r.receipt};assert(mp4_child_pending_host.journal().begin(call));scope.invoked();assert(mp4_child_pending_host.journal().invoked());parent_original();assert(mp4_child_pending_host.journal().end());mutation={call,true,true};}
- auto&record=mp4_child_execution_bank.records[mp4_child_execution_bank.count++];record.source=s;record.mutation=mutation;record.finished=true;
+ auto&record=mp4_child_execution_bank.records[mp4_child_execution_bank.count++];record.source=s;record.mutation=mutation;record.finished=true;record.ticket=17;
  if(scenario=="physical")physical=false;if(scenario=="active_grant")assert(mp4_animation_gate.grant(7,0));if(scenario=="unreturned")mutation.returned=false;if(scenario=="unfinished")record.finished=false;if(scenario=="unowned_queue")f->push(0,1);
  if(scenario=="throws"){bool caught=false;try{mp4_child_deferred_settle(s,mutation);}catch(int value){caught=value==42;}assert(caught&&native_phases==1&&quarantines==1&&!mp4_animation_gate.healthy(7)&&!unexpected_phases);return 0;}
  auto result=mp4_child_deferred_settle(s,mutation);

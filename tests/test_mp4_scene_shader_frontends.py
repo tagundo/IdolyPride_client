@@ -30,8 +30,8 @@ bool mp4_capture_static_frontend(const pin::Entry&e,uintptr_t hook,uintptr_t ori
  assert(!require_ready);for(size_t i=0;i<4;++i)if(&e==entries[i])return relay_current[i]&&hook==hook_values[i]&&original&&original==reinterpret_cast<uintptr_t>(*original_slots[i]);return false;
 }
 #else
-constexpr size_t mp4_managed_hook_capacity=128;
-struct Receipt{uintptr_t base=0,rva=0;void*trampoline=nullptr;void**original_location=nullptr;void*stub=nullptr;}mp4_managed_hook_receipts[128];
+constexpr size_t mp4_managed_hook_capacity=160;
+struct Receipt{uintptr_t base=0,rva=0;void*trampoline=nullptr;void**original_location=nullptr;void*stub=nullptr;}mp4_managed_hook_receipts[mp4_managed_hook_capacity];
 std::atomic<size_t>mp4_managed_hook_count{4};bool backend_current[4]={true,true,true,true};
 struct Backend{bool receipt(size_t index,uintptr_t target,uintptr_t replacement,uintptr_t gateway,uintptr_t stub,mp4_bootstrap::Install*){
  if(index<9||index>=13)return false;size_t i=index-9;return backend_current[i]&&target==image_base+128+i*32&&replacement==hook_values[i]&&gateway&&gateway==reinterpret_cast<uintptr_t>(*original_slots[i])&&stub==19+i;
@@ -56,7 +56,7 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];
  if(mode.rfind("relay",0)==0)relay_current[mode.back()-'0']=false;
  if(mode.rfind("tail",0)==0)image[entries[mode.back()-'0']->rva+20]^=1;
 #else
- if(mode=="count_overflow")mp4_managed_hook_count.store(129);
+ if(mode=="count_overflow")mp4_managed_hook_count.store(mp4_managed_hook_capacity+1);
  if(mode=="unpublished")mp4_managed_hook_count.store(3);
  if(mode.rfind("backend",0)==0)backend_current[mode.back()-'0']=false;
  if(mode.rfind("stub",0)==0)mp4_managed_hook_receipts[mode.back()-'0'].stub=nullptr;

@@ -20,7 +20,7 @@ std::map<void*,Blob*> memory;
 Class*cls(const char*n,Class*parent=nullptr){auto p=std::make_unique<Class>();p->name=n;p->parent=parent;auto*r=p.get();memory[r]=r;classes.push_back(std::move(p));return r;}
 Blob*obj(Class*c){auto p=std::make_unique<Blob>();p->klass=c;auto*r=p.get();memory[r]=r;objects.push_back(std::move(p));return r;}
 template<class T>void put(void*p,size_t at,T value){assert(memory.count(p)&&at+sizeof(T)<=1024);std::memcpy(memory[p]->memory.data()+at,&value,sizeof(T));}
-bool live=true,thread=true,prefix=true,mutate_queue=false,mutate_static=false;
+bool live=true,prefix=true,mutate_queue=false,mutate_static=false;thread_local bool thread=true;
 void*queue_for_mutation=nullptr,*method_for_mutation=nullptr;Field*static_for_mutation=nullptr;
 template<class T>bool mp4_actor_field(void*p,size_t at,T&out){auto i=memory.find(p);if(i==memory.end()||at+sizeof(T)>1024)return false;
  std::memcpy(&out,i->second->memory.data()+at,sizeof(T));
@@ -44,10 +44,10 @@ void*field(void*k,const char*n){return find_field(static_cast<Class*>(k),n);}
 void*field_type(void*p){return static_cast<Field*>(p)->declared;}void*class_type(void*p){return p;}
 void*(*font_field)(void*,const char*)=field;void*(*font_field_type)(void*)=field_type;void*(*font_class_type)(void*)=class_type;
 uint32_t field_flags(void*p){return static_cast<Field*>(p)->flags;}size_t field_offset(void*p){return static_cast<Field*>(p)->offset;}
-void field_get(void*p,void*out){std::memcpy(out,&static_cast<Field*>(p)->value,sizeof(void*));}
+void(*field_get_callback)()=nullptr;void field_get(void*p,void*out){if(field_get_callback){auto callback=field_get_callback;field_get_callback=nullptr;callback();}std::memcpy(out,&static_cast<Field*>(p)->value,sizeof(void*));}
 namespace mp4game{struct Binding{uintptr_t rva=0;uint8_t prefix[16]{};};struct Layout{uint32_t player_binder=88,binder_actors=64;};}
 struct Mp4SrpPins{mp4game::Binding manager,pipeline,controller,outline,actor,foot,frame,outline_begin,outline_update,aabb,foot_apply,add,invoke,camera_type,active_enabled,object_equal;}mp4_srp_pins;
-struct{mp4game::Binding field_flags,field_offset,field_static_get,write_barrier;}mp4_cam_profile;
+struct{mp4game::Binding field_flags,field_offset,field_static_get,write_barrier,render_asset;}mp4_cam_profile;
 struct{struct{uint32_t actor_extensions=64;}fields;}mp4_actor_profile;
 uintptr_t image_base=0;
 bool mp4_source_verified=true,mp4_actor_source_verified=true;
@@ -62,7 +62,8 @@ namespace idoly_mp4_runtime{struct Game{bool selected_scene_witness(Mp4SceneWitn
 
 struct Method{};
 Mp4OriginalRendererSource source_for_host{};
-bool mp4_original_renderer_source_detail(Mp4OriginalRendererSource& out){out=source_for_host;return live;}
+unsigned renderer_detail_calls=0;bool mp4_original_renderer_source_detail(Mp4OriginalRendererSource& out){++renderer_detail_calls;out={};return false;}
+void*render_asset(const Method*){return source_for_host.asset;}
 bool held_now=true,entered_now=true;int writes=0;
 bool host_held(void*){return held_now;}
 bool host_entered(void*,idoly_mp4_srp::Operation,void*,void*){return entered_now;}
@@ -73,6 +74,7 @@ void barrier(void*,void**target,void*value){++writes;*target=value;}
 
 #include <atomic>
 #include <stdexcept>
+#include <thread>
 Class *delegate_class,*array_class,*delegate_array,*action_class,*event_class,*queue_class,*actor_class,*foot_class,*outline_class,*controller_class,*manager_class,*pipeline_class;
 Blob *controller,*player,*camera,*actor,*foot,*outline,*queue,*actor_list,*actor_array,*foot_list,*foot_array,*frame_delegate,*outline_delegate,*method_frame,*method_aabb,*method_foot;
 Blob*method(uintptr_t entry,Class*owner,uint8_t argc){auto*m=obj(nullptr);put(m,0,entry);put(m,8,entry);put(m,32,static_cast<void*>(owner));put(m,82,argc);return m;}
@@ -97,11 +99,11 @@ void initialize_source(){
  put(outline,32,1.f);put(outline,36,2.f);put(outline,40,3.f);
  auto*aabb=callback(action_class,actor,104,method_aabb);auto*shadow=callback(action_class,foot,105,method_foot);
  queue=list(queue_class,array(cls("UnityAction[]",array_class),{aabb,shadow}));put(controller,128,static_cast<void*>(queue));
- auto*asset=obj(cls("PipelineAsset"));auto*pipeline=obj(pipeline_class);put(manager_class,224,uint32_t(1));manager_class->fields["s_CurrentPipelineAsset"]={0,16,nullptr,asset};manager_class->fields["s_CurrentPipeline"]={24,16,nullptr,pipeline};
+ auto*asset=obj(cls("UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset"));auto*pipeline=obj(pipeline_class);put(manager_class,224,uint32_t(1));manager_class->fields["s_CurrentPipelineAsset"]={0,16,nullptr,asset};manager_class->fields["s_CurrentPipeline"]={24,16,nullptr,pipeline};
  const char*events[]={"beginFrameRendering","endFrameRendering","beginContextRendering","endContextRendering","beginCameraRendering","endCameraRendering"};for(size_t i=0;i<6;++i)manager_class->fields[events[i]]={32+i*8,16,event_class,nullptr};manager_class->fields[events[0]].value=frame_delegate;manager_class->fields[events[4]].value=outline_delegate;
  Mp4OriginalRendererSource source{};source.scene={player,controller,camera,7};source.asset=asset;current_scene=source.scene;
 
- source_for_host=source;
+ source_for_host=source;mp4_cam_profile.render_asset.rva=reinterpret_cast<uintptr_t>(render_asset);
  queue_class->fields["_items"]={16,0,nullptr,nullptr};queue_class->fields["_size"]={24,0,nullptr,nullptr};
  void*backing=nullptr;assert(mp4_actor_field(queue,16,backing));memory[backing]->klass=cls("UnityEngine.Events.UnityAction[]",array_class);
  memory[backing]->items.resize(4);put(queue,24,int32_t(2));

@@ -42,7 +42,8 @@ struct Ledger {uint64_t epoch=7,transaction=1;bool active=false,evaluation_pendi
 struct Api {void*(*director_get_asset)(void*,void*)=nullptr;double(*director_get_time)(void*,void*)=nullptr;void(*director_graph_injected)(void*,mp4game::PlayableGraph*,void*)=nullptr;}mp4_api;
 void* get_asset(void*,void*){return p(7);}double get_time(void*,void*){return current_time;}
 void get_graph(void*,mp4game::PlayableGraph*out,void*){*out={5,7,0};}
-enum class Mp4TimelineProofPhase:uint8_t {admission=0,active=1,source_restore_plan=2,source_restore=source_restore_plan,source_restored=3};
+enum class Mp4TimelineProofPhase:uint8_t {admission=0,active=1,source_restore_plan=2,source_restore=source_restore_plan,source_restored=3,source_bootstrap_plan=4};
+bool bootstrap_receipt=false;bool mp4_source_bootstrap_roots_current(const Mp4SceneWitness&w){return bootstrap_receipt&&w.generation==selected.generation;}
 struct Mp4TimelineContext {Mp4TimelineProofPhase phase=Mp4TimelineProofPhase::active;Mp4SceneWitness witness{};mp4world::DirectorGraphIdentity identity{};void*director=nullptr;void*asset=nullptr;void*root_script=nullptr;mp4actor::Handle graph{},root{},nodes[4096]{};void*scripts[4096]{};size_t node_count=0;bool keep(void*){return true;}};
 struct Hooks{bool(*current)(const Mp4TimelineContext&)=nullptr;}mp4_timeline_hooks;
 bool(*mp4_timeline_intrinsic_restore_verified)(const Mp4TimelineContext&)=nullptr;
@@ -86,6 +87,11 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];
  mp4_api={get_asset,get_time,get_graph};mp4_timeline_hooks.current=mp4_timeline_phase_current;
  mp4_timeline_intrinsic_restore_verified=intrinsic;for(auto&part:mp4_scene_host.parts)part.restoration_verified=child_verified;
  Mp4TimelineContext c{};c.witness=selected;c.director=p(2);c.asset=p(7);c.identity={6,5,7};
+ if(mode=="bootstrap_plan"||mode=="bootstrap_missing_receipt"||mode=="bootstrap_other_source"){
+  c.phase=Mp4TimelineProofPhase::source_bootstrap_plan;mp4_scene_host.configured=7;mp4_scene_host.captured=0;
+  bootstrap_receipt=mode!="bootstrap_missing_receipt";if(mode=="bootstrap_other_source")++c.witness.generation;
+  assert(mp4_timeline_restoration_plan_closed(c)==(mode=="bootstrap_plan"));return 0;
+ }
  if(mode=="admission"||mode=="admission_after_stage_cleanup"||mode=="admission_receipt_lost"||mode=="admission_other_source"||mode=="admission_unpublished"){
   c.phase=Mp4TimelineProofPhase::admission;mp4_scene_host.active=false;
   if(mode=="admission_after_stage_cleanup")mp4_stage_host.source.generation=0;

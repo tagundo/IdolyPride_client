@@ -44,6 +44,14 @@ int main(int argc,char** argv){
         if(mode=="bootstrap_missing_backend")mp4_managed_hook_backend_current=nullptr;else backend_valid=false;
         assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;
     }
+    if(mode=="last_slot"){
+        static_assert(mp4_managed_hook_capacity==160,"actual finite bank bound");
+        mp4_managed_hook_count.store(mp4_managed_hook_capacity-1);
+        assert(mp4_record_managed_hook(&entry,stub,&trampoline));
+        assert(mp4_managed_hook_count.load()==mp4_managed_hook_capacity);
+        mp4_managed_hook_receipts_ready.store(true);assert(mp4_managed_hook_verified(binding));
+        assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;
+    }
     assert(mp4_record_managed_hook(&entry,stub,&trampoline));assert(!mp4_managed_hook_verified(binding));
     if(mode.rfind("bootstrap_",0)==0){
         mp4_shader_bootstrap_receipts_open.store(true);
@@ -84,7 +92,7 @@ int main(int argc,char** argv){
 @pytest.mark.parametrize('mode', ['missing_original', 'missing_stub', 'unmapped_record', 'valid', 'foreign_code',
     'foreign_original_prefix', 'foreign_rva', 'foreign_base', 'changed_trampoline', 'rollback', 'unmapped_check', 'bootstrap_sync', 'bootstrap_async', 'bootstrap_file',
     'bootstrap_result', 'bootstrap_unpublished', 'bootstrap_foreign_prefix', 'bootstrap_foreign_code', 'bootstrap_revoked',
-    'ordinary_bootstrap', 'capacity', 'over_capacity', 'published_over_capacity', 'bootstrap_missing_backend',
+    'ordinary_bootstrap', 'last_slot', 'capacity', 'over_capacity', 'published_over_capacity', 'bootstrap_missing_backend',
     'bootstrap_rejected_backend', 'bootstrap_revoked_backend'])
 def test_own_installed_code_and_trampoline_identity_are_required(receipt_binary, mode):
     result = subprocess.run([str(receipt_binary), mode], capture_output=True, text=True, timeout=5)

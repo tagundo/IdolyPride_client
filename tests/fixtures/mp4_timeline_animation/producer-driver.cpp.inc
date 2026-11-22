@@ -1,0 +1,9 @@
+int main(int argc,char**argv){assert(argc==2);int mode=atoi(argv[1]);m={};cache={};mp4_timeline_animation_runtime;Mp4TimelineContext c{};cache.plans[0].context.timeline=&c;mp4_animation_state_routes.phase_closed=phase;image_base=reinterpret_cast<uintptr_t>(&output_type);mp4world::AnimationOutput output{};Mp4TimelineRuntime r{};
+ if(mode<10){if(mode==1)mp4_animation_state_routes.phase_closed=nullptr;if(mode==2)m.phase=false;if(mode==3)m.recognized=false;if(mode==4)m.cache=false;if(mode==5)cache.plans[0].plan.node.handle=99;if(mode==6)cache.count=2;if(mode==7)m.plan=false;if(mode==8)m.current=false;
+  const auto v=mp4_timeline_actor_animation_node(c,{20,2,0},mode==9?reinterpret_cast<void*>(9):nullptr);assert(v==((mode==0)?Mp4TimelineVerdict::closed:(mode==3||mode==9)?Mp4TimelineVerdict::unrecognized:Mp4TimelineVerdict::unclosed));
+ }else if(mode<21){if(mode==11){r.kind=2;m.row.infinite=true;cache.plans[0].plan.infinite=true;}if(mode==12)m.observation=false;if(mode==13)m.row.parent_input.track=88;if(mode==14)m.row.timeline_clip=reinterpret_cast<void*>(55);if(mode==15)m.row.mixer.handle=99;if(mode==16)r.kind=1;if(mode==17)cache.count=2;if(mode==18)m.phase=false;if(mode==19)m.plan=false;if(mode==20)m.row.infinite=true;
+  assert((mp4_timeline_actor_animation_runtime(c,r)==Mp4TimelineVerdict::closed)==(mode==10||mode==11));
+ }else {if(mode==22)m.output_program=false;if(mode==23)m.output_handle=false;if(mode==24)m.type=false;if(mode==25)m.target=reinterpret_cast<void*>(99);if(mode==26)m.branch=false;if(mode==27)m.native_target=88;if(mode==28)m.reference=0;if(mode==29)m.stream=2;if(mode==30)m.sorting=65536;if(mode==31)m.user=reinterpret_cast<void*>(1);if(mode==32)m.raw_user=1;if(mode==33)m.origin=false;if(mode==34)m.mapped=false;if(mode==35)m.port=-1;if(mode==36)m.weight=__builtin_nanf("");if(mode==37)m.table=99;
+  assert(mp4_animation_timeline_output_closed(c,500)==(mode==21));
+ }
+}
