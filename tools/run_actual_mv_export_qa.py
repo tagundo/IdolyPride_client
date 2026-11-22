@@ -126,20 +126,35 @@ def launch_log_evidence(raw, package=PACKAGE):
             if kind:history.append({"timestamp":row[1],"kind":kind,"tag":tag,"pid":int(row[2]),"record":index})
     history.sort(key=lambda row:row["record"])
     for event in history:event.pop("record")
-    selected=[];bytes_kept=0;redacted=0
-    for index in sorted(chosen):
+    # Budget priority must not follow log chronology: PackageManager anchors
+    # can pull a large Settings-indexing flood in before the failed Activity.
+    # Keep the actual failure/transaction stack and process events first, then
+    # fill with target-PID logs and surrounding system context. Emit the chosen
+    # records chronologically only after applying this semantic priority.
+    failure_tags={"AndroidRuntime","TransactionExecutor","ActivityThread","IdolyLauncher"}
+    system_tags={"ActivityTaskManager","ActivityManager"}
+    critical=[i for i in chosen if rows[i]and(
+        int(rows[i][2])in pids and rows[i][5].strip()in failure_tags
+        or rows[i][5].strip()in system_tags and re.search(r"Exception|Error|\bat (?:android|com)\.",rows[i][6]))]
+    own=[i for i in chosen if rows[i]and int(rows[i][2])in pids]
+    priority=list(dict.fromkeys(sorted(critical)+anchors+sorted(own)+sorted(chosen,reverse=True)))
+    selected={};bytes_kept=0;redacted=0
+    for index in priority:
         line=lines[index];row=rows[index]
-        if LAUNCH_SENSITIVE.search(line):
-            redacted+=1
+        sensitive=bool(LAUNCH_SENSITIVE.search(line))
+        if sensitive:
             types=re.findall(r"(?:[A-Za-z_$][A-Za-z0-9_$]*\.)+[A-Za-z_$][A-Za-z0-9_$]*(?:Exception|Error)\b",line)
             line=(line[:row.start(6)]if row else"")+(", ".join(types[:3])+": "if types else"")+"[sensitive launch log content omitted]"
+        line=line[:4096]+(" [truncated]"if len(line)>4096 else"")
         encoded=len(line.encode("utf-8"))+1
         if bytes_kept+encoded>128*1024:
-            break
-        selected.append(line);bytes_kept+=encoded
+            continue
+        selected[index]=line;bytes_kept+=encoded;redacted+=int(sensitive)
+    ordered=[selected[i]for i in sorted(selected)]
     return {"schema":1,"package":package,"observed_process_ids":sorted(pids),
         "events":history[:256],"redacted_records":redacted,"input_records":len(lines),
-        "retained_records":len(selected),"context":"\n".join(selected)+("\n"if selected else"")}
+        "retained_records":len(ordered),"omitted_context_records":len(chosen)-len(ordered),
+        "context":"\n".join(ordered)+("\n"if ordered else"")}
 
 
 def integer(value, minimum=0, maximum=9007199254740991):

@@ -77,6 +77,30 @@ def test_launch_context_redacts_account_fields_and_keeps_exception_type():
     assert 'java.lang.IllegalStateException'in evidence['context']
 
 
+
+def test_launch_budget_prioritizes_failed_activity_stack_over_earlier_settings_flood():
+    raw="\n".join([
+        *[logrow(580,'PackageManager','index '+qa.PACKAGE+' '+('SettingsNoise '*70),0) for _ in range(1200)],
+        logrow(580,'ActivityManager','Start proc 4100:'+qa.PACKAGE+'/u0a210 for top-activity',1),
+        logrow(4100,'TransactionExecutor','Failed to execute the transaction: ClientTransaction{',2),
+        logrow(4100,'AndroidRuntime','FATAL EXCEPTION: main',2),
+        logrow(4100,'AndroidRuntime','java.lang.NoClassDefFoundError: MainActivity linkage',2),
+        logrow(4100,'AndroidRuntime','    at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:4000)',2),
+        logrow(580,'am_crash','[0,4100,'+qa.PACKAGE+',538984005,java.lang.NoClassDefFoundError,missing]',3),
+        logrow(580,'ActivityTaskManager','Force finishing activity '+qa.MAIN,3),
+        *[logrow(4156,'Provider','restart noise '+('x'*256),4) for _ in range(1000)],
+        logrow(580,'am_proc_start','[0,4156,10210,'+qa.PACKAGE+',service,SDKProvider]',5),
+    ])
+    evidence=qa.launch_log_evidence(raw)
+    assert evidence['observed_process_ids']==[4100,4156]
+    assert evidence['omitted_context_records']>0
+    context=evidence['context']
+    assert len(context.encode('utf-8'))<=128*1024
+    for fragment in ('FATAL EXCEPTION: main','NoClassDefFoundError: MainActivity linkage',
+                     'performLaunchActivity','Failed to execute the transaction','Force finishing activity'):
+        assert fragment in context
+    assert context.index('Start proc 4100')<context.index('FATAL EXCEPTION')<context.index('Force finishing')
+
 def test_launch_context_requires_exact_package_and_bounded_input():
     evidence=qa.launch_log_evidence(logrow(580,'ActivityManager','Start proc 4100:'+qa.PACKAGE+'.other/u0a210'))
     assert not evidence['events']and not evidence['context']
