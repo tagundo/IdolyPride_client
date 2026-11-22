@@ -79,7 +79,12 @@ void* load_bundle(void*,Method*){return ptr(request);}bool isdone(void*,Method*)
 void* bundle_result(void*,Method*){return ptr(bundle);}
 void* load_asset(void*,void*,void*,Method*){return ptr(private_clip);}
 void unload(void*,bool all,Method*){assert(all);++unloads;}
-void capture(void*,Method*){}
+bool op_wait=false,op_wait_ticket=false,op_zero=false,op_end_good=true,op_throw=false,op_handoff=false,op_reuse=false;
+int raw_captures=0,op_ends=0,op_failed_ends=0;uint64_t op_serial=0;
+void capture(void*,Method*){++raw_captures;if(op_throw)throw 37;}
+Result capture_begin(void*p,uint64_t*out){assert(p==ptr(camera_controller));*out=0;if(op_wait){if(op_wait_ticket)*out=1;return Result::waiting;}*out=op_zero?0:op_reuse?1:++op_serial;return Result::ok;}
+bool capture_end(void*p,uint64_t serial,bool returned){assert(p==ptr(camera_controller)&&serial);++op_ends;if(!returned)++op_failed_ends;if(op_handoff)take_over_scene();return op_end_good;}
+
 int32_t capture_width=16,capture_height=16,source_width=4096,source_height=2458;
 std::vector<std::array<int32_t,2>> geometry_calls;bool geometry_resize_good=true;
 bool resize_output(void* value,int32_t w,int32_t h){if(!value){assert(!w&&!h);++geometry_cleanup_calls;return true;}assert(value==ptr(camera_controller));geometry_calls.push_back({w,h});if(!w&&!h&&transition_during_resize_restore)take_over_scene();return geometry_resize_good||(!w&&!h);}
@@ -196,6 +201,25 @@ int main(){
     transition_during_resize_restore=true;
     assert(a.restore()==Result::ok&&mode==2&&time_value==9&&bgm_volume==.3f&&voice_volume==.7f&&actor_mode==2&&custom&&shader==77);
     transition_during_resize_restore=false;a.reset_observations();assert(handles.empty());
+    // Only an actual returned operation may authorize the native request. CPU
+    // discard does not consume the original renderer's still-queued request.
+    normal_scene();observe();assert(a.install_capture_operations(capture_begin,capture_end));
+    assert(a.begin_manual()==Result::ok&&!a.install_capture_operations(capture_begin,capture_end));
+    int before_capture_calls=raw_captures;op_wait=true;
+    assert(a.request_capture()==Result::waiting&&raw_captures==before_capture_calls&&!a.owned_pending_capture(ptr(wrapper)));
+    op_wait_ticket=true;assert(a.request_capture()==Result::failed&&raw_captures==before_capture_calls);op_wait_ticket=false;op_wait=false;
+    op_zero=true;assert(a.request_capture()==Result::failed&&raw_captures==before_capture_calls);op_zero=false;
+    op_end_good=false;assert(a.request_capture()==Result::failed&&raw_captures==before_capture_calls+1&&!a.owned_pending_capture(ptr(wrapper)));op_end_good=true;
+    op_throw=true;try{a.request_capture();assert(false);}catch(int code){assert(code==37);}op_throw=false;assert(op_failed_ends==1&&!a.owned_pending_capture(ptr(wrapper)));
+    assert(a.request_capture()==Result::ok&&a.owned_pending_capture(ptr(wrapper))
+        &&a.owned_pending_capture(ptr(camera),ptr(camera_controller),ptr(wrapper))
+        &&!a.owned_pending_capture(ptr(bgm),ptr(camera_controller),ptr(wrapper)));
+    a.discard_capture();assert(a.owned_pending_capture(ptr(wrapper)));
+    before_capture_calls=raw_captures;op_reuse=true;assert(a.request_capture()==Result::failed&&raw_captures==before_capture_calls);op_reuse=false;
+    a.reset_observations();assert(handles.empty()&&!a.owned_pending_capture(ptr(wrapper)));
+    normal_scene();observe();assert(a.begin_manual()==Result::ok);op_handoff=true;
+    assert(a.request_capture()==Result::stale&&!a.owned_pending_capture(ptr(wrapper)));
+    op_handoff=false;a.reset_observations();assert(handles.empty()&&mode==2&&time_value==9);
 }
 '''
 

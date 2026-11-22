@@ -24,6 +24,7 @@ HARNESS=r'''
 #include <vector>
 namespace p=idoly_mp4_playback;
 struct Graph {void* handle=nullptr;int version=0,padding=0;};
+p::Scope<Graph>* verifying_scope=nullptr;
 struct Scene {
     int player=0,director=0;bool owner=true,playing=true,paused=false;
     int state=1,mode=0,version=1;double time=13.25;
@@ -63,7 +64,7 @@ p::Result prepare(void*){primary();++s.prepares;s.volume=0;event("prepare");retu
 p::Result reset(void*){primary();++s.resets;if(!s.reset_ready)return p::Result::waiting;if(s.fail_reset)return p::Result::unsupported;s.history=0;event("reset");return p::Result::ok;}
 p::Result restore(void*){primary();++s.restores;if(!s.restore_ready)return p::Result::waiting;s.history=s.saved_history;s.volume=s.saved_volume;event("restore");return p::Result::ok;}
 p::Result release(void*,bool owned){++s.releases;s.released_owned=owned;if(!s.release_ready)return p::Result::waiting;s.calls.emplace_back("release");return p::Result::ok;}
-p::Result verify_source(void*){primary();++s.verifications;assert(s.time==13.25&&s.history==s.saved_history&&s.volume==s.saved_volume);assert(!s.calls.empty()&&(s.verifications>1||s.calls.back()=="paused_flag"));return s.source_ready?p::Result::ok:p::Result::waiting;}
+p::Result verify_source(void*){assert(verifying_scope&&verifying_scope->source_playback_state_restored()&&!verifying_scope->logical_restored());primary();++s.verifications;assert(s.time==13.25&&s.history==s.saved_history&&s.volume==s.saved_volume);assert(!s.calls.empty()&&(s.verifications>1||s.calls.back()=="paused_flag"));return s.source_ready?p::Result::ok:p::Result::waiting;}
 const char* dependent_error(void*){return s.fail_reset?"actor_history_unverified":"actor_fence_pending";}
 p::OriginalApi<Graph> api(){
     p::OriginalApi<Graph> a{};a.director_state=state;a.director_mode=mode;a.director_set_mode=setmode;
@@ -73,7 +74,7 @@ p::OriginalApi<Graph> api(){
 }
 p::Dependents dependents(){return {current,quiesce,capture,prepare,reset,restore,release,dependent_error,verify_source};}
 int main(int argc,char** argv){
-    assert(argc==2);std::string scenario=argv[1];p::Scope<Graph> scope;
+    assert(argc==2);std::string scenario=argv[1];p::Scope<Graph> scope;verifying_scope=&scope;assert(!scope.source_playback_state_restored());
     if(scenario=="paused"){s.state=0;s.paused=true;}
     if(scenario=="checkpoint_pause_pending")s.paused=true;
     if(scenario=="not_started"){s.state=0;s.playing=false;}
@@ -196,7 +197,7 @@ int main(int argc,char** argv){
             assert(!s.released_owned&&s.primary_reads==reads&&s.owner_queries==queries);
             s.time=25;s.history=1001;s.owner=false;s.release_ready=true;
         }
-        assert(scope.release_restored()==p::Result::ok&&!scope.active()&&!scope.logical_restored()&&!s.released_owned);
+        assert(scope.release_restored()==p::Result::ok&&!scope.active()&&!scope.logical_restored()&&!scope.source_playback_state_restored()&&!s.released_owned);
         assert(s.primary_reads==reads&&s.owner_queries==queries&&s.sets==sets_before&&s.evaluates==evaluates_before);
         assert(s.rebuilds==rebuilds_before&&s.restores==restores_before&&s.verifications==verifies_before);
         assert(s.history==(scenario=="checkpoint_release_wait"?1001:903)&&s.volume==.4f&&s.state==0&&s.paused);
@@ -204,7 +205,7 @@ int main(int argc,char** argv){
     }
     if(scenario=="checkpoint_verify_wait"){
         s.source_ready=false;
-        assert(scope.restore({true,true},false)==p::Result::waiting&&scope.active()&&!scope.logical_restored());
+        assert(scope.restore({true,true},false)==p::Result::waiting&&scope.active()&&!scope.logical_restored()&&scope.source_playback_state_restored());
         const auto reads=s.primary_reads,queries=s.owner_queries,sets_before=s.sets;
         assert(scope.release_restored()==p::Result::invalid&&scope.active()&&s.releases==0);
         assert(s.primary_reads==reads&&s.owner_queries==queries&&s.sets==sets_before);

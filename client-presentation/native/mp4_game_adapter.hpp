@@ -126,6 +126,10 @@ struct Api {
     void* (*bundle_load_asset)(void*,void*,void*,Method*)=nullptr;
     void (*bundle_unload)(void*,bool,Method*)=nullptr;
     void (*camera_capture_request)(void*,Method*)=nullptr;
+    // Automatic exports bracket the unchanged original. WAIT before entry is
+    // read-only; end must account for a partial original even when it throws.
+    Result (*capture_operation_begin)(void*,uint64_t*)=nullptr;
+    bool (*capture_operation_end)(void*,uint64_t,bool original_returned)=nullptr;
     int32_t (*texture_graphics_format)(void*,Method*)=nullptr;
     bool (*texture_srgb)(void*,Method*)=nullptr;
     int32_t (*texture_width)(void*,Method*)=nullptr;
@@ -224,6 +228,18 @@ public:
         return manual_&&wrapper&&get(captured_texture_)&&owned_primary_scene_current()&&get(capture_wrapper_)==wrapper
             &&field<void*>(wrapper,layout_.wrapper_texture)==get(captured_texture_);
     }
+    bool owned_pending_capture(void* wrapper)const {
+        // CPU discard/readback does not mean that the native renderer has
+        // consumed its real queued request. The host checks its exact tuple.
+        return capture_last_issued_&&owned_capture_wrapper(wrapper);
+    }
+    bool owned_pending_capture(void* camera,void* controller,void* wrapper)const {
+        return camera==get(camera_)&&controller==get(camera_controller_)&&owned_pending_capture(wrapper);
+    }
+    bool install_capture_operations(Result(*begin)(void*,uint64_t*),bool(*end)(void*,uint64_t,bool)){
+        if(manual_||automatic_||automatic_scope_.active()||!begin||!end)return false;
+        api_.capture_operation_begin=begin;api_.capture_operation_end=end;return true;
+    }
     void discard_capture(){capture_pending_=capture_pass_seen_=capture_submitted_=false;}
     Result capture_geometry(int32_t& width,int32_t& height) const;
     void maintenance();
@@ -270,6 +286,10 @@ public:
     bool owned_primary_scene_current()const{return manual_&&primary_scene_current()
         &&(!automatic_||automatic_scope_.restorable_owner_current());}
     bool restoration_source_current()const{return manual_&&primary_scene_current();}
+    bool automatic_source_playback_state_restored(uint64_t epoch)const {
+        return automatic_&&epoch&&epoch==owned_generation_&&restoration_source_current()
+            &&automatic_scope_.source_playback_state_restored();
+    }
     SceneKind scene_kind()const{return scene_kind_;}
     void* selected_presenter()const {void* value=get(presenter_);return value&&live(value)?value:nullptr;}
     void* selected_player()const {return resolve_selected_player(true);}
@@ -402,6 +422,7 @@ private:
     float camera_step_delta_=0;int32_t previous_brain_update_=0,previous_brain_blend_=0;
     bool manual_=false,output_geometry_applied_=false,shader_was_custom_=false,capture_pending_=false,
         capture_pass_seen_=false,capture_submitted_=false;
+    uint64_t capture_last_issued_=0;
     SceneKind scene_kind_=SceneKind::none;
     bool owner_replaced_=false;
     void* owned_player_anchor_=nullptr;
@@ -1012,11 +1033,26 @@ inline Result GameAdapter::request_capture() {
         return fail(Result::unsupported,"output_projection_failed");
     if(!api_.camera_capture_request||!api_.texture_width||!api_.texture_height)
         return fail(Result::unsupported,"capture_api_unavailable");
-    api_.camera_capture_request(get(camera_controller_),nullptr);
+    if(automatic_&&(!api_.capture_operation_begin||!api_.capture_operation_end))
+        return fail(Result::unsupported,"capture_operation_proof_unavailable");
+    uint64_t operation=0;
+    if(api_.capture_operation_begin){
+        const Result begun=api_.capture_operation_begin(get(camera_controller_),&operation);
+        if(begun!=Result::ok)return operation?fail(Result::failed,"capture_operation_wait_receipt"):begun;
+        if(!operation||operation<=capture_last_issued_)return fail(Result::failed,"capture_operation_serial_invalid");
+    }
+    try{api_.camera_capture_request(get(camera_controller_),nullptr);}
+    catch(...){if(operation&&api_.capture_operation_end)try{(void)api_.capture_operation_end(get(camera_controller_),operation,false);}catch(...){}throw;}
+    if(operation&&(!api_.capture_operation_end||!api_.capture_operation_end(get(camera_controller_),operation,true)))
+        return fail(Result::failed,"capture_operation_receipt_failed");
+    if(!owned_primary_scene_current())return fail(Result::stale,"capture_source_changed");
     void* wrapper=field<void*>(get(camera_controller_),layout_.camera_captured);
     void* texture=field<void*>(wrapper,layout_.wrapper_texture);
     if(!wrapper||!keep(capture_wrapper_,wrapper))return fail(Result::failed,"capture_wrapper_root_failed");
     if(!live(texture)||!keep(captured_texture_,texture))return fail(Result::waiting,"capture_texture_not_ready");
+    // The legacy manual adapter has no automatic operation provider. It can
+    // retain its actual returned wrapper but grants no native queued request.
+    capture_last_issued_=operation;
     int32_t width=api_.texture_width(texture,nullptr),height=api_.texture_height(texture,nullptr);
     if(width<16||height<16||width>4096||height>4096)
         return fail(Result::unsupported,"capture_geometry_not_supported");
@@ -1195,7 +1231,7 @@ inline Result GameAdapter::restore_impl(bool release_resources) {
         release_shader_lease();
         manual_=automatic_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
         if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
-        drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);
+        drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);capture_last_issued_=0;
         if(result==idoly_mp4_playback::Result::ok&&!automatic_geometry_restored_)
             return fail(Result::failed,"output_restore_failed");
         return automatic_result(result);
@@ -1240,7 +1276,7 @@ inline Result GameAdapter::restore_impl(bool release_resources) {
     }
     manual_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
     if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
-    drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);
+    drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);capture_last_issued_=0;
     return geometry_restored?Result::ok:fail(Result::failed,"output_restore_failed");
 }
 inline Result GameAdapter::abandon_automatic(const char* reason){
@@ -1257,7 +1293,7 @@ inline Result GameAdapter::abandon_automatic(const char* reason){
     if(automatic_scope_.active())return automatic_result(result);
     manual_=automatic_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
     if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
-    drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);
+    drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);capture_last_issued_=0;
     return fail(static_cast<Result>(result),reason?reason:"original_engine_clock_lost");
 }
 inline void GameAdapter::reset_observations() {

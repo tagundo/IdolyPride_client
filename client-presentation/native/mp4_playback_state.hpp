@@ -274,6 +274,9 @@ public:
     // Once ordinary playback resumes, saved-time equality is no longer a
     // valid predicate and none of these original setters may run again.
     bool logical_restored()const{return source_verified_;}
+    // Setter-stage marker only. Final dependent verification may use this
+    // after the parent state checks; it must not recurse into logical_restored.
+    bool source_playback_state_restored()const{return active()&&source_playback_restored_;}
     Result release_restored(){
         if(!active())return Result::ok;
         if(!source_verified_)return fail(Result::invalid,"original_restore_checkpoint_missing");
