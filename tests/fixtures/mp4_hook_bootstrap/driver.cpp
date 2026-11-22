@@ -217,10 +217,13 @@ static void *hook(void *t, void *n, void **original, uint32_t flags, ...) {
 }
 int main() {
   unsigned cases = 0;
-  for (auto pins : {android_bootstrap_pins, ios_bootstrap_pins,
-                    android_managed_extra_pins, ios_managed_extra_pins})
-    for (size_t p = 0; p < 8; ++p)
+  struct PinRange { const BootstrapPin* pins; size_t count; };
+  for (const auto range : {PinRange{android_bootstrap_pins,8},PinRange{ios_bootstrap_pins,8},
+                          PinRange{android_managed_extra_pins,8},PinRange{ios_managed_extra_pins,8},
+                          PinRange{android_scene_managed_pins,4},PinRange{ios_scene_managed_pins,4}})
+    for (size_t p = 0; p < range.count; ++p)
       for (unsigned mode = 0; mode < 4; ++mode) {
+        const auto*pins=range.pins;
         Model m;
         const size_t spans[] = {4, 4, 20, 24};
         const bool np[] = {false, true, false, true};

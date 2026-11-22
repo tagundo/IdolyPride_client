@@ -32,8 +32,10 @@ OBJECT_ALIASES.update({
  'mp4_shader_memory_async':'UnityEngine.AssetBundleCreateRequest',
  'mp4_shader_file_async':'UnityEngine.AssetBundleCreateRequest',
  'mp4_shader_bundle_result':'UnityEngine.AssetBundle',
+ 'mp4_scene_shader_load':'UnityEngine.AsyncOperation',
 })
-STATIC_ALIASES.update({'mp4_shader_memory_sync','mp4_shader_memory_async','mp4_shader_file_async'})
+STATIC_ALIASES.update({'mp4_shader_memory_sync','mp4_shader_memory_async','mp4_shader_file_async',
+ 'mp4_scene_shader_loaded','mp4_scene_shader_unloaded'})
 
 VALUE_ALIASES={'mp4_control_create':'UnityEngine.Playables.Playable',
  'mp4_source_timeline_factory':'UnityEngine.Playables.Playable'}
@@ -44,6 +46,10 @@ TYPED_PARAMETERS={
  'mp4_capture_texture_ctor':['UnityEngine.RenderTextureDescriptor'],
  'mp4_control_create':['UnityEngine.Playables.PlayableGraph','UnityEngine.GameObject'],
  'mp4_source_timeline_factory':['UnityEngine.Playables.PlayableGraph','UnityEngine.GameObject'],
+ 'mp4_scene_shader_load':['System.String','System.Int32','UnityEngine.SceneManagement.LoadSceneParameters','System.Boolean'],
+ 'mp4_scene_shader_loaded':['UnityEngine.SceneManagement.Scene','UnityEngine.SceneManagement.LoadSceneMode'],
+ 'mp4_scene_shader_unloaded':['UnityEngine.SceneManagement.Scene'],
+ 'mp4_scene_shader_bundle_unload':['System.Boolean'],
  'mp4_shader_memory_sync':['System.Byte[]','System.UInt32'],
  'mp4_shader_memory_async':['System.Byte[]','System.UInt32'],
  'mp4_shader_file_async':['System.String','System.UInt32','System.UInt64'],
@@ -60,6 +66,10 @@ TYPED_ABIS={
  'mp4_capture_texture_ctor':'void(void*,const RenderTextureDescriptor52*,const MethodInfo*)',
  'mp4_control_create':'Playable16(void*,PlayableGraph16,void*,const MethodInfo*)',
  'mp4_source_timeline_factory':'Playable16(void*,PlayableGraph16,void*,const MethodInfo*)',
+ 'mp4_scene_shader_load':'void*(void*,void*,int32_t,LoadSceneParameters8,bool,const MethodInfo*)',
+ 'mp4_scene_shader_loaded':'void(Scene4,int32_t,const MethodInfo*)',
+ 'mp4_scene_shader_unloaded':'void(Scene4,const MethodInfo*)',
+ 'mp4_scene_shader_bundle_unload':'void(void*,bool,const MethodInfo*)',
  'mp4_shader_memory_sync':'void*(void*,uint32_t,const MethodInfo*)',
  'mp4_shader_memory_async':'void*(void*,uint32_t,const MethodInfo*)',
  'mp4_shader_file_async':'void*(void*,uint32_t,uint64_t,const MethodInfo*)',
@@ -88,6 +98,10 @@ SELECTIONS.update({
  'mp4_srp_invoke_precull':('VL.Rendering.VLSRPCameraController','InvokePreCullFrameEvent',0),
  'mp4_srp_begin_frame':('VL.Rendering.VLSRPCameraController','OnBeginFrameRendering',2,tuple(TYPED_PARAMETERS['mp4_srp_begin_frame'])),
  'mp4_source_timeline_factory':('UnityEngine.Timeline.TimelineAsset','CreatePlayable',2,tuple(TYPED_PARAMETERS['mp4_source_timeline_factory'])),
+ 'mp4_scene_shader_load':('UnityEngine.SceneManagement.SceneManagerAPI','LoadSceneAsyncByNameOrIndex',4,tuple(TYPED_PARAMETERS['mp4_scene_shader_load'])),
+ 'mp4_scene_shader_loaded':('UnityEngine.SceneManagement.SceneManager','Internal_SceneLoaded',2,tuple(TYPED_PARAMETERS['mp4_scene_shader_loaded'])),
+ 'mp4_scene_shader_unloaded':('UnityEngine.SceneManagement.SceneManager','Internal_SceneUnloaded',1,tuple(TYPED_PARAMETERS['mp4_scene_shader_unloaded'])),
+ 'mp4_scene_shader_bundle_unload':('UnityEngine.AssetBundle','Unload',1,tuple(TYPED_PARAMETERS['mp4_scene_shader_bundle_unload'])),
 })
 FIXED_ALIAS='mp4_fixed_loop_condition'
 ANIMATION_ALIASES=['mp4_animation_'+suffix for suffix in ('sample','update','begin','legacy','end','deferred','late','render')]

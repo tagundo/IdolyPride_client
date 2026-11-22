@@ -1,5 +1,9 @@
 int main(int argc,char**argv){assert(argc==2);initialize();const std::string mode=argv[1];Mp4ShaderConsumerHost host;
  if(mode=="root_failure")root_fail_after=3;
+ if(mode=="scene"||mode=="scene_changed"||mode=="scene_unknown"||mode=="scene_compute"){
+  downloaded=false;scene_admitted=mode!="scene_unknown";put(material,32,static_cast<void*>(shader_b));
+  if(mode=="scene_compute"){assert(!mp4_consumer_program(host,shader_b,true));return 0;}
+ }
  if(mode=="downloaded")put(material,32,static_cast<void*>(shader_b));
  if(mode=="builtin")put(material,32,static_cast<void*>(shader_d));
  if(mode=="unknown"||mode=="disabled"||mode=="inactive"||mode=="unculled")put(material,32,static_cast<void*>(shader_c));
@@ -15,11 +19,12 @@ int main(int argc,char**argv){assert(argc==2);initialize();const std::string mod
   mp4_vlb_state.started=true;mp4_vlb_state.batch_count=1;auto*draw=obj(cls("Draw"));put(draw,16,static_cast<void*>(material));mp4_vlb_state.batches[0].draw_images[0]={draw,material};
   if(mode=="vlb_unknown"){auto*m=obj(static_cast<Class*>(object_class(material)));put(m,16,uintptr_t(m));put(m,32,static_cast<void*>(shader_c));put(draw,16,static_cast<void*>(m));mp4_vlb_state.batches[0].draw_images[0].material=m;}
  }
- const bool accepted=mode!="root_failure"&&mode!="unknown"&&mode!="unknown_pass_shader"&&mode!="null_material"&&mode!="unknown_skybox"&&mode!="unknown_queue"&&mode!="vlb_unknown";
+ const bool accepted=mode!="root_failure"&&mode!="scene_unknown"&&mode!="unknown"&&mode!="unknown_pass_shader"&&mode!="null_material"&&mode!="unknown_skybox"&&mode!="unknown_queue"&&mode!="vlb_unknown";
  assert(mp4_shader_consumer_capture(host,&host,42,9,current,held)==accepted);
  if(!accepted){assert(roots.empty());return 0;}
  assert(mp4_shader_consumer_current(host));
- if(mode=="role_changed"){put(feature,32,static_cast<void*>(shader_c));assert(!mp4_shader_consumer_current(host));}
+ if(mode=="scene_changed"){scene_admitted=false;assert(!mp4_shader_consumer_current(host));}
+ else if(mode=="role_changed"){put(feature,32,static_cast<void*>(shader_c));assert(!mp4_shader_consumer_current(host));}
  else if(mode=="shader_id_changed"){put(shader_a,8,int32_t(2));assert(!mp4_shader_consumer_current(host));}
  else if(mode=="shader_native_changed"){put(shader_a,16,uintptr_t(999));assert(!mp4_shader_consumer_current(host));}
  else if(mode=="material_shader_changed"){put(material,32,static_cast<void*>(shader_c));assert(!mp4_shader_consumer_current(host));}
@@ -29,6 +34,6 @@ int main(int argc,char**argv){assert(argc==2);initialize();const std::string mod
  else if(mode=="unknown_node"){pass->klass=cls("UnknownPass");assert(!mp4_shader_consumer_current(host));}
  else if(mode=="builtin_changed"){put(builtin_material,32,static_cast<void*>(shader_c));assert(!mp4_shader_consumer_current(host));}
  else if(mode=="source_program_changed"){source_program=false;assert(!mp4_shader_consumer_current(host));}
- else assert(mode=="normal"||mode=="downloaded"||mode=="builtin"||mode=="disabled"||mode=="inactive"||mode=="unculled"||mode=="skybox"||mode=="config"||mode=="queue"||mode=="vlb");
+ else assert(mode=="scene"||mode=="normal"||mode=="downloaded"||mode=="builtin"||mode=="disabled"||mode=="inactive"||mode=="unculled"||mode=="skybox"||mode=="config"||mode=="queue"||mode=="vlb");
  mp4_shader_consumer_clear(host);assert(roots.empty());
 }

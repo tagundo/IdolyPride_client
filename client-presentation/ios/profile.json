@@ -3493,6 +3493,114 @@
       "registration_pointer_slot_rva": 175623424,
       "prefix16": "ffc301d1fc6f01a9fa6702a9f85f03a9",
       "native_abi": "Playable16(void*,PlayableGraph16,void*,const MethodInfo*)"
+    },
+    "mp4_scene_shader_load": {
+      "name": "UnityEngine.SceneManagement.SceneManagerAPI.LoadSceneAsyncByNameOrIndex",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24176,
+      "metadata_method_index": 166256,
+      "token_row": 4344,
+      "rva": 126280724,
+      "return_type_index": 49024,
+      "parameters": [
+        {
+          "name": "sceneName",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        },
+        {
+          "name": "sceneBuildIndex",
+          "metadata_type_index": 61162,
+          "type_name": "System.Int32"
+        },
+        {
+          "name": "parameters",
+          "metadata_type_index": 63344,
+          "type_name": "UnityEngine.SceneManagement.LoadSceneParameters"
+        },
+        {
+          "name": "mustCompleteNextFrame",
+          "metadata_type_index": 50275,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 4,
+      "method_flags": 453,
+      "return_type": "UnityEngine.AsyncOperation",
+      "registration_pointer_slot_rva": 175682112,
+      "prefix16": "ff0301d1f65701a9f44f02a9fd7b03a9",
+      "native_abi": "void*(void*,void*,int32_t,LoadSceneParameters8,bool,const MethodInfo*)"
+    },
+    "mp4_scene_shader_loaded": {
+      "name": "UnityEngine.SceneManagement.SceneManager.Internal_SceneLoaded",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24177,
+      "metadata_method_index": 166283,
+      "token_row": 4371,
+      "rva": 126286352,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "scene",
+          "metadata_type_index": 71263,
+          "type_name": "UnityEngine.SceneManagement.Scene"
+        },
+        {
+          "name": "mode",
+          "metadata_type_index": 63339,
+          "type_name": "UnityEngine.SceneManagement.LoadSceneMode"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 145,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175682328,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "native_abi": "void(Scene4,int32_t,const MethodInfo*)"
+    },
+    "mp4_scene_shader_unloaded": {
+      "name": "UnityEngine.SceneManagement.SceneManager.Internal_SceneUnloaded",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24177,
+      "metadata_method_index": 166284,
+      "token_row": 4372,
+      "rva": 126286556,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "scene",
+          "metadata_type_index": 71263,
+          "type_name": "UnityEngine.SceneManagement.Scene"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 145,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175682336,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "native_abi": "void(Scene4,const MethodInfo*)"
+    },
+    "mp4_scene_shader_bundle_unload": {
+      "name": "UnityEngine.AssetBundle.Unload",
+      "module": "UnityEngine.AssetBundleModule.dll",
+      "type_definition_index": 33555,
+      "metadata_method_index": 222482,
+      "token_row": 21,
+      "rva": 125692288,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "unloadAllLoadedObjects",
+          "metadata_type_index": 50275,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175644744,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "native_abi": "void(void*,bool,const MethodInfo*)"
     }
   },
   "hook_names": [
@@ -3603,7 +3711,11 @@
     "mp4_capture_wrapper_ctor",
     "mp4_capture_texture_ctor",
     "mp4_capture_request",
-    "mp4_source_timeline_factory"
+    "mp4_source_timeline_factory",
+    "mp4_scene_shader_load",
+    "mp4_scene_shader_loaded",
+    "mp4_scene_shader_unloaded",
+    "mp4_scene_shader_bundle_unload"
   ],
   "segments": {
     "__TEXT": {
@@ -3645,12 +3757,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 3456,
+    "bytes": 3584,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 864,
+    "bytes": 896,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {

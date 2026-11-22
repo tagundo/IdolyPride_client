@@ -54,7 +54,7 @@ def host(tmp_path_factory):
     known, main = driver.split("int main(", 1)
     source = '#include "mp4_actor_state.hpp"\n'
     source += (FIXTURES / "mp4_shader_lineage_host_prefix.cpp.inc").read_text() + known
-    source += block(bridge, "MP4_SHADER_LINEAGE_HOST") + block(bridge, "MP4_SHADER_LINEAGE_HOOKS")
+    source += block(bridge, "MP4_SHADER_LINEAGE_HOST") + block(bridge, "MP4_SHADER_OBSERVER_ROOTS") + block(bridge, "MP4_SHADER_LINEAGE_HOOKS")
     source += "int main(" + main
     return compile_fixture(tmp_path_factory.mktemp("mp4-shader-lineage-host"), source)
 

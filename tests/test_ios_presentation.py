@@ -10,6 +10,8 @@ import pytest
 from idoly_local import ios_presentation as p
 
 SCENE_APPENDED=('mp4_psyllium_execute','mp4_fixed_loop_condition','mp4_particle_simulate','mp4_live_particle_simulate','mp4_presenter_end','mp4_actor_update','mp4_actor_late','mp4_actor_eye_late','mp4_actor_face_late','mp4_actor_foot_apply','mp4_particle_control_simulate','mp4_actor_derived_late_ref','mp4_actor_derived_late_shared','mp4_equipment_late','mp4_photography_is_end','mp4_player_is_end','mp4_render_stack','mp4_render_camera','mp4_vlb_draw','mp4_selected_renderer','mp4_volume_update','mp4_material_ctor_shader','mp4_render_library_ctor','mp4_cine_apply','mp4_cine_game_object_ctor','mp4_cine_volume_enable','mp4_mirror_late','mp4_mirror_parameters','mp4_mirror_destroy','mp4_fog_enable','mp4_fog_disable','mp4_fog_late','mp4_context_submit','mp4_control_create','mp4_srp_add_precull','mp4_srp_invoke_precull','mp4_srp_begin_frame','mp4_shader_memory_sync','mp4_shader_memory_async','mp4_shader_file_async','mp4_shader_bundle_result','mp4_capture_update','mp4_capture_wrapper_ctor','mp4_capture_texture_ctor','mp4_capture_request','mp4_source_timeline_factory')
+SCENE_APPENDED += ('mp4_scene_shader_load','mp4_scene_shader_loaded',
+                   'mp4_scene_shader_unloaded','mp4_scene_shader_bundle_unload')
 
 
 def signed_branch_target(source, instruction):
@@ -94,9 +96,9 @@ def test_original_cache_conditional_gateway_executes_both_paths(item_pointer):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "b26e91b84ba1d5a5f2e3a616173512e5dd97579c373a79b0d507f3ec38ab2d82"
+    assert hashlib.sha256(header).hexdigest() == "d7a83220479a765971b1f6c558f39235d94b20d0cd01aad88a914e229018bdc1"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 183 and len(plan["entries"]) == 108
+    assert len(profile["aliases"]) == 187 and len(plan["entries"]) == 112
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -113,6 +115,19 @@ def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
         assert signed_branch_target(entry["rva"], int.from_bytes(bytes.fromhex(entry["patched_entry"]), "little")) == entry.get("relay_in", entry["gateway"])
         assert signed_branch_target(entry["gateway"] + 24, words[6]) == entry.get("relay_out", entry["rva"] + 4)
         assert profile["aliases"][name]["rva"] == entry["rva"]
+
+
+def test_scene_origin_and_source_factory_observers_arm_before_font_startup():
+    installer = (p.PROFILE.parent / "static_install.hpp").read_text()
+    hooks = re.findall(r"HOOK\((\w+),", installer.split("Hook hooks[]={", 1)[1].split("};", 1)[0])
+    early = ["mp4_scene_shader_loaded", "mp4_scene_shader_unloaded", "mp4_scene_shader_bundle_unload",
+             "mp4_scene_shader_load", "mp4_shader_memory_sync", "mp4_shader_memory_async",
+             "mp4_shader_file_async", "mp4_shader_bundle_result", "mp4_source_timeline_factory"]
+    assert hooks[:len(early)] == early
+    assert hooks.index("mp4_source_timeline_factory") < hooks.index("font_awake")
+    publication = installer[installer.index("// All originals are valid"):]
+    assert publication.index("__atomic_store_n") < publication.index("mp4_scene_shader_frontends_current()")
+    assert "!mp4_scene_shader_origin_install()" in publication
 
 
 def test_two_new_gateways_preserve_every_previous_profile_byte_and_mapping():
@@ -311,8 +326,8 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 108 * 32
-    assert profile["slot_region"]["bytes"] == 108 * 8
+    assert profile["gateway_region"]["bytes"] == 112 * 32
+    assert profile["slot_region"]["bytes"] == 112 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
@@ -343,8 +358,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 108 * 32
-    assert original["slot_region"]["bytes"] == 108 * 8
+    assert original["gateway_region"]["bytes"] == 112 * 32
+    assert original["slot_region"]["bytes"] == 112 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length

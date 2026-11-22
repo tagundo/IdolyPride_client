@@ -49,3 +49,16 @@ void*file_original(void*p,uint32_t crc,uint64_t offset,Method*m){assert(p==&path
 void*request_original(void*p,Method*m){assert(p==&request&&m==reinterpret_cast<Method*>(456));++original_calls;return complete?&bundle:nullptr;}
 
 bool actual_main_thread(Method*m){assert(!m);++oracle_calls;return oracle_main;}
+
+// Scene producer services are modeled as unrecognized in this ordinary Shader
+// fixture; the actual Scene and PM helpers have separate extraction cases.
+struct Mp4SceneBundleFile{char path[1024]{};uint64_t offset=0;uint16_t source=0;};
+bool scene_withdrawn=false;
+void mp4_scene_shader_offthread(){scene_withdrawn=true;}
+uint16_t mp4_scene_shader_memory(void*){return 0;}
+uint16_t mp4_scene_shader_file(const char*,uint64_t){return 0;}
+bool mp4_scene_shader_file_begin(void*,uint64_t,Mp4SceneBundleFile&out){out={};return false;}
+bool scene_result_rooted(void*object){for(const auto&r:roots)if(r.second==object)return true;return false;}
+bool mp4_scene_shader_bundle_add(void*object,uint16_t,uint16_t){assert(scene_result_rooted(object));return false;}
+void mp4_scene_shader_async_result(void*object,void*,uint16_t,uint16_t,const Mp4SceneBundleFile*){assert(scene_result_rooted(object));}
+void mp4_scene_shader_bundle_result(void*,void*object){assert(scene_result_rooted(object));}

@@ -31,7 +31,7 @@ def host(tmp_path_factory):
 
 
 @pytest.mark.parametrize("case", [
-    "normal", "downloaded", "builtin", "unknown", "disabled", "inactive", "unculled",
+    "normal", "downloaded", "builtin", "scene", "scene_changed", "scene_unknown", "scene_compute", "unknown", "disabled", "inactive", "unculled",
     "unknown_pass_shader", "null_material", "skybox", "unknown_skybox", "config", "queue", "unknown_queue",
     "vlb", "vlb_unknown", "role_changed", "shader_id_changed", "shader_native_changed", "material_shader_changed",
     "root_failure", "source_changed", "unheld", "owner_lost", "unknown_node", "builtin_changed", "source_program_changed",

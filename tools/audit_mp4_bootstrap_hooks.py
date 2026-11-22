@@ -24,6 +24,9 @@ NATIVE_ROLES = {
     'deferred_a': 'deferred_a', 'deferred_b': 'deferred_b',
     'graph_create': 'graph_create',
 }
+SCENE_OBSERVERS = ('mp4_scene_shader_loaded', 'mp4_scene_shader_unloaded',
+                   'mp4_scene_shader_bundle_unload', 'mp4_scene_shader_load')
+
 MANAGED_EXTRA = (
     'mp4_capture_request', 'mp4_capture_update', 'mp4_capture_wrapper_ctor',
     'mp4_capture_texture_ctor', 'mp4_shader_memory_sync', 'mp4_shader_memory_async',
@@ -31,13 +34,13 @@ MANAGED_EXTRA = (
 )
 
 
-def source_pins(text: str, array: str):
-    found = re.findall(r'\b' + re.escape(array) + r'\s*\[8\]\s*=\s*\{(.*?)\};', text, re.S)
+def source_pins(text: str, array: str, expected_count: int = 8):
+    found = re.findall(r'\b' + re.escape(array) + r'\s*\[' + str(expected_count) + r'\]\s*=\s*\{(.*?)\};', text, re.S)
     if len(found) != 1:
         raise ValueError(f'{array}: expected exactly one finite source array')
     rows = re.findall(r'\{\s*BootstrapRole::(\w+)\s*,\s*BootstrapImage::(\w+)\s*,\s*(0x[0-9a-fA-F]+)\s*,\s*\{([^{}]+)\}\s*\}', found[0])
-    if len(rows) != 8:
-        raise ValueError(f'{array}: expected exactly eight source specs')
+    if len(rows) != expected_count:
+        raise ValueError(f'{array}: expected exactly {expected_count} source specs')
     out = []
     for role, image, rva, data in rows:
         parts = [part.strip() for part in data.split(',') if part.strip()]
@@ -49,7 +52,7 @@ def source_pins(text: str, array: str):
 
 def audit(originals: Path, bridge: Path | None = None):
     source = (bridge or ROOT / 'client-presentation/native/bridge.cpp').read_text()
-    checked = {'native_factory': 0, 'shader_capture': 0}
+    checked = {'native_factory': 0, 'shader_capture': 0, 'scene_observers': 0}
     for platform in ('android', 'ios'):
         original, engine, offset = whole(originals, platform)
         primary = source_pins(source, platform + '_bootstrap_pins')
@@ -81,6 +84,15 @@ def audit(originals: Path, bridge: Path | None = None):
             if original.b[at:at + 24] != pin:
                 raise ValueError(f'{platform}/{alias}: immutable original prologue mismatch')
             checked['shader_capture'] += 1
+        scenes = source_pins(source, platform + '_scene_managed_pins', 4)
+        for alias, (role, image, rva, pin) in zip(SCENE_OBSERVERS, scenes, strict=True):
+            method = original.method(*SELECTIONS[alias])
+            if (role, image, rva) != ('factory', 'game', int(method['rva'], 16)):
+                raise ValueError(f'{platform}/{alias}: actual scene observer selector changed')
+            at = original.offset(rva)
+            if original.b[at:at + 24] != pin:
+                raise ValueError(f'{platform}/{alias}: immutable scene prologue mismatch')
+            checked['scene_observers'] += 1
     return checked
 
 

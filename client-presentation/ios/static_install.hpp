@@ -129,6 +129,15 @@ void *install(void *) {
     shared_cache_load_calls();
 #define HOOK(entry, replacement, original) {&pin::entry,reinterpret_cast<void *>(replacement),reinterpret_cast<void **>(&original)}
     Hook hooks[]={
+        HOOK(mp4_scene_shader_loaded,mp4_scene_shader_loaded_hook,mp4_scene_shader_loaded_original),
+        HOOK(mp4_scene_shader_unloaded,mp4_scene_shader_unloaded_hook,mp4_scene_shader_unloaded_original),
+        HOOK(mp4_scene_shader_bundle_unload,mp4_scene_shader_bundle_unload_hook,mp4_scene_shader_bundle_unload_original),
+        HOOK(mp4_scene_shader_load,mp4_scene_shader_load_hook,mp4_scene_shader_load_original),
+        HOOK(mp4_shader_memory_sync,mp4_shader_memory_sync_hook,mp4_shader_memory_sync_original),
+        HOOK(mp4_shader_memory_async,mp4_shader_memory_async_hook,mp4_shader_memory_async_original),
+        HOOK(mp4_shader_file_async,mp4_shader_file_async_hook,mp4_shader_file_async_original),
+        HOOK(mp4_shader_bundle_result,mp4_shader_bundle_result_hook,mp4_shader_bundle_result_original),
+        HOOK(mp4_source_timeline_factory,mp4_child_factory_hook,mp4_child_factory_original),
         HOOK(q_set,quality_set_hook,quality_set_original), HOOK(q_apply,quality_apply_hook,quality_apply_original),
         HOOK(q_init,quality_init_hook,quality_init_original), HOOK(q_update,quality_update_hook,quality_update_original),
         HOOK(app_fps_set,app_fps_set_hook,app_fps_set_original),
@@ -219,11 +228,6 @@ void *install(void *) {
         HOOK(mp4_capture_update,mp4_capture_update_hook,mp4_capture_update_original),
         HOOK(mp4_capture_wrapper_ctor,mp4_capture_wrapper_ctor_hook,mp4_capture_wrapper_ctor_original),
         HOOK(mp4_capture_texture_ctor,mp4_capture_texture_ctor_hook,mp4_capture_texture_ctor_original),
-        HOOK(mp4_shader_memory_sync,mp4_shader_memory_sync_hook,mp4_shader_memory_sync_original),
-        HOOK(mp4_shader_memory_async,mp4_shader_memory_async_hook,mp4_shader_memory_async_original),
-        HOOK(mp4_shader_file_async,mp4_shader_file_async_hook,mp4_shader_file_async_original),
-        HOOK(mp4_shader_bundle_result,mp4_shader_bundle_result_hook,mp4_shader_bundle_result_original),
-        HOOK(mp4_source_timeline_factory,mp4_child_factory_hook,mp4_child_factory_original),
         HOOK(mp4_srp_add_precull,mp4_srp_add_precull_hook,mp4_srp_add_precull_original),
         HOOK(mp4_srp_invoke_precull,mp4_srp_invoke_precull_hook,mp4_srp_invoke_precull_original),
         HOOK(mp4_srp_begin_frame,mp4_srp_begin_frame_hook,mp4_srp_begin_frame_original),
@@ -239,8 +243,14 @@ void *install(void *) {
     if(!mp4_install_native_clock_api()||!mp4_install_fixed_root()){set_state("init_failed");return nullptr;}
     // All originals are valid before the first replacement is visible. Any
     // concurrent invocation during publication takes the original path.
-    for (auto &hook:hooks) __atomic_store_n(reinterpret_cast<uintptr_t *>(image_base+hook.entry->slot),
-        reinterpret_cast<uintptr_t>(hook.replacement),__ATOMIC_RELEASE);
+    for (auto &hook:hooks) {
+        __atomic_store_n(reinterpret_cast<uintptr_t *>(image_base+hook.entry->slot),
+            reinterpret_cast<uintptr_t>(hook.replacement),__ATOMIC_RELEASE);
+        if(hook.entry==&pin::mp4_scene_shader_load
+            &&(!mp4_scene_shader_frontends_current()||!mp4_scene_shader_origin_install())){
+            set_state("init_failed");return nullptr;
+        }
+    }
     mp4_actor_managed_installed.store(true,std::memory_order_release);
     mp4_actor_burst_installed.store(true,std::memory_order_release);
     shared_hooks_ready.store(true,std::memory_order_release);

@@ -1,0 +1,1946 @@
+{
+  "schema": 1,
+  "scope": "immutable-source-only; not callback/state execution proof",
+  "platforms": {
+    "android": {
+      "sources": {
+        "metadata_sha256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e",
+        "native_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3"
+      },
+      "callbacks": [
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "name": "OnCreateClip",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x92398e0",
+          "prefix": "fe0f1ef8f44f01a9347200b088625439",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "clip",
+              "type": "UnityEngine.Timeline.TimelineClip",
+              "metadata_type_index": 75421
+            }
+          ],
+          "metadata_method_index": 195561,
+          "token_row": 883,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a730"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "name": "CreatePlayable",
+          "parameter_count": 3,
+          "static": false,
+          "rva": "0x9239998",
+          "prefix": "ff8301d1e2fb00a9fa6702a9f85f03a9",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68499
+            },
+            {
+              "name": "gameObject",
+              "type": "UnityEngine.GameObject",
+              "metadata_type_index": 58059
+            },
+            {
+              "name": "clip",
+              "type": "UnityEngine.Timeline.TimelineClip",
+              "metadata_type_index": 75421
+            }
+          ],
+          "metadata_method_index": 195562,
+          "token_row": 884,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a738"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "name": "CreateTrackMixer",
+          "parameter_count": 3,
+          "static": false,
+          "rva": "0x9239dec",
+          "prefix": "fe0f1cf8f85f01a9f65702a9f44f03a9",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68499
+            },
+            {
+              "name": "go",
+              "type": "UnityEngine.GameObject",
+              "metadata_type_index": 58059
+            },
+            {
+              "name": "inputCount",
+              "type": "System.Int32",
+              "metadata_type_index": 61313
+            }
+          ],
+          "metadata_method_index": 195563,
+          "token_row": 885,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a740"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x923a06c",
+          "prefix": "e1031faa54fff217e1031faa51c5f517",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195564,
+          "token_row": 886,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a748"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "name": "get_clipCaps",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x9238bc0",
+          "prefix": "fe57bea9f44f01a9357200d0d43500b0",
+          "return": "UnityEngine.Timeline.ClipCaps",
+          "parameters": [],
+          "metadata_method_index": 195544,
+          "token_row": 866,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6a8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "name": "get_duration",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x9238c4c",
+          "prefix": "fe57bea9f44f01a9357200d0d43500b0",
+          "return": "System.Double",
+          "parameters": [],
+          "metadata_method_index": 195545,
+          "token_row": 867,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6b0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "name": "CreatePlayable",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x9238cdc",
+          "prefix": "fe0f1ef8f44f01a9337200d0d43500d0",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68499
+            },
+            {
+              "name": "owner",
+              "type": "UnityEngine.GameObject",
+              "metadata_type_index": 58059
+            }
+          ],
+          "metadata_method_index": 195546,
+          "token_row": 868,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6b8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x9238d2c",
+          "prefix": "e1031faa21caf517e1031faa21caf517",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195547,
+          "token_row": 869,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6c0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "Create",
+          "parameter_count": 3,
+          "static": true,
+          "rva": "0x9239fa4",
+          "prefix": "fe0f1cf8f85f01a9f65702a9f44f03a9",
+          "return": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable>",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68499
+            },
+            {
+              "name": "player",
+              "type": "VL.VLAnimationClipPlayer",
+              "metadata_type_index": 77576
+            },
+            {
+              "name": "inputCount",
+              "type": "System.Int32",
+              "metadata_type_index": 61313
+            }
+          ],
+          "metadata_method_index": 195565,
+          "token_row": 887,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a750"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "OnPlayableCreate",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x923a07c",
+          "prefix": "fe5fbda9f65701a9f44f02a937720090",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            }
+          ],
+          "metadata_method_index": 195566,
+          "token_row": 888,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a758"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "OnPlayableDestroy",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x923a110",
+          "prefix": "fe57bea9f44f01a935720090b43500f0",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            }
+          ],
+          "metadata_method_index": 195567,
+          "token_row": 889,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a760"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "OnBehaviourPlay",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x923a1cc",
+          "prefix": "fe57bea9f44f01a935720090743e00f0",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57590
+            }
+          ],
+          "metadata_method_index": 195568,
+          "token_row": 890,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a768"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "OnBehaviourPause",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x923a244",
+          "prefix": "fe57bea9f44f01a935720090743e00f0",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57590
+            }
+          ],
+          "metadata_method_index": 195569,
+          "token_row": 891,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a770"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "PrepareFrame",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x923a2bc",
+          "prefix": "e80f19fcfd7b01a9fc6f02a9fa6703a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57590
+            }
+          ],
+          "metadata_method_index": 195570,
+          "token_row": 892,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a778"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x923a074",
+          "prefix": "e1031faa51c5f517fe5fbda9f65701a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195571,
+          "token_row": 893,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a780"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "Create",
+          "parameter_count": 2,
+          "static": true,
+          "rva": "0x9231200",
+          "prefix": "fe67bca9f85f01a9f65702a9f44f03a9",
+          "return": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable>",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68499
+            },
+            {
+              "name": "timelinePlayable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            }
+          ],
+          "metadata_method_index": 195554,
+          "token_row": 876,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6f8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "AddClipPlayable",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x92315f8",
+          "prefix": "fe5fbda9f65701a9f44f02a9777200b0",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable>",
+              "metadata_type_index": 39464
+            }
+          ],
+          "metadata_method_index": 195555,
+          "token_row": 877,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a700"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "OnPlayableCreate",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x923949c",
+          "prefix": "fe0f1bf8fa6701a9f85f02a9f65703a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            }
+          ],
+          "metadata_method_index": 195556,
+          "token_row": 878,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a708"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "OnPlayableDestroy",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x92395c0",
+          "prefix": "fe0f1cf8f85f01a9f65702a9f44f03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            }
+          ],
+          "metadata_method_index": 195557,
+          "token_row": 879,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a710"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "GetInputCount",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x92396ec",
+          "prefix": "fe57bea9f44f01a9357200b0d43500d0",
+          "return": "System.Int32",
+          "parameters": [],
+          "metadata_method_index": 195558,
+          "token_row": 880,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a718"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "SetInputWeight",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x9239768",
+          "prefix": "e923bc6dfe5f01a9f65702a9f44f03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "index",
+              "type": "System.Int32",
+              "metadata_type_index": 61313
+            },
+            {
+              "name": "weight",
+              "type": "System.Single",
+              "metadata_type_index": 72837
+            }
+          ],
+          "metadata_method_index": 195559,
+          "token_row": 881,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a720"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x9239494",
+          "prefix": "e1031faa49c8f517fe0f1bf8fa6701a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195560,
+          "token_row": 882,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a728"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "Create",
+          "parameter_count": 4,
+          "static": true,
+          "rva": "0x9231528",
+          "prefix": "fe0f1cf8f85f01a9f65702a9f44f03a9",
+          "return": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable>",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68499
+            },
+            {
+              "name": "timelinePlayable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            },
+            {
+              "name": "motion",
+              "type": "VL.MotionDefine",
+              "metadata_type_index": 65668
+            },
+            {
+              "name": "applyFootIK",
+              "type": "System.Boolean",
+              "metadata_type_index": 50428
+            }
+          ],
+          "metadata_method_index": 195548,
+          "token_row": 870,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6c8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "OnPlayableCreate",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x9238d3c",
+          "prefix": "fd7bbaa9fc6f01a9fa6702a9f85f03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            }
+          ],
+          "metadata_method_index": 195549,
+          "token_row": 871,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6d0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "OnPlayableDestroy",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x9239134",
+          "prefix": "fe5fbda9f65701a9f44f02a9347200b0",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            }
+          ],
+          "metadata_method_index": 195550,
+          "token_row": 872,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6d8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "OnBehaviourPause",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x9239254",
+          "prefix": "fe5fbda9f65701a9f44f02a9347200b0",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57590
+            }
+          ],
+          "metadata_method_index": 195551,
+          "token_row": 873,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6e0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "OnBehaviourPlay",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x9239374",
+          "prefix": "fe5fbda9f65701a9f44f02a9347200b0",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57590
+            }
+          ],
+          "metadata_method_index": 195552,
+          "token_row": 874,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6e8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x9238d34",
+          "prefix": "e1031faa21caf517fd7bbaa9fc6f01a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195553,
+          "token_row": 875,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04a6f0"
+        },
+        {
+          "type": "VL.Core.VLActorController",
+          "name": "SetTimelineWeight",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x92467cc",
+          "prefix": "fe0f1ff8001040f9800000b4e1031faa",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "weight",
+              "type": "System.Single",
+              "metadata_type_index": 72837
+            }
+          ],
+          "metadata_method_index": 195813,
+          "token_row": 1135,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04af10"
+        },
+        {
+          "type": "VL.Core.VLActorController",
+          "name": "ResetModel",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x92468b8",
+          "prefix": "c0035fd6001040f9c0035fd6fe0f1df8",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195815,
+          "token_row": 1137,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04af20"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "GetTimelinePlayable",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x9230f7c",
+          "prefix": "fe57bea9f44f01a9757200d0d43e00b0",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [],
+          "metadata_method_index": 195242,
+          "token_row": 564,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa049d38"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "CreateTimelineMixer",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x9230ff0",
+          "prefix": "fe5fbda9f65701a9f44f02a9777200d0",
+          "return": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable>",
+          "parameters": [
+            {
+              "name": "trackPlayable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            }
+          ],
+          "metadata_method_index": 195243,
+          "token_row": 565,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa049d40"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "CreateTimelineClip",
+          "parameter_count": 3,
+          "static": false,
+          "rva": "0x9231394",
+          "prefix": "fe5fbda9f65701a9f44f02a9777200b0",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [
+            {
+              "name": "clipPlayable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68482
+            },
+            {
+              "name": "motion",
+              "type": "VL.MotionDefine",
+              "metadata_type_index": 65668
+            },
+            {
+              "name": "applyFootIK",
+              "type": "System.Boolean",
+              "metadata_type_index": 50428
+            }
+          ],
+          "metadata_method_index": 195244,
+          "token_row": 566,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa049d48"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "DestroyTimelineMixer",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x9231134",
+          "prefix": "fe57bea9f44f01a9757200b0d43e0090",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195245,
+          "token_row": 567,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa049d50"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "GetTimelineWeight",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x922e858",
+          "prefix": "fe57bea9f44f01a995720090d43e00f0",
+          "return": "System.Single",
+          "parameters": [],
+          "metadata_method_index": 195246,
+          "token_row": 568,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa049d58"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "SetTimelineWeight",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x92312ec",
+          "prefix": "e80f1dfcfe5701a9f44f02a9757200b0",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "weight",
+              "type": "System.Single",
+              "metadata_type_index": 72837
+            }
+          ],
+          "metadata_method_index": 195247,
+          "token_row": 569,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa049d60"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "SetTimelineDelay",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x922e8d8",
+          "prefix": "e80f1dfcfe5701a9f44f02a995720090",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "time",
+              "type": "System.Single",
+              "metadata_type_index": 72837
+            }
+          ],
+          "metadata_method_index": 195248,
+          "token_row": 570,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa049d68"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "Setup",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x922e244",
+          "prefix": "ff8301d1fe0b00f9fa6702a9f85f03a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195197,
+          "token_row": 519,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa049bd0"
+        },
+        {
+          "type": "Solis.Common.SolisActorController",
+          "name": "ResetModel",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x882e5a8",
+          "prefix": "fe57bea9f44f01a915c200d0148600f0",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 159156,
+          "token_row": 1558,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0x9fc4fb8"
+        },
+        {
+          "type": "VL.VLActorActorSwing",
+          "name": "Reset",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x921b4d8",
+          "prefix": "fe57bea9f44f01a9157300f0b43600d0",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 194687,
+          "token_row": 9,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa048be0"
+        }
+      ],
+      "types": {
+        "track": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "rva": "0x9e00b70",
+          "prefix": "966f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28566,
+          "metadata_type_index": 77592,
+          "type_table_pointer_slot": "0x984ede8",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        },
+        "asset": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "rva": "0x9e00b40",
+          "prefix": "936f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28563,
+          "metadata_type_index": 77589,
+          "type_table_pointer_slot": "0x984edd0",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        },
+        "track_playable": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "rva": "0x9e00b80",
+          "prefix": "976f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28567,
+          "metadata_type_index": 77593,
+          "type_table_pointer_slot": "0x984edf0",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        },
+        "mixer": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "rva": "0x9e00b60",
+          "prefix": "956f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28565,
+          "metadata_type_index": 77591,
+          "type_table_pointer_slot": "0x984ede0",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        },
+        "clip": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "rva": "0x9e00b50",
+          "prefix": "946f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28564,
+          "metadata_type_index": 77590,
+          "type_table_pointer_slot": "0x984edd8",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        }
+      },
+      "fields": {
+        "VL.Timeline.VLAnimationClipPlayerTimelineTrack": {},
+        "VL.Timeline.VLAnimationClipPlayerTimelineAsset": {
+          "motion": {
+            "offset": 24,
+            "type": "VL.MotionDefine",
+            "metadata_field_index": 129486
+          },
+          "exposedMotion": {
+            "offset": 32,
+            "type": "UnityEngine.ExposedReference`1<VL.MotionDefine>",
+            "metadata_field_index": 129487
+          },
+          "applyFootIK": {
+            "offset": 48,
+            "type": "System.Boolean",
+            "metadata_field_index": 129488
+          },
+          "positionOffsets": {
+            "offset": 52,
+            "type": "UnityEngine.Vector3",
+            "metadata_field_index": 129489
+          },
+          "rotationOffsets": {
+            "offset": 64,
+            "type": "UnityEngine.Vector3",
+            "metadata_field_index": 129490
+          }
+        },
+        "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable": {
+          "_player": {
+            "offset": 16,
+            "type": "VL.VLAnimationClipPlayer",
+            "metadata_field_index": 129499
+          },
+          "_playerPlayable": {
+            "offset": 24,
+            "type": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable>",
+            "metadata_field_index": 129500
+          }
+        },
+        "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable": {
+          "delay": {
+            "offset": 16,
+            "type": "System.Double",
+            "metadata_field_index": 129495
+          },
+          "inputCount": {
+            "offset": 24,
+            "type": "System.Int32",
+            "metadata_field_index": 129496
+          },
+          "_mixerPlayable": {
+            "offset": 32,
+            "type": "UnityEngine.Playables.Playable",
+            "metadata_field_index": 129497
+          },
+          "_currentInputIndex": {
+            "offset": 48,
+            "type": "System.Int32",
+            "metadata_field_index": 129498
+          }
+        },
+        "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable": {
+          "_motion": {
+            "offset": 16,
+            "type": "VL.MotionDefine",
+            "metadata_field_index": 129491
+          },
+          "_applyFootIK": {
+            "offset": 24,
+            "type": "System.Boolean",
+            "metadata_field_index": 129492
+          },
+          "_mixerPlayable": {
+            "offset": 32,
+            "type": "UnityEngine.Animations.AnimationLayerMixerPlayable",
+            "metadata_field_index": 129493
+          },
+          "_clipPlayables": {
+            "offset": 48,
+            "type": "UnityEngine.Animations.AnimationClipPlayable[]",
+            "metadata_field_index": 129494
+          }
+        }
+      },
+      "seek_receiver": {
+        "input_slot": "0x9a09bc0",
+        "usage_cell": "0x9ce9380",
+        "encoded": "0xc00a83ab",
+        "method_spec_index": 344533,
+        "method_spec": [
+          164660,
+          -1,
+          35381
+        ],
+        "arguments": [
+          "VL.Core.VLActorController"
+        ]
+      },
+      "virtual_offsets": {
+        "Setup": 376,
+        "SetTimelineWeight": 456,
+        "ResetModel": 1032
+      }
+    },
+    "ios": {
+      "sources": {
+        "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+        "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
+      },
+      "callbacks": [
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "name": "OnCreateClip",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bc6b88",
+          "prefix": "f44fbea9fd7b01a9fd430091f30301aa",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "clip",
+              "type": "UnityEngine.Timeline.TimelineClip",
+              "metadata_type_index": 75288
+            }
+          ],
+          "metadata_method_index": 195993,
+          "token_row": 883,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d90"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "name": "CreatePlayable",
+          "parameter_count": 3,
+          "static": false,
+          "rva": "0x7bc6c60",
+          "prefix": "ff0302d1fc6f02a9fa6703a9f85f04a9",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68374
+            },
+            {
+              "name": "gameObject",
+              "type": "UnityEngine.GameObject",
+              "metadata_type_index": 57907
+            },
+            {
+              "name": "clip",
+              "type": "UnityEngine.Timeline.TimelineClip",
+              "metadata_type_index": 75288
+            }
+          ],
+          "metadata_method_index": 195994,
+          "token_row": 884,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d98"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "name": "CreateTrackMixer",
+          "parameter_count": 3,
+          "static": false,
+          "rva": "0x7bc714c",
+          "prefix": "ff4301d1f85f01a9f65702a9f44f03a9",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68374
+            },
+            {
+              "name": "go",
+              "type": "UnityEngine.GameObject",
+              "metadata_type_index": 57907
+            },
+            {
+              "name": "inputCount",
+              "type": "System.Int32",
+              "metadata_type_index": 61162
+            }
+          ],
+          "metadata_method_index": 195995,
+          "token_row": 885,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4da0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bc7418",
+          "prefix": "010080d22953ef17010080d27820f317",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195996,
+          "token_row": 886,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4da8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "name": "get_clipCaps",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bc5d34",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "UnityEngine.Timeline.ClipCaps",
+          "parameters": [],
+          "metadata_method_index": 195976,
+          "token_row": 866,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d08"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "name": "get_duration",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bc5dfc",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Double",
+          "parameters": [],
+          "metadata_method_index": 195977,
+          "token_row": 867,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d10"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "name": "CreatePlayable",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x7bc5ec0",
+          "prefix": "f44fbea9fd7b01a9fd430091f36a0190",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68374
+            },
+            {
+              "name": "owner",
+              "type": "UnityEngine.GameObject",
+              "metadata_type_index": 57907
+            }
+          ],
+          "metadata_method_index": 195978,
+          "token_row": 868,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d18"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bc5f30",
+          "prefix": "010080d2b225f317010080d2b225f317",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195979,
+          "token_row": 869,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d20"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "Create",
+          "parameter_count": 3,
+          "static": true,
+          "rva": "0x7bc734c",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable>",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68374
+            },
+            {
+              "name": "player",
+              "type": "VL.VLAnimationClipPlayer",
+              "metadata_type_index": 77449
+            },
+            {
+              "name": "inputCount",
+              "type": "System.Int32",
+              "metadata_type_index": 61162
+            }
+          ],
+          "metadata_method_index": 195997,
+          "token_row": 887,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4db0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "OnPlayableCreate",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bc7428",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            }
+          ],
+          "metadata_method_index": 195998,
+          "token_row": 888,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4db8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "OnPlayableDestroy",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bc7500",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            }
+          ],
+          "metadata_method_index": 195999,
+          "token_row": 889,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4dc0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "OnBehaviourPlay",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x7bc75fc",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57437
+            }
+          ],
+          "metadata_method_index": 196000,
+          "token_row": 890,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4dc8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "OnBehaviourPause",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x7bc7684",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57437
+            }
+          ],
+          "metadata_method_index": 196001,
+          "token_row": 891,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4dd0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": "PrepareFrame",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x7bc770c",
+          "prefix": "ff0302d1e923016dfc6f02a9fa6703a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57437
+            }
+          ],
+          "metadata_method_index": 196002,
+          "token_row": 892,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4dd8"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bc7420",
+          "prefix": "010080d27820f317f85fbca9f65701a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 196003,
+          "token_row": 893,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4de0"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "Create",
+          "parameter_count": 2,
+          "static": true,
+          "rva": "0x7bbcdb8",
+          "prefix": "fa67bba9f85f01a9f65702a9f44f03a9",
+          "return": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable>",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68374
+            },
+            {
+              "name": "timelinePlayable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            }
+          ],
+          "metadata_method_index": 195986,
+          "token_row": 876,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d58"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "AddClipPlayable",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bbd20c",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable>",
+              "metadata_type_index": 39346
+            }
+          ],
+          "metadata_method_index": 195987,
+          "token_row": 877,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d60"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "OnPlayableCreate",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bc6710",
+          "prefix": "fa67bba9f85f01a9f65702a9f44f03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            }
+          ],
+          "metadata_method_index": 195988,
+          "token_row": 878,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d68"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "OnPlayableDestroy",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bc683c",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            }
+          ],
+          "metadata_method_index": 195989,
+          "token_row": 879,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d70"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "GetInputCount",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bc6964",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Int32",
+          "parameters": [],
+          "metadata_method_index": 195990,
+          "token_row": 880,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d78"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": "SetInputWeight",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x7bc69ec",
+          "prefix": "e923bb6df85f01a9f65702a9f44f03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "index",
+              "type": "System.Int32",
+              "metadata_type_index": 61162
+            },
+            {
+              "name": "weight",
+              "type": "System.Single",
+              "metadata_type_index": 72704
+            }
+          ],
+          "metadata_method_index": 195991,
+          "token_row": 881,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d80"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bc6708",
+          "prefix": "010080d2be23f317fa67bba9f85f01a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195992,
+          "token_row": 882,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d88"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "Create",
+          "parameter_count": 4,
+          "static": true,
+          "rva": "0x7bbd13c",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable>",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph",
+              "metadata_type_index": 68374
+            },
+            {
+              "name": "timelinePlayable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            },
+            {
+              "name": "motion",
+              "type": "VL.MotionDefine",
+              "metadata_type_index": 65579
+            },
+            {
+              "name": "applyFootIK",
+              "type": "System.Boolean",
+              "metadata_type_index": 50275
+            }
+          ],
+          "metadata_method_index": 195980,
+          "token_row": 870,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d28"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "OnPlayableCreate",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bc5f40",
+          "prefix": "fc6fbaa9fa6701a9f85f02a9f65703a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            }
+          ],
+          "metadata_method_index": 195981,
+          "token_row": 871,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d30"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "OnPlayableDestroy",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bc6378",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            }
+          ],
+          "metadata_method_index": 195982,
+          "token_row": 872,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d38"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "OnBehaviourPause",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x7bc64a8",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57437
+            }
+          ],
+          "metadata_method_index": 195983,
+          "token_row": 873,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d40"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": "OnBehaviourPlay",
+          "parameter_count": 2,
+          "static": false,
+          "rva": "0x7bc65d8",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "playable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            },
+            {
+              "name": "info",
+              "type": "UnityEngine.Playables.FrameData",
+              "metadata_type_index": 57437
+            }
+          ],
+          "metadata_method_index": 195984,
+          "token_row": 874,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d48"
+        },
+        {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "name": ".ctor",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bc5f38",
+          "prefix": "010080d2b225f317fc6fbaa9fa6701a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195985,
+          "token_row": 875,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4d50"
+        },
+        {
+          "type": "VL.Core.VLActorController",
+          "name": "SetTimelineWeight",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bd6a70",
+          "prefix": "001040f9600000b4010080d20d99ff17",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "weight",
+              "type": "System.Single",
+              "metadata_type_index": 72704
+            }
+          ],
+          "metadata_method_index": 196245,
+          "token_row": 1135,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b5570"
+        },
+        {
+          "type": "VL.Core.VLActorController",
+          "name": "ResetModel",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bd6b70",
+          "prefix": "c0035fd6001040f9c0035fd6f657bda9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 196247,
+          "token_row": 1137,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b5580"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "GetTimelinePlayable",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bbcae8",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [],
+          "metadata_method_index": 195674,
+          "token_row": 564,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4398"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "CreateTimelineMixer",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bbcb68",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable>",
+          "parameters": [
+            {
+              "name": "trackPlayable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            }
+          ],
+          "metadata_method_index": 195675,
+          "token_row": 565,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b43a0"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "CreateTimelineClip",
+          "parameter_count": 3,
+          "static": false,
+          "rva": "0x7bbcf68",
+          "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+          "return": "UnityEngine.Playables.Playable",
+          "parameters": [
+            {
+              "name": "clipPlayable",
+              "type": "UnityEngine.Playables.Playable",
+              "metadata_type_index": 68357
+            },
+            {
+              "name": "motion",
+              "type": "VL.MotionDefine",
+              "metadata_type_index": 65579
+            },
+            {
+              "name": "applyFootIK",
+              "type": "System.Boolean",
+              "metadata_type_index": 50275
+            }
+          ],
+          "metadata_method_index": 195676,
+          "token_row": 566,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b43a8"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "DestroyTimelineMixer",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bbccdc",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195677,
+          "token_row": 567,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b43b0"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "GetTimelineWeight",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bb9748",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Single",
+          "parameters": [],
+          "metadata_method_index": 195678,
+          "token_row": 568,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b43b8"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "SetTimelineWeight",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bbceb0",
+          "prefix": "e923bc6df65701a9f44f02a9fd7b03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "weight",
+              "type": "System.Single",
+              "metadata_type_index": 72704
+            }
+          ],
+          "metadata_method_index": 195679,
+          "token_row": 569,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b43c0"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "SetTimelineDelay",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x7bb97d8",
+          "prefix": "e923bc6df65701a9f44f02a9fd7b03a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "time",
+              "type": "System.Single",
+              "metadata_type_index": 72704
+            }
+          ],
+          "metadata_method_index": 195680,
+          "token_row": 570,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b43c8"
+        },
+        {
+          "type": "VL.VLAnimationClipPlayer",
+          "name": "Setup",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7bb8e88",
+          "prefix": "ffc301d1fc6f01a9fa6702a9f85f03a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195629,
+          "token_row": 519,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b4230"
+        },
+        {
+          "type": "Solis.Common.SolisActorController",
+          "name": "ResetModel",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x6f83b58",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 159575,
+          "token_row": 1558,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0xa72f0f8"
+        },
+        {
+          "type": "VL.VLActorActorSwing",
+          "name": "Reset",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7ba1384",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 195119,
+          "token_row": 9,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b3240"
+        }
+      ],
+      "types": {
+        "track": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrack",
+          "rva": "0xa56a750",
+          "prefix": "c76f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28615,
+          "metadata_type_index": 77465,
+          "type_table_pointer_slot": "0x9d8ecd0",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        },
+        "asset": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineAsset",
+          "rva": "0xa56a720",
+          "prefix": "c46f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28612,
+          "metadata_type_index": 77462,
+          "type_table_pointer_slot": "0x9d8ecb8",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        },
+        "track_playable": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",
+          "rva": "0xa56a760",
+          "prefix": "c86f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28616,
+          "metadata_type_index": 77466,
+          "type_table_pointer_slot": "0x9d8ecd8",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        },
+        "mixer": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",
+          "rva": "0xa56a740",
+          "prefix": "c66f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28614,
+          "metadata_type_index": 77464,
+          "type_table_pointer_slot": "0x9d8ecc8",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        },
+        "clip": {
+          "type": "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",
+          "rva": "0xa56a730",
+          "prefix": "c56f0000000000000000120000000000",
+          "kind": 18,
+          "metadata_type_definition_index": 28613,
+          "metadata_type_index": 77463,
+          "type_table_pointer_slot": "0x9d8ecc0",
+          "runtime_validation": "exact_resolved_metadata_row_plus_tail8_then_exact_class_identity"
+        }
+      },
+      "fields": {
+        "VL.Timeline.VLAnimationClipPlayerTimelineTrack": {},
+        "VL.Timeline.VLAnimationClipPlayerTimelineAsset": {
+          "motion": {
+            "offset": 24,
+            "type": "VL.MotionDefine",
+            "metadata_field_index": 129698
+          },
+          "exposedMotion": {
+            "offset": 32,
+            "type": "UnityEngine.ExposedReference`1<VL.MotionDefine>",
+            "metadata_field_index": 129699
+          },
+          "applyFootIK": {
+            "offset": 48,
+            "type": "System.Boolean",
+            "metadata_field_index": 129700
+          },
+          "positionOffsets": {
+            "offset": 52,
+            "type": "UnityEngine.Vector3",
+            "metadata_field_index": 129701
+          },
+          "rotationOffsets": {
+            "offset": 64,
+            "type": "UnityEngine.Vector3",
+            "metadata_field_index": 129702
+          }
+        },
+        "VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable": {
+          "_player": {
+            "offset": 16,
+            "type": "VL.VLAnimationClipPlayer",
+            "metadata_field_index": 129711
+          },
+          "_playerPlayable": {
+            "offset": 24,
+            "type": "UnityEngine.Playables.ScriptPlayable`1<VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable>",
+            "metadata_field_index": 129712
+          }
+        },
+        "VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable": {
+          "delay": {
+            "offset": 16,
+            "type": "System.Double",
+            "metadata_field_index": 129707
+          },
+          "inputCount": {
+            "offset": 24,
+            "type": "System.Int32",
+            "metadata_field_index": 129708
+          },
+          "_mixerPlayable": {
+            "offset": 32,
+            "type": "UnityEngine.Playables.Playable",
+            "metadata_field_index": 129709
+          },
+          "_currentInputIndex": {
+            "offset": 48,
+            "type": "System.Int32",
+            "metadata_field_index": 129710
+          }
+        },
+        "VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable": {
+          "_motion": {
+            "offset": 16,
+            "type": "VL.MotionDefine",
+            "metadata_field_index": 129703
+          },
+          "_applyFootIK": {
+            "offset": 24,
+            "type": "System.Boolean",
+            "metadata_field_index": 129704
+          },
+          "_mixerPlayable": {
+            "offset": 32,
+            "type": "UnityEngine.Animations.AnimationLayerMixerPlayable",
+            "metadata_field_index": 129705
+          },
+          "_clipPlayables": {
+            "offset": 48,
+            "type": "UnityEngine.Animations.AnimationClipPlayable[]",
+            "metadata_field_index": 129706
+          }
+        }
+      },
+      "seek_receiver": {
+        "input_slot": "0xa454888",
+        "usage_cell": "0xa454888",
+        "encoded": "0xc00a844d",
+        "method_spec_index": 344614,
+        "method_spec": [
+          165085,
+          -1,
+          35309
+        ],
+        "arguments": [
+          "VL.Core.VLActorController"
+        ]
+      },
+      "virtual_offsets": {
+        "Setup": 376,
+        "SetTimelineWeight": 456,
+        "ResetModel": 1032
+      }
+    }
+  }
+}

@@ -89,6 +89,9 @@ bool mp4_renderer_srp_field(void*k,const char*n,size_t offset,bool statik,void*&
 bool mp4_renderer_srp_list(void*list,void**&items,size_t&count,void*&array,uint32_t&version,size_t maximum){return mp4_actor_field(list,16,array)&&mp4_actor_field(list,28,version)&&mp4_actor_list(list,&items,&count,maximum);}
 bool mp4_renderer_srp_list_same(void*list,void*array,uint32_t version,void*const*items,size_t count,size_t maximum){void**now=nullptr,*a=nullptr;size_t n=0;uint32_t v=0;if(!mp4_renderer_srp_list(list,now,n,a,v,maximum)||a!=array||v!=version||n!=count)return false;for(size_t i=0;i<n;++i)if(now[i]!=items[i])return false;return true;}
 bool mp4_shader_downloaded_program(void*p){return downloaded&&p==shader_b;}
+// Scene provenance has its own actual producer/PM tests; default refusal here.
+bool scene_admitted=false;
+bool mp4_scene_shader_program(void*p){return scene_admitted&&p==shader_b;}
 int32_t instance_id(void*p,Method*){assert(retained(p));int32_t id=0;assert(mp4_actor_field(p,8,id));return id;}
 void*material_shader(void*p,Method*){if(p==builtin_material)assert(retained(p));void*shader=nullptr;assert(mp4_actor_field(p,32,shader));return shader;}
 void*builtin(Method*){return builtin_material;}
