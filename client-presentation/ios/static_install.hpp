@@ -223,6 +223,7 @@ void *install(void *) {
         HOOK(mp4_shader_memory_async,mp4_shader_memory_async_hook,mp4_shader_memory_async_original),
         HOOK(mp4_shader_file_async,mp4_shader_file_async_hook,mp4_shader_file_async_original),
         HOOK(mp4_shader_bundle_result,mp4_shader_bundle_result_hook,mp4_shader_bundle_result_original),
+        HOOK(mp4_source_timeline_factory,mp4_child_factory_hook,mp4_child_factory_original),
         HOOK(mp4_srp_add_precull,mp4_srp_add_precull_hook,mp4_srp_add_precull_original),
         HOOK(mp4_srp_invoke_precull,mp4_srp_invoke_precull_hook,mp4_srp_invoke_precull_original),
         HOOK(mp4_srp_begin_frame,mp4_srp_begin_frame_hook,mp4_srp_begin_frame_original),

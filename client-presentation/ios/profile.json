@@ -3466,6 +3466,33 @@
       "registration_pointer_slot_rva": 175853648,
       "prefix16": "ff0302d1f44f06a9fd7b07a9fdc30191",
       "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_source_timeline_factory": {
+      "name": "UnityEngine.Timeline.TimelineAsset.CreatePlayable",
+      "module": "Unity.Timeline.dll",
+      "type_definition_index": 30579,
+      "metadata_method_index": 205069,
+      "token_row": 290,
+      "rva": 125320300,
+      "return_type_index": 68357,
+      "parameters": [
+        {
+          "name": "graph",
+          "metadata_type_index": 68374,
+          "type_name": "UnityEngine.Playables.PlayableGraph"
+        },
+        {
+          "name": "go",
+          "metadata_type_index": 57907,
+          "type_name": "UnityEngine.GameObject"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 198,
+      "return_type": "UnityEngine.Playables.Playable",
+      "registration_pointer_slot_rva": 175623424,
+      "prefix16": "ffc301d1fc6f01a9fa6702a9f85f03a9",
+      "native_abi": "Playable16(void*,PlayableGraph16,void*,const MethodInfo*)"
     }
   },
   "hook_names": [
@@ -3575,7 +3602,8 @@
     "mp4_capture_update",
     "mp4_capture_wrapper_ctor",
     "mp4_capture_texture_ctor",
-    "mp4_capture_request"
+    "mp4_capture_request",
+    "mp4_source_timeline_factory"
   ],
   "segments": {
     "__TEXT": {
@@ -3617,12 +3645,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 3424,
+    "bytes": 3456,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 856,
+    "bytes": 864,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {

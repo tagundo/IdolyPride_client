@@ -4547,6 +4547,33 @@
       "registration_pointer_slot_rva": "0xa04a9f0",
       "prefix16": "ff4302d1fe4f08a9f30300aa48ffff97",
       "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_source_timeline_factory": {
+      "name": "UnityEngine.Timeline.TimelineAsset.CreatePlayable",
+      "module": "Unity.Timeline.dll",
+      "type_definition_index": 30542,
+      "metadata_method_index": 204705,
+      "token_row": 290,
+      "rva": "0x8ee53ac",
+      "return_type_index": 68482,
+      "parameters": [
+        {
+          "name": "graph",
+          "typeindex": 68499,
+          "type": "UnityEngine.Playables.PlayableGraph"
+        },
+        {
+          "name": "go",
+          "typeindex": 58059,
+          "type": "UnityEngine.GameObject"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 198,
+      "return_type": "UnityEngine.Playables.Playable",
+      "registration_pointer_slot_rva": "0xa012630",
+      "prefix16": "ff8301d1fe6f01a9fa6702a9f85f03a9",
+      "native_abi": "Playable16(void*,PlayableGraph16,void*,const MethodInfo*)"
     }
   },
   "graphics_fields": [
