@@ -190,7 +190,7 @@ import android.app.Activity;import android.content.*;import android.net.Uri;impo
 import java.io.*;import java.nio.file.*;import java.lang.reflect.*;import java.util.*;import org.json.*;
 public final class SaveLifecycleHarness {
  static final String JOB="0123456789abcdef0123456789abcdef",OUTPUT="abcdef0123456789abcdef0123456789",ONE="11111111111111111111111111111111",SECOND="22222222222222222222222222222222";
- public static String nativeSession,nativeQueue,queueIdentity;public static int cancelCalls,queueCommands,queueOperation,queuePosition;public static boolean allowNativeReady;
+ public static String nativeSession,nativeQueue,queueIdentity,nativeDiagnosticJson;public static int cancelCalls,queueCommands,queueOperation,queuePosition;public static boolean allowNativeReady;
  static final byte[] VIDEO=new byte[]{7,9,3,5,1,8};
  static final class ForeignActivity extends Activity {ForeignActivity(File root){super(root);}}
  static void need(boolean value,String message){if(!value)throw new AssertionError(message);}
@@ -287,6 +287,27 @@ public final class SaveLifecycleHarness {
   need(!UnifiedMP4Export.deleteCompleted(queuedTarget)&&source.isFile()&&queueCommands==0,"an unavailable native queue cannot falsely confirm queued output deletion");
   set("queueConfigured",true);nativeQueueFixture();poll();
   need(UnifiedMP4Export.deleteCompleted(queuedTarget)&&queueCommands==1&&queueOperation==2&&queuePosition==1&&JOB.equals(queueIdentity),"explicit queued deletion alone supplies native output-delete consent");
+  need(UnifiedMP4Export.diagnostics().optString("last_save_failure_stage").equals("save_open_document"),"actual failed document-provider stage survives the process-style restore");
+  JSONArray traceRows=new JSONArray();
+  for(int i=0;i<20;i++)traceRows.put(new JSONObject().put("sequence",i+1).put("stage","source_admission").put("code","offline_pipeline_not_verified").put("frame",i).put("tick",i*2).put("path","/private/not-exported"));
+  traceRows.put(new JSONObject().put("stage","/private/path").put("code","bad").put("sequence",Long.MAX_VALUE));
+  JSONObject modules=new JSONObject().put("scene_control",false).put("native_clock",true).put("/private/path",true).put("capability","secret");
+  for(int i=0;i<40;i++)modules.put("module_"+i,false);
+  JSONObject trace=new JSONObject().put("schema",1).put("current_stage","source_admission").put("last_error","offline_pipeline_not_verified")
+   .put("events",traceRows).put("modules",modules).put("capability","secret").put("address","0x123");
+  nativeDiagnosticJson=new JSONObject().put("export_trace",trace).toString();poll();
+  JSONObject exported=UnifiedMP4Export.diagnostics().optJSONObject("export_trace");
+  need(exported!=null&&exported.optString("current_stage").equals("source_admission")&&exported.optString("last_error").equals("offline_pipeline_not_verified"),"actual separate JNI diagnostics reaches the exported bundle");
+  need(exported.optJSONArray("events").length()==15&&exported.optJSONArray("events").optJSONObject(0).optLong("sequence")==6,"only the last16 native rows are considered and malformed rows are excluded");
+  need(exported.optJSONObject("modules").length()==24&&!exported.optJSONObject("modules").has("capability")&&!exported.optJSONObject("modules").has("/private/path"),"module map is bounded boolean facts only");
+  need(!exported.has("capability")&&!exported.has("address")&&!exported.optJSONArray("events").optJSONObject(0).has("path"),"native trace redacts paths, addresses, payloads and unknown keys");
+  set("lastNativeTrace",null);set("initialized",false);nativeDiagnosticJson=null;
+  JSONObject restarted=UnifiedMP4Export.diagnostics();
+  need(restarted.optJSONObject("export_trace")!=null&&restarted.optJSONObject("last_failed_export_trace")!=null,"persisted bounded failure trace remains available without live JNI after restart");
+  set("initialized",true);nativeDiagnosticJson=new JSONObject().put("export_trace",new JSONObject().put("schema",1).put("current_stage","idle").put("last_error","none")).toString();poll();
+  need(UnifiedMP4Export.diagnostics().optJSONObject("last_failed_export_trace").optString("last_error").equals("offline_pipeline_not_verified"),"fresh idle cannot erase a previous failed attempt");
+  nativeDiagnosticJson=new JSONObject().put("export_trace",new JSONObject().put("schema",2).put("current_stage","untrusted")).toString();set("lastNativeTrace",null);
+  need(!UnifiedMP4Export.diagnostics().optJSONObject("export_trace").optString("current_stage").equals("untrusted"),"unknown native diagnostic schema never enters the report");
   System.out.println("PASS actual controller explicit Save, durable completion, recreation, cancel and source retention");
  }
 }
@@ -298,6 +319,7 @@ static jclass fixture(JNIEnv* env){return env->FindClass("game/qualiarts/idolypr
 static jstring value(JNIEnv* env,const char* name){jclass type=fixture(env);return static_cast<jstring>(env->GetStaticObjectField(type,env->GetStaticFieldID(type,name,"Ljava/lang/String;")));}
 extern "C" {
 JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeStatus(JNIEnv* e,jclass){return value(e,"nativeSession");}
+JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeDiagnostics(JNIEnv* e,jclass){return value(e,"nativeDiagnosticJson");}
 JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueStatus(JNIEnv* e,jclass){return value(e,"nativeQueue");}
 JNIEXPORT void JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeCancel(JNIEnv* e,jclass){jclass type=fixture(e);e->CallStaticVoidMethod(type,e->GetStaticMethodID(type,"cancelledFromNative","()V"));}
 JNIEXPORT void JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeInvalidateQueueSelection(JNIEnv*,jclass){}

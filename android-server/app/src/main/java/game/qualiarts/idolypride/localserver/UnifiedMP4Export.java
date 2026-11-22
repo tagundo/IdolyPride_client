@@ -43,6 +43,9 @@ public final class UnifiedMP4Export {
     private static boolean queueConfigured;
     private static JSONObject last = new JSONObject();
     private static JSONObject lastQueue = new JSONObject();
+    private static JSONObject lastNativeTrace;
+    private static long tracePersistedAt;
+    private static String persistedTrace = "";
     private static volatile Mp4TitleCatalog titleCatalog = Mp4TitleCatalog.empty();
     private static boolean pendingQueueRun;
     private static WeakReference<Activity> game = new WeakReference<>(null);
@@ -70,6 +73,7 @@ public final class UnifiedMP4Export {
     private static native int nativeStartV2(int fpsNumerator, int fpsDenominator, int codec, int videoBitrate,
                                              int audioBitrate, int outputWidth, int outputHeight);
     private static native String nativeStatus();
+    private static native String nativeDiagnostics();
     private static native void nativeCancel();
     private static native void nativeSuspend(int reason);
     private static native void nativeResume();
@@ -193,6 +197,79 @@ public final class UnifiedMP4Export {
         } catch (Exception ignored) { /* Retain only the bounded public observations already copied. */ }
         return result.length() == 0 ? null : result;
     }
+    /** Native trace is a separate optional ABI; small existing status callers stay compatible. */
+    private static JSONObject exportTrace(JSONObject document) {
+        JSONObject source = document == null ? null : document.optJSONObject("export_trace");
+        if (source == null || !(source.opt("schema") instanceof Integer) || source.optLong("schema") != 1) return null;
+        JSONObject trace = new JSONObject();
+        try {
+            trace.put("schema", 1);
+            for (String key : new String[] {"current_stage", "last_error"}) {
+                Object value = source.opt(key);
+                if (value instanceof String && ((String) value).matches("[A-Za-z0-9_]{1,96}")) trace.put(key, value);
+            }
+            JSONArray input = source.optJSONArray("events"), events = new JSONArray();
+            if (input != null) for (int i = Math.max(0, input.length() - 16); i < input.length(); i++) {
+                JSONObject row = input.optJSONObject(i); if (row == null) continue;
+                JSONObject event = new JSONObject();
+                for (String key : new String[] {"stage", "code"}) {
+                    Object value = row.opt(key);
+                    if (value instanceof String && ((String) value).matches("[A-Za-z0-9_]{1,96}")) event.put(key, value);
+                }
+                for (String key : new String[] {"sequence", "frame", "tick"}) {
+                    Object value = row.opt(key);
+                    if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long)
+                        event.put(key, Math.max(0L, Math.min(9007199254740991L, ((Number) value).longValue())));
+                }
+                if (event.has("stage") && event.has("code")) events.put(event);
+            }
+            trace.put("events", events);
+            JSONObject inputModules = source.optJSONObject("modules"), modules = new JSONObject();
+            if (inputModules != null) {
+                java.util.Iterator<String> keys = inputModules.keys(); int count = 0;
+                while (keys.hasNext() && count < 24) {
+                    String key = keys.next(); Object value = inputModules.opt(key);
+                    if (key.matches("[a-z][a-z0-9_]{0,63}") && value instanceof Boolean) {
+                        modules.put(key, value); count++;
+                    }
+                }
+            }
+            trace.put("modules", modules);
+        } catch (Exception invalid) { return null; }
+        return trace.has("current_stage") || trace.has("last_error") || eventsPresent(trace) ? trace : null;
+    }
+    private static boolean eventsPresent(JSONObject trace) {
+        JSONArray events = trace.optJSONArray("events"); return events != null && events.length() != 0;
+    }
+    private static JSONObject readNativeTrace() {
+        if (!initialized) return null;
+        try {
+            String raw = nativeDiagnostics();
+            return raw != null && raw.length() <= 65536 ? exportTrace(new JSONObject(raw)) : null;
+        } catch (Exception | LinkageError unavailable) { return null; }
+    }
+    private static void rememberNativeTrace() {
+        JSONObject trace = readNativeTrace(); if (trace == null) return;
+        lastNativeTrace = trace;
+        Context context = application; if (context == null) return;
+        try {
+            String encoded = new JSONObject().put("export_trace", trace).toString();
+            long now = android.os.SystemClock.uptimeMillis();
+            boolean failed = !trace.optString("last_error", "none").equals("none");
+            if (encoded.equals(persistedTrace) || (!failed && now - tracePersistedAt < 2000)) return;
+            android.content.SharedPreferences.Editor edit = context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE)
+                    .edit().putString("last_native_trace", encoded);
+            if (failed) edit.putString("last_failed_native_trace", encoded);
+            edit.apply(); persistedTrace = encoded; tracePersistedAt = now;
+        } catch (Exception ignored) { /* Diagnostic writes never block an export. */ }
+    }
+    private static JSONObject savedNativeTrace(String key) {
+        Context context = application; if (context == null) return null;
+        try {
+            String raw = context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).getString(key, "");
+            return raw.length() <= 65536 ? exportTrace(new JSONObject(raw)) : null;
+        } catch (Exception ignored) { return null; }
+    }
     /** Bounded public observations only: no broker paths, capabilities or job payloads. */
     static JSONObject diagnostics() {
         JSONObject result = new JSONObject();
@@ -202,6 +279,12 @@ public final class UnifiedMP4Export {
                     .put("game_attached", owner != null && !owner.isDestroyed() && !owner.isFinishing())
                     .put("game_resumed", resumed).put("game_focused", gameFocused).put("game_stopped", stopped)
                     .put("verified_foreground_selection", foregroundSelectionReady);
+            Context context = application;
+            if (context != null) {
+                String stage = context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).getString("last_save_failure_stage", "none");
+                if (java.util.Arrays.asList("none", "save_validate_source", "save_open_document", "save_copy_document", "save_verify_copy").contains(stage))
+                    result.put("last_save_failure_stage", stage);
+            }
             result.put("save_picker_pending", pendingSaveId != null).put("save_copy_active", saving)
                     .put("document_picker_events", documentDiagnostics());
             JSONObject state = snapshot();
@@ -209,6 +292,12 @@ public final class UnifiedMP4Export {
                 String raw = nativeStatus();
                 if (raw != null && raw.length() <= 65536) state = new JSONObject(raw);
             } catch (Exception | LinkageError ignored) { }
+            JSONObject trace = readNativeTrace();
+            if (trace == null) trace = lastNativeTrace;
+            if (trace == null) trace = savedNativeTrace("last_native_trace");
+            if (trace != null) result.put("export_trace", trace);
+            JSONObject previousFailure = savedNativeTrace("last_failed_native_trace");
+            if (previousFailure != null) result.put("last_failed_export_trace", previousFailure);
             result.put("ready", state.optBoolean("ready"));
             for (String key : new String[] {"phase", "readiness_error", "error_code", "pause_reason"}) {
                 String value = state.optString(key, "unknown");
@@ -545,6 +634,7 @@ public final class UnifiedMP4Export {
                 if (queue != null && queue.length() <= 65536) lastQueue = new JSONObject(queue);
             }
         } catch (Exception | LinkageError unavailable) { /* Keep last complete user-visible snapshot. */ }
+        rememberNativeTrace();
         rememberCompletedOutputs();
         UnifiedMP4Background.sample(last);
         Activity activity = game.get();
@@ -813,18 +903,25 @@ public final class UnifiedMP4Export {
         if (result != Activity.RESULT_OK || data == null || data.getData() == null || id == null) { wake(); return true; }
         Uri destination = data.getData(); Context context = activity.getApplicationContext(); saving = true; wake();
         new Thread(() -> {
-            boolean success = false;
+            boolean success = false; String copyStage = "save_validate_source";
             try {
                 File source = completedFile(root, id); long expected = source.length(), copied = 0;
+                copyStage = "save_open_document";
                 try (FileInputStream input = new FileInputStream(source); OutputStream output = context.getContentResolver().openOutputStream(destination, "w")) {
                     if (output == null) throw new IOException("Document output unavailable");
+                    copyStage = "save_copy_document";
                     byte[] buffer = new byte[131072]; int read;
                     while ((read = input.read(buffer)) != -1) { output.write(buffer, 0, read); copied += read; }
                     output.flush();
                 }
+                copyStage = "save_verify_copy";
                 if (copied != expected || source.length() != expected) throw new IOException("Completed file changed");
                 success = true;
-            } catch (Exception ignored) { /* The private completed file stays available for retry. */ }
+            } catch (Exception ignored) {
+                try { context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).edit()
+                        .putString("last_save_failure_stage", copyStage).apply(); }
+                catch (RuntimeException unavailable) { /* The completed file remains retryable. */ }
+            }
             boolean saved = success;
             MAIN.post(() -> { saving = false; Toast.makeText(context, saved ? R.string.mp4_saved : R.string.mp4_save_failed, Toast.LENGTH_LONG).show(); wake(); });
         }, "IdolyMp4Document").start();

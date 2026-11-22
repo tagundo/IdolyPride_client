@@ -329,6 +329,11 @@ public class DiagnosticsHarness {
  static class Activity {boolean isDestroyed(){return false;}boolean isFinishing(){return false;}}
  static WeakReference<Activity> game=new WeakReference<>(new Activity());static boolean queueConfigured=true;
  static JSONObject last=new JSONObject(),queue=new JSONObject(),nativeValue=new JSONObject();
+ static JSONObject lastNativeTrace;static Context application;
+ static class Context {static final int MODE_PRIVATE=0;Preferences getSharedPreferences(String k,int mode){return new Preferences();}}
+ static class Preferences {String getString(String k,String fallback){return fallback;}}
+ static JSONObject readNativeTrace(){return null;}static JSONObject savedNativeTrace(String key){return null;}
+
  static class JSONObject {static final Map<String,JSONObject> refs=new HashMap<>();final Map<String,Object> map=new LinkedHashMap<>();
   JSONObject(){}JSONObject(String raw){map.putAll(refs.get(raw).map);}JSONObject put(String k,Object v){map.put(k,v);return this;}
   Object opt(String key){return map.get(key);}Object remove(String key){return map.remove(key);}int length(){return map.size();}
