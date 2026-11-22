@@ -68,3 +68,22 @@ runtime gate passes.
 These results cover the actual game inside the specified translated software
 guest. They do not establish physical-device speed, display color accuracy,
 long-term thermal behavior, background execution, or iOS device rendering.
+
+## Latest observed boundary, 2026-11-22
+
+Run `44981305568` uses exact source
+`0f7c0a5bd6b9847fec2f33011cab81edf718fad7`. The normal producer and packaging
+job passed. Its square-case runtime proof shows that the app Main Activity was
+created and resumed, but every observed Android UI tree was obscured by the
+system dialog **Pixel Launcher isn't responding**. The foreground Activity
+under that overlay was the Android notification permission controller. The
+driver did not close this unrelated ANR, infer a launcher button behind it, or
+count the permission Activity as the game launcher. It timed out before a
+usable Home or MV could be observed.
+
+The same proof separately retains Shadowhook initialization errno 12
+(`INIT_LINKER`) in the translated ARM guest. This is not evidence that a game
+MV ran, that memory was exhausted, or that export works on a physical device.
+No actual MP4, restoration or saved-file verification passed in this case.
+The small proof artifact is `14738371088`; successful artifact collection and
+strict native links remain separate from a functional runtime pass.
