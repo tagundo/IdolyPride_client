@@ -65,6 +65,26 @@ void node_graph(mp4actor::Handle*,mp4actor::Handle*out,Method*){*out={42,2,0};}
 bool mp4_actor_same_handle(mp4actor::Handle a,mp4actor::Handle b){return a.handle==b.handle&&a.version==b.version;}
 struct{Binding playable_graph_get;}mp4_actor_profile;
 #include "control-passive.cpp"
+// This fixture models only publication plumbing; the separate shipping source
+// topology fixture exercises the concrete observer and its plan refusals.
+bool mp4_control_source_observe(const Mp4ControlPassiveImage&,uint64_t){return false;}
+size_t topology_calls=0;
+Asset topology_nested_asset;
+bool topology_observer(const Mp4ControlPassiveImage&image,uint64_t receipt){
+ ++topology_calls;
+ assert(mp4_control_passive_publishing==&image&&mp4_control_passive_publishing_receipt==receipt&&receipt);
+ if(scenario=="topology_throw")throw 17;
+ if(scenario=="topology_nested"&&image.values[0]==&asset){
+  topology_nested_asset.source=&source_go;topology_nested_asset.input=asset.input;topology_nested_asset.cache=asset.cache;
+  Mp4ControlPassiveTicket nested;
+  assert(mp4_control_passive_before(&topology_nested_asset,image.graph,&parent_go,&method,nested));
+  topology_nested_asset.cache.duration=26;
+  assert(mp4_control_passive_after(nested,image.result,true));
+  nested.clear();
+  assert(mp4_control_passive_publishing==&image&&mp4_control_passive_publishing_receipt==receipt);
+ }
+ return scenario!="topology_reject";
+}
 bool proof_good=true;uint64_t proof_epoch=77,proof_job=99;
 bool logical_proof(void*ctx,const Mp4ControlPassiveImage&raw,uint64_t receipt,const mp4ctl::Cache&logical,uint64_t epoch,uint64_t job){
  assert(ctx==&asset&&receipt&&raw.before.duration==0&&raw.after.duration==25&&raw.after.controlled_asset==&child_asset);
@@ -74,6 +94,10 @@ bool logical_proof(void*ctx,const Mp4ControlPassiveImage&raw,uint64_t receipt,co
 }
 int main(int argc,char**argv){assert(argc==2);scenario=argv[1];parent.go=&parent_go;asset.source=&source_go;asset.input.source_default=&source_go;asset.cache.controlled_asset=&parent_asset;mp4_stage_other_pins.control_create.rva=17;mp4_stage_other_pins.graph_resolver.rva=reinterpret_cast<uintptr_t>(resolver);mp4_stage_profile.component_gameobject.rva=reinterpret_cast<uintptr_t>(get_go);mp4_actor_profile.playable_graph_get.rva=reinterpret_cast<uintptr_t>(node_graph);
  Mp4ControlPassiveTicket ticket;const mp4ctl::Handle graph{42,2,0},result{101,2,0};
+ Mp4ControlPassiveImage prior_publication{};
+ if(scenario.rfind("topology_",0)==0&&scenario!="topology_unset")mp4_control_passive_topology_observe=topology_observer;
+ if(scenario=="topology_prior_tls"){mp4_control_passive_publishing=&prior_publication;mp4_control_passive_publishing_receipt=999;}
+
  if(scenario=="before_pins")pins=false;else if(scenario=="before_method")method.entry=18;else if(scenario=="before_graph")graph_valid=false;else if(scenario=="before_schema")schema=false;else if(scenario=="before_owner")parent.go=&source_go;else if(scenario=="before_dead_asset")asset.alive=false;else if(scenario=="before_retain")force_retain_failure=true;else if(scenario=="before_foreign")main_thread=false;
  const bool initial=scenario.rfind("before_",0)!=0;
  assert(mp4_control_passive_before(&asset,graph,&parent_go,&method,ticket)==initial);
@@ -84,6 +108,12 @@ int main(int argc,char**argv){assert(argc==2);scenario=argv[1];parent.go=&parent
  assert(mp4_control_passive_after(ticket,result,scenario!="original_exception")==published);ticket.clear();
  if(!published){assert(!mp4_control_passive_receipted(&asset,&parent,&parent_go,graph,result));mp4_control_passive_clear();assert(roots.empty());return 0;}
  assert(mp4_control_passive_receipted(&asset,&parent,&parent_go,graph,result));
+ if(scenario.rfind("topology_",0)==0){
+  assert(topology_calls==(scenario=="topology_unset"?0u:scenario=="topology_nested"?2u:1u));
+  assert(mp4_control_passive_publishing==(scenario=="topology_prior_tls"?&prior_publication:nullptr));
+  assert(mp4_control_passive_publishing_receipt==(scenario=="topology_prior_tls"?999u:0u));
+  mp4_control_passive_publishing=nullptr;mp4_control_passive_publishing_receipt=0;
+ }
  if(scenario.rfind("promote_",0)==0){
   uint64_t raw_receipt=0,logical_receipt=0;Mp4ControlPassiveImage raw{};
   assert(mp4_control_passive_raw_receipted(&asset,&parent,&parent_go,graph,result,&raw_receipt,&raw)&&raw_receipt);
@@ -123,7 +153,7 @@ int main(int argc,char**argv){assert(argc==2);scenario=argv[1];parent.go=&parent
   assert(!mp4_control_passive_receipted(&asset,&parent,&parent_go,graph,result));
   assert(!mp4_control_passive_after(second,{},false));second.clear();
  }
- const bool remains=scenario=="normal"||scenario=="historical_expired"||scenario=="reuse";
+ const bool remains=scenario=="normal"||scenario=="historical_expired"||scenario=="reuse"||scenario.rfind("topology_",0)==0;
  assert(mp4_control_passive_receipted(&asset,&parent,&parent_go,graph,result)==remains);
  if(scenario=="reuse"){
   Mp4ControlPassiveTicket second;assert(mp4_control_passive_before(&asset,graph,&parent_go,&method,second));

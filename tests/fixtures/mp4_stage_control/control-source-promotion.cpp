@@ -69,6 +69,7 @@ bool mp4_actor_same_handle(mp4actor::Handle a,mp4actor::Handle b){return a.handl
 struct{Binding playable_graph_get;}mp4_actor_profile;
 bool mp4_control_source_pins_ready(){return mp4_stage_other_pins_ready();}
 #include "control-passive.cpp"
+bool mp4_control_source_observe(const Mp4ControlPassiveImage&,uint64_t){return false;}
 
 namespace mp4dn {enum class Result:uint8_t{ok,waiting,invalid,stale,failed,unsupported};enum class Round:uint8_t{source,exporting,restoring,restored};}
 enum class Mp4SceneResult:int{ok=0,waiting=1,unsupported=-1,invalid=-2,failed=-3,stale=-4};

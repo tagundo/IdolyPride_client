@@ -46,7 +46,17 @@ void*mp4_stage_children(void*){return array;}bool mp4_stage_array(void*a,void***
 bool mp4_stage_full_owner(void*){return full_owner;}bool mp4_stage_control_current(void*,const mp4stage::Owner&){return control_current;}
 #include "pins.inc"
 #include "provider.cpp"
+// This fixture isolates the retained PC primitive. Complete source Control
+// topology/parent/resource-plan joins are exercised by control-source-admission.
+bool source_delegate=false;size_t source_node_calls=0,source_runtime_calls=0,source_userdata_calls=0;
+Mp4TimelineVerdict mp4_control_source_node_verdict(const Mp4TimelineContext&c,mp4actor::Handle n,void*s){assert(c.phase==Mp4TimelineProofPhase::admission&&n.handle==3);++source_node_calls;return mp4_timeline_exact(s,mp4_stage_other_pins.particle)||mp4_timeline_exact(s,mp4_stage_other_pins.director_control)||mp4_timeline_exact(s,mp4_stage_other_pins.activation)?(source_delegate?Mp4TimelineVerdict::closed:Mp4TimelineVerdict::unclosed):Mp4TimelineVerdict::unrecognized;}
+Mp4TimelineVerdict mp4_control_source_runtime_verdict(const Mp4TimelineContext&,const Mp4TimelineRuntime&r){++source_runtime_calls;if(!r.clip)return Mp4TimelineVerdict::unrecognized;void*a=nullptr;if(!mp4_actor_field(r.clip,40,a))return Mp4TimelineVerdict::unclosed;return mp4_timeline_exact(a,mp4_stage_other_pins.control_asset)?(source_delegate?Mp4TimelineVerdict::closed:Mp4TimelineVerdict::unclosed):Mp4TimelineVerdict::unrecognized;}
+bool mp4_control_source_userdata(const Mp4TimelineContext&c,mp4actor::Handle n,void*s,void*d){assert(c.phase==Mp4TimelineProofPhase::admission&&n.handle==3&&s==&pc&&d==&userdata);++source_userdata_calls;return source_delegate;}
 int main(int argc,char**argv){assert(argc==2);const std::string c=argv[1];Mp4TimelineContext ctx;ctx.director=&director;ctx.asset=&asset;pc.particle=&ps;mp4_actor_profile.playable_graph_get.rva=reinterpret_cast<uintptr_t>(get_graph);mp4actor::Handle node{3,2,0};
+ if(c=="delegate_source_node"||c=="delegate_source_reject"){ctx.phase=Mp4TimelineProofPhase::admission;source_delegate=c=="delegate_source_node";assert(mp4_stage_other_node(ctx,node,&pc)==(source_delegate?Mp4TimelineVerdict::closed:Mp4TimelineVerdict::unclosed));assert(mp4_stage_other_userdata(ctx,node,&pc,&userdata)==source_delegate);assert(source_node_calls==1&&source_userdata_calls==1);return 0;}
+ if(c=="delegate_source_runtime"){ctx.phase=Mp4TimelineProofPhase::admission;source_delegate=true;Clip clip;clip.asset=&control_asset;Mp4TimelineRuntime runtime{&clip};assert(mp4_stage_other_runtime(ctx,runtime)==Mp4TimelineVerdict::closed&&source_runtime_calls==1);return 0;}
+ if(c=="delegate_other_phase"){source_delegate=true;assert(mp4_stage_other_node(ctx,node,&pc)==Mp4TimelineVerdict::closed&&source_node_calls==0);return 0;}
+ if(c=="delegate_unknown"){ctx.phase=Mp4TimelineProofPhase::admission;source_delegate=true;assert(mp4_stage_other_node(ctx,node,&unknown)==Mp4TimelineVerdict::unrecognized&&source_node_calls==1);return 0;}
  if(c=="admission"||c=="admit_foreign"||c=="admit_duplicate"||c=="admit_receipt"||c=="admit_timeline_sibling"||c=="admit_unpublished")ctx.phase=Mp4TimelineProofPhase::admission;
  if(c=="admit_foreign")admission_particle=&otherps;else if(c=="admit_duplicate")admission_duplicate=true;else if(c=="admit_timeline_sibling"){array[0]=&otherps;array_count=1;}else if(c=="admit_unpublished")admission_receipt=false;else if(c=="admit_receipt")source_admitted=false;
  if(c=="pins_lost")pins_current=false;else if(c=="source_lost")source_current=false;else if(c=="zero_seed")pc.seed=0;else if(c=="seed_changed")pc.seed=8;else if(c=="wrong_particle")pc.particle=&otherps;else if(c=="wrong_path")path_valid=false;else if(c=="wrong_graph")ctx.graph.version=4;else if(c=="uncaptured")mp4_scene_host.captured=0;else if(c=="scope_lost")full_owner=false;else if(c=="producer_lost")control_current=false;else if(c=="wrong_producer")mp4_stage_host.current_producers[0]=&foreign;else if(c=="source_epoch")++mp4_stage_host.source.generation;
@@ -56,6 +66,8 @@ int main(int argc,char**argv){assert(argc==2);const std::string c=argv[1];Mp4Tim
  if(c=="unknown"){assert(mp4_stage_other_node(ctx,node,&unknown)==Mp4TimelineVerdict::unrecognized);return 0;}
  if(c=="control_runtime"||c=="light_runtime"||c=="unknown_runtime"){Clip clip;clip.asset=c=="control_runtime"?&control_asset:c=="light_runtime"?&light_asset:&unknown;Mp4TimelineRuntime runtime{&clip};assert(mp4_stage_other_runtime(ctx,runtime)==(c=="unknown_runtime"?Mp4TimelineVerdict::unrecognized:Mp4TimelineVerdict::unclosed));return 0;}
  const bool ok=c=="active"||c=="admit_timeline_sibling"||c=="admission"||c=="restore"||c=="restore_plan"||c=="userdata";
- assert(mp4_stage_other_node(ctx,node,&pc)==(ok?Mp4TimelineVerdict::closed:Mp4TimelineVerdict::unclosed));
- assert(mp4_stage_other_userdata(ctx,node,&pc,&userdata)==ok);
+ if(ctx.phase==Mp4TimelineProofPhase::admission){assert(mp4_stage_other_particle_node(ctx,node,&pc)==ok);}
+ const bool complete=ok&&ctx.phase!=Mp4TimelineProofPhase::admission;
+ assert(mp4_stage_other_node(ctx,node,&pc)==(complete?Mp4TimelineVerdict::closed:Mp4TimelineVerdict::unclosed));
+ assert(mp4_stage_other_userdata(ctx,node,&pc,&userdata)==complete);
 }

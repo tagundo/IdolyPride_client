@@ -24,6 +24,7 @@ bool mp4_scene_parts_available(){return parts_ok;}
 struct Part{void*context=nullptr;bool(*restoration_verified)(void*)=nullptr;};
 bool child_verified(void*){return children_ok;}
 struct Host {bool active=true,invalidated=false,releasing=false;unsigned admitted=7,configured=31,captured=1,prepared=31,restored=31,finalized=2,all=31;Mp4SceneWitness source=selected,admitted_source=selected;Part parts[5]{};}mp4_scene_host;
+bool admission_receipt=true;bool mp4_stage_admission_source(const Mp4SceneWitness&w){return admission_receipt&&w.generation==selected.generation;}
 struct SourceHost{bool verified=true;Mp4SceneWitness source=selected;}mp4_camera_host,mp4_stage_host,mp4_world_host;
 namespace idoly_mp4_playback {enum class Phase {acquiring,held,starting,playing,restoring};}
 namespace idoly_mp4_runtime {
@@ -85,11 +86,14 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];
  mp4_api={get_asset,get_time,get_graph};mp4_timeline_hooks.current=mp4_timeline_phase_current;
  mp4_timeline_intrinsic_restore_verified=intrinsic;for(auto&part:mp4_scene_host.parts)part.restoration_verified=child_verified;
  Mp4TimelineContext c{};c.witness=selected;c.director=p(2);c.asset=p(7);c.identity={6,5,7};
- if(mode=="admission"||mode=="admission_other_source"||mode=="admission_unpublished"){
+ if(mode=="admission"||mode=="admission_after_stage_cleanup"||mode=="admission_receipt_lost"||mode=="admission_other_source"||mode=="admission_unpublished"){
   c.phase=Mp4TimelineProofPhase::admission;mp4_scene_host.active=false;
+  if(mode=="admission_after_stage_cleanup")mp4_stage_host.source.generation=0;
+  if(mode=="admission_receipt_lost")admission_receipt=false;
   if(mode=="admission_other_source")mp4_scene_host.admitted_source.generation=8;
   if(mode=="admission_unpublished")mp4_scene_host.admitted=3;
-  assert(mp4_timeline_restoration_plan_closed(c)==(mode=="admission"));return 0;}
+  assert(mp4_timeline_restoration_plan_closed(c)==(mode=="admission"||mode=="admission_after_stage_cleanup"));return 0;}
+ if(mode=="active_stage_source_lost"){mp4_stage_host.source.generation=8;assert(!mp4_timeline_phase_current(c));return 0;}
  if(mode=="current_missing_callback"){mp4_timeline_hooks.current=nullptr;assert(!mp4_timeline_current(c));return 0;}
  if(mode=="current_foreign_graph"){registry_ok=false;assert(!mp4_timeline_current(c));return 0;}
  if(mode=="active_held_partial"){assert(mp4_timeline_restoration_plan_closed(c));return 0;}

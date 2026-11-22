@@ -91,10 +91,10 @@ def test_own_installed_code_and_trampoline_identity_are_required(receipt_binary,
     assert result.returncode == 0, result.stderr
 
 
-def test_shader_observers_install_before_the_font_delay():
+def test_source_observers_install_before_the_font_delay():
     source = (NATIVE / 'bridge.cpp').read_text()
     table = source.split('    Hook hooks[] = {', 1)[1].split('    };', 1)[0]
     names = [line.split('HOOK(', 1)[1].split(',', 1)[0] for line in table.splitlines() if 'HOOK(' in line]
-    assert names[:5] == ['mp4_shader_memory_sync', 'mp4_shader_memory_async', 'mp4_shader_file_async',
-                         'mp4_shader_bundle_result', 'font_awake']
+    assert names[:6] == ['mp4_shader_memory_sync', 'mp4_shader_memory_async', 'mp4_shader_file_async',
+                         'mp4_shader_bundle_result', 'mp4_source_timeline_factory', 'font_awake']
     assert 'if (hooks[i].entry==&pin::font_awake) pause_ms(500)' in source

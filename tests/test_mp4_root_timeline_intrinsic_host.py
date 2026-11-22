@@ -23,7 +23,7 @@ def intrinsic(tmp_path_factory, request):
     text = (ROOT / 'client-presentation/native/bridge.cpp').read_text()
     start = text.index('// BEGIN_MP4_ROOT_TIMELINE_PRODUCER_HOST')
     middle = text.index('enum class Mp4TimelineProofPhase', start)
-    end = text.index('// Exact original source factory/callback pins;', middle)
+    end = text.index('// BEGIN_MP4_TIMELINE_ACTOR_PINS', middle)
     pins = '#define mp4_timeline_pins generated_timeline_pins\n' + text[start:middle]
     pins += '\n#undef mp4_timeline_pins\nMp4TimelinePins mp4_timeline_pins=generated_timeline_pins;\n'
     fixture = (ROOT / 'tests/fixtures/mp4_root_timeline_intrinsic_host.cpp.inc').read_text()

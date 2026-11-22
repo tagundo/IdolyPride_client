@@ -65,6 +65,10 @@ def _write_shipping_bodies(destination: Path) -> None:
         "provider.cpp": _between(source, "bool mp4_stage_other_pins_ready()",
                                   "namespace idoly_mp4_control_assets {"),
         "control-source-schema-pins.cpp": _function(source, "mp4_control_source_pins_ready"),
+        "control-source-admission-pins.inc": _between(source,
+            "struct Mp4ControlSourceAdmissionPins", "// BEGIN_MP4_CONTROL_SOURCE_ADMISSION_HOST"),
+        "control-source-admission-host.cpp": _between(source,
+            "// BEGIN_MP4_CONTROL_SOURCE_ADMISSION_HOST", "// END_MP4_CONTROL_SOURCE_ADMISSION_HOST"),
         "control-passive.cpp": _between(source,
             "constexpr size_t mp4_control_passive_capacity = 512;",
             "bool mp4_control_factory_authorized("),
@@ -100,7 +104,8 @@ def test_shipping_stage_control_models(tmp_path: Path) -> None:
             "owner_lost", "original_exception", "wrong_result", "cleanup_false",
             "restore_superseded", "restore_owner_lost", "restore_writer_failed",
             "reuse", "inventory_exception"],
-        "provider": ["admission", "admit_foreign", "admit_duplicate", "admit_receipt", "admit_timeline_sibling", "admit_unpublished",
+        "provider": ["delegate_source_node", "delegate_source_reject", "delegate_source_runtime",
+            "delegate_other_phase", "delegate_unknown", "admission", "admit_foreign", "admit_duplicate", "admit_receipt", "admit_timeline_sibling", "admit_unpublished",
             "pins_lost", "source_lost", "zero_seed", "seed_changed", "wrong_particle",
             "wrong_path", "wrong_graph", "uncaptured", "scope_lost", "producer_lost",
             "wrong_producer", "source_epoch", "restore", "restore_pending", "restore_plan",
@@ -136,7 +141,7 @@ def test_shipping_stage_control_models(tmp_path: Path) -> None:
         if fixture.stem not in explicit:
             cases += inferred
         elif fixture.stem == "control-passive":
-            cases += [case for case in inferred if case.startswith("promote_")]
+            cases += [case for case in inferred if case.startswith(("promote_", "topology_"))]
         cases = list(dict.fromkeys(cases))
         build = subprocess.run([compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
             "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie", "-no-pie",
@@ -148,4 +153,4 @@ def test_shipping_stage_control_models(tmp_path: Path) -> None:
             result = subprocess.run([str(binary), case], env=env, capture_output=True, text=True)
             assert result.returncode == 0, (fixture.name, case, result.stdout, result.stderr)
         total += len(cases)
-    assert total >= 440, total
+    assert total >= 518, total

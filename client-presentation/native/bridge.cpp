@@ -2257,7 +2257,8 @@ bool mp4_managed_hook_requires_backend(uintptr_t rva){
  return rva==pin::mp4_shader_memory_sync.rva||rva==pin::mp4_shader_memory_async.rva
   ||rva==pin::mp4_shader_file_async.rva||rva==pin::mp4_shader_bundle_result.rva
   ||rva==pin::mp4_capture_request.rva||rva==pin::mp4_capture_update.rva
-  ||rva==pin::mp4_capture_wrapper_ctor.rva||rva==pin::mp4_capture_texture_ctor.rva;
+  ||rva==pin::mp4_capture_wrapper_ctor.rva||rva==pin::mp4_capture_texture_ctor.rva
+  ||rva==pin::mp4_source_timeline_factory.rva;
 }
 constexpr size_t mp4_managed_hook_capacity=128;
 Mp4ManagedHookReceipt mp4_managed_hook_receipts[mp4_managed_hook_capacity]{};
@@ -2348,6 +2349,7 @@ bool mp4_hook_was_statically_verified(const mp4game::Binding &binding) {
     else if(binding.rva==pin::mp4_cine_volume_enable.rva)entry=&pin::mp4_cine_volume_enable;
     else if(binding.rva==pin::mp4_context_submit.rva)entry=&pin::mp4_context_submit;
     else if(binding.rva==pin::mp4_control_create.rva)entry=&pin::mp4_control_create;
+    else if(binding.rva==pin::mp4_source_timeline_factory.rva)entry=&pin::mp4_source_timeline_factory;
     else if(binding.rva==pin::mp4_capture_request.rva)entry=&pin::mp4_capture_request;
     else if(binding.rva==pin::mp4_capture_update.rva)entry=&pin::mp4_capture_update;
     else if(binding.rva==pin::mp4_capture_wrapper_ctor.rva)entry=&pin::mp4_capture_wrapper_ctor;
@@ -4871,6 +4873,7 @@ struct Mp4SceneHost {
 } mp4_scene_host;
 void mp4_stage_admission_drop()noexcept;
 void mp4_stage_admission_withdraw()noexcept;
+bool mp4_stage_admission_source(const Mp4SceneWitness&);
 // Independent retirement providers retain their own anchors after scene
 // resources are released. A missing provider cannot enable the pipeline.
 struct Mp4ScenePostRestoreApi {
@@ -19175,6 +19178,241 @@ bool mp4_timeline_userdata(Mp4TimelineContext &c, mp4world::AnimationOutput outp
     }
 }
 
+// BEGIN_MP4_TIMELINE_ACTOR_PINS
+struct Mp4TimelineActorPins{Mp4TimelineTypePin track,asset,track_playable,mixer,clip;mp4game::Binding reset_base,reset_solis,reset_swing,setup,weight;const mp4game::Binding*callbacks;size_t callback_count;};
+[[maybe_unused]] inline constexpr mp4game::Binding mp4_timeline_actor_android_callbacks[]={{0x92398e0,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x34,0x72,0x00,0xb0,0x88,0x62,0x54,0x39}},{0x9239998,{0xff,0x83,0x01,0xd1,0xe2,0xfb,0x00,0xa9,0xfa,0x67,0x02,0xa9,0xf8,0x5f,0x03,0xa9}},{0x9239dec,{0xfe,0x0f,0x1c,0xf8,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x923a06c,{0xe1,0x03,0x1f,0xaa,0x54,0xff,0xf2,0x17,0xe1,0x03,0x1f,0xaa,0x51,0xc5,0xf5,0x17}},{0x9238bc0,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x35,0x72,0x00,0xd0,0xd4,0x35,0x00,0xb0}},{0x9238c4c,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x35,0x72,0x00,0xd0,0xd4,0x35,0x00,0xb0}},{0x9238cdc,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x33,0x72,0x00,0xd0,0xd4,0x35,0x00,0xd0}},{0x9238d2c,{0xe1,0x03,0x1f,0xaa,0x21,0xca,0xf5,0x17,0xe1,0x03,0x1f,0xaa,0x21,0xca,0xf5,0x17}},{0x9239fa4,{0xfe,0x0f,0x1c,0xf8,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x923a07c,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x37,0x72,0x00,0x90}},{0x923a110,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x35,0x72,0x00,0x90,0xb4,0x35,0x00,0xf0}},{0x923a1cc,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x35,0x72,0x00,0x90,0x74,0x3e,0x00,0xf0}},{0x923a244,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x35,0x72,0x00,0x90,0x74,0x3e,0x00,0xf0}},{0x923a2bc,{0xe8,0x0f,0x19,0xfc,0xfd,0x7b,0x01,0xa9,0xfc,0x6f,0x02,0xa9,0xfa,0x67,0x03,0xa9}},{0x923a074,{0xe1,0x03,0x1f,0xaa,0x51,0xc5,0xf5,0x17,0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9}},{0x9231200,{0xfe,0x67,0xbc,0xa9,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x92315f8,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x77,0x72,0x00,0xb0}},{0x923949c,{0xfe,0x0f,0x1b,0xf8,0xfa,0x67,0x01,0xa9,0xf8,0x5f,0x02,0xa9,0xf6,0x57,0x03,0xa9}},{0x92395c0,{0xfe,0x0f,0x1c,0xf8,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x92396ec,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x35,0x72,0x00,0xb0,0xd4,0x35,0x00,0xd0}},{0x9239768,{0xe9,0x23,0xbc,0x6d,0xfe,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x9239494,{0xe1,0x03,0x1f,0xaa,0x49,0xc8,0xf5,0x17,0xfe,0x0f,0x1b,0xf8,0xfa,0x67,0x01,0xa9}},{0x9231528,{0xfe,0x0f,0x1c,0xf8,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x9238d3c,{0xfd,0x7b,0xba,0xa9,0xfc,0x6f,0x01,0xa9,0xfa,0x67,0x02,0xa9,0xf8,0x5f,0x03,0xa9}},{0x9239134,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x34,0x72,0x00,0xb0}},{0x9239254,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x34,0x72,0x00,0xb0}},{0x9239374,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x34,0x72,0x00,0xb0}},{0x9238d34,{0xe1,0x03,0x1f,0xaa,0x21,0xca,0xf5,0x17,0xfd,0x7b,0xba,0xa9,0xfc,0x6f,0x01,0xa9}},{0x92467cc,{0xfe,0x0f,0x1f,0xf8,0x00,0x10,0x40,0xf9,0x80,0x00,0x00,0xb4,0xe1,0x03,0x1f,0xaa}},{0x92468b8,{0xc0,0x03,0x5f,0xd6,0x00,0x10,0x40,0xf9,0xc0,0x03,0x5f,0xd6,0xfe,0x0f,0x1d,0xf8}},{0x9230f7c,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x75,0x72,0x00,0xd0,0xd4,0x3e,0x00,0xb0}},{0x9230ff0,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x77,0x72,0x00,0xd0}},{0x9231394,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x77,0x72,0x00,0xb0}},{0x9231134,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x75,0x72,0x00,0xb0,0xd4,0x3e,0x00,0x90}},{0x922e858,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x95,0x72,0x00,0x90,0xd4,0x3e,0x00,0xf0}},{0x92312ec,{0xe8,0x0f,0x1d,0xfc,0xfe,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x75,0x72,0x00,0xb0}},{0x922e8d8,{0xe8,0x0f,0x1d,0xfc,0xfe,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x95,0x72,0x00,0x90}},{0x922e244,{0xff,0x83,0x01,0xd1,0xfe,0x0b,0x00,0xf9,0xfa,0x67,0x02,0xa9,0xf8,0x5f,0x03,0xa9}},{0x882e5a8,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x15,0xc2,0x00,0xd0,0x14,0x86,0x00,0xf0}},{0x921b4d8,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x15,0x73,0x00,0xf0,0xb4,0x36,0x00,0xd0}}};
+[[maybe_unused]] inline constexpr Mp4TimelineActorPins mp4_timeline_actor_android={{"VL.Timeline.VLAnimationClipPlayerTimelineTrack",{0x9e00b70,{0x96,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{"VL.Timeline.VLAnimationClipPlayerTimelineAsset",{0x9e00b40,{0x93,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{"VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",{0x9e00b80,{0x97,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{"VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",{0x9e00b60,{0x95,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{"VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",{0x9e00b50,{0x94,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{0x92468b8,{0xc0,0x03,0x5f,0xd6,0x00,0x10,0x40,0xf9,0xc0,0x03,0x5f,0xd6,0xfe,0x0f,0x1d,0xf8}},{0x882e5a8,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x15,0xc2,0x00,0xd0,0x14,0x86,0x00,0xf0}},{0x921b4d8,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x15,0x73,0x00,0xf0,0xb4,0x36,0x00,0xd0}},{0x922e244,{0xff,0x83,0x01,0xd1,0xfe,0x0b,0x00,0xf9,0xfa,0x67,0x02,0xa9,0xf8,0x5f,0x03,0xa9}},{0x92312ec,{0xe8,0x0f,0x1d,0xfc,0xfe,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x75,0x72,0x00,0xb0}},mp4_timeline_actor_android_callbacks,40};
+[[maybe_unused]] inline constexpr mp4game::Binding mp4_timeline_actor_ios_callbacks[]={{0x7bc6b88,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xf3,0x03,0x01,0xaa}},{0x7bc6c60,{0xff,0x03,0x02,0xd1,0xfc,0x6f,0x02,0xa9,0xfa,0x67,0x03,0xa9,0xf8,0x5f,0x04,0xa9}},{0x7bc714c,{0xff,0x43,0x01,0xd1,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x7bc7418,{0x01,0x00,0x80,0xd2,0x29,0x53,0xef,0x17,0x01,0x00,0x80,0xd2,0x78,0x20,0xf3,0x17}},{0x7bc5d34,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bc5dfc,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bc5ec0,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xf3,0x6a,0x01,0x90}},{0x7bc5f30,{0x01,0x00,0x80,0xd2,0xb2,0x25,0xf3,0x17,0x01,0x00,0x80,0xd2,0xb2,0x25,0xf3,0x17}},{0x7bc734c,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bc7428,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bc7500,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bc75fc,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bc7684,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bc770c,{0xff,0x03,0x02,0xd1,0xe9,0x23,0x01,0x6d,0xfc,0x6f,0x02,0xa9,0xfa,0x67,0x03,0xa9}},{0x7bc7420,{0x01,0x00,0x80,0xd2,0x78,0x20,0xf3,0x17,0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9}},{0x7bbcdb8,{0xfa,0x67,0xbb,0xa9,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x7bbd20c,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bc6710,{0xfa,0x67,0xbb,0xa9,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x7bc683c,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bc6964,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bc69ec,{0xe9,0x23,0xbb,0x6d,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},{0x7bc6708,{0x01,0x00,0x80,0xd2,0xbe,0x23,0xf3,0x17,0xfa,0x67,0xbb,0xa9,0xf8,0x5f,0x01,0xa9}},{0x7bbd13c,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bc5f40,{0xfc,0x6f,0xba,0xa9,0xfa,0x67,0x01,0xa9,0xf8,0x5f,0x02,0xa9,0xf6,0x57,0x03,0xa9}},{0x7bc6378,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bc64a8,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bc65d8,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bc5f38,{0x01,0x00,0x80,0xd2,0xb2,0x25,0xf3,0x17,0xfc,0x6f,0xba,0xa9,0xfa,0x67,0x01,0xa9}},{0x7bd6a70,{0x00,0x10,0x40,0xf9,0x60,0x00,0x00,0xb4,0x01,0x00,0x80,0xd2,0x0d,0x99,0xff,0x17}},{0x7bd6b70,{0xc0,0x03,0x5f,0xd6,0x00,0x10,0x40,0xf9,0xc0,0x03,0x5f,0xd6,0xf6,0x57,0xbd,0xa9}},{0x7bbcae8,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bbcb68,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bbcf68,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bbccdc,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bb9748,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bbceb0,{0xe9,0x23,0xbc,0x6d,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bb97d8,{0xe9,0x23,0xbc,0x6d,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},{0x7bb8e88,{0xff,0xc3,0x01,0xd1,0xfc,0x6f,0x01,0xa9,0xfa,0x67,0x02,0xa9,0xf8,0x5f,0x03,0xa9}},{0x6f83b58,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7ba1384,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}};
+[[maybe_unused]] inline constexpr Mp4TimelineActorPins mp4_timeline_actor_ios={{"VL.Timeline.VLAnimationClipPlayerTimelineTrack",{0xa56a750,{0xc7,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{"VL.Timeline.VLAnimationClipPlayerTimelineAsset",{0xa56a720,{0xc4,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{"VL.Timeline.VLAnimationClipPlayerTimelineTrackPlayable",{0xa56a760,{0xc8,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{"VL.Timeline.VLAnimationClipPlayerTimelineMixerPlayable",{0xa56a740,{0xc6,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{"VL.Timeline.VLAnimationClipPlayerTimelineClipPlayable",{0xa56a730,{0xc5,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}},{0x7bd6b70,{0xc0,0x03,0x5f,0xd6,0x00,0x10,0x40,0xf9,0xc0,0x03,0x5f,0xd6,0xf6,0x57,0xbd,0xa9}},{0x6f83b58,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7ba1384,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},{0x7bb8e88,{0xff,0xc3,0x01,0xd1,0xfc,0x6f,0x01,0xa9,0xfa,0x67,0x02,0xa9,0xf8,0x5f,0x03,0xa9}},{0x7bbceb0,{0xe9,0x23,0xbc,0x6d,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}},mp4_timeline_actor_ios_callbacks,40};
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto&mp4_timeline_actor_pins=mp4_timeline_actor_ios;
+#else
+constexpr const auto&mp4_timeline_actor_pins=mp4_timeline_actor_android;
+#endif
+// END_MP4_TIMELINE_ACTOR_PINS
+
+// BEGIN_MP4_TIMELINE_ACTOR_PRODUCER_HOST
+// Actual Director TrackPlayable -> selected Actor player -> that player's
+// separate persistent graph TimelineMixer. This is a readonly restoration
+// plan; it never configures/captures a scope or borrows a future image receipt.
+bool mp4_timeline_actor_pins_current(){
+ if(!game_call()||!font_method||!mp4_timeline_pins_current()||!mp4_temporal_pins_ready())return false;
+ const auto&p=mp4_timeline_actor_pins;
+ for(const auto*t:{&p.track,&p.asset,&p.track_playable,&p.mixer,&p.clip})if(!mp4_timeline_class(*t))return false;
+ for(size_t i=0;i<p.callback_count;++i)if(!mp4_prefix(p.callbacks[i])&&!mp4_hook_was_statically_verified(p.callbacks[i]))return false;
+ return true;
+}
+bool mp4_timeline_actor_method(void*object,const char*name,int32_t argc,const mp4game::Binding&pin){
+ const void*method=object?font_method(object_class(object),name,argc):nullptr;uintptr_t pointer=0,dispatch=0;
+ const size_t slot=!std::strcmp(name,"Setup")?0x178:!std::strcmp(name,"SetTimelineWeight")?0x1c8:!std::strcmp(name,"ResetModel")?0x408:0;
+ return slot&&method&&mp4_actor_field(const_cast<void*>(method),0,pointer)&&pointer==image_base+pin.rva
+  &&mp4_actor_field(object_class(object),slot,dispatch)&&dispatch==pointer;
+}
+bool mp4_timeline_actor_receiver(const mp4actor::Owner&owner,void*player){
+ const auto*schema=mp4_actor_presentation_schema("VL.Core.VLActorController");
+ if(!schema||!mp4_type_is(player,"VL.VLAnimationClipPlayer")||!mp4_alive(player)
+  ||!mp4_timeline_actor_method(player,"Setup",0,mp4_timeline_actor_pins.setup)
+  ||!mp4_timeline_actor_method(player,"SetTimelineWeight",1,mp4_timeline_actor_pins.weight))return false;
+ using Object=void*(*)(void*,Method*);using Components=void*(*)(void*,void*,bool,bool,bool,bool,void*,Method*);
+ Mp4ActorTempRoot go(reinterpret_cast<Object>(image_base+mp4_actor_profile.get_game_object.rva)(player,nullptr));
+ Mp4ActorTempRoot type(mp4_type_get_object(reinterpret_cast<const void*>(image_base+schema->klass.rva)));
+ if(!go.get()||!type.get()||!mp4_alive(go.get()))return false;
+ Mp4ActorTempRoot array(reinterpret_cast<Components>(image_base+mp4_actor_profile.get_components_internal.rva)(go.get(),type.get(),true,false,true,false,nullptr,nullptr));
+ if(!array.get()||!mp4_actor_refresh_maps()||!mp4_type_is(array.get(),"System.Array")||mp4_array_length(array.get())!=1
+  ||!mp4_actor_mapped(mp4_array_data(array.get()),sizeof(void*),false))return false;
+ void*actual=nullptr;std::memcpy(&actual,mp4_array_data(array.get()),sizeof actual);if(actual!=owner.actor)return false;
+ if(mp4_timeline_actor_method(actual,"ResetModel",0,mp4_timeline_actor_pins.reset_base))return true;
+ // The original Solis override only calls this exact ActorSwing extension's
+ // two known ResetDynamicBone/ResetBreastBone leaves. Its fields/rig/history
+ // belong to the already admitted Actor schema, not arbitrary TryGetComponent.
+ void*swing=nullptr;
+ return mp4_timeline_actor_method(actual,"ResetModel",0,mp4_timeline_actor_pins.reset_solis)
+  &&mp4_root_track_field(actual,"_actorSwing",376)&&mp4_actor_field(actual,376,swing)&&swing==owner.extension;
+}
+bool mp4_timeline_actor_parameter_plan(Mp4TemporalHost&source,mp4actor::Handle handle){
+ const auto api=mp4_actor_state_api();if(!api.playable_valid(&handle,nullptr)||!mp4_temporal_type(handle,4))return false;
+ void*script=mp4_temporal_script(handle);if(!mp4_exact_type(script,"VL.Playables.VLAnimationClipParamMixerPlayable"))return false;
+ Mp4ActorTempRoot keep(script);void*array=nullptr,*value=nullptr,*prepare=nullptr,*play=nullptr,*outer_prepare=nullptr,*outer_play=nullptr;int32_t count=0;
+ if(!mp4_actor_field(script,40,array)||!array||!mp4_actor_field(script,48,count)||count)return false;
+ Mp4ActorTempRoot array_root(array);void**rows=nullptr;size_t length=0;
+ if(!mp4_temporal_array(array,rows,length,48,4)||length!=4)return false;
+ for(size_t i=0;i<4*48;++i)if(static_cast<const uint8_t*>(static_cast<void*>(rows))[i])return false;
+ for(size_t offset:{size_t(56),size_t(72),size_t(80),size_t(88)})if(!mp4_actor_field(script,offset,value)||value)return false;
+ if(!mp4_actor_field(script,112,prepare)||!mp4_actor_field(script,120,play)
+  ||!mp4_actor_field(source.player,176,outer_prepare)||!mp4_actor_field(source.player,184,outer_play)||outer_play)return false;
+ return mp4_temporal_body_null_callbacks(source,outer_prepare)
+  &&mp4_temporal_null_relay(prepare,source.player,image_base+mp4_temporal_pins.layer_prepare.rva)
+  &&mp4_temporal_null_relay(play,source.player,image_base+mp4_temporal_pins.layer_play.rva);
+}
+bool mp4_timeline_actor_graph(mp4actor::Handle,mp4actor::Handle);
+bool mp4_timeline_actor_graph_plan(const mp4actor::Owner&owner,const mp4actor::PresentationInventory&inventory,const Mp4TemporalImage&image){
+ const auto api=mp4_actor_state_api();mp4actor::Handle pending[512]{};size_t used=0;
+ auto graph=owner.graph;const int32_t roots=api.graph_root_count(&graph,nullptr);if(roots<1||roots>512)return false;
+ for(int32_t i=0;i<roots;++i){mp4actor::Handle root{};api.graph_root(&graph,i,&root,nullptr);pending[used++]=root;}
+ for(size_t i=0;i<used;++i){auto node=pending[i];if(!mp4_timeline_actor_graph(node,owner.graph))return false;
+  const bool known=mp4_temporal_role_of(image,mp4_temporal_native(node))||mp4_temporal_type(node,0)||mp4_temporal_type(node,1);
+  if(!known){if(!mp4_temporal_type(node,3))return false;void*job=api.job_data(&node,nullptr);if(!job)return false;
+   bool owned=mp4_actor_same_handle(node,owner.playable)&&api.job_type_is_actor(api.job_type(&node,nullptr));
+   for(size_t j=0;j<inventory.fixed_job_count;++j)owned|=inventory.fixed_jobs[j].job==job&&mp4_actor_same_handle(inventory.fixed_jobs[j].playable,node)
+    &&mp4_actor_same_handle(inventory.fixed_jobs[j].graph,owner.graph)&&inventory.fixed_jobs[j].animator==owner.animator;
+   for(size_t j=0;j<inventory.talk_job_count;++j)owned|=inventory.talk_jobs[j]==job&&mp4_actor_talk_type&&api.job_type(&node,nullptr)==weak_get(mp4_actor_talk_type);
+   if(!owned)return false;
+  }
+  const int32_t count=api.playable_input_count(&node,nullptr);if(count<0||count>128)return false;
+  for(int32_t j=0;j<count;++j){mp4actor::Handle child{};api.playable_input(&node,j,&child,nullptr);
+   if(!child.handle){if(child.version)return false;continue;}bool seen=false;for(size_t k=0;k<used;++k)seen|=mp4_actor_same_handle(child,pending[k]);
+   if(!seen){if(used==512)return false;pending[used++]=child;}}
+ }
+ return used!=0;
+}
+bool mp4_timeline_actor_state_plan(const Mp4TimelineContext&c,const mp4actor::Owner&owner,void*player){
+ mp4actor::PresentationInventory inventory{};
+ if(!mp4_actor_presentation_collect(&owner,1,false,inventory)||!mp4_timeline_actor_receiver(owner,player))return false;
+ void*storage=::malloc(sizeof(Mp4TemporalHost));void*image_storage=::malloc(sizeof(Mp4TemporalImage));
+ if(!storage||!image_storage){::free(storage);::free(image_storage);return false;}
+ auto*source=new(idoly_mp4_actor_placement::Address{storage})Mp4TemporalHost{};
+ auto*image=new(idoly_mp4_actor_placement::Address{image_storage})Mp4TemporalImage{};
+ struct Release{Mp4TemporalHost*source;Mp4TemporalImage*image;~Release(){source->~Mp4TemporalHost();image->~Mp4TemporalImage();::free(source);::free(image);}}release{source,image};
+ source->owner=owner;source->player=player;source->root_asset=c.asset;source->epoch=c.witness.generation;
+ mp4actor::Handle base{};void*layers=nullptr;
+ if(!mp4_actor_field(player,80,base)||!mp4_timeline_actor_parameter_plan(*source,base)||!mp4_actor_field(player,152,layers))return false;
+ Mp4ActorTempRoot layers_root(layers);void**items=nullptr;size_t count=0;
+ if(!mp4_temporal_array(layers,items,count,16,8)||count!=8)return false;
+ const auto api=mp4_actor_state_api();
+ for(size_t i=0;i<8;++i){mp4actor::Handle layer{};std::memcpy(&layer,static_cast<uint8_t*>(static_cast<void*>(items))+i*16,16);
+  if(api.playable_valid(&layer,nullptr)&&!mp4_timeline_actor_parameter_plan(*source,layer))return false;}
+ return mp4_temporal_catalog(*source,*image,true)&&image->base_parameter&&mp4_timeline_actor_graph_plan(owner,inventory,*image);
+}
+bool mp4_timeline_actor_director(const Mp4TimelineContext&c){
+ if(!c.director||!c.asset||!mp4_type_is(c.director,"UnityEngine.Playables.PlayableDirector")||!mp4_alive(c.director))return false;
+ void*controller=nullptr,*list=nullptr;void**values=nullptr;size_t count=0;
+ if(!mp4_actor_field(c.witness.player,mp4game::Layout{}.player_director_controller,controller)||!controller
+  ||!mp4_actor_field(controller,mp4game::Layout{}.controller_directors,list)||!mp4_actor_list(list,&values,&count,63))return false;
+ Mp4ActorTempRoot controller_root(controller),list_root(list),director_root(c.director),asset_root(c.asset);
+ if(controller_root.get()!=controller||list_root.get()!=list||director_root.get()!=c.director||asset_root.get()!=c.asset)return false;
+ void*before[63]{};bool member=c.director==c.witness.director;uint32_t version=0;
+ if(!mp4_root_track_field(list,"_version",28)||!mp4_actor_field(list,28,version))return false;
+ for(size_t i=0;i<count;++i){before[i]=values[i];
+  if(!mp4_type_is(before[i],"UnityEngine.Playables.PlayableDirector")||!mp4_alive(before[i]))return false;
+  member|=before[i]==c.director;
+ }
+ if(!member||mp4_api.director_get_asset(c.director,nullptr)!=c.asset)return false;
+ mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(c.director,&raw,nullptr);mp4actor::Handle graph{};std::memcpy(static_cast<void*>(&graph),&raw,sizeof graph);
+ if(!mp4_actor_same_handle(graph,c.graph))return false;
+ void*after_controller=nullptr,*after_list=nullptr;void**after=nullptr;size_t after_count=0;uint32_t after_version=0;
+ if(!mp4_actor_field(c.witness.player,mp4game::Layout{}.player_director_controller,after_controller)||after_controller!=controller
+  ||!mp4_actor_field(controller,mp4game::Layout{}.controller_directors,after_list)||after_list!=list
+  ||!mp4_actor_list(list,&after,&after_count,63)||after_count!=count||!mp4_actor_field(list,28,after_version)||after_version!=version)return false;
+ for(size_t i=0;i<count;++i)if(before[i]!=after[i])return false;
+ return true;
+}
+bool mp4_timeline_actor_owner(const Mp4TimelineContext&c,void*player,mp4actor::Owner&out){
+ if(!mp4_timeline_actor_pins_current()||!mp4_timeline_current(c)||!mp4_timeline_actor_director(c)
+  ||!player||!mp4_type_is(player,"VL.VLAnimationClipPlayer")||!mp4_alive(player))return false;
+ mp4actor::Owner owners[32]{};size_t count=0,found=0;
+ if(!mp4_scene_actor_inventory(c.witness,owners,&count))return false;
+ for(size_t i=0;i<count;++i){void*actual=nullptr;
+  if(!mp4_actor_field(owners[i].actor,mp4_actor_profile.fields.actor_player,actual))return false;
+  if(actual==player){out=owners[i];++found;}}
+ return found==1&&mp4_timeline_actor_state_plan(c,out,player);
+}
+bool mp4_timeline_actor_graph(mp4actor::Handle node,mp4actor::Handle expected){
+ const auto api=mp4_actor_state_api();if(!node.handle||!api.playable_valid(&node,nullptr))return false;
+ using Graph=void(*)(mp4actor::Handle*,mp4actor::Handle*,Method*);mp4actor::Handle actual{};
+ reinterpret_cast<Graph>(image_base+mp4_actor_profile.playable_graph_get.rva)(&node,&actual,nullptr);
+ return mp4_actor_same_handle(actual,expected);
+}
+bool mp4_timeline_actor_clip(const Mp4TimelineContext&c,void*asset,mp4actor::Handle actor_clip,mp4actor::Handle graph){
+ if(!mp4_timeline_exact(asset,mp4_timeline_actor_pins.asset)||!mp4_alive(asset)||!mp4_timeline_actor_graph(actor_clip,graph))return false;
+ void*script=mp4_temporal_script(actor_clip);if(!mp4_timeline_exact(script,mp4_timeline_actor_pins.clip))return false;
+ Mp4ActorTempRoot script_root(script);mp4game::PropertyName4 property{};void*fallback=nullptr,*motion=nullptr,*actual=nullptr,*clips=nullptr;uint8_t foot=0,actual_foot=0;mp4actor::Handle layer{};
+ if(!mp4_root_track_field(asset,"motion",24)||!mp4_root_track_field(asset,"exposedMotion",32)||!mp4_root_track_field(asset,"applyFootIK",48)
+  ||!mp4_actor_field(asset,24,fallback)||!mp4_actor_field(asset,32,property)||!mp4_actor_field(asset,40,motion)||!mp4_actor_field(asset,48,foot)||foot>1)return false;
+ bool valid=false;void*resolved=mp4_api.director_get_reference(c.director,property,&valid,nullptr);
+ // ExposedReference.Resolve uses its own defaultValue first; the authored
+ // motion fallback is applied only when that result is Unity-null.
+ motion=valid?resolved:motion;if(!motion||!mp4_alive(motion))motion=fallback;
+ if(!motion||!mp4_alive(motion)||!mp4_actor_field(script,16,actual)||actual!=motion
+  ||!mp4_actor_field(script,24,actual_foot)||actual_foot!=foot||!mp4_actor_field(script,32,layer)
+  ||!mp4_actor_field(script,48,clips)||!mp4_temporal_type(layer,1)||!mp4_temporal_link(actor_clip,0,layer)
+  ||!mp4_timeline_actor_graph(layer,graph))return false;
+ Mp4ActorTempRoot motion_root(motion),clips_root(clips);int32_t layers=0;void**rows=nullptr;size_t length=0;
+ if(!mp4_temporal_motion(motion,layers)||!mp4_temporal_array(clips,rows,length,16,4)||length!=size_t(layers)
+  ||mp4_actor_state_api().playable_input_count(&layer,nullptr)!=layers)return false;
+ for(int32_t i=0;i<layers;++i){mp4actor::Handle clip{};std::memcpy(&clip,static_cast<uint8_t*>(static_cast<void*>(rows))+size_t(i)*16,16);
+  void*source_clip=nullptr;uint64_t recipe=1469598103934665603ULL;uintptr_t native=0,native_asset=0,managed_asset=0;
+  if(!mp4_temporal_type(clip,2)||!mp4_temporal_link(layer,i,clip)||!mp4_timeline_actor_graph(clip,graph)
+   ||!mp4_temporal_motion_clip(motion,i,source_clip,recipe,true)||!mp4_actor_field(reinterpret_cast<void*>(clip.handle),40,native)||!native
+   ||!mp4_actor_field(reinterpret_cast<void*>(native),0x1d0,native_asset)||!mp4_actor_field(source_clip,16,managed_asset)
+   ||!managed_asset||native_asset!=managed_asset)return false;
+ }
+ return true;
+}
+bool mp4_timeline_actor_track(const Mp4TimelineContext&c,size_t index,const Mp4TimelineRuntime*requested=nullptr){
+ if(index>=c.track_count||!mp4_timeline_exact(c.tracks[index],mp4_timeline_actor_pins.track)||!mp4_alive(c.tracks[index]))return false;
+ const auto api=mp4_actor_state_api();auto head=c.compiled[index];void*script=mp4_timeline_script(head);
+ if(!mp4_timeline_exact(script,mp4_timeline_actor_pins.track_playable)||!mp4_timeline_actor_graph(head,c.graph))return false;
+ Mp4ActorTempRoot keep(script);void*player=nullptr;mp4actor::Handle timeline{},actual{};
+ if(!mp4_root_track_field(script,"_player",16)||!mp4_root_track_field(script,"_playerPlayable",24)
+  ||!mp4_actor_field(script,16,player)||!mp4_actor_field(script,24,timeline)
+  ||mp4_api.director_get_binding(c.director,c.tracks[index],nullptr)!=player)return false;
+ mp4actor::Owner owner{};if(!mp4_timeline_actor_owner(c,player,owner)||!mp4_actor_field(player,192,actual)
+  ||!mp4_actor_same_handle(actual,timeline)||!mp4_timeline_actor_graph(timeline,owner.graph))return false;
+ // Two authored tracks targeting one player destroy/replace the same Timeline
+ // mixer. This finite recipe refuses that ambiguous source instead of ancestry.
+ for(size_t i=0;i<c.track_count;++i)if(i!=index&&mp4_timeline_exact(c.tracks[i],mp4_timeline_actor_pins.track)
+  &&mp4_api.director_get_binding(c.director,c.tracks[i],nullptr)==player)return false;
+ void*mixer=mp4_temporal_script(timeline);mp4actor::Handle input{};int32_t count=0,inserted=0;
+ if(!mp4_timeline_exact(mixer,mp4_timeline_actor_pins.mixer)||!mp4_actor_field(mixer,32,input)
+  ||!mp4_actor_field(mixer,24,count)||!mp4_actor_field(mixer,48,inserted)||count<0||count>128||inserted!=count
+  ||!mp4_temporal_type(input,0)||!mp4_temporal_link(timeline,0,input)||!mp4_timeline_actor_graph(input,owner.graph)
+  ||api.playable_input_count(&input,nullptr)!=count||api.playable_input_count(&head,nullptr)!=count)return false;
+ Mp4ActorTempRoot mixer_root(mixer);size_t authored=0;for(size_t i=0;i<c.clip_count;++i)authored+=c.clip_tracks[i]==c.tracks[index];if(authored!=size_t(count))return false;
+ bool requested_found=requested==nullptr;
+ for(int32_t slot=0;slot<count;++slot){mp4actor::Handle master_clip{},actor_clip{};auto h=head;
+  api.playable_input(&h,slot,&master_clip,nullptr);api.playable_input(&input,slot,&actor_clip,nullptr);
+  if(!mp4_timeline_actor_graph(master_clip,c.graph))return false;
+  const Mp4TimelineRuntime*chosen=nullptr;Mp4TimelineRuntime found{};size_t matches=0;
+  for(size_t i=0;i<c.element_count;++i){void*element=c.elements[i];Mp4TimelineRuntime r{};r.element=element;
+   if(!mp4_timeline_exact(element,mp4_timeline_pins.clip)||!mp4_actor_field(element,32,r.playable)||!mp4_actor_same_handle(r.playable,master_clip))continue;
+   if(!mp4_actor_field(element,24,r.clip)||!mp4_actor_field(element,48,r.mixer)||!mp4_actor_same_handle(r.mixer,head))return false;
+   for(size_t j=0;j<c.clip_count;++j)if(c.clips[j]==r.clip){if(r.track)return false;r.track=c.clip_tracks[j];}
+   if(r.track!=c.tracks[index])return false;found=r;chosen=&found;++matches;
+  }
+  void*asset=nullptr;if(matches!=1||!chosen||!mp4_actor_field(chosen->clip,mp4stage::Layout::clip_asset,asset)
+   ||!mp4_timeline_actor_clip(c,asset,actor_clip,owner.graph))return false;
+  if(requested&&requested->element==chosen->element&&requested->clip==chosen->clip&&requested->track==chosen->track
+   &&mp4_actor_same_handle(requested->playable,chosen->playable)&&mp4_actor_same_handle(requested->mixer,chosen->mixer))requested_found=true;
+ }
+ return requested_found&&mp4_timeline_current(c)&&mp4_api.director_get_binding(c.director,c.tracks[index],nullptr)==player;
+}
+Mp4TimelineVerdict mp4_timeline_actor_node(const Mp4TimelineContext&c,mp4actor::Handle node,void*script){
+ const auto&p=mp4_timeline_actor_pins;
+ if(!mp4_timeline_exact(script,p.track_playable)){
+  if(mp4_timeline_exact(script,p.clip)||mp4_timeline_exact(script,p.mixer))return Mp4TimelineVerdict::unclosed;
+  return Mp4TimelineVerdict::unrecognized;
+ }
+ if(mp4_timeline_script(node)!=script)return Mp4TimelineVerdict::unclosed;
+ size_t found=0;for(size_t i=0;i<c.track_count;++i)if(mp4_actor_same_handle(c.compiled[i],node)){
+  if(!mp4_timeline_actor_track(c,i))return Mp4TimelineVerdict::unclosed;++found;}
+ return found==1?Mp4TimelineVerdict::closed:Mp4TimelineVerdict::unclosed;
+}
+bool mp4_timeline_actor_userdata(const Mp4TimelineContext&c,mp4actor::Handle node,void*script,void*){
+ // The exact TrackPlayable overrides PrepareFrame, not ProcessFrame. Its actual
+ // inherited base ProcessFrame is the pinned RET; userData is not a receiver.
+ return mp4_timeline_actor_node(c,node,script)==Mp4TimelineVerdict::closed;
+}
+Mp4TimelineVerdict mp4_timeline_actor_runtime(const Mp4TimelineContext&c,const Mp4TimelineRuntime&r){
+ void*asset=nullptr;const bool track=mp4_timeline_exact(r.track,mp4_timeline_actor_pins.track);
+ if(r.clip&&!mp4_actor_field(r.clip,mp4stage::Layout::clip_asset,asset))return Mp4TimelineVerdict::unclosed;
+ if(!track&&!mp4_timeline_exact(asset,mp4_timeline_actor_pins.asset))return Mp4TimelineVerdict::unrecognized;
+ if(r.kind||!r.clip||!track)return Mp4TimelineVerdict::unclosed;
+ size_t found=0;for(size_t i=0;i<c.track_count;++i)if(c.tracks[i]==r.track){
+  if(!mp4_timeline_actor_track(c,i,&r))return Mp4TimelineVerdict::unclosed;++found;}
+ return found==1?Mp4TimelineVerdict::closed:Mp4TimelineVerdict::unclosed;
+}
+// END_MP4_TIMELINE_ACTOR_PRODUCER_HOST
+
 // Exact original source factory/callback pins; no mutation or graph authority.
 struct Mp4TimelineCameraPins {Mp4TimelineTypePin track,shot,playable,mixer;mp4game::Binding track_create,shot_create,mixer_process,mixer_destroy;};
 [[maybe_unused]] inline constexpr Mp4TimelineCameraPins android_timeline_camera_pins={
@@ -19317,28 +19555,33 @@ bool mp4_timeline_camera_userdata(const Mp4TimelineContext& c,mp4actor::Handle h
 // SHARED ONLY. Distinguish source mutation/restoration PLAN from historical
 // successful restoration. No recursive World/Registry/Timeline admission call.
 bool(*mp4_timeline_intrinsic_restore_verified)(const Mp4TimelineContext&)=nullptr;
-bool mp4_timeline_phase_current(const Mp4TimelineContext& c){
+// A phase/witness predicate is shared by exact native output adapters. It
+// grants no output payload or producer by itself and allocates no Context.
+bool mp4_timeline_phase_witness_current(Mp4TimelineProofPhase phase,const Mp4SceneWitness& witness){
     if(!game_call()||!mp4_source_verified||!mp4_actor_source_verified||!mp4_camera_host.verified
-        ||!mp4_world_host.verified||!c.witness.generation||!c.director||!c.asset
+        ||!mp4_world_host.verified||!witness.generation||!witness.director
         ||mp4_scene_host.invalidated||mp4_scene_host.releasing||!mp4_scene_normal_animation_closed())return false;
     Mp4SceneWitness selected{};
-    if(!idoly_mp4_runtime::game.selected_scene_witness(selected)||!mp4_scene_same_source(selected,c.witness)
-        ||!mp4_scene_same_source(mp4_camera_host.source,c.witness)
-        ||!mp4_scene_same_source(mp4_stage_host.source,c.witness)
-        ||!mp4_scene_same_source(mp4_world_host.source,c.witness))return false;
+    if(!idoly_mp4_runtime::game.selected_scene_witness(selected)||!mp4_scene_same_source(selected,witness)
+        ||!mp4_scene_same_source(mp4_camera_host.source,witness)
+        ||!mp4_scene_same_source(mp4_world_host.source,witness))return false;
     const auto& host=mp4_scene_host;
-    if(c.phase==Mp4TimelineProofPhase::admission)
-        return !host.active&&(host.admitted&7u)==7u&&mp4_scene_same_source(host.admitted_source,c.witness);
-    if(!host.active||(host.configured&7u)!=7u||!mp4_scene_source_current()
+    if(phase==Mp4TimelineProofPhase::admission)
+        return !host.active&&(host.admitted&7u)==7u&&mp4_scene_same_source(host.admitted_source,witness)
+            &&mp4_stage_admission_source(witness);
+    if(!mp4_scene_same_source(mp4_stage_host.source,witness)||!host.active||(host.configured&7u)!=7u||!mp4_scene_source_current()
         ||!idoly_mp4_runtime::native_clock_scope().active()||mp4_rebuild_ledger.active)return false;
     const auto playback=idoly_mp4_runtime::game.automatic_rebuild_phase();
-    if(c.phase==Mp4TimelineProofPhase::active)
+    if(phase==Mp4TimelineProofPhase::active)
         return playback==idoly_mp4_playback::Phase::acquiring||playback==idoly_mp4_playback::Phase::held
             ||playback==idoly_mp4_playback::Phase::starting||playback==idoly_mp4_playback::Phase::playing;
-    if(c.phase!=Mp4TimelineProofPhase::source_restore_plan&&c.phase!=Mp4TimelineProofPhase::source_restored)return false;
+    if(phase!=Mp4TimelineProofPhase::source_restore_plan&&phase!=Mp4TimelineProofPhase::source_restored)return false;
     return playback==idoly_mp4_playback::Phase::restoring
         &&idoly_mp4_runtime::native_clock_scope().held()
         &&host.captured==host.all&&host.prepared==host.all;
+}
+bool mp4_timeline_phase_current(const Mp4TimelineContext& c){
+    return c.director&&c.asset&&mp4_timeline_phase_witness_current(c.phase,c.witness);
 }
 bool mp4_timeline_original_rebuild_complete(const Mp4TimelineContext& c,bool saved_evaluation){
     const auto& ledger=mp4_rebuild_ledger;
@@ -20087,12 +20330,20 @@ bool mp4_stage_other_particle_node(const Mp4TimelineContext &c,
   }
   return matches == 1;
 }
+// Source-only Control recipe, defined after actual passive/node schemas.
+Mp4TimelineVerdict mp4_control_source_node_verdict(const Mp4TimelineContext&,mp4actor::Handle,void*);
+Mp4TimelineVerdict mp4_control_source_runtime_verdict(const Mp4TimelineContext&,const Mp4TimelineRuntime&);
+bool mp4_control_source_userdata(const Mp4TimelineContext&,mp4actor::Handle,void*,void*);
 [[maybe_unused]] Mp4TimelineVerdict
 mp4_stage_other_node(const Mp4TimelineContext &c, mp4actor::Handle node,
                      void *script) {
   const auto &p = mp4_stage_other_pins;
   if (!script)
     return Mp4TimelineVerdict::unrecognized;
+  if(c.phase==Mp4TimelineProofPhase::admission){
+    const auto source=mp4_control_source_node_verdict(c,node,script);
+    if(source!=Mp4TimelineVerdict::unrecognized)return source;
+  }
   if (mp4_timeline_exact(script, p.particle))
     return mp4_stage_other_pins_ready() &&
                    mp4_stage_other_particle_node(c, node, script)
@@ -20112,7 +20363,12 @@ mp4_stage_other_node(const Mp4TimelineContext &c, mp4actor::Handle node,
 }
 [[maybe_unused]] bool mp4_stage_other_userdata(const Mp4TimelineContext &c,
                                                mp4actor::Handle node,
-                                               void *script, void *) {
+                                               void *script, void *data) {
+  if(c.phase==Mp4TimelineProofPhase::admission
+    &&(mp4_timeline_exact(script,mp4_stage_other_pins.particle)
+      ||mp4_timeline_exact(script,mp4_stage_other_pins.director_control)
+      ||mp4_timeline_exact(script,mp4_stage_other_pins.activation)))
+    return mp4_control_source_userdata(c,node,script,data);
   // Original PC overrides PrepareFrame/behaviour callbacks only. Inherited
   // ProcessFrame is the exact base RET proven by Root's both-source pins;
   // it never consumes ScriptOutput playerData, including a nonnull value.
@@ -20122,6 +20378,10 @@ mp4_stage_other_node(const Mp4TimelineContext &c, mp4actor::Handle node,
 [[maybe_unused]] Mp4TimelineVerdict
 mp4_stage_other_runtime(const Mp4TimelineContext &c,
                         const Mp4TimelineRuntime &r) {
+  if(c.phase==Mp4TimelineProofPhase::admission){
+    const auto source=mp4_control_source_runtime_verdict(c,r);
+    if(source!=Mp4TimelineVerdict::unrecognized)return source;
+  }
   if (!r.clip)
     return Mp4TimelineVerdict::unrecognized;
   void *asset = nullptr;
@@ -20896,6 +21156,12 @@ struct Mp4ControlPassiveImage {
   mp4ctl::Handle graph{}, result{};
   const void *method = nullptr;
 };
+// Only the synchronous successfully published raw factory event may seed a
+// topology recipe. Later source scans cannot retroactively mint this receipt.
+bool mp4_control_source_observe(const Mp4ControlPassiveImage&,uint64_t);
+bool (*mp4_control_passive_topology_observe)(const Mp4ControlPassiveImage&,uint64_t)=mp4_control_source_observe;
+thread_local const Mp4ControlPassiveImage*mp4_control_passive_publishing=nullptr;
+thread_local uint64_t mp4_control_passive_publishing_receipt=0;
 struct Mp4ControlPassiveRecord {
   static void *operator new(size_t, void *p) noexcept { return p; }
   static void operator delete(void *, void *) noexcept {}
@@ -21172,6 +21438,15 @@ bool mp4_control_passive_after(Mp4ControlPassiveTicket &t,
   }
   r.receipt = ++mp4_control_passive_sequence;
   r.valid = true;
+  struct Publishing {
+    const Mp4ControlPassiveImage*previous=mp4_control_passive_publishing;
+    uint64_t receipt=mp4_control_passive_publishing_receipt;
+    Publishing(const Mp4ControlPassiveImage&image,uint64_t raw){mp4_control_passive_publishing=&image;mp4_control_passive_publishing_receipt=raw;}
+    ~Publishing(){mp4_control_passive_publishing=previous;mp4_control_passive_publishing_receipt=receipt;}
+  } publishing(i,r.receipt);
+  if(mp4_control_passive_topology_observe){
+    try{(void)mp4_control_passive_topology_observe(i,r.receipt);}catch(...){/* No topology grant; preserve original/raw return. */}
+  }
   return true;
 }
 bool mp4_control_passive_key(const Mp4ControlPassiveRecord &r, void *asset,
@@ -24681,6 +24956,139 @@ void mp4_animation_journal_original(unsigned phase){
 // END_MP4_NATIVE_PHASE_JOURNAL_HOST
 
 
+// BEGIN_MP4_PASSIVE_SOURCE_FACTORY_CORE
+// Passive ordinary source construction only. A record grants NO private
+// callback, evaluation, native-operation, graph mutation or frame permission.
+namespace mp4_source_factory {
+using Graph=mp4_director_maintenance::world::AnimationGraph;
+using Playable=mp4_director_birth::Playable;
+using Factory=mp4_director_birth::FactoryFn;
+struct Object {uintptr_t object=0,klass=0,native=0;uint32_t instance=0;};
+struct Input {uintptr_t asset=0,game_object=0,method=0,return_pc=0;Graph graph{};};
+struct Image {Object asset{},game_object{};uintptr_t graph_native=0;uint32_t graph_version=0;};
+struct Ticket {uint64_t serial=0,generation=0;uint16_t depth=0;};
+struct Context {Ticket ticket{},parent{};Input input{};Image image{};};
+struct Receipt {Context source{};Playable root{};};
+struct Api {
+ void*context=nullptr;
+ // This is an actual source-pinned Unity main-thread predicate available
+ // before game_call()/selected MV/bootstrap font observations establish state.
+ bool(*owner_thread)(void*)=nullptr;
+ bool(*ordinary_stack)(void*)=nullptr;
+ bool(*bindings)(void*,Factory)=nullptr;
+ // Exact class/vtable MethodInfo/caller+native instance IDs/valid graph native
+ // slot/backref/version. Uses early source-bound read/CAPI/GC, not Scene APIs.
+ bool(*inspect)(void*,const Input&,Image*)=nullptr;
+ // Original returned root must still be live and belong to EXACT input graph.
+ // Native Director has not necessarily published88/98 yet; no false rootCount.
+ bool(*returned)(void*,const Input&,const Image&,Playable)=nullptr;
+ uint32_t(*retain)(void*)=nullptr;void*(*target)(uint32_t)=nullptr;void(*release)(uint32_t)=nullptr;
+};
+class Journal {
+ static constexpr size_t capacity=256,max_depth=32;
+ struct Record {Receipt value{};uint32_t roots[2]{};bool occupied=false,active=false,valid=false;};
+ Api api_{};Factory original_=nullptr;Record records_[capacity]{};
+ uint16_t stack_[max_depth]{};size_t depth_=0,cursor_=0;uint64_t sequence_=0,generation_=1;
+ std::atomic<bool>configured_{false},dirty_{false};
+ static bool same(Graph a,Graph b){return a.handle==b.handle&&a.version==b.version;}
+ static bool same(Object a,Object b){return a.object==b.object&&a.klass==b.klass&&a.native==b.native&&a.instance==b.instance;}
+ static bool same(const Input&a,const Input&b){return a.asset==b.asset&&a.game_object==b.game_object&&a.method==b.method&&a.return_pc==b.return_pc&&same(a.graph,b.graph);}
+ static bool same(const Image&a,const Image&b){return same(a.asset,b.asset)&&same(a.game_object,b.game_object)&&a.graph_native==b.graph_native&&a.graph_version==b.graph_version;}
+ static bool valid(const Input&i,const Image&m){return i.asset&&i.game_object&&i.method&&i.return_pc&&i.graph.handle
+  &&m.asset.object==i.asset&&m.game_object.object==i.game_object&&m.asset.klass&&m.asset.native&&m.asset.instance
+  &&m.game_object.klass&&m.game_object.native&&m.game_object.instance&&m.graph_native&&!(m.graph_version&1u)
+  &&m.graph_version==(i.graph.version&~uint32_t(1));}
+ bool drop(Record&r)noexcept{bool good=true;for(auto&root:r.roots)if(root){try{api_.release(root);root=0;}catch(...){good=false;}}
+  if(good)r={};else{r.active=r.valid=false;}return good;}
+ bool roots(const Record&r)const{return r.roots[0]&&r.roots[1]&&api_.target(r.roots[0])==reinterpret_cast<void*>(r.value.source.input.asset)&&api_.target(r.roots[1])==reinterpret_cast<void*>(r.value.source.input.game_object);}
+ bool current(const Record&r)const{
+  if(!r.occupied||!r.valid||r.active||r.value.source.ticket.generation!=generation_||dirty_.load(std::memory_order_acquire)||!roots(r)||!api_.bindings(api_.context,original_))return false;
+  Image now{};return api_.inspect(api_.context,r.value.source.input,&now)&&same(now,r.value.source.image)
+   &&api_.returned(api_.context,r.value.source.input,r.value.source.image,r.value.root)&&!dirty_.load(std::memory_order_acquire);
+ }
+ bool drain(){
+  if(!dirty_.load(std::memory_order_acquire))return true;
+  if(depth_)return false;
+  if(generation_==~uint64_t(0))return false;
+  dirty_.store(false,std::memory_order_release);++generation_;bool good=true;
+  for(auto&r:records_)if(r.occupied&&!drop(r))good=false;
+  if(!good)dirty_.store(true,std::memory_order_release);return good&&!dirty_.load(std::memory_order_acquire);
+ }
+public:
+ bool configure(Api api,Factory original){
+  if(configured_.load(std::memory_order_acquire)||!original||!api.owner_thread||!api.ordinary_stack||!api.bindings||!api.inspect||!api.returned||!api.retain||!api.target||!api.release||!api.bindings(api.context,original))return false;
+  api_=api;original_=original;configured_.store(true,std::memory_order_release);return true;
+ }
+ // No GC, old scene or graph read. Source observer/off-thread hook may call.
+ void invalidate()noexcept{dirty_.store(true,std::memory_order_release);}
+ bool begin(const Input&input,Ticket*out){
+  if(out)*out={};if(!out||!configured_.load(std::memory_order_acquire))return false;
+  if(!api_.owner_thread(api_.context)){invalidate();return false;}
+  if(!api_.ordinary_stack(api_.context)||!drain()||depth_==max_depth||sequence_==~uint64_t(0)||!api_.bindings(api_.context,original_))return false;
+  // An observed re-entry for this exact ordinary graph supersedes its old
+  // construction BEFORE original runs, including throw/unobservable return.
+  for(auto&r:records_)if(r.occupied&&!r.active&&same(r.value.source.input.graph,input.graph))r.valid=false;
+  size_t slot=capacity;
+  for(size_t n=0;n<capacity;++n){const size_t at=(cursor_+n)%capacity;if(!records_[at].active){slot=at;break;}}
+  if(slot==capacity)return false;
+  auto&r=records_[slot];if(r.occupied&&!drop(r))return false;r.occupied=true;
+  r.value.source.input=input;
+  for(size_t n=0;n<2;++n){void*p=reinterpret_cast<void*>(n?input.game_object:input.asset);r.roots[n]=api_.retain(p);
+   if(!r.roots[n]||api_.target(r.roots[n])!=p){drop(r);return false;}}
+  // Root both actual managed arguments BEFORE identity inspection invokes any
+  // Object/GetInstanceID CAPI. No identity callback sees an unrooted argument.
+  Image image{};if(!api_.inspect(api_.context,input,&image)||!valid(input,image)){drop(r);return false;}
+  if(dirty_.load(std::memory_order_acquire)){drop(r);return false;}
+  r.value.source.ticket={++sequence_,generation_,static_cast<uint16_t>(depth_+1)};r.value.source.parent=depth_?records_[stack_[depth_-1]].value.source.ticket:Ticket{};r.value.source.image=image;
+  r.active=true;stack_[depth_++]=static_cast<uint16_t>(slot);cursor_=(slot+1)%capacity;*out=r.value.source.ticket;return true;
+ }
+ bool context(Graph graph,Context*out)const{
+  if(out)*out={};if(!out||!configured_.load(std::memory_order_acquire)||!api_.owner_thread(api_.context)||!depth_||dirty_.load(std::memory_order_acquire)||!api_.ordinary_stack(api_.context)||!api_.bindings(api_.context,original_))return false;
+  const auto&r=records_[stack_[depth_-1]];
+  if(!r.active||!roots(r)||!same(graph,r.value.source.input.graph))return false;
+  Image now{};if(!api_.inspect(api_.context,r.value.source.input,&now)||!same(now,r.value.source.image))return false;
+  *out=r.value.source;return true;
+ }
+ bool returned(Ticket ticket,Playable root){
+  if(!configured_.load(std::memory_order_acquire)||!api_.owner_thread(api_.context)||!depth_||ticket.depth!=depth_)return false;
+  auto&r=records_[stack_[depth_-1]];if(r.value.source.ticket.serial!=ticket.serial||r.value.source.ticket.generation!=ticket.generation)return false;
+  bool ok=api_.ordinary_stack(api_.context)&&!dirty_.load(std::memory_order_acquire)&&generation_==ticket.generation&&roots(r)&&root.handle&&api_.bindings(api_.context,original_);
+  Image now{};if(ok)ok=api_.inspect(api_.context,r.value.source.input,&now)&&same(now,r.value.source.image)&&api_.returned(api_.context,r.value.source.input,r.value.source.image,root);
+  r.value.root=root;r.active=false;r.valid=ok;--depth_;
+  if(dirty_.load(std::memory_order_acquire))(void)drain();return ok;
+ }
+ void abandon(Ticket ticket)noexcept{
+  if(!configured_.load(std::memory_order_acquire)||!api_.owner_thread(api_.context)||!depth_||ticket.depth!=depth_)return;
+  auto&r=records_[stack_[depth_-1]];if(r.value.source.ticket.serial!=ticket.serial||r.value.source.ticket.generation!=ticket.generation)return;
+  r.active=r.valid=false;--depth_;if(dirty_.load(std::memory_order_acquire))(void)drain();
+ }
+ bool receipt(Ticket ticket,Receipt*out)const{
+  if(out)*out={};if(!out||!configured_.load(std::memory_order_acquire)||!api_.owner_thread(api_.context)||!ticket.serial||ticket.generation!=generation_)return false;
+  const Record*found=nullptr;for(const auto&r:records_)if(r.occupied&&r.value.source.ticket.serial==ticket.serial&&r.value.source.ticket.generation==ticket.generation&&r.value.source.ticket.depth==ticket.depth){if(found)return false;found=&r;}
+  if(!found||!current(*found))return false;*out=found->value;return true;
+ }
+ bool find(const Input&input,Playable root,Receipt*out)const{
+  if(out)*out={};if(!out||!configured_.load(std::memory_order_acquire)||!api_.owner_thread(api_.context)||dirty_.load(std::memory_order_acquire))return false;
+  const Record*found=nullptr;for(const auto&r:records_)if(r.occupied&&same(r.value.source.input,input)&&r.value.root.handle==root.handle&&r.value.root.version==root.version&&current(r)){if(found)return false;found=&r;}
+  if(!found)return false;*out=found->value;return true;
+ }
+ bool clear(){if(!configured_.load(std::memory_order_acquire)||!api_.owner_thread(api_.context)||depth_)return false;invalidate();return drain();}
+};
+// Ordinary original is always forwarded exactly once, including unobservable
+// inputs/limits/off-thread calls and source handoff/throw. No private quarantine.
+inline Playable observe(Journal&journal,Factory original,const Input&input){
+ Ticket ticket{};bool observed=false;
+ try{observed=journal.begin(input,&ticket);}catch(...){journal.invalidate();}
+ Playable root{};
+ try{root=original(reinterpret_cast<void*>(input.asset),input.graph,reinterpret_cast<void*>(input.game_object),reinterpret_cast<void*>(input.method));}
+ catch(...){if(observed)try{journal.abandon(ticket);}catch(...){journal.invalidate();}throw;}
+ if(observed)try{(void)journal.returned(ticket,root);}catch(...){journal.invalidate();try{journal.abandon(ticket);}catch(...){}}
+ return root;
+}
+} // namespace mp4_source_factory
+
+// END_MP4_PASSIVE_SOURCE_FACTORY_CORE
+
 // BEGIN_MP4_CHILD_BIRTH_API_HOST
 // Embed after factory-context host and original Birth source pins. Wrappers
 // are not published here: Bridge owns exact typed hook/gateway installation.
@@ -24766,8 +25174,15 @@ bool mp4_child_birth_returned_root(void*,const mp4_director_birth::FactoryInput&
  if(!mp4_child_birth_configured)return mp4_child_graph_create_original(manager,name);
  return mp4_child_birth_host.create(manager,name,entry_return);
 }
+mp4_director_birth::Playable mp4_source_factory_observe(void*,mp4world::AnimationGraph,void*,const void*,uintptr_t);
+bool mp4_source_factory_context(mp4world::AnimationGraph,mp4_source_factory::Context*);
 [[maybe_unused]] __attribute__((noinline)) mp4_director_birth::Playable mp4_child_factory_hook(void*asset,mp4world::AnimationGraph graph,void*go,const void*method){
  const uintptr_t entry_return=reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+ // An unestablished/foreign thread is checked by the passive main-thread
+ // oracle before any raw stack or source object read. Private originals never
+ // enter this source journal.
+ if(!game_call()||!mp4_raw_original_operation.depth)
+  return mp4_source_factory_observe(asset,graph,go,method,entry_return);
  if(!mp4_child_birth_configured)return mp4_child_factory_original(asset,graph,go,method);
  mp4_director_maintenance::Call parent{};const mp4_director_birth::FactoryInput input{reinterpret_cast<uintptr_t>(asset),reinterpret_cast<uintptr_t>(go),reinterpret_cast<uintptr_t>(method),entry_return,graph};
  const bool selected=mp4_director_actual_operation(&parent)&&mp4_child_birth_origin.factory(parent,input);
@@ -27828,6 +28243,602 @@ bool mp4_activation_callback_execution(void *component) {
 
 // END_MP4_ACTIVATION_SOURCE_HOST
 
+struct Mp4ControlSourceAdmissionPins {mp4game::Binding helper[4],callbacks[3][8];};
+[[maybe_unused]] constexpr Mp4ControlSourceAdmissionPins android_control_source_admission_pins={
+{{0x8ef17d4,{0xfd,0x7b,0xba,0xa9,0xfc,0x6f,0x1,0xa9,0xfa,0x67,0x2,0xa9,0xf8,0x5f,0x3,0xa9}},{0x8ef0918,{0xfe,0x67,0xbc,0xa9,0xf8,0x5f,0x1,0xa9,0xf6,0x57,0x2,0xa9,0xf4,0x4f,0x3,0xa9}},{0x8ef0f10,{0xfd,0x7b,0xba,0xa9,0xfc,0x6f,0x1,0xa9,0xfa,0x67,0x2,0xa9,0xf8,0x5f,0x3,0xa9}},{0x8eefe94,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x1,0xa9,0xf4,0x4f,0x2,0xa9,0x36,0x8c,0x0,0xb0}}},
+{{{0x8fab5cc,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8ef6f14,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0xf4,0x8b,0x0,0xd0,0xd5,0x4f,0x0,0xf0}},{0x8fab5c4,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8fab5c8,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8ef7484,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0xf4,0x8b,0x0,0xb0,0xd5,0x4f,0x0,0xd0}},{0x8ef7558,{0xfe,0xf,0x1d,0xf8,0xf6,0x57,0x1,0xa9,0xf4,0x4f,0x2,0xa9,0xf5,0x8b,0x0,0xb0}},{0x8ef6fd4,{0xff,0x3,0x2,0xd1,0xfe,0x23,0x0,0xf9,0xf8,0x5f,0x5,0xa9,0xf6,0x57,0x6,0xa9}},{0x8ef7658,{0xff,0x3,0x1,0xd1,0xfe,0x5f,0x1,0xa9,0xf6,0x57,0x2,0xa9,0xf4,0x4f,0x3,0xa9}}},{{0x8fab5cc,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8ef6cbc,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0xf5,0x8b,0x0,0xd0,0xd4,0x4f,0x0,0xf0}},{0x8ef6c28,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0xf5,0x8b,0x0,0xd0,0xd4,0x4f,0x0,0xf0}},{0x8fab5c8,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8ef6a70,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0xf5,0x8b,0x0,0xd0,0xd4,0x4f,0x0,0xf0}},{0x8ef6af8,{0xfe,0xf,0x1d,0xf8,0xf6,0x57,0x1,0xa9,0xf4,0x4f,0x2,0xa9,0xf6,0x8b,0x0,0xd0}},{0x8fab5dc,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xe1,0x3,0x1f,0xaa,0x8d,0x70,0xdb,0x17}},{0x8ef6ba0,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0xf5,0x8b,0x0,0xd0,0xd4,0x4f,0x0,0xf0}}},{{0x8fab5cc,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8fab5d0,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8fab5c4,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8fab5c8,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x8ef81a4,{0x8,0x10,0xb0,0x12,0x8,0x10,0x0,0xb9,0xc0,0x3,0x5f,0xd6,0x8,0x10,0xb0,0x12}},{0x8ef81b0,{0x8,0x10,0xb0,0x12,0x8,0x10,0x0,0xb9,0xc0,0x3,0x5f,0xd6,0x8,0x10,0xb0,0x12}},{0x8ef7f2c,{0xea,0xf,0x1b,0xfc,0xe9,0x23,0x1,0x6d,0xfe,0x5f,0x2,0xa9,0xf6,0x57,0x3,0xa9}},{0x8fab5e0,{0xc0,0x3,0x5f,0xd6,0xe1,0x3,0x1f,0xaa,0x8d,0x70,0xdb,0x17,0x0,0x0,0x40,0xf9}}}}};
+[[maybe_unused]] constexpr Mp4ControlSourceAdmissionPins ios_control_source_admission_pins={
+{{0x7791e28,{0xff,0x3,0x2,0xd1,0xfc,0x6f,0x2,0xa9,0xfa,0x67,0x3,0xa9,0xf8,0x5f,0x4,0xa9}},{0x7790ffc,{0xfa,0x67,0xbb,0xa9,0xf8,0x5f,0x1,0xa9,0xf6,0x57,0x2,0xa9,0xf4,0x4f,0x3,0xa9}},{0x77915c8,{0xff,0x3,0x2,0xd1,0xfc,0x6f,0x2,0xa9,0xfa,0x67,0x3,0xa9,0xf8,0x5f,0x4,0xa9}},{0x7790550,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x1,0xa9,0xf4,0x4f,0x2,0xa9,0xfd,0x7b,0x3,0xa9}}},
+{{{0x788f614,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x7798b38,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x788f60c,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x788f610,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x7799174,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x77992a4,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x7798c40,{0xff,0x3,0x2,0xd1,0xf8,0x5f,0x4,0xa9,0xf6,0x57,0x5,0xa9,0xf4,0x4f,0x6,0xa9}},{0x77993e0,{0xff,0x43,0x1,0xd1,0xf8,0x5f,0x1,0xa9,0xf6,0x57,0x2,0xa9,0xf4,0x4f,0x3,0xa9}}},{{0x788f614,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x7798834,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x7798760,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x788f610,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x7798514,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x77985d0,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x788f624,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0x1,0x0,0x80,0xd2,0x4b,0xfd,0xd3,0x17}},{0x77986a4,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}}},{{0x788f614,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x788f618,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x788f60c,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x788f610,{0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6,0xc0,0x3,0x5f,0xd6}},{0x779a0e0,{0x8,0x10,0xb0,0x12,0x8,0x10,0x0,0xb9,0xc0,0x3,0x5f,0xd6,0x8,0x10,0xb0,0x12}},{0x779a0ec,{0x8,0x10,0xb0,0x12,0x8,0x10,0x0,0xb9,0xc0,0x3,0x5f,0xd6,0x0,0x44,0x4,0x2f}},{0x7799dcc,{0xeb,0x2b,0xba,0x6d,0xe9,0x23,0x1,0x6d,0xf8,0x5f,0x2,0xa9,0xf6,0x57,0x3,0xa9}},{0x788f628,{0xc0,0x3,0x5f,0xd6,0x1,0x0,0x80,0xd2,0x4b,0xfd,0xd3,0x17,0xf6,0x57,0xbd,0xa9}}}}};
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto&mp4_control_source_admission_pins=ios_control_source_admission_pins;
+#else
+constexpr const auto&mp4_control_source_admission_pins=android_control_source_admission_pins;
+#endif
+
+bool mp4_source_factory_receipt(mp4_source_factory::Ticket,mp4_source_factory::Receipt*);
+// BEGIN_MP4_CONTROL_SOURCE_ADMISSION_HOST
+// Source evidence only: the actual original factory-return boundary seals the
+// ordered wrapper topology. No capture/private callback/native write authority.
+constexpr size_t mp4_control_source_capacity = 512;
+constexpr size_t mp4_control_source_leaf_limit = 256;
+enum class Mp4ControlSourceRole : uint8_t { director, activation, particle };
+struct Mp4ControlSourceLeaf {
+  static void *operator new(size_t, void *p) noexcept { return p; }
+  static void operator delete(void *, void *) noexcept {}
+  mp4actor::Handle node{};
+  void *script = nullptr, *target = nullptr, *klass = nullptr;
+  uintptr_t native = 0;
+  uint32_t seed = 0;
+  int32_t post = 0;
+  Mp4ControlSourceRole role = Mp4ControlSourceRole::director;
+  uint32_t weak_script = 0, weak_target = 0;
+};
+struct Mp4ControlSourceRecipe {
+  static void *operator new(size_t, void *p) noexcept { return p; }
+  static void operator delete(void *, void *) noexcept {}
+  void *asset = nullptr, *director = nullptr, *owner = nullptr;
+  mp4ctl::Handle graph{}, result{};
+  mp4_source_factory::Context parent{};
+  Mp4ControlSourceLeaf *leaves = nullptr;
+  size_t count = 0;
+  uint64_t raw_receipt = 0, receipt = 0;
+  bool valid = false;
+};
+Mp4ControlSourceRecipe *mp4_control_source_bank = nullptr;
+uint64_t mp4_control_source_sequence = 0,
+         mp4_control_source_last_publication = 0;
+size_t mp4_control_source_cursor = 0;
+// This capability query must prove a finite source restoration PLAN, using
+// source callback/configuration/layout/binding evidence. It must not require
+// future images already captured, and must not publish any mutation permission.
+// Child supplies Director/output plans; Activation supplies exact subtree
+// lifecycle/resource plans. A null or rejecting provider grants nothing.
+bool (*mp4_control_source_plan)(const Mp4TimelineContext &,
+                                const Mp4ControlPassiveImage &,
+                                const Mp4ControlSourceLeaf &) = nullptr;
+
+bool mp4_control_source_pins() {
+  if (!mp4_control_source_pins_ready())
+    return false;
+  // The first ordinary Control factory precedes Timeline/output admission.
+  // Resolve only immutable type/code/field descriptors in this passive path.
+  for (const auto *type : {&mp4_stage_other_pins.director_control,
+                           &mp4_stage_other_pins.activation,
+                           &mp4_stage_other_pins.particle,
+                           &mp4_timeline_pins.plain})
+    if (!mp4_timeline_class(*type))
+      return false;
+  const auto verified = [](const auto &pin) {
+    mp4game::Binding b{};
+    b.rva = pin.rva;
+    ::memcpy(b.prefix, pin.prefix, 16);
+    return mp4_prefix(b) || mp4_hook_was_statically_verified(b);
+  };
+  if (!verified(mp4_actor_profile.playable_type) ||
+      !verified(mp4_actor_profile.playable_input_count) ||
+      !verified(mp4_actor_profile.playable_input) ||
+      !verified(mp4_actor_profile.script_instance) ||
+      !verified(mp4_actor_profile.field_offset))
+    return false;
+  for (const auto &p : mp4_control_source_admission_pins.helper)
+    if (!mp4_prefix(p) && !mp4_hook_was_statically_verified(p))
+      return false;
+  for (const auto &family : mp4_control_source_admission_pins.callbacks)
+    for (const auto &p : family)
+      if (!mp4_prefix(p) && !mp4_hook_was_statically_verified(p))
+        return false;
+  return true;
+}
+bool mp4_control_source_callbacks(void *script, Mp4ControlSourceRole role) {
+  static const char *names[] = {
+      "OnPlayableCreate", "OnPlayableDestroy", "OnGraphStart", "OnGraphStop",
+      "OnBehaviourPlay", "OnBehaviourPause", "PrepareFrame", "ProcessFrame"};
+  static constexpr int counts[] = {1, 1, 1, 1, 2, 2, 2, 3};
+  const auto kind = static_cast<size_t>(role);
+  if (!script || kind >= 3 || !mp4_control_source_pins())
+    return false;
+  for (size_t i = 0; i < 8; ++i) {
+    const void *m = font_method(object_class(script), names[i], counts[i]);
+    uintptr_t entry = 0;
+    if (!m || !mp4_actor_field(const_cast<void *>(m), 0, entry) ||
+        entry != image_base +
+                     mp4_control_source_admission_pins.callbacks[kind][i].rva)
+      return false;
+  }
+  return true;
+}
+bool mp4_control_source_field(void *object, const char *name, size_t offset,
+                                uint32_t kind) {
+  void *field = nullptr;
+  uint32_t bits = 0;
+  if (!mp4_root_track_field(object, name, offset, &field))
+    return false;
+  const void *type = font_field_type(field);
+  return type && mp4_actor_field(const_cast<void *>(type), 8, bits) &&
+         !(bits & 16u) && ((bits >> 16) & 255u) == kind;
+}
+bool mp4_control_source_leaf_schema(void *script, Mp4ControlSourceRole role) {
+  if (!script || !mp4_control_source_pins())
+    return false;
+  if (role == Mp4ControlSourceRole::director)
+    return mp4_timeline_exact(script, mp4_stage_other_pins.director_control) &&
+           mp4_control_source_field(script, "director", 16, 18) &&
+           mp4_control_source_field(script, "m_SyncTime", 24, 2) &&
+           mp4_control_source_field(script, "m_AssetDuration", 32, 13);
+  if (role == Mp4ControlSourceRole::activation)
+    return mp4_timeline_exact(script, mp4_stage_other_pins.activation) &&
+           mp4_control_source_field(script, "gameObject", 16, 18) &&
+           mp4_control_source_field(script, "postPlayback", 24, 17) &&
+           mp4_control_source_field(script, "m_InitialState", 28, 17);
+  return role == Mp4ControlSourceRole::particle &&
+         mp4_timeline_exact(script, mp4_stage_other_pins.particle) &&
+         mp4_control_source_field(script, "m_RandomSeed", 24, 9) &&
+         mp4_control_source_field(script, "<particleSystem>k__BackingField", 32, 18);
+}
+bool mp4_control_source_plain(mp4actor::Handle node) {
+  using Type = void *(*)(mp4actor::Handle *, Method *);
+  Mp4ActorTempRoot plain(mp4_type_get_object(reinterpret_cast<void *>(
+      image_base + mp4_timeline_pins.plain.binding.rva)));
+  return plain.get() && !mp4_timeline_script(node) &&
+         reinterpret_cast<Type>(image_base + mp4_actor_profile.playable_type.rva)(
+             &node, nullptr) == plain.get();
+}
+bool mp4_control_source_leaf(mp4actor::Handle graph,
+                              mp4actor::Handle node,
+                              Mp4ControlSourceLeaf *out) {
+  if (!out || !mp4_control_source_pins())
+    return false;
+  mp4ctl::Handle g{}, n{};
+  ::memcpy(static_cast<void *>(&g), &graph, 16);
+  ::memcpy(static_cast<void *>(&n), &node, 16);
+  if (!mp4_control_passive_graph(g, n))
+    return false;
+  auto api = mp4_actor_state_api();
+  if (api.playable_input_count(&node, nullptr) != 0)
+    return false;
+  *out = {};
+  out->node = node;
+  out->script = mp4_timeline_script(node);
+  if (!out->script)
+    return false;
+  Mp4ActorTempRoot keep(out->script);
+  if (keep.get() != out->script)
+    return false;
+  out->klass = object_class(out->script);
+  if (mp4_timeline_exact(out->script, mp4_stage_other_pins.director_control)) {
+    out->role = Mp4ControlSourceRole::director;
+    if (!mp4_control_source_leaf_schema(out->script, out->role) ||
+        !mp4_actor_field(out->script, 16, out->target) ||
+        !mp4_type_is(out->target, "UnityEngine.Playables.PlayableDirector"))
+      return false;
+  } else if (mp4_timeline_exact(out->script, mp4_stage_other_pins.activation)) {
+    out->role = Mp4ControlSourceRole::activation;
+    if (!mp4_control_source_leaf_schema(out->script, out->role) ||
+        !mp4_actor_field(out->script, 16, out->target) ||
+        !mp4_actor_field(out->script, 24, out->post) || out->post < 0 ||
+        out->post > 2 ||
+        !mp4_type_is(out->target, "UnityEngine.GameObject"))
+      return false;
+  } else if (mp4_timeline_exact(out->script, mp4_stage_other_pins.particle)) {
+    out->role = Mp4ControlSourceRole::particle;
+    if (!mp4_control_source_leaf_schema(out->script, out->role) ||
+        !mp4_actor_field(out->script, mp4stage::Layout::control_particle,
+                         out->target) ||
+        !mp4_actor_field(out->script, mp4stage::Layout::control_random_seed,
+                         out->seed) ||
+        !out->seed || !mp4_type_is(out->target, "UnityEngine.ParticleSystem"))
+      return false;
+  } else
+    return false;
+  return mp4_alive(out->target) &&
+         mp4_control_passive_native(out->target, out->native) &&
+         mp4_control_source_callbacks(out->script, out->role);
+}
+void mp4_control_source_drop(Mp4ControlSourceRecipe &r) {
+  for (size_t i = 0; i < r.count; ++i) {
+    if (r.leaves[i].weak_script)
+      weak_free(r.leaves[i].weak_script);
+    if (r.leaves[i].weak_target)
+      weak_free(r.leaves[i].weak_target);
+  }
+  ::free(r.leaves);
+  r = {};
+}
+[[maybe_unused]] void mp4_control_source_clear() {
+  if (!game_call())
+    return;
+  if (mp4_control_source_bank)
+    for (size_t i = 0; i < mp4_control_source_capacity; ++i)
+      mp4_control_source_drop(mp4_control_source_bank[i]);
+}
+bool mp4_control_source_same_leaf(const Mp4ControlSourceLeaf &a,
+                                   const Mp4ControlSourceLeaf &b) {
+  return mp4_actor_same_handle(a.node, b.node) && a.script == b.script &&
+         a.target == b.target && a.klass == b.klass && a.native == b.native &&
+         a.role == b.role && a.seed == b.seed && a.post == b.post;
+}
+bool mp4_control_source_topology_current(const Mp4ControlSourceRecipe &r);
+bool mp4_control_source_observe(const Mp4ControlPassiveImage &image,
+                                 uint64_t raw_receipt) {
+  // A raw historical receipt alone cannot retrospectively adopt topology.
+  if (!game_call() || mp4_control_passive_publishing != &image ||
+      mp4_control_passive_publishing_receipt != raw_receipt || !raw_receipt ||
+      raw_receipt <= mp4_control_source_last_publication)
+    return false;
+  // Consume this actual raw event even if its finite topology is unsupported.
+  // It cannot be retried later in the same callback after another mutation.
+  mp4_control_source_last_publication = raw_receipt;
+  if (!mp4_control_source_pins() || image.input.prefab ||
+      image.input.time_control || !weak_new || !weak_free ||
+      mp4_control_source_sequence == ~uint64_t(0))
+    return false;
+  uint64_t actual_receipt = 0;
+  if (!mp4_control_passive_raw_receipted(
+          image.values[0], image.values[1], image.values[2], image.graph,
+          image.result, &actual_receipt) || actual_receipt != raw_receipt)
+    return false;
+  if (!mp4_control_source_bank) {
+    auto *p = static_cast<Mp4ControlSourceRecipe *>(
+        ::malloc(sizeof(Mp4ControlSourceRecipe) * mp4_control_source_capacity));
+    if (!p)
+      return false;
+    for (size_t i = 0; i < mp4_control_source_capacity; ++i)
+      new (&p[i]) Mp4ControlSourceRecipe{};
+    mp4_control_source_bank = p;
+  }
+  size_t slot = mp4_control_source_capacity;
+  for (size_t i = 0; i < mp4_control_source_capacity; ++i) {
+    const auto &r = mp4_control_source_bank[i];
+    if (r.asset == image.values[0]) {
+      slot = i;
+      break;
+    }
+    if (slot == mp4_control_source_capacity && !r.valid)
+      slot = i;
+  }
+  if (slot == mp4_control_source_capacity) {
+    slot = mp4_control_source_cursor;
+    mp4_control_source_cursor = (slot + 1) % mp4_control_source_capacity;
+  }
+  auto &saved = mp4_control_source_bank[slot];
+  mp4_control_source_drop(saved);
+  Mp4ControlSourceRecipe candidate{};
+  struct Cleanup {
+    Mp4ControlSourceRecipe &r;
+    ~Cleanup() { mp4_control_source_drop(r); }
+  } cleanup{candidate};
+  candidate.asset = image.values[0];
+  candidate.director = image.values[1];
+  candidate.owner = image.values[2];
+  candidate.graph = image.graph;
+  candidate.result = image.result;
+  candidate.raw_receipt = raw_receipt;
+  mp4world::AnimationGraph parent_graph{};
+  ::memcpy(static_cast<void *>(&parent_graph), &image.graph, 16);
+  // Private rebuilds can still have raw Control topology, but they are not an
+  // ordinary Source construction. Their later Source promotion is separate.
+  (void)mp4_source_factory_context(parent_graph, &candidate.parent);
+  mp4actor::Handle root{}, graph{};
+  ::memcpy(static_cast<void *>(&root), &image.result, 16);
+  ::memcpy(static_cast<void *>(&graph), &image.graph, 16);
+  const auto api = mp4_actor_state_api();
+  if (!mp4_control_source_plain(root))
+    return false;
+  const int32_t count = api.playable_input_count(&root, nullptr);
+  if (count < 0 || count > static_cast<int32_t>(mp4_control_source_leaf_limit))
+    return false;
+  if (count) {
+    candidate.leaves = static_cast<Mp4ControlSourceLeaf *>(
+        ::malloc(sizeof(Mp4ControlSourceLeaf) * static_cast<size_t>(count)));
+    if (!candidate.leaves)
+      return false;
+    for (int32_t i = 0; i < count; ++i)
+      new (&candidate.leaves[i]) Mp4ControlSourceLeaf{};
+  }
+  for (int32_t i = 0; i < count; ++i) {
+    mp4actor::Handle node{};
+    api.playable_input(&root, i, &node, nullptr);
+    auto &leaf = candidate.leaves[i];
+    ++candidate.count; // cleanup covers partially allocated weak handles.
+    if (!mp4_control_source_leaf(graph, node, &leaf))
+      return false;
+    for (int32_t j = 0; j < i; ++j)
+      if (mp4_actor_same_handle(candidate.leaves[j].node, leaf.node) ||
+          candidate.leaves[j].script == leaf.script ||
+          (candidate.leaves[j].role == leaf.role &&
+           candidate.leaves[j].target == leaf.target))
+        return false;
+    leaf.weak_script = weak_new(leaf.script, false);
+    leaf.weak_target = weak_new(leaf.target, false);
+    if (!leaf.weak_script || !leaf.weak_target ||
+        weak_get(leaf.weak_script) != leaf.script ||
+        weak_get(leaf.weak_target) != leaf.target)
+      return false;
+  }
+  // Recheck original publication after all managed/native helper calls.
+  if (mp4_control_passive_publishing != &image ||
+      mp4_control_passive_publishing_receipt != raw_receipt ||
+      !mp4_control_passive_raw_receipted(
+          image.values[0], image.values[1], image.values[2], image.graph,
+          image.result, &actual_receipt) || actual_receipt != raw_receipt)
+    return false;
+  candidate.receipt = mp4_control_source_sequence + 1;
+  candidate.valid = true;
+  if (!mp4_control_source_topology_current(candidate))
+    return false;
+  ++mp4_control_source_sequence;
+  saved = candidate;
+  candidate = {};
+  return true;
+}
+
+bool mp4_control_source_topology_current(const Mp4ControlSourceRecipe &r) {
+  if (!r.valid || !r.receipt || r.count > mp4_control_source_leaf_limit ||
+      (r.count && !r.leaves))
+    return false;
+  mp4actor::Handle root{}, graph{};
+  ::memcpy(static_cast<void *>(&root), &r.result, 16);
+  ::memcpy(static_cast<void *>(&graph), &r.graph, 16);
+  if (!mp4_control_source_plain(root))
+    return false;
+  const auto api = mp4_actor_state_api();
+  if (api.playable_input_count(&root, nullptr) != static_cast<int32_t>(r.count))
+    return false;
+  for (size_t i = 0; i < r.count; ++i) {
+    const auto &leaf = r.leaves[i];
+    mp4actor::Handle actual{};
+    api.playable_input(&root, static_cast<int32_t>(i), &actual, nullptr);
+    Mp4ControlSourceLeaf now{};
+    if (weak_get(leaf.weak_script) != leaf.script ||
+        weak_get(leaf.weak_target) != leaf.target ||
+        !mp4_control_source_leaf(graph, actual, &now) ||
+        !mp4_control_source_same_leaf(leaf, now))
+      return false;
+  }
+  return true;
+}
+
+bool mp4_control_source_parent_current(const Mp4TimelineContext &c,
+                                       const Mp4ControlSourceRecipe &r,
+                                       void *owner) {
+  const auto &p = r.parent;
+  if (!p.ticket.serial || !p.ticket.generation || !p.ticket.depth ||
+      p.input.asset != reinterpret_cast<uintptr_t>(c.asset) ||
+      p.input.game_object != reinterpret_cast<uintptr_t>(owner) ||
+      p.input.graph.handle != c.graph.handle ||
+      p.input.graph.version != c.graph.version ||
+      p.image.graph_native != c.identity.native ||
+      p.image.graph_version != c.identity.version)
+    return false;
+  mp4_source_factory::Receipt actual{};
+  if (!mp4_source_factory_receipt(p.ticket, &actual))
+    return false;
+  const auto &a = actual.source;
+  const auto same_object = [](const auto &x, const auto &y) {
+    return x.object == y.object && x.klass == y.klass &&
+           x.native == y.native && x.instance == y.instance;
+  };
+  return a.ticket.serial == p.ticket.serial &&
+         a.ticket.generation == p.ticket.generation &&
+         a.ticket.depth == p.ticket.depth &&
+         a.parent.serial == p.parent.serial &&
+         a.parent.generation == p.parent.generation &&
+         a.parent.depth == p.parent.depth &&
+         a.input.asset == p.input.asset &&
+         a.input.game_object == p.input.game_object &&
+         a.input.method == p.input.method &&
+         a.input.return_pc == p.input.return_pc &&
+         a.input.graph.handle == p.input.graph.handle &&
+         a.input.graph.version == p.input.graph.version &&
+         same_object(a.image.asset, p.image.asset) &&
+         same_object(a.image.game_object, p.image.game_object) &&
+         a.image.graph_native == p.image.graph_native &&
+         a.image.graph_version == p.image.graph_version &&
+         actual.root.handle == c.root.handle &&
+         actual.root.version == c.root.version && mp4_timeline_current(c);
+}
+
+bool mp4_control_source_runtime(const Mp4TimelineContext &c,
+                                const Mp4TimelineRuntime &runtime,
+                                mp4actor::Handle wanted = {},
+                                void *wanted_script = nullptr) {
+  if (c.phase != Mp4TimelineProofPhase::admission || runtime.kind != 0 ||
+      !runtime.element || !runtime.clip || !runtime.track ||
+      !mp4_timeline_exact(runtime.element, mp4_timeline_pins.clip) ||
+      !mp4_timeline_current(c) || !mp4_control_source_pins() ||
+      !mp4_control_source_bank ||
+      (static_cast<bool>(wanted.handle) != static_cast<bool>(wanted_script)))
+    return false;
+  size_t clip_index = c.clip_count, clips = 0, tracks = 0;
+  for (size_t i = 0; i < c.clip_count; ++i)
+    if (c.clips[i] == runtime.clip && c.clip_tracks[i] == runtime.track) {
+      clip_index = i;
+      ++clips;
+    }
+  for (size_t i = 0; i < c.track_count; ++i)
+    if (c.tracks[i] == runtime.track) {
+      if (!mp4_actor_same_handle(c.compiled[i], runtime.mixer))
+        return false;
+      ++tracks;
+    }
+  size_t elements = 0;
+  for (size_t i = 0; i < c.element_count; ++i)
+    if (c.elements[i] == runtime.element)
+      ++elements;
+  void *actual_clip = nullptr;
+  mp4actor::Handle actual_playable{}, actual_mixer{};
+  if (!mp4_actor_field(runtime.element, 24, actual_clip) ||
+      !mp4_actor_field(runtime.element, 32, actual_playable) ||
+      !mp4_actor_field(runtime.element, 48, actual_mixer) ||
+      actual_clip != runtime.clip ||
+      !mp4_actor_same_handle(actual_playable, runtime.playable) ||
+      !mp4_actor_same_handle(actual_mixer, runtime.mixer))
+    return false;
+  if (clips != 1 || tracks != 1 || elements != 1 ||
+      mp4_timeline_node_index(c, runtime.playable) < 0 ||
+      mp4_timeline_node_index(c, runtime.mixer) < 0)
+    return false;
+  Mp4ControlEdgeObservation authored{};
+  if (!mp4_control_edge_observe_impl(
+          c, clip_index, authored,
+          [](const Mp4TimelineContext &v) { return mp4_timeline_current(v); }))
+    return false;
+  uint64_t raw_receipt = 0;
+  mp4ctl::Handle graph{}, result{};
+  ::memcpy(static_cast<void *>(&graph), &c.graph, 16);
+  ::memcpy(static_cast<void *>(&result), &runtime.playable, 16);
+  Mp4ControlPassiveImage raw{};
+  if (!mp4_control_passive_raw_receipted(
+          authored.asset, c.director, authored.owner, graph, result,
+          &raw_receipt, &raw) ||
+      !mp4_control_passive_receipted(authored.asset, c.director, authored.owner,
+                                    graph, result) ||
+      raw.input.prefab || raw.input.time_control ||
+      raw.values[3] != authored.source ||
+      !mp4_control_passive_same_input(raw.input, authored.input))
+    return false;
+  const Mp4ControlSourceRecipe *saved = nullptr;
+  for (size_t i = 0; i < mp4_control_source_capacity; ++i) {
+    const auto &r = mp4_control_source_bank[i];
+    if (r.valid && r.raw_receipt == raw_receipt && r.receipt &&
+        r.asset == authored.asset && r.director == c.director &&
+        r.owner == authored.owner && r.graph.handle == graph.handle &&
+        r.graph.version == graph.version && r.result.handle == result.handle &&
+        r.result.version == result.version) {
+      if (saved)
+        return false;
+      saved = &r;
+    }
+  }
+  if (!saved || !mp4_control_source_topology_current(*saved) ||
+      !mp4_control_source_parent_current(c, *saved, authored.owner))
+    return false;
+  auto root = runtime.playable;
+  const auto api = mp4_actor_state_api();
+  if (api.playable_input_count(&root, nullptr) !=
+      static_cast<int32_t>(saved->count))
+    return false;
+  size_t directors = 0, activations = 0, particles = 0, wanted_matches = 0;
+  for (size_t i = 0; i < saved->count; ++i) {
+    const auto &leaf = saved->leaves[i];
+    mp4actor::Handle node{};
+    api.playable_input(&root, static_cast<int32_t>(i), &node, nullptr);
+    Mp4ControlSourceLeaf now{};
+    if (mp4_timeline_node_index(c, node) < 0 ||
+        weak_get(leaf.weak_script) != leaf.script ||
+        weak_get(leaf.weak_target) != leaf.target ||
+        !mp4_control_source_leaf(c.graph, node, &now) ||
+        !mp4_control_source_same_leaf(leaf, now))
+      return false;
+    if (leaf.role == Mp4ControlSourceRole::director) {
+      size_t matches = 0;
+      for (size_t d = 0; d < authored.count; ++d)
+        if (authored.children[d] == leaf.target)
+          ++matches;
+      if (matches != 1 || !raw.after.director)
+        return false;
+      ++directors;
+    } else if (leaf.role == Mp4ControlSourceRole::activation) {
+      if (!raw.after.active || !authored.source ||
+          leaf.target != authored.source || leaf.post != raw.input.post)
+        return false;
+      ++activations;
+    } else {
+      if (!raw.input.particles || !authored.source ||
+          !mp4_stage_admission_particle(c.witness, c.director, c.asset,
+                                        c.graph, node, leaf.script,
+                                        leaf.target, leaf.seed))
+        return false;
+      ++particles;
+    }
+    if (!mp4_control_source_plan || !mp4_control_source_plan(c, raw, leaf))
+      return false;
+    if (mp4_actor_same_handle(node, wanted) && leaf.script == wanted_script)
+      ++wanted_matches;
+  }
+  if (directors != authored.count || activations !=
+          static_cast<size_t>(raw.after.active && authored.source) ||
+      (!raw.input.particles && particles) ||
+      (wanted.handle && wanted_matches != 1))
+    return false;
+  // Source callbacks and all resource-plan providers are observations, so
+  // revalidate the original source/runtime key before publishing this answer.
+  uint64_t final_receipt = 0;
+  return mp4_control_source_topology_current(*saved) &&
+         mp4_control_source_parent_current(c, *saved, authored.owner) &&
+         mp4_timeline_current(c) &&
+         mp4_control_passive_raw_receipted(
+             authored.asset, c.director, authored.owner, graph, result,
+             &final_receipt) && final_receipt == raw_receipt &&
+         mp4_control_passive_receipted(authored.asset, c.director,
+                                       authored.owner, graph, result);
+}
+
+// Source-only provider entrypoints. Other phases continue through the actual
+// captured/fresh/restore recipes; phase-0 evidence is never reused as ownership.
+Mp4TimelineVerdict mp4_control_source_runtime_verdict(
+    const Mp4TimelineContext &c, const Mp4TimelineRuntime &r) {
+  if (c.phase != Mp4TimelineProofPhase::admission || !r.clip)
+    return Mp4TimelineVerdict::unrecognized;
+  void *asset = nullptr;
+  if (!mp4_actor_field(r.clip, mp4stage::Layout::clip_asset, asset))
+    return Mp4TimelineVerdict::unclosed;
+  if (!mp4_timeline_exact(asset, mp4_stage_other_pins.control_asset))
+    return Mp4TimelineVerdict::unrecognized;
+  return mp4_control_source_runtime(c, r) ? Mp4TimelineVerdict::closed
+                                          : Mp4TimelineVerdict::unclosed;
+}
+Mp4TimelineVerdict mp4_control_source_node_verdict(
+    const Mp4TimelineContext &c, mp4actor::Handle node, void *script) {
+  if (c.phase != Mp4TimelineProofPhase::admission || !script ||
+      (!mp4_timeline_exact(script, mp4_stage_other_pins.director_control) &&
+       !mp4_timeline_exact(script, mp4_stage_other_pins.activation) &&
+       !mp4_timeline_exact(script, mp4_stage_other_pins.particle)))
+    return Mp4TimelineVerdict::unrecognized;
+  if (!mp4_stage_other_same_graph(c, node, script) || c.element_count > 4096)
+    return Mp4TimelineVerdict::unclosed;
+  size_t matches = 0;
+  for (size_t i = 0; i < c.element_count; ++i) {
+    void *element = c.elements[i];
+    if (!mp4_timeline_exact(element, mp4_timeline_pins.clip))
+      continue;
+    Mp4TimelineRuntime r{};
+    r.element = element;
+    if (!mp4_actor_field(element, 24, r.clip) ||
+        !mp4_actor_field(element, 32, r.playable) ||
+        !mp4_actor_field(element, 48, r.mixer))
+      return Mp4TimelineVerdict::unclosed;
+    size_t clips = 0;
+    for (size_t k = 0; k < c.clip_count; ++k)
+      if (c.clips[k] == r.clip) {
+        r.track = c.clip_tracks[k];
+        ++clips;
+      }
+    if (clips != 1)
+      return Mp4TimelineVerdict::unclosed;
+    void *asset = nullptr;
+    if (!mp4_actor_field(r.clip, mp4stage::Layout::clip_asset, asset))
+      return Mp4TimelineVerdict::unclosed;
+    if (mp4_timeline_exact(asset, mp4_stage_other_pins.control_asset) &&
+        mp4_control_source_runtime(c, r, node, script))
+      ++matches;
+  }
+  return matches == 1 ? Mp4TimelineVerdict::closed
+                       : Mp4TimelineVerdict::unclosed;
+}
+bool mp4_control_source_userdata(const Mp4TimelineContext &c,
+                                  mp4actor::Handle node, void *script, void *) {
+  // Both accepted originals' Director/Activation ProcessFrame bodies ignore
+  // playerData; Particle inherits the exact base RET. Exact callback tables
+  // are checked above, including any override introduced by a different type.
+  return mp4_control_source_node_verdict(c, node, script) ==
+         Mp4TimelineVerdict::closed;
+}
+
+// END_MP4_CONTROL_SOURCE_ADMISSION_HOST
+
+
 // BEGIN_MP4_TARGET_IMAGE_HOST
 // Exact TargetImage producer. Root contexts supply authored track -> compiled
 // mixer -> RuntimeClip mappings; this does not discover arbitrary scene UI.
@@ -28126,6 +29137,63 @@ bool mp4_target_image_userdata(const Mp4TimelineContext& c,mp4actor::Handle node
 }
 [[maybe_unused]] Mp4TimelineProducer mp4_target_image_producer(){return {mp4_target_image_node,mp4_target_image_userdata,mp4_target_image_runtime};}
 // END_MP4_TARGET_IMAGE_HOST
+
+// BEGIN_MP4_NATIVE_OUTPUT_ROUTE_HOST
+// These adapters select an actual source lifecycle, then delegate the COMPLETE
+// payload/producer proof. A nonnull route is never an output capability.
+bool mp4_native_output_context(Mp4TimelineProofPhase*phase,Mp4SceneWitness*witness){
+ if(phase){*phase=Mp4TimelineProofPhase::admission;}
+ if(witness){*witness={};}
+ if(!phase||!witness||!game_call())return false;
+ Mp4SceneWitness selected{};
+ if(!idoly_mp4_runtime::game.selected_scene_witness(selected))return false;
+ Mp4TimelineProofPhase actual=Mp4TimelineProofPhase::admission;
+ if(mp4_scene_host.active){
+  const auto playback=idoly_mp4_runtime::game.automatic_rebuild_phase();
+  if(playback==idoly_mp4_playback::Phase::restoring){
+   const auto&h=mp4_scene_host;
+   actual=h.logical_checkpoint&&h.restored==h.all&&(h.finalized&2u)
+    ?Mp4TimelineProofPhase::source_restored:Mp4TimelineProofPhase::source_restore_plan;
+  }else if(playback==idoly_mp4_playback::Phase::acquiring||playback==idoly_mp4_playback::Phase::held
+   ||playback==idoly_mp4_playback::Phase::starting||playback==idoly_mp4_playback::Phase::playing)
+   actual=Mp4TimelineProofPhase::active;
+  else return false;
+ }
+ if(!mp4_timeline_phase_witness_current(actual,selected))return false;
+ *phase=actual;*witness=selected;return true;
+}
+bool mp4_native_audio_output_closed(const mp4world::DirectorGraphIdentity&identity,uintptr_t output){
+ if(!output||!identity.native||!identity.slot||(identity.version&1u))return false;
+ try{
+  Mp4TimelineProofPhase phase{};Mp4SceneWitness witness{};
+  return mp4_native_output_context(&phase,&witness)
+   &&mp4_audio_outer_output_closed(witness,identity,output,phase==Mp4TimelineProofPhase::admission);
+ }catch(...){return false;}
+}
+bool mp4_native_script_output_closed(const mp4world::DirectorGraphIdentity&identity,uintptr_t output){
+ if(!output||!identity.native||!identity.slot||(identity.version&1u))return false;
+ try{
+  Mp4TimelineProofPhase phase{};Mp4SceneWitness witness{};
+  return mp4_native_output_context(&phase,&witness)
+   &&mp4_timeline_script_output_closed(phase,witness,identity,output);
+ }catch(...){return false;}
+}
+bool mp4_timeline_animation_payload_closed(const Mp4TimelineContext&c,uintptr_t output){
+ return output&&mp4_timeline_current(c)
+  &&mp4_persistent_or_rebuilt_animation_output_closed(c.identity,output);
+}
+void mp4_bind_native_output_routes(){
+ mp4_director_output_closed[0]=mp4_persistent_or_rebuilt_animation_output_closed;
+ mp4_director_output_closed[1]=mp4_native_audio_output_closed;
+ mp4_director_output_closed[2]=mp4_native_script_output_closed;
+ mp4_timeline_hooks.animation_output=mp4_timeline_animation_payload_closed;
+ mp4_timeline_hooks.actor={mp4_timeline_actor_node,mp4_timeline_actor_userdata,mp4_timeline_actor_runtime};
+ // Exact TargetImage is the currently concrete World producer. Unknown
+ // Volume/Video families remain unrecognized/unclosed until their own recipe.
+ mp4_timeline_hooks.world=mp4_target_image_producer();
+}
+// END_MP4_NATIVE_OUTPUT_ROUTE_HOST
+
 
 
 // Exact ordinary source-factory observation is installed before the user can
@@ -29688,7 +30756,7 @@ bool mp4_prepare_runtime() {
     mp4_gpu_video_auxiliary_recipe_closed=mp4_video_texture_recipe_closed;
     mp4_bind_scene_post_restore();
     if(mp4_camera_host.verified)mp4_audio_managed_clip=mp4_audio_source_clip;
-    mp4_director_output_closed[0]=mp4_persistent_or_rebuilt_animation_output_closed;
+    mp4_bind_native_output_routes();
     // Pure source observation (including an already paused MV) precedes
     // acquisition of the offline scene. It must use the nine independently
     // verified original calls, not an invented flag/playing fallback.
@@ -31220,6 +32288,142 @@ void mp4_shader_bundle_observe(void*request,void*bundle){
   &&mp4_shader_lineage_registry.admits(actual_shader);
 }
 // END_MP4_SHADER_LINEAGE_HOST
+
+// BEGIN_MP4_PASSIVE_SOURCE_FACTORY_HOST
+// Embed after Shader lineage pins (all finite direct services are then visible).
+// The core is earlier than child_factory_hook; declare observer/context ahead
+// of that hook. No dependence on selected MV, font Awake, private Birth or API.
+namespace mp4sf=mp4_source_factory;
+bool mp4_source_factory_gateway_current(mp4_director_birth::FactoryFn);
+mp4sf::Journal mp4_source_factory_journal;
+std::atomic<bool>mp4_source_factory_configured{false};
+bool mp4_source_factory_owner(void*){
+ if(!image_base||!mp4_prefix(mp4_shader_lineage_pins.main_thread))return false;
+ using Main=bool(*)(Method*);
+ // Establish the owner only after the original VM compares actual Unity main
+ // thread ID. A first worker factory cannot claim game_thread_id.
+ return reinterpret_cast<Main>(image_base+mp4_shader_lineage_pins.main_thread.rva)(nullptr)&&game_call(true);
+}
+bool mp4_source_factory_ordinary(void*){return game_call()&&!mp4_raw_original_operation.depth;}
+bool mp4_source_factory_bindings(void*,mp4_director_birth::FactoryFn original){
+ if(!image_base||!mp4_native_base||!mp4_native_clock_source_ready.load(std::memory_order_acquire)
+  ||!original||original!=mp4_child_factory_original||!mp4_source_factory_gateway_current(original))return false;
+ // Installer independently holds/verifies both whole original image cohorts.
+ // This finite route checks every direct callable used by the early observer;
+ // no global table-ready flag substitutes for these exact source/gateway facts.
+ const pin::Entry*services[]={&pin::font_strong,&pin::weak_get,&pin::weak_free,&pin::object_alive,
+  &pin::object_class,&pin::class_name,&pin::class_namespace};
+ const uintptr_t actual[]={reinterpret_cast<uintptr_t>(font_strong),reinterpret_cast<uintptr_t>(weak_get),
+  reinterpret_cast<uintptr_t>(weak_free),reinterpret_cast<uintptr_t>(object_alive),reinterpret_cast<uintptr_t>(object_class),
+  reinterpret_cast<uintptr_t>(class_name),reinterpret_cast<uintptr_t>(class_namespace)};
+ for(size_t i=0;i<sizeof actual/sizeof actual[0];++i){const auto&p=*services[i];const uintptr_t at=image_base+p.rva;
+  if(at<image_base||actual[i]!=at||!mp4_mapped(at,16,false)||std::memcmp(reinterpret_cast<const void*>(at),p.bytes,16))return false;}
+ for(const auto*p:{&mp4_shader_lineage_pins.main_thread,&mp4_shader_lineage_pins.instance_id,&mp4_profile.graph_valid})
+  if(!mp4_prefix(*p))return false;
+ for(const auto*p:{&mp4_actor_profile.playable_valid,&mp4_actor_profile.playable_graph_get}){
+  mp4game::Binding b{};b.rva=p->rva;std::memcpy(b.prefix,p->prefix,16);if(!mp4_prefix(b))return false;}
+ const auto&p=mp4_child_birth_pins;const uintptr_t at=image_base+p.internal_return-8;
+ return at>=image_base&&mp4_mapped(at,8,false)&&!std::memcmp(reinterpret_cast<const void*>(at),p.internal_call,8);
+}
+bool mp4_source_factory_object(uintptr_t object,const char*type,mp4sf::Object*out){
+ if(!out||!object||!mp4_actor_mapped(reinterpret_cast<void*>(object),24,false)
+  ||!mp4_exact_type(reinterpret_cast<void*>(object),type)||!mp4_alive(reinterpret_cast<void*>(object)))return false;
+ mp4sf::Object value{};value.object=object;
+ if(!mp4_actor_field(reinterpret_cast<void*>(object),0,value.klass)||!value.klass
+  ||!mp4_actor_field(reinterpret_cast<void*>(object),16,value.native)||!value.native
+  ||!mp4_actor_mapped(reinterpret_cast<void*>(value.native),0x40,false))return false;
+ using ID=int32_t(*)(void*,Method*);
+ value.instance=static_cast<uint32_t>(reinterpret_cast<ID>(image_base+mp4_shader_lineage_pins.instance_id.rva)(reinterpret_cast<void*>(object),nullptr));
+ uintptr_t native=0,klass=0;
+ if(!value.instance||!mp4_actor_field(reinterpret_cast<void*>(object),16,native)||native!=value.native
+  ||!mp4_actor_field(reinterpret_cast<void*>(object),0,klass)||klass!=value.klass||!mp4_alive(reinterpret_cast<void*>(object)))return false;
+ *out=value;return true;
+}
+bool mp4_source_factory_graph(mp4sf::Graph graph,uintptr_t*native,uint32_t*version){
+ if(!native||!version||!graph.handle)return false;
+ uintptr_t n=0,back=0;uint32_t v=0;
+ if(!mp4_actor_field(reinterpret_cast<void*>(graph.handle),0x20,v)||(v&1u)||v!=(graph.version&~uint32_t(1))
+  ||!mp4_actor_field(reinterpret_cast<void*>(graph.handle),0x28,n)||!n
+  ||!mp4_actor_field(reinterpret_cast<void*>(n),16,back)||back!=graph.handle)return false;
+ using Valid=bool(*)(mp4sf::Graph*,Method*);
+ if(!reinterpret_cast<Valid>(image_base+mp4_profile.graph_valid.rva)(&graph,nullptr))return false;
+ uintptr_t again=0;uint32_t next=0;
+ if(!mp4_actor_field(reinterpret_cast<void*>(graph.handle),0x20,next)||next!=v
+  ||!mp4_actor_field(reinterpret_cast<void*>(graph.handle),0x28,again)||again!=n)return false;
+ *native=n;*version=v;return true;
+}
+bool mp4_source_factory_inspect(void*,const mp4sf::Input&i,mp4sf::Image*out){
+ if(!out||!game_call()||!mp4_source_factory_ordinary(nullptr)||!mp4_source_factory_bindings(nullptr,mp4_child_factory_original)
+  ||i.return_pc!=image_base+mp4_child_birth_pins.internal_return||!i.method||!mp4_actor_refresh_maps())return false;
+ mp4sf::Image image{};uintptr_t target=0,method=0,entry=0;
+ if(!mp4_source_factory_object(i.asset,"UnityEngine.Timeline.TimelineAsset",&image.asset)
+  ||!mp4_source_factory_object(i.game_object,"UnityEngine.GameObject",&image.game_object)
+  ||!mp4_actor_field(reinterpret_cast<void*>(image.asset.klass),0x198,target)||target!=image_base+mp4_child_birth_pins.factory
+  ||!mp4_actor_field(reinterpret_cast<void*>(image.asset.klass),0x1a0,method)||method!=i.method
+  ||!mp4_actor_field(reinterpret_cast<void*>(method),0,entry)||entry!=target
+  ||!mp4_source_factory_graph(i.graph,&image.graph_native,&image.graph_version))return false;
+ *out=image;return true;
+}
+bool mp4_source_factory_returned(void*,const mp4sf::Input&i,const mp4sf::Image&image,mp4sf::Playable root){
+ if(!game_call()||!root.handle||!mp4_source_factory_bindings(nullptr,mp4_child_factory_original))return false;
+ uintptr_t native=0;uint32_t version=0;
+ if(!mp4_source_factory_graph(i.graph,&native,&version)||native!=image.graph_native||version!=image.graph_version)return false;
+ // A pure version/payload read precedes any native query of the returned node.
+ uint32_t node_version=0;uintptr_t node=0;
+ if(!mp4_actor_field(reinterpret_cast<void*>(root.handle),0x20,node_version)||(node_version&1u)
+  ||node_version!=(root.version&~uint32_t(1))||!mp4_actor_field(reinterpret_cast<void*>(root.handle),0x28,node)||!node)return false;
+ using Valid=bool(*)(mp4sf::Playable*,Method*);using GetGraph=void(*)(mp4sf::Playable*,mp4sf::Graph*,Method*);
+ if(!reinterpret_cast<Valid>(image_base+mp4_actor_profile.playable_valid.rva)(&root,nullptr))return false;
+ mp4sf::Graph actual{};reinterpret_cast<GetGraph>(image_base+mp4_actor_profile.playable_graph_get.rva)(&root,&actual,nullptr);
+ return actual.handle==i.graph.handle&&actual.version==i.graph.version
+  &&mp4_source_factory_graph(i.graph,&native,&version)&&native==image.graph_native&&version==image.graph_version;
+}
+bool mp4_source_factory_prepare(){
+ if(mp4_source_factory_configured.load(std::memory_order_acquire))return mp4_source_factory_bindings(nullptr,mp4_child_factory_original);
+ if(!mp4_source_factory_owner(nullptr)||!mp4_source_factory_ordinary(nullptr)
+  ||!mp4_source_factory_bindings(nullptr,mp4_child_factory_original)||!mp4_actor_refresh_maps())return false;
+ mp4sf::Api a{};a.owner_thread=mp4_source_factory_owner;a.ordinary_stack=mp4_source_factory_ordinary;
+ a.bindings=mp4_source_factory_bindings;a.inspect=mp4_source_factory_inspect;a.returned=mp4_source_factory_returned;
+ a.retain=mp4_retain;a.target=weak_get;a.release=weak_free;
+ const bool configured=mp4_source_factory_journal.configure(a,mp4_child_factory_original);
+ if(configured)mp4_source_factory_configured.store(true,std::memory_order_release);
+ return configured;
+}
+mp4_director_birth::Playable mp4_source_factory_observe(void*asset,mp4world::AnimationGraph graph,void*go,const void*method,uintptr_t entry_return){
+ // The saved typed original is published before its hook target. Failed early
+ // observation still preserves the actual ordinary call and its return/throw.
+ bool prepared=false;try{prepared=mp4_source_factory_prepare();}catch(...){mp4_source_factory_journal.invalidate();}
+ if(!prepared){mp4_source_factory_journal.invalidate();return mp4_child_factory_original(asset,graph,go,method);}
+ const mp4sf::Input input{reinterpret_cast<uintptr_t>(asset),reinterpret_cast<uintptr_t>(go),reinterpret_cast<uintptr_t>(method),entry_return,graph};
+ return mp4sf::observe(mp4_source_factory_journal,mp4_child_factory_original,input);
+}
+[[maybe_unused]] bool mp4_source_factory_context(mp4world::AnimationGraph graph,mp4sf::Context*out){
+ return mp4_source_factory_configured.load(std::memory_order_acquire)&&mp4_source_factory_journal.context(graph,out);
+}
+[[maybe_unused]] bool mp4_source_factory_receipt(mp4sf::Ticket ticket,mp4sf::Receipt*out){
+ return mp4_source_factory_configured.load(std::memory_order_acquire)&&mp4_source_factory_journal.receipt(ticket,out);
+}
+[[maybe_unused]] void mp4_source_factory_invalidate()noexcept{mp4_source_factory_journal.invalidate();}
+[[maybe_unused]] bool mp4_source_factory_clear(){return mp4_source_factory_configured.load(std::memory_order_acquire)&&mp4_source_factory_journal.clear();}
+// Source handoff uses later exact Director publication only to SEAL a genuine
+// observed record. It can never create one from native88/98 or graph ancestry.
+[[maybe_unused]] bool mp4_source_factory_seal(const mp4_director_birth::SourceTuple&owner,mp4world::AnimationGraph graph,
+                             mp4_director_birth::Playable root,mp4sf::Receipt*out){
+ if(out)*out={};if(!out||!mp4_source_factory_configured.load(std::memory_order_acquire)||!game_call()||mp4_raw_original_operation.depth
+  ||!mp4_child_native_owner(nullptr,owner))return false;
+ mp4world::DirectorGraphIdentity identity{};mp4_director_birth::Playable designated{};
+ if(!mp4_child_publication(owner,graph,&identity,&designated)||designated.handle!=root.handle||designated.version!=root.version)return false;
+ const mp4sf::Input input{owner.asset,owner.game_object,owner.method,image_base+mp4_child_birth_pins.internal_return,graph};
+ mp4sf::Receipt record{};
+ if(!mp4_source_factory_journal.find(input,root,&record)||record.source.image.asset.klass!=owner.klass
+  ||record.source.image.graph_native!=identity.native||record.source.image.graph_version!=identity.version)return false;
+ mp4world::DirectorGraphIdentity again{};mp4_director_birth::Playable next{};
+ if(!mp4_child_publication(owner,graph,&again,&next)||again.native!=identity.native||again.slot!=identity.slot||again.version!=identity.version
+  ||next.handle!=root.handle||next.version!=root.version)return false;
+ *out=record;return true;
+}
+// END_MP4_PASSIVE_SOURCE_FACTORY_HOST
+
 
 // BEGIN_MP4_SHADER_LINEAGE_HOOKS
 using Mp4ShaderMemoryLoad=void*(*)(void*,uint32_t,Method*);
@@ -32835,8 +34039,8 @@ Mp4CaptureQueueOriginal mp4_capture_add_original=nullptr,mp4_capture_target_requ
 
 // BEGIN_MP4_CAPTURE_FRONTEND_SOURCE_HOST
 #ifdef IDOLY_DARWIN_BRIDGE
-bool mp4_capture_static_frontend(const pin::Entry&e,uintptr_t replacement,uintptr_t original){
- if(!ready.load(std::memory_order_acquire)||!e.gateway||!e.slot||e.relay_in||e.relay_out
+bool mp4_capture_static_frontend(const pin::Entry&e,uintptr_t replacement,uintptr_t original,bool require_ready=true){
+ if((require_ready&&!ready.load(std::memory_order_acquire))||!e.gateway||!e.slot||e.relay_in||e.relay_out
   ||original!=image_base+e.gateway+20||!mp4_mapped(image_base+e.rva,24,true)
   ||!mp4_mapped(image_base+e.gateway,28,true)||!mp4_mapped(image_base+e.slot,8,false)
   ||read<uintptr_t>(reinterpret_cast<void*>(image_base+e.slot),0)!=replacement)return false;
@@ -32857,7 +34061,7 @@ bool mp4_capture_static_frontend(const pin::Entry&e,uintptr_t replacement,uintpt
  return !std::memcmp(reinterpret_cast<void*>(image_base+e.gateway),code,sizeof code);
 }
 #else
-extern mp4_bootstrap::ShadowService<8>mp4_managed_source_backend;
+extern mp4_bootstrap::ShadowService<9>mp4_managed_source_backend;
 #endif
 [[maybe_unused]] bool mp4_capture_frontends_current(uintptr_t*actual_update_return){
  if(actual_update_return)*actual_update_return=0;
@@ -32879,6 +34083,37 @@ extern mp4_bootstrap::ShadowService<8>mp4_managed_source_backend;
 #endif
 }
 // END_MP4_CAPTURE_FRONTEND_SOURCE_HOST
+
+// BEGIN_MP4_SOURCE_FACTORY_FRONTEND_HOST
+// This certificate is available during ordinary first-MV construction. It
+// proves only this installed typed source gateway, not Birth/Scene ownership.
+[[maybe_unused]] bool mp4_source_factory_gateway_current(mp4_director_birth::FactoryFn original){
+ if(!original||original!=mp4_child_factory_original||!image_base)return false;
+ const auto&entry=pin::mp4_source_timeline_factory;
+#ifdef IDOLY_DARWIN_BRIDGE
+ const auto&source=mp4_bootstrap::ios_bootstrap_pins[7];
+ if(entry.rva!=source.rva||std::memcmp(entry.bytes,source.original,16)
+  ||!mp4_mapped(image_base+entry.rva+16,8,true)
+  ||std::memcmp(reinterpret_cast<void*>(image_base+entry.rva+16),source.original+16,8))return false;
+ return mp4_capture_static_frontend(entry,reinterpret_cast<uintptr_t>(mp4_child_factory_hook),
+  reinterpret_cast<uintptr_t>(original),false);
+#else
+ const auto&source=mp4_bootstrap::android_bootstrap_pins[7];
+ if(entry.rva!=source.rva||std::memcmp(entry.bytes,source.original,16))return false;
+ const size_t count=mp4_managed_hook_count.load(std::memory_order_acquire);
+ if(count>mp4_managed_hook_capacity)return false;
+ for(size_t i=0;i<count;++i){const auto&r=mp4_managed_hook_receipts[i];
+  if(r.base!=image_base||r.rva!=entry.rva||r.original_location!=reinterpret_cast<void**>(&mp4_child_factory_original)
+   ||r.trampoline!=reinterpret_cast<void*>(original)||!r.stub)continue;
+  mp4_bootstrap::Install actual{};
+  return mp4_managed_source_backend.receipt(8,image_base+source.rva,
+   reinterpret_cast<uintptr_t>(mp4_child_factory_hook),reinterpret_cast<uintptr_t>(original),
+   reinterpret_cast<uintptr_t>(r.stub),&actual);
+ }
+ return false;
+#endif
+}
+// END_MP4_SOURCE_FACTORY_FRONTEND_HOST
 
 void mp4_capture_frontends_install(){
  mp4_capture_production_frontend.active=mp4_capture_production_active_bank;
@@ -36224,7 +37459,7 @@ struct Mp4AndroidHookSource {
  uint64_t game_load=0,native_load=0,game_cohort=0,native_cohort=0;
  std::atomic<bool> active{false};
 }mp4_android_hook_source_state;
-mp4_bootstrap::ShadowService<8>mp4_managed_source_backend;
+mp4_bootstrap::ShadowService<9>mp4_managed_source_backend;
 bool mp4_android_hook_installer(void*context){
  auto*h=static_cast<Mp4AndroidHookSource*>(context);
  return h&&h->active.load(std::memory_order_acquire)&&pthread_equal(h->installer,pthread_self());
@@ -36257,6 +37492,7 @@ bool mp4_android_hook_code(void*,uintptr_t address,void*out,size_t count){
 }
 bool mp4_managed_source_current(uintptr_t rva){
  for(size_t i=0;i<8;++i)if(mp4_bootstrap::android_managed_extra_pins[i].rva==rva)return mp4_managed_source_backend.current(i);
+ if(mp4_bootstrap::android_bootstrap_pins[7].rva==rva)return mp4_managed_source_backend.current(8);
  return false;
 }
 bool mp4_android_managed_source_prepare(const Image&game){
@@ -36270,10 +37506,11 @@ bool mp4_android_managed_source_prepare(const Image&game){
  h.game_hold=held_library;h.native_hold=mp4_held_native_library;
  h.game_load=++next_certificate;h.native_load=++next_certificate;
  h.game_cohort=++next_certificate;h.native_cohort=++next_certificate;
- mp4_bootstrap::ShadowSourceSpec specs[8]{};
+ mp4_bootstrap::ShadowSourceSpec specs[9]{};
  const pin::Entry*entries[]={&pin::mp4_capture_request,&pin::mp4_capture_update,&pin::mp4_capture_wrapper_ctor,&pin::mp4_capture_texture_ctor,
-  &pin::mp4_shader_memory_sync,&pin::mp4_shader_memory_async,&pin::mp4_shader_file_async,&pin::mp4_shader_bundle_result};
- for(size_t i=0;i<8;++i){const auto&p=mp4_bootstrap::android_managed_extra_pins[i];
+  &pin::mp4_shader_memory_sync,&pin::mp4_shader_memory_async,&pin::mp4_shader_file_async,&pin::mp4_shader_bundle_result,
+  &pin::mp4_source_timeline_factory};
+ for(size_t i=0;i<9;++i){const auto&p=i<8?mp4_bootstrap::android_managed_extra_pins[i]:mp4_bootstrap::android_bootstrap_pins[7];
   if(entries[i]->rva!=p.rva||std::memcmp(entries[i]->bytes,p.original,16))return false;
   specs[i].image=mp4_bootstrap::BootstrapImage::game;specs[i].rva=p.rva;
   std::memcpy(specs[i].original,p.original,24);specs[i].library="libil2cpp.so";specs[i].symbol=entries[i]->name;
@@ -36281,7 +37518,7 @@ bool mp4_android_managed_source_prepare(const Image&game){
  const mp4_bootstrap::ShadowBackend backend={shadowhook_get_recordable,shadowhook_set_recordable,
   shadowhook_hook_func_addr_2,shadowhook_get_records,free};
  const mp4_bootstrap::ShadowServices services={&h,mp4_android_hook_installer,mp4_android_hook_source,mp4_android_hook_code};
- if(!mp4_managed_source_backend.configure(backend,services,specs,8))return false;
+ if(!mp4_managed_source_backend.configure(backend,services,specs,9))return false;
  h.active.store(true,std::memory_order_release);
  mp4_managed_hook_backend_current=mp4_managed_source_current;return true;
 }
@@ -36321,6 +37558,7 @@ void *install(void *) {
         HOOK(mp4_shader_memory_async,mp4_shader_memory_async_hook,mp4_shader_memory_async_original),
         HOOK(mp4_shader_file_async,mp4_shader_file_async_hook,mp4_shader_file_async_original),
         HOOK(mp4_shader_bundle_result,mp4_shader_bundle_result_hook,mp4_shader_bundle_result_original),
+        HOOK(mp4_source_timeline_factory,mp4_child_factory_hook,mp4_child_factory_original),
         HOOK(font_awake,font_awake_hook,font_awake_original),
         HOOK(resource_can_reach,resource_can_reach_hook,resource_can_reach_original),
         HOOK(sound_bgm_volume,sound_bgm_volume_hook,sound_bgm_volume_original),
@@ -36429,7 +37667,7 @@ void *install(void *) {
 #undef HOOK
     for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; ++i) {
         bool finite_source=false;
-        for(size_t index=0;index<8;++index)if(mp4_bootstrap::android_managed_extra_pins[index].rva==hooks[i].entry->rva){
+        for(size_t index=0;index<9;++index)if((index<8?mp4_bootstrap::android_managed_extra_pins[index]:mp4_bootstrap::android_bootstrap_pins[7]).rva==hooks[i].entry->rva){
             finite_source=true;
             const bool installed=mp4_managed_source_backend.install(index,reinterpret_cast<uintptr_t>(hooks[i].replacement),hooks[i].original);
             hooks[i].stub=mp4_managed_source_backend.installed_stub(index);
