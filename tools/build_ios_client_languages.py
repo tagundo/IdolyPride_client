@@ -36,6 +36,14 @@ DIRECT_GPU_PIN = "client-presentation/images/korean-ios-direct-gpu-v1.json"
 DIRECT_GPU_PIN_SHA256 = "5a15ccce17f043d4c56424e2b6318f83bdcbc7b0614f56b0207239298d190131"
 
 
+def _renderer_asset_verifier():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("idoly_ios_renderer_assets", ROOT / "tools/audit_mp4_renderer_assets.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _need(value, message):
     if not value:
         raise ValueError(message)
@@ -101,6 +109,7 @@ def _skip(source, count):
 
 def _build_source_pins():
     names = ("tools/build_ios_client_languages.py", "tools/fetch_korean_ui_images.py",
+             "tools/audit_mp4_renderer_assets.py",
              "src/idoly_local/static_ui_assets.py",
              "src/idoly_local/static_ui_images.py", "src/idoly_local/static_ui_textures.py",
              "src/idoly_local/ui_assets.py", "src/idoly_local/cdn_image_translation.py",
@@ -439,6 +448,9 @@ def build_client_languages(stock_ipa, base_ipa, output, *, english_csv, english_
     stock_identity, base_identity = _hash(stock_ipa), _hash(base_ipa)
     _need(stock_identity == (STOCK_SHA256, STOCK_BYTES) and base_identity == (BASE_SHA256, BASE_BYTES),
           "Stock or Korean base IPA differs from its pinned source")
+    renderer_assets = _renderer_asset_verifier()
+    program_inputs = {"stock": renderer_assets.verify_archive(stock_ipa, "ios"),
+                      "base": renderer_assets.verify_archive(base_ipa, "ios")}
     csv, csv_proof = load_package_inputs("en", english_csv, english_proof)
     manifest = {"schema": 1, "policy": POLICY, "bundle_id": BUNDLE_ID,
                 "common": {}, "languages": {language: {} for language in ("ja", "ko", "en")},
@@ -503,6 +515,8 @@ def build_client_languages(stock_ipa, base_ipa, output, *, english_csv, english_
                              compress_type=ZIP_DEFLATED, compresslevel=6)
         _need(partial.stat().st_size <= MAX_PACKAGE, "Language package exceeds its bound")
         with ZipFile(partial) as check:
+            program_overlays = {code: renderer_assets.verify_asset_bytes(check.read(code + "/" + RESOURCES), "ios", "resources.assets")
+                                for code in ("ja", "ko", "en")}
             _need(check.testzip() is None, "Language package CRC differs")
             _need(json.loads(check.read("manifest.json")) == manifest, "Language manifest roundtrip differs")
             for language in ("ja", "ko", "en"):
@@ -519,7 +533,8 @@ def build_client_languages(stock_ipa, base_ipa, output, *, english_csv, english_
         receipt = {"schema": 1, "policy": POLICY, "source": manifest["source"], "package": metadata,
                    "common_files": len(manifest["common"]), "language_members": 3, "korean_resources_refreshed": True,
                    "signed_app_modified_at_runtime": False, "runtime_string_translation": False,
-                   "manifest": manifest, "proofs": proofs, "source_component_sha256": build_sources,
+                   "manifest": manifest, "proofs": proofs, "renderer_program_assets": {"inputs": program_inputs, "overlays": program_overlays},
+                   "source_component_sha256": build_sources,
                    "source_commit": os.environ.get("GITHUB_SHA")}
         _need(not any(p.exists() or p.is_symlink() for p in (output, descriptor, report)), "Language output appeared during build")
         # These files share a directory/filesystem. Publishing with a hard

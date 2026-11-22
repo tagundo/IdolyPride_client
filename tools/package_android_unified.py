@@ -353,6 +353,7 @@ def source_snapshot(root, commit, allow_working):
                 py_sources[member] = (name, raw)
     for name in (SERVER_MANIFEST, "android-server/app/build.gradle.kts",
                  "tools/package_android_unified.py", "tools/build_android_language_data.py",
+                 "tools/audit_mp4_renderer_assets.py",
                  "tools/refresh_korean_translation_bundle.py", "tools/build_startup_translation_receipt.py",
                  "data/latest-korean-translations-pin.json", "tools/korean_server_data_pin.py",
                  "data/korean-master-data-pin.json"):
@@ -821,9 +822,15 @@ def build(args):
             from . import build_android_language_data as language_data
         else:
             import build_android_language_data as language_data
+        if __package__:
+            from . import audit_mp4_renderer_assets as renderer_assets
+        else:
+            import audit_mp4_renderer_assets as renderer_assets
+        language_inputs = {"ko": client, "ja": regular(args.client_ja_apk), "en": regular(args.client_en_apk)}
+        renderer_program_assets = {code: renderer_assets.verify_archive(path, "android")
+                                   for code, path in language_inputs.items()}
         language_archive = work / "language-data.zip"
-        data_descriptor = language_data.build_archive({"ko": client,
-            "ja": regular(args.client_ja_apk), "en": regular(args.client_en_apk)}, language_archive)
+        data_descriptor = language_data.build_archive(language_inputs, language_archive)
         translation_source = regular(args.translation_source or server.parent / "korean-translations-source.zip", 192 * MIB)
         runtime_assets, asset_overrides, translation_proof, master_proof = prepare_translation_assets(server, translation_source, work, root, env)
         resources, generated, r = build_resources(work, blobs, tools, env)
@@ -876,6 +883,8 @@ def build(args):
                     raise ValueError("Final bundled server data or translation asset differs")
         if language_data.validate_data_archive(aligned, client, embedded=True) != data_descriptor:
             raise ValueError("Final language object store differs")
+        if renderer_assets.verify_archive(aligned, "android") != renderer_program_assets["ko"]:
+            raise ValueError("Final renderer shader program objects differ")
         badging = run([tools["aapt2"], "dump", "badging", aligned], env, complete_output_limit=64 * 1024)
         validate_final_badging(badging)
         final_blobs, _, _ = source_snapshot(root, args.source_commit, args.allow_working_tree)
@@ -902,7 +911,8 @@ def build(args):
             "korean_master_refresh": master_proof,
             "runtime_assets": {name: {"bytes": size, "sha256": digest} for name, (size, digest) in runtime_assets.items()},
             "python_sources": python_rows, "added_dex": dex_name, "server_class_count": len(definitions),
-            "preservation": preservation, "signed_certificate_sha256": CERTIFICATE,
+            "preservation": preservation, "renderer_program_assets": renderer_program_assets,
+            "signed_certificate_sha256": CERTIFICATE,
             "apk_bytes": aligned.stat().st_size, "apk_sha256": sha256(aligned),
             "runtime_validation": {"install_and_launch": False, "gameplay": False,
                 "language_switching": False, "shared_resource_direct_reading": False,

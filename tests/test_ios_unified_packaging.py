@@ -17,6 +17,14 @@ import prepare_runtime as runtime
 import package_unified as package
 
 
+@pytest.fixture(autouse=True)
+def _synthetic_renderer_program_inputs(monkeypatch):
+    # This module's tiny Mach-O/Data fixtures contain no retained Unity shader
+    # objects. Real shader parsing/preservation and mandatory joins are covered
+    # by test_mp4_renderer_assets; do not weaken the production guard for fakes.
+    monkeypatch.setattr(package, 'renderer_program_assets', lambda *args: None)
+
+
 def sha(raw): return hashlib.sha256(raw).hexdigest()
 
 def native(platform=2,cpu=common.ARM64,name='Python',dependencies=(),signed=True):

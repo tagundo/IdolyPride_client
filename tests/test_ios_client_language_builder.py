@@ -20,6 +20,16 @@ def builder():
 
 
 def source_inputs(tmp_path, monkeypatch, builder):
+    # Small language routing fixtures do not contain serialized Unity objects.
+    # The real parser and package guards are tested in test_mp4_renderer_assets.
+    class ProgramFixture:
+        @staticmethod
+        def verify_archive(path, platform):
+            return {"fixture": True, "platform": platform}
+        @staticmethod
+        def verify_asset_bytes(raw, platform, name):
+            return {"fixture": True, "platform": platform, "name": name}
+    monkeypatch.setattr(builder, "_renderer_asset_verifier", ProgramFixture)
     stock, base = tmp_path / "stock.ipa", tmp_path / "ko.ipa"
     source = {"Data/shared": b"same shader bytes", "Data/resources.assets": b"Japanese UI",
               "Data/Managed/Metadata/global-metadata.dat": b"Japanese metadata"}

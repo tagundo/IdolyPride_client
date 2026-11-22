@@ -44,6 +44,24 @@ def _packaged_pin_module():
     return module
 
 
+def _renderer_program_module():
+    spec=importlib.util.spec_from_file_location('ios_renderer_program_assets',HERE.parent/'tools/audit_mp4_renderer_assets.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module
+
+
+def renderer_program_assets(base_ipa, language_archive, manifest):
+    if 'stock_ipa' not in manifest['inputs']:
+        return None  # Explicit synthetic fixtures do not identify the source SDK.
+    verifier=_renderer_program_module()
+    base=verifier.verify_archive(base_ipa,'ios')
+    require(language_archive is not None,'Renderer program proof requires all selected language resources')
+    with ZipFile(language_archive) as archive:
+        overlays={code:verifier.verify_asset_bytes(archive.read(code+'/Data/resources.assets'),'ios','resources.assets')
+                  for code in ('ja','ko','en')}
+    return {'base':base,'selected_language_resources':overlays}
+
+
 def _korean_pin_module():
     spec=importlib.util.spec_from_file_location('ios_packaged_korean_master_pin',HERE.parent/'tools/korean_server_data_pin.py')
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
@@ -281,7 +299,8 @@ def verify_unity_patch(incoming, patched, original_sha256):
 
 
 def stage_app(runtime_root,native_framework,server_data,translations,output,*,target='simulator',manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,base_ipa=None,server_data_upgrade_proof=None,server_data_korean_refresh_proof=None,startup_translations=None,startup_translations_metadata=None):
-    manifest = _packaging_manifest(manifest); require(target == 'simulator', 'Stage-only app is reserved for the Simulator probe'); output = Path(output); require(not output.exists(), 'Fresh prepared app output required')
+    manifest = _packaging_manifest(manifest)
+    renderer_program_proof=renderer_program_assets(base_ipa,client_languages,manifest); require(target == 'simulator', 'Stage-only app is reserved for the Simulator probe'); output = Path(output); require(not output.exists(), 'Fresh prepared app output required')
     files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,target,manifest,web_root,allow_unsigned_native=True,client_languages=client_languages,client_languages_metadata=client_languages_metadata,server_data_upgrade_proof=server_data_upgrade_proof,server_data_korean_refresh_proof=server_data_korean_refresh_proof,startup_translations=startup_translations,startup_translations_metadata=startup_translations_metadata); output.mkdir(parents=True)
     for name,path in files.items():
         dest = output / name; dest.parent.mkdir(parents=True,exist_ok=True)
@@ -290,13 +309,16 @@ def stage_app(runtime_root,native_framework,server_data,translations,output,*,ta
     for name,raw in generated.items():
         dest = output / name; dest.parent.mkdir(parents=True,exist_ok=True); dest.write_bytes(raw)
     data = stage_base_data(base_ipa,output,proofs['client_languages']['manifest'],manifest) if proofs['client_languages'] else None
-    report = {'schema':1,'target':target,'prepared_app':str(output),'files':len(files)+len(generated)+(data['files'] if data else 0),'client_languages':proofs['client_languages'],'base_Data':data,'executable_and_Info_provided_by_probe':True,'actual_simulator_execution':False,'native_signing_deferred_to_probe':True}
+    report = {'schema':1,'target':target,'prepared_app':str(output),'files':len(files)+len(generated)+(data['files'] if data else 0),'client_languages':proofs['client_languages'],'base_Data':data,'renderer_program_assets':renderer_program_proof,'executable_and_Info_provided_by_probe':True,'actual_simulator_execution':False,'native_signing_deferred_to_probe':True}
     if proofs['startup_translations'] is not None: report['startup_translations']=proofs['startup_translations']
     return report
 
 
 def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,translations,output,*,source_commit,manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,server_data_upgrade_proof=None,server_data_korean_refresh_proof=None,startup_translations=None,startup_translations_metadata=None,stock_ipa=None,presentation_library=None,presentation_plan=None):
-    manifest = _packaging_manifest(manifest); require(re.fullmatch('[0-9a-f]{40}',source_commit or ''), 'Exact unified source commit required'); verify_file(base_ipa,manifest['inputs']['base_ipa'])
+    manifest = _packaging_manifest(manifest)
+    require(re.fullmatch('[0-9a-f]{40}',source_commit or ''), 'Exact unified source commit required')
+    verify_file(base_ipa,manifest['inputs']['base_ipa'])
+    renderer_program_proof=renderer_program_assets(base_ipa,client_languages,manifest)
     output = Path(output); partial = output.with_suffix(output.suffix + '.partial'); require(not output.exists() and not partial.exists(), 'Fresh unified IPA output required')
     files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,'device',manifest,web_root,client_languages=client_languages,client_languages_metadata=client_languages_metadata,server_data_upgrade_proof=server_data_upgrade_proof,server_data_korean_refresh_proof=server_data_korean_refresh_proof,startup_translations=startup_translations,startup_translations_metadata=startup_translations_metadata)
     fresh = any(value is not None for value in (stock_ipa,presentation_library,presentation_plan))
@@ -377,8 +399,11 @@ def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,tra
             with archive.open(name) as incoming:
                 for block in iter(lambda:incoming.read(CHUNK),b''): h.update(block)
             require(h.hexdigest() == wanted, 'Unified output member SHA/CRC differs')
+    if renderer_program_proof is not None:
+        require(_renderer_program_module().verify_archive(partial,'ios')==renderer_program_proof['base'],
+                'Final renderer shader program objects differ')
     os.link(partial,output); partial.unlink()
-    report = {'schema':1,'source_commit':source_commit,'base_ipa_sha256':manifest['inputs']['base_ipa']['sha256'],'output_bytes':regular(output).st_size,'output_sha256':sha_file(output),'member_sha256':expected,'original_member_sha256':original_sha,'original_members_preserved_except_Unity_header_and_Info':True,'original_SDK_members_unchanged':True,'Unity_patch':unity,'client_languages':proofs['client_languages'],'runtime_target':'device','runtime_framework_count':len(proofs['runtime']['frameworks']),'max_stream_chunk_bytes':CHUNK,'capacity_bytes':max_bytes,'actual_device_or_PlayCover_execution':False,'requires_user_sideload_resigning':True}
+    report = {'schema':1,'source_commit':source_commit,'base_ipa_sha256':manifest['inputs']['base_ipa']['sha256'],'output_bytes':regular(output).st_size,'output_sha256':sha_file(output),'member_sha256':expected,'original_member_sha256':original_sha,'original_members_preserved_except_Unity_header_and_Info':True,'original_SDK_members_unchanged':True,'Unity_patch':unity,'renderer_program_assets':renderer_program_proof,'client_languages':proofs['client_languages'],'runtime_target':'device','runtime_framework_count':len(proofs['runtime']['frameworks']),'max_stream_chunk_bytes':CHUNK,'capacity_bytes':max_bytes,'actual_device_or_PlayCover_execution':False,'requires_user_sideload_resigning':True}
     if fresh:
         report['original_members_preserved_except_Unity_header_and_Info'] = False
         report['original_members_preserved_except'] = [UNITY,PRESENTATION,'Info.plist']
