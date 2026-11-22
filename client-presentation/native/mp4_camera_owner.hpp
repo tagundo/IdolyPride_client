@@ -4821,8 +4821,12 @@ public:
         return true;
     }
     Result request(double normalized_time,double clip_rate,uint64_t clip_frames) {
-        if(!bound_||failed_)return Result::invalid;
         int64_t frame=-1;if(!frame_for_normalized_time(normalized_time,clip_rate,clip_frames,&frame))return Result::invalid;
+        return request_frame(frame,clip_frames);
+    }
+    Result request_frame(int64_t frame,uint64_t clip_frames) {
+        if(!bound_||failed_||frame<0||!clip_frames||clip_frames>(~uint64_t(0)>>1)
+            ||static_cast<uint64_t>(frame)>=clip_frames)return Result::invalid;
         if(inflight_)return frame==wanted_?Result::waiting:Result::invalid;
         State current{};if(!state(current)){failed_=true;return Result::stale;}
         if(!usable(current))return Result::waiting;

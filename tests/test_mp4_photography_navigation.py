@@ -27,6 +27,7 @@ def function(source, name):
 PRELUDE = r'''
 #include "mp4_replay.hpp"
 #include <cassert>
+#include <atomic>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -77,6 +78,13 @@ bool mp4_type_is(void* p,const char* name){return mp4_alive(p)&&!std::strcmp(sta
 bool mp4_exact_type(void* p,const char* name){return mp4_type_is(p,name);}
 bool game_call(bool=false){return on_unity_thread;}
 bool mp4_prepare_runtime(){return mp4_api_installed&&on_unity_thread;}
+// Native Actor/GL installers are separate services. This navigation fixture
+// supplies their unavailable result and grants no graph or GPU capability.
+bool mp4_prepare_actor_types(){return false;}
+bool mp4_install_animation_root(){assert(false);return false;}
+std::atomic<bool>mp4_gl_observer_published{false};
+bool mp4_install_gl_observer(){return false;}
+
 struct Factory {
     uint32_t owned=0;
     void clear(){if(owned)weak_free(owned);owned=0;}
@@ -86,6 +94,7 @@ struct Factory {
 Factory& mp4_photography_factory(){return factory;}
 struct Weak {Object* value=nullptr;void* get(bool=false)const{return mp4_alive(value)?value:nullptr;}} mp4_photography_presenter;
 namespace idoly_mp4_runtime {
+uint64_t milliseconds(){return 1;}
 struct Game {Object* selected=nullptr;bool built=false;void* selected_player(){return built?selected:nullptr;}} game;
 void observe_presenter(void* p){assert(mp4_type_is(p,"Solis.Photography.PhotographyLivePresenter"));}
 void observe_photography_transition(void* p,void* transition){assert(p==game.selected&&mp4_alive(transition));}

@@ -82,7 +82,7 @@ int main(int argc,char**argv){
     const auto original_shader=selected_api.automatic_shader;selected_api.automatic_shader={};
     selected_api.automatic_playback={};selected_api.automatic_dependents={};
     selected_api.automatic_context=nullptr;selected_api.automatic_clock_state=nullptr;
-    GameAdapter a(selected_api);clock_game=&a;a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));
+    GameAdapter a(selected_api);clock_game=&a;assert(a.install_capture_operations(capture_begin,capture_end));a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));
     Snapshot snapshot{};assert(a.snapshot(snapshot)==Result::ok);
     const auto observed_handles=handles.size();
     if(scenario=="late_install_private_audio"){

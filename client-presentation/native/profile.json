@@ -4364,6 +4364,189 @@
       "registration_pointer_slot_rva": "0xa04aa20",
       "prefix16": "fe67bca9f85f01a9f65702a9f44f03a9",
       "native_abi": "void(void*,ScriptableRenderContext8,void*,const MethodInfo*)"
+    },
+    "mp4_shader_memory_sync": {
+      "name": "UnityEngine.AssetBundle.LoadFromMemory_Internal",
+      "module": "UnityEngine.AssetBundleModule.dll",
+      "type_definition_index": 33443,
+      "metadata_method_index": 221764,
+      "token_row": 6,
+      "rva": "0x8f2e54c",
+      "return_type_index": 49033,
+      "parameters": [
+        {
+          "name": "binary",
+          "typeindex": 45875,
+          "type": "System.Byte[]"
+        },
+        {
+          "name": "crc",
+          "typeindex": 76572,
+          "type": "System.UInt32"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 147,
+      "return_type": "UnityEngine.AssetBundle",
+      "registration_pointer_slot_rva": "0xa0180c8",
+      "prefix16": "fe57bea9f44f01a9558a0090a2be40f9",
+      "native_abi": "void*(void*,uint32_t,const MethodInfo*)"
+    },
+    "mp4_shader_memory_async": {
+      "name": "UnityEngine.AssetBundle.LoadFromMemoryAsync_Internal",
+      "module": "UnityEngine.AssetBundleModule.dll",
+      "type_definition_index": 33443,
+      "metadata_method_index": 221762,
+      "token_row": 4,
+      "rva": "0x8f2e4c8",
+      "return_type_index": 49037,
+      "parameters": [
+        {
+          "name": "binary",
+          "typeindex": 45875,
+          "type": "System.Byte[]"
+        },
+        {
+          "name": "crc",
+          "typeindex": 76572,
+          "type": "System.UInt32"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 147,
+      "return_type": "UnityEngine.AssetBundleCreateRequest",
+      "registration_pointer_slot_rva": "0xa0180b8",
+      "prefix16": "fe57bea9f44f01a9558a0090a2ba40f9",
+      "native_abi": "void*(void*,uint32_t,const MethodInfo*)"
+    },
+    "mp4_shader_file_async": {
+      "name": "UnityEngine.AssetBundle.LoadFromFileAsync_Internal",
+      "module": "UnityEngine.AssetBundleModule.dll",
+      "type_definition_index": 33443,
+      "metadata_method_index": 221760,
+      "token_row": 2,
+      "rva": "0x8f2e430",
+      "return_type_index": 49037,
+      "parameters": [
+        {
+          "name": "path",
+          "typeindex": 74263,
+          "type": "System.String"
+        },
+        {
+          "name": "crc",
+          "typeindex": 76572,
+          "type": "System.UInt32"
+        },
+        {
+          "name": "offset",
+          "typeindex": 76592,
+          "type": "System.UInt64"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 147,
+      "return_type": "UnityEngine.AssetBundleCreateRequest",
+      "registration_pointer_slot_rva": "0xa0180a8",
+      "prefix16": "fe0f1df8f65701a9f44f02a9568a0090",
+      "native_abi": "void*(void*,uint32_t,uint64_t,const MethodInfo*)"
+    },
+    "mp4_shader_bundle_result": {
+      "name": "UnityEngine.AssetBundleCreateRequest.get_assetBundle",
+      "module": "UnityEngine.AssetBundleModule.dll",
+      "type_definition_index": 33444,
+      "metadata_method_index": 221783,
+      "token_row": 25,
+      "rva": "0x8f2ecf0",
+      "return_type_index": 49033,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 2182,
+      "return_type": "UnityEngine.AssetBundle",
+      "registration_pointer_slot_rva": "0xa018160",
+      "prefix16": "fe0f1ef8f44f01a9548a009081ee40f9",
+      "native_abi": "void*(void*,const MethodInfo*)"
+    },
+    "mp4_capture_update": {
+      "name": "VL.Rendering.VLSRPCameraController.UpdateCapturedTexture",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28587,
+      "metadata_method_index": 195648,
+      "token_row": 970,
+      "rva": "0x923d228",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa04a9e8",
+      "prefix16": "ff0306d1fd7b15a9f65716a9f44f17a9",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_capture_wrapper_ctor": {
+      "name": "VL.VLRenderTexture..ctor",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28551,
+      "metadata_method_index": 195483,
+      "token_row": 805,
+      "rva": "0x92364fc",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "setting",
+          "typeindex": 70576,
+          "type": "UnityEngine.RenderTextureDescriptor"
+        },
+        {
+          "name": "shaderPropertyName",
+          "typeindex": 74263,
+          "type": "System.String"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 6278,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa04a4c0",
+      "prefix16": "ff8302d1fe5f07a9f65708a9f44f09a9",
+      "native_abi": "void(void*,const RenderTextureDescriptor52*,void*,const MethodInfo*)"
+    },
+    "mp4_capture_texture_ctor": {
+      "name": "UnityEngine.RenderTexture..ctor",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 23904,
+      "metadata_method_index": 163944,
+      "token_row": 2452,
+      "rva": "0x8f69e7c",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "desc",
+          "typeindex": 70576,
+          "type": "UnityEngine.RenderTextureDescriptor"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 6278,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa01d820",
+      "prefix16": "ffc302d1fe4300f9f65709a9f44f0aa9",
+      "native_abi": "void(void*,const RenderTextureDescriptor52*,const MethodInfo*)"
+    },
+    "mp4_capture_request": {
+      "name": "VL.Rendering.VLSRPCameraController.CaptureRequest",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28587,
+      "metadata_method_index": 195649,
+      "token_row": 971,
+      "rva": "0x923d4fc",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa04a9f0",
+      "prefix16": "ff4302d1fe4f08a9f30300aa48ffff97",
+      "native_abi": "void(void*,const MethodInfo*)"
     }
   },
   "graphics_fields": [

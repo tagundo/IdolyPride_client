@@ -96,7 +96,7 @@ uintptr_t image_base=0;
 char mp4_binding_error[96]="none";
 mp4game::TypeMetadataProfile mp4_type_metadata_profile=mp4game::android_type_metadata_profile;
 alignas(16) unsigned char type_descriptors[3][16]{};
-bool mp4_source_verified=false,mp4_replay_verified=false,on_unity=true,resolve_cells=true,has_existing=true;
+bool mp4_source_verified=false,mp4_replay_verified=false,mp4_playback_source_verified=false,on_unity=true,resolve_cells=true,has_existing=true;
 uintptr_t has_cell=1,instance_cell=3,has_outer=0,instance_outer=0;
 alignas(16) uint64_t has_info[2]{},instance_info[2]{};
 int initialized=0,has_calls=0,instance_calls=0,cached=0;
@@ -175,7 +175,7 @@ void observe_camera_controller(void*){assert(false);}
 
 void reset(bool indirect=true){
     active=true;video=false;events.clear();initialized=has_calls=instance_calls=cached=0;
-    mp4_source_verified=true;mp4_replay_verified=false;on_unity=resolve_cells=has_existing=true;
+    mp4_source_verified=true;mp4_replay_verified=false;mp4_playback_source_verified=false;on_unity=resolve_cells=has_existing=true;
     std::snprintf(mp4_binding_error,sizeof(mp4_binding_error),"%s","none");
     mp4_type_metadata_profile=indirect?mp4game::android_type_metadata_profile:mp4game::ios_type_metadata_profile;
     has_cell=1;instance_cell=3;rejected_mapping=rejected_binding=0;
@@ -306,9 +306,13 @@ int main(int argc,char** argv){
             type_descriptors[type][byte]^=1;
             mp4_verify_original_calls();assert(mp4_source_verified);
         }
+    }else if(test=="playback_binding_changed"){
+        rejected_binding=idoly_mp4_playback::android_profile.director_state.rva;
+        mp4_verify_original_calls();assert(!mp4_source_verified&&!mp4_playback_source_verified);
+        assert(mp4_original_current_controller()==nullptr&&initialized==0);
     }else if(test=="descriptor_unmapped"){
         rejected_mapping=mp4_runtime_profile.single_type.rva;
-        mp4_verify_original_calls();assert(!mp4_source_verified);
+        mp4_verify_original_calls();assert(!mp4_source_verified&&mp4_playback_source_verified);
         char expected[96]{};std::snprintf(expected,sizeof(expected),"original_mv_type_shape_%llx",static_cast<unsigned long long>(rejected_mapping));
         assert(std::strcmp(mp4_binding_error,expected)==0);
     }else if(test=="metadata_base_unmapped"||test=="metadata_header_unmapped"){
@@ -364,7 +368,7 @@ def controller_harness(tmp_path_factory):
     "metadata_base_unmapped", "metadata_header_unmapped",
     "ios_descriptor_file_state", "ios_descriptor_resolved_row_state", "ios_descriptor_tail_changed",
     "ios_descriptor_unmapped", "ios_metadata_base_unmapped", "ios_metadata_header_unmapped",
-    "android_outer_verified", "ios_direct_verified", "wrong_outer_slot", "unmapped_cell", "unmapped_slot",
+    "android_outer_verified", "ios_direct_verified", "wrong_outer_slot", "unmapped_cell", "unmapped_slot", "playback_binding_changed",
     "unverified_getter", "unverified_resolver",
 ))
 def test_actual_controller_lookup_guards(controller_harness, scenario):

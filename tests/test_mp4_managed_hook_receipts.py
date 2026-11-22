@@ -23,20 +23,44 @@ def receipt_binary(tmp_path_factory):
 #include <cstring>
 #include <string>
 namespace pin=idoly::presentation::profile;namespace mp4game=idoly_mp4_game;
-alignas(16) unsigned char image[256]{};uintptr_t image_base=reinterpret_cast<uintptr_t>(image);bool mapped=true;
-bool mp4_mapped(uintptr_t at,size_t bytes,bool executable){return mapped&&executable&&at>=image_base&&at+bytes>=at&&at+bytes<=image_base+sizeof(image);}
+alignas(16) unsigned char image[256]{};uintptr_t image_base=reinterpret_cast<uintptr_t>(image);bool mapped=true,backend_valid=true;
+bool mp4_mapped(uintptr_t at,size_t bytes,bool executable){const auto start=reinterpret_cast<uintptr_t>(image);return mapped&&executable&&at>=start&&at+bytes>=at&&at+bytes<=start+sizeof(image);}
+bool backend_current(uintptr_t){return backend_valid;}
 // ACTUAL
 int main(int argc,char** argv){
-    assert(argc==2);const std::string mode=argv[1];
+    assert(argc==2);const std::string mode=argv[1];mp4_managed_hook_backend_current=backend_current;
     pin::Entry entry{"verified original",32,{}};for(unsigned i=0;i<16;++i)entry.bytes[i]=i;
-    mp4game::Binding binding{};binding.rva=32;memcpy(binding.prefix,entry.bytes,16);
+    if(mode.rfind("bootstrap_",0)==0){
+        const unsigned index=mode=="bootstrap_async"?1:mode=="bootstrap_file"?2:mode=="bootstrap_result"?3:0;
+        const pin::Entry entries[]={pin::mp4_shader_memory_sync,pin::mp4_shader_memory_async,pin::mp4_shader_file_async,pin::mp4_shader_bundle_result};
+        entry=entries[index];image_base=reinterpret_cast<uintptr_t>(image)+32-entry.rva;
+    }
+    mp4game::Binding binding{};binding.rva=entry.rva;memcpy(binding.prefix,entry.bytes,16);
     memset(image+32,0x88,16);void* trampoline=reinterpret_cast<void*>(0x1234);void* stub=reinterpret_cast<void*>(0x5678);
     if(mode=="missing_original"){void* empty=nullptr;assert(!mp4_record_managed_hook(&entry,stub,&empty));return 0;}
     if(mode=="missing_stub"){assert(!mp4_record_managed_hook(&entry,nullptr,&trampoline));return 0;}
     if(mode=="unmapped_record"){mapped=false;assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;}
+    if(mode=="bootstrap_missing_backend"||mode=="bootstrap_rejected_backend"){
+        if(mode=="bootstrap_missing_backend")mp4_managed_hook_backend_current=nullptr;else backend_valid=false;
+        assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;
+    }
     assert(mp4_record_managed_hook(&entry,stub,&trampoline));assert(!mp4_managed_hook_verified(binding));
+    if(mode.rfind("bootstrap_",0)==0){
+        mp4_shader_bootstrap_receipts_open.store(true);
+        if(mode=="bootstrap_unpublished")mp4_managed_hook_count.store(0);
+        if(mode=="bootstrap_foreign_prefix")binding.prefix[0]^=1;
+        if(mode=="bootstrap_foreign_code")image[32]^=1;
+        if(mode=="bootstrap_revoked_backend")backend_valid=false;
+        const bool accepted=mode=="bootstrap_sync"||mode=="bootstrap_async"||mode=="bootstrap_file"||mode=="bootstrap_result"||mode=="bootstrap_revoked";
+        assert(mp4_managed_hook_verified(binding)==accepted);
+        if(mode=="bootstrap_revoked"){mp4_shader_bootstrap_receipts_open.store(false);assert(!mp4_managed_hook_verified(binding));}
+        return 0;
+    }
+    if(mode=="ordinary_bootstrap"){mp4_shader_bootstrap_receipts_open.store(true);assert(!mp4_managed_hook_verified(binding));return 0;}
+    if(mode=="capacity"||mode=="over_capacity"){mp4_managed_hook_count.store(mp4_managed_hook_capacity+(mode=="over_capacity"?1:0));assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;}
     mp4_managed_hook_receipts_ready.store(true);
     assert(mp4_managed_hook_verified(binding));
+    if(mode=="published_over_capacity"){mp4_managed_hook_count.store(mp4_managed_hook_capacity+1);assert(!mp4_managed_hook_verified(binding));return 0;}
     if(mode=="valid")return 0;
     if(mode=="foreign_code")image[32]^=1;
     else if(mode=="foreign_original_prefix")binding.prefix[0]^=1;
@@ -58,7 +82,19 @@ int main(int argc,char** argv){
 
 
 @pytest.mark.parametrize('mode', ['missing_original', 'missing_stub', 'unmapped_record', 'valid', 'foreign_code',
-    'foreign_original_prefix', 'foreign_rva', 'foreign_base', 'changed_trampoline', 'rollback', 'unmapped_check'])
+    'foreign_original_prefix', 'foreign_rva', 'foreign_base', 'changed_trampoline', 'rollback', 'unmapped_check', 'bootstrap_sync', 'bootstrap_async', 'bootstrap_file',
+    'bootstrap_result', 'bootstrap_unpublished', 'bootstrap_foreign_prefix', 'bootstrap_foreign_code', 'bootstrap_revoked',
+    'ordinary_bootstrap', 'capacity', 'over_capacity', 'published_over_capacity', 'bootstrap_missing_backend',
+    'bootstrap_rejected_backend', 'bootstrap_revoked_backend'])
 def test_own_installed_code_and_trampoline_identity_are_required(receipt_binary, mode):
     result = subprocess.run([str(receipt_binary), mode], capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr
+
+
+def test_shader_observers_install_before_the_font_delay():
+    source = (NATIVE / 'bridge.cpp').read_text()
+    table = source.split('    Hook hooks[] = {', 1)[1].split('    };', 1)[0]
+    names = [line.split('HOOK(', 1)[1].split(',', 1)[0] for line in table.splitlines() if 'HOOK(' in line]
+    assert names[:5] == ['mp4_shader_memory_sync', 'mp4_shader_memory_async', 'mp4_shader_file_async',
+                         'mp4_shader_bundle_result', 'font_awake']
+    assert 'if (hooks[i].entry==&pin::font_awake) pause_ms(500)' in source

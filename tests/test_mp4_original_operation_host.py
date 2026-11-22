@@ -24,7 +24,7 @@ def original_operation(tmp_path_factory):
 #include <stdexcept>
 #include <string>
 namespace mp4_director_maintenance{
-enum class Kind:uint8_t{play=1,stop=2,rebuild=3,zero_evaluate=4,saved_evaluate=5};
+enum class Kind:uint8_t{play=1,stop=2,rebuild=3,zero_evaluate=4,saved_evaluate=5,maintenance=6};
 struct Call{Kind kind=Kind::play;uint64_t epoch=0,serial=0;uintptr_t source_asset=0,receiver=0,method=0;uint64_t original_receipt=0;};
 }
 bool thread=true,current=true;
@@ -44,9 +44,10 @@ int main(int argc,char**argv){
  if(mode=="asset_missing")mp4_rebuild_ledger.asset=nullptr;
  if(mode=="eval_overflow")mp4_raw_evaluate_sequence=~uint64_t(0);
  const bool eval=mode=="zero"||mode=="saved"||mode=="eval_overflow";
+ const bool implicit_receipt=eval||mode=="maintenance";
  {
-  Mp4OriginalOperationScope scope(7,mode=="play"?1:mode=="stop"?2:eval?(mode=="saved"?5:4):3,reinterpret_cast<void*>(22),33,(eval||mode=="missing_rebuild_receipt")?0:44);
-  if(mode=="sequence_overflow"||mode=="depth_limit"||mode=="asset_missing"||mode=="eval_overflow"||mode=="missing_rebuild_receipt"){
+  Mp4OriginalOperationScope scope(7,mode=="maintenance"?6:mode=="unsupported_kind"?7:mode=="play"?1:mode=="stop"?2:eval?(mode=="saved"?5:4):3,reinterpret_cast<void*>(22),33,(implicit_receipt||mode=="missing_rebuild_receipt")?0:44);
+  if(mode=="unsupported_kind"||mode=="sequence_overflow"||mode=="depth_limit"||mode=="asset_missing"||mode=="eval_overflow"||mode=="missing_rebuild_receipt"){
    assert(!scope.valid&&!mp4_director_actual_operation(&call));return 0;
   }
   assert(scope.valid&&!mp4_director_actual_operation(&call));scope.invoked();
@@ -59,8 +60,8 @@ int main(int argc,char**argv){
    assert(!mp4_director_actual_operation(&call)&&!call.serial);return 0;
   }
   assert(mp4_director_actual_operation(&call)&&call.epoch==7&&call.serial==1&&call.receiver==22&&call.method==33&&call.source_asset==11);
-  assert(call.kind==(mode=="play"?K::play:mode=="stop"?K::stop:eval?(mode=="saved"?K::saved_evaluate:K::zero_evaluate):K::rebuild));
-  assert(call.original_receipt==(eval?1:44));
+  assert(call.kind==(mode=="maintenance"?K::maintenance:mode=="play"?K::play:mode=="stop"?K::stop:eval?(mode=="saved"?K::saved_evaluate:K::zero_evaluate):K::rebuild));
+  assert(call.original_receipt==(implicit_receipt?1:44));
   if(mode=="nested_throw"){
    try{Mp4OriginalOperationScope nested(7,5,reinterpret_cast<void*>(55),66,0);nested.invoked();
     assert(mp4_director_actual_operation(&call)&&call.serial==2&&call.receiver==55&&call.original_receipt==1);throw std::runtime_error("original");
@@ -77,7 +78,7 @@ int main(int argc,char**argv){
     assert result.returncode==0,result.stdout+result.stderr
     return binary
 
-@pytest.mark.parametrize('mode',['normal','play','stop','missing_rebuild_receipt','zero','saved','nested_throw','sequence_overflow','eval_overflow','depth_limit','asset_missing','foreign_thread','source_lost','inactive','epoch_changed','asset_changed','null_output'])
+@pytest.mark.parametrize('mode',['normal','play','stop','maintenance','unsupported_kind','missing_rebuild_receipt','zero','saved','nested_throw','sequence_overflow','eval_overflow','depth_limit','asset_missing','foreign_thread','source_lost','inactive','epoch_changed','asset_changed','null_output'])
 def test_actual_original_stack_receipt(original_operation,mode):
     result=subprocess.run([str(original_operation),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

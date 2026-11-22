@@ -544,9 +544,12 @@ inline Result admit_particles(const Api& api,const Owner* owners,size_t count,vo
 // It does not simulate every system a second time or invent a stripped culling
 // setter. Original ParticleControlPlayable.Simulate is explicit and pauses the
 // system; the host must prove every selected system has that exact owner.
+// Minted only by a complete capture on the owning game thread; independent of
+// the export epoch and retained across Scope reconfiguration.
+inline uint64_t particle_snapshot_sequence=0;
 class ParticleScope {
  struct SavedList {void* object=nullptr;uint32_t root=0;ListView view{};uint64_t hash=0;size_t stride=0;};
- struct Entry {Owner owner{};uint32_t root=0,producer_root=0;ControlState control{};PlaybackState state{};Particle* particles=nullptr;int32_t count=0;
+ struct Entry {Owner owner{};uint32_t root=0,producer_root=0;uint64_t capture_receipt=0;ControlState control{};PlaybackState state{};Particle* particles=nullptr;int32_t count=0;
   Trails trails{};RootedTrails trail_box{},custom_boxes[2]{};SavedList trail_lists[5]{},custom[2]{};uint32_t seed=0;bool automatic_seed=false,paused=false,stopped=false,emitting=false,capture_started=false,captured=false,reset_started=false,reset_prepared=false,data_restored=false,restored=false;};
  Api api_{};void* context_=nullptr;uint64_t epoch_=0,simulation_tick_=0;bool configured_=false,prepared_=false,reset_=false,advancing_=false,have_tick_=false,pending_=false,zero_evaluating_=false;uint64_t pending_tick_=0;void* initializing_system_=nullptr;
  Entry entries_[max_particles]{};Owner owners_[max_particles]{};size_t count_=0,bytes_=0;const char* error_="none";
@@ -565,6 +568,26 @@ class ParticleScope {
  void cleanup(){for(size_t i=0;i<count_;++i){auto&e=entries_[i];for(auto&s:e.trail_lists)if(s.root)api_.release(s.root);for(auto&s:e.custom)if(s.root)api_.release(s.root);for(auto&box:e.custom_boxes)if(box.root)api_.release(box.root);if(e.trail_box.root)api_.release(e.trail_box.root);if(e.particles)::free(e.particles);if(e.producer_root)api_.release(e.producer_root);if(e.root)api_.release(e.root);e={};owners_[i]={};}count_=bytes_=0;context_=nullptr;epoch_=0;configured_=prepared_=reset_=advancing_=have_tick_=pending_=zero_evaluating_=false;pending_tick_=0;initializing_system_=nullptr;}
 public:
  const char* error()const{return error_;}bool active()const{return configured_;}
+ // Read-only exact saved-image witness. This reports completed Scope restore,
+ // not permission for native activation or proof against a later native write.
+ // Callers must join their own actual lifecycle/final-checkpoint receipt.
+ bool snapshot_receipt(void* particle,Owner* owner,uint64_t* receipt,bool* restored)const {
+  if(owner){*owner={};}
+  if(receipt){*receipt=0;}
+  if(restored){*restored=false;}
+  if(!particle||!owner||!receipt||!restored||!current()){return false;}
+  for(size_t i=0;i<count_;++i){
+   const auto&e=entries_[i];
+   if(e.owner.particle!=particle){continue;}
+   if(!e.captured||!e.capture_receipt||!e.trail_box.root||api_.retained(e.trail_box.root)!=e.trail_box.object){return false;}
+   for(const auto&b:e.custom_boxes){if(!b.root||api_.retained(b.root)!=b.object){return false;}}
+   for(const auto&l:e.trail_lists){if(!list_current(l)){return false;}}
+   for(const auto&l:e.custom){if(!list_current(l)){return false;}}
+   if(!current()){return false;}
+   *owner=e.owner;*receipt=e.capture_receipt;*restored=e.restored&&e.data_restored;return true;
+  }
+  return false;
+ }
  // Cancellation precedes every fallible owner/fence check. It revokes only
  // unpublished/published simulation permission; it is not a job completion.
  void revoke_grants(){pending_=advancing_=zero_evaluating_=false;initializing_system_=nullptr;}
@@ -603,7 +626,7 @@ public:
     e.custom[j].object=list;e.custom[j].root=api_.retain(list);if(!e.custom[j].root||api_.retained(e.custom[j].root)!=list)return fail(Result::failed,"stage_particle_list_root_failed");
     if(api_.custom_get(p,list,static_cast<int32_t>(j),nullptr)<0)return fail(Result::failed,"stage_particle_custom_data_failed");
     r=save_list(e.custom[j],list,16);if(r!=Result::ok)return r;}
-   if(!current()){return fail(Result::stale,"stage_particle_owner_changed");}e.captured=true;}
+   if(!current()){return fail(Result::stale,"stage_particle_owner_changed");}if(particle_snapshot_sequence==~uint64_t(0))return fail(Result::unsupported,"stage_particle_snapshot_receipt_exhausted");e.capture_receipt=++particle_snapshot_sequence;e.captured=true;}
   error_="none";return Result::ok;
  }
  Result prepare(){Result r=held();if(r!=Result::ok)return r;for(size_t i=0;i<count_;++i){auto&e=entries_[i];if(!e.captured)return fail(Result::invalid,"stage_particle_snapshot_missing");if(e.reset_prepared)continue;

@@ -27,15 +27,41 @@ BOOL_ALIASES={'mp4_photography_is_end','mp4_player_is_end'}
 STATIC_ALIASES={'mp4_render_stack','mp4_render_camera'}
 ONE_STATIC_ALIASES={'mp4_cine_apply'}
 OBJECT_ALIASES={'mp4_selected_renderer':'UnityEngine.Rendering.Universal.ScriptableRenderer'}
+OBJECT_ALIASES.update({
+ 'mp4_shader_memory_sync':'UnityEngine.AssetBundle',
+ 'mp4_shader_memory_async':'UnityEngine.AssetBundleCreateRequest',
+ 'mp4_shader_file_async':'UnityEngine.AssetBundleCreateRequest',
+ 'mp4_shader_bundle_result':'UnityEngine.AssetBundle',
+})
+STATIC_ALIASES.update({'mp4_shader_memory_sync','mp4_shader_memory_async','mp4_shader_file_async'})
+
 VALUE_ALIASES={'mp4_control_create':'UnityEngine.Playables.Playable'}
 TYPED_PARAMETERS={
+ 'mp4_capture_request':[],
+ 'mp4_capture_update':[],
+ 'mp4_capture_wrapper_ctor':['UnityEngine.RenderTextureDescriptor','System.String'],
+ 'mp4_capture_texture_ctor':['UnityEngine.RenderTextureDescriptor'],
  'mp4_control_create':['UnityEngine.Playables.PlayableGraph','UnityEngine.GameObject'],
+ 'mp4_shader_memory_sync':['System.Byte[]','System.UInt32'],
+ 'mp4_shader_memory_async':['System.Byte[]','System.UInt32'],
+ 'mp4_shader_file_async':['System.String','System.UInt32','System.UInt64'],
+ 'mp4_shader_bundle_result':[],
+
  'mp4_srp_add_precull':['UnityEngine.Events.UnityAction'],
  'mp4_srp_invoke_precull':[],
  'mp4_srp_begin_frame':['UnityEngine.Rendering.ScriptableRenderContext','UnityEngine.Camera[]'],
 }
 TYPED_ABIS={
+ 'mp4_capture_request':'void(void*,const MethodInfo*)',
+ 'mp4_capture_update':'void(void*,const MethodInfo*)',
+ 'mp4_capture_wrapper_ctor':'void(void*,const RenderTextureDescriptor52*,void*,const MethodInfo*)',
+ 'mp4_capture_texture_ctor':'void(void*,const RenderTextureDescriptor52*,const MethodInfo*)',
  'mp4_control_create':'Playable16(void*,PlayableGraph16,void*,const MethodInfo*)',
+ 'mp4_shader_memory_sync':'void*(void*,uint32_t,const MethodInfo*)',
+ 'mp4_shader_memory_async':'void*(void*,uint32_t,const MethodInfo*)',
+ 'mp4_shader_file_async':'void*(void*,uint32_t,uint64_t,const MethodInfo*)',
+ 'mp4_shader_bundle_result':'void*(void*,const MethodInfo*)',
+
  'mp4_srp_add_precull':'void(void*,void*,const MethodInfo*)',
  'mp4_srp_invoke_precull':'void(void*,const MethodInfo*)',
  'mp4_srp_begin_frame':'void(void*,ScriptableRenderContext8,void*,const MethodInfo*)',
@@ -45,7 +71,16 @@ SELECTIONS={'mp4_context_submit':('UnityEngine.Rendering.ScriptableRenderContext
     'mp4_actor_eye_late':('VL.VLActorEye','LateUpdate',0),'mp4_actor_face_late':('VL.VLActorFaceTargetCorrection','LateUpdate',0),
     'mp4_actor_foot_apply':('VL.VLActorFootShadow','ApplyJob',0)}
 SELECTIONS.update({
+ 'mp4_capture_request':('VL.Rendering.VLSRPCameraController','CaptureRequest',0),
+ 'mp4_capture_update':('VL.Rendering.VLSRPCameraController','UpdateCapturedTexture',0),
+ 'mp4_capture_wrapper_ctor':('VL.VLRenderTexture','.ctor',2,tuple(TYPED_PARAMETERS['mp4_capture_wrapper_ctor'])),
+ 'mp4_capture_texture_ctor':('UnityEngine.RenderTexture','.ctor',1,tuple(TYPED_PARAMETERS['mp4_capture_texture_ctor'])),
  'mp4_control_create':('UnityEngine.Timeline.ControlPlayableAsset','CreatePlayable',2,tuple(TYPED_PARAMETERS['mp4_control_create'])),
+ 'mp4_shader_memory_sync':('UnityEngine.AssetBundle','LoadFromMemory_Internal',2,tuple(TYPED_PARAMETERS['mp4_shader_memory_sync'])),
+ 'mp4_shader_memory_async':('UnityEngine.AssetBundle','LoadFromMemoryAsync_Internal',2,tuple(TYPED_PARAMETERS['mp4_shader_memory_async'])),
+ 'mp4_shader_file_async':('UnityEngine.AssetBundle','LoadFromFileAsync_Internal',3,tuple(TYPED_PARAMETERS['mp4_shader_file_async'])),
+ 'mp4_shader_bundle_result':('UnityEngine.AssetBundleCreateRequest','get_assetBundle',0),
+
  'mp4_srp_add_precull':('VL.Rendering.VLSRPCameraController','AddPreCullFrameEvent',1,tuple(TYPED_PARAMETERS['mp4_srp_add_precull'])),
  'mp4_srp_invoke_precull':('VL.Rendering.VLSRPCameraController','InvokePreCullFrameEvent',0),
  'mp4_srp_begin_frame':('VL.Rendering.VLSRPCameraController','OnBeginFrameRendering',2,tuple(TYPED_PARAMETERS['mp4_srp_begin_frame'])),

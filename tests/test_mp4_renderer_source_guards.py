@@ -80,7 +80,7 @@ def test_shipping_owned_capture_request_all_slots_target_and_event(source_guards
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("case", range(20))
+@pytest.mark.parametrize("case", range(23))
 def test_shipping_proflare_selected_feature_pass_batch_data(source_guards, case):
     result = subprocess.run([str(source_guards["proflare"]), str(case)], capture_output=True,
                             text=True, timeout=5)

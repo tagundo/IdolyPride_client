@@ -40,6 +40,20 @@ def _write_shipping_bodies(destination: Path) -> None:
     source = (NATIVE / "bridge.cpp").read_text()
     bodies = {
         "pins.inc": _between(source, "struct Mp4StageOtherPins{", "bool mp4_control_source_pins_ready()"),
+        "activation-node-scope.hpp.inc": _between(source,
+            "namespace idoly_mp4_activation_nodes {", "} // namespace idoly_mp4_activation_nodes")
+            + "} // namespace idoly_mp4_activation_nodes\n",
+        "activation-node-host.cpp": _between(source,
+            "namespace mp4an = idoly_mp4_activation_nodes;", "struct Mp4ActivationTargetPins"),
+        "activation-target-scope.hpp.inc": _between(source,
+            "namespace idoly_mp4_activation_targets {", "} // namespace idoly_mp4_activation_targets")
+            + "} // namespace idoly_mp4_activation_targets\n",
+        "activation-family.cpp.inc": "\n".join(_function(source, name) for name in (
+            "mp4_activation_callback_table", "mp4_activation_volume_callbacks",
+            "mp4_activation_component_family")),
+        "activation-subtree.cpp.inc": _function(source, "mp4_activation_subtree_inventory"),
+        "activation-callback-origin.cpp": _between(source,
+            "enum class Mp4ActivationOperation", "// END_MP4_ACTIVATION_SOURCE_HOST"),
         "control-asset-scope.hpp.inc": _between(
             source, "namespace idoly_mp4_control_assets {",
             "} // namespace idoly_mp4_control_assets")
@@ -58,7 +72,9 @@ def _write_shipping_bodies(destination: Path) -> None:
             "namespace idoly_mp4_director_nodes {", "} // namespace idoly_mp4_director_nodes")
             + "} // namespace idoly_mp4_director_nodes\n",
         "director-node-host.cpp": _between(source,
-            "namespace mp4dn = idoly_mp4_director_nodes;", "struct Mp4ControlPromotionRequest"),
+            "namespace mp4dn = idoly_mp4_director_nodes;", "// BEGIN_MP4_DIRECTOR_SOURCE_EDGE_HOST"),
+        "director-source-edge.cpp": _between(source,
+            "// BEGIN_MP4_DIRECTOR_SOURCE_EDGE_HOST", "// END_MP4_DIRECTOR_SOURCE_EDGE_HOST"),
         "control-source-promotion.cpp": _between(source,
             "struct Mp4ControlPromotionRequest", "struct Mp4ProFlarePins"),
     }
@@ -124,4 +140,4 @@ def test_shipping_stage_control_models(tmp_path: Path) -> None:
             result = subprocess.run([str(binary), case], env=env, capture_output=True, text=True)
             assert result.returncode == 0, (fixture.name, case, result.stdout, result.stderr)
         total += len(cases)
-    assert total >= 210, total
+    assert total >= 330, total

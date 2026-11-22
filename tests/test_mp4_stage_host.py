@@ -148,13 +148,17 @@ struct Mp4StagePath{uint16_t director=0,root=0,length=0,inputs[64]{};};
 struct Host{
     void* directors[64]{};size_t director_count=1;
     size_t count=1;mp4stage::Owner owners[256]{};
-    bool graph_receipt=false,rebuilding=false;
+    bool graph_receipt=false,rebuilding=false,configured=false;
     void* director_assets[64]{};uint64_t timeline_receipts[64]{};
     mp4actor::Handle graph_receipts[64]{};Mp4StagePath control_paths[256]{};
     void* current_producers[256]{};uint32_t source_seeds[256]{};
     const char* error="none";
 }mp4_stage_host;
 int director,timeline,other_timeline,particle,other_particle,prefab;
+std::vector<void*> particle_objects{&particle,&other_particle},control_objects;
+bool root_valid=true;size_t retained_particles=0;
+bool mp4_alive(void*p){return p!=nullptr;}
+bool mp4_stage_root(void*p){if(!p||!root_valid)return false;++retained_particles;return true;}
 struct PC {uint8_t header[16]{};float first=0,second=0;uint32_t seed=71,pad=0;void* ps=&particle;} first,second,duplicate;
 static_assert(offsetof(PC,ps)==0x20&&offsetof(PC,seed)==0x18,"Original source fields");
 struct Node{std::vector<mp4actor::Handle>inputs;void*script=nullptr;bool valid=true;double time=2;}root,control;
@@ -164,8 +168,9 @@ mp4actor::Handle handle(Node* n){return {reinterpret_cast<uintptr_t>(n),7,0};}
 Node* node(mp4actor::Handle*h){return reinterpret_cast<Node*>(h->handle);}
 bool mp4_type_is(void*p,const char*n){
     if(!p)return false;
+    if(std::strcmp(n,"UnityEngine.ParticleSystem")==0){for(auto*v:particle_objects)if(v==p)return true;return false;}
     if(std::strcmp(n,"UnityEngine.Timeline.PrefabControlPlayable")==0)return p==&prefab;
-    if(std::strcmp(n,"UnityEngine.Timeline.ParticleControlPlayable")==0)return p==&first||p==&second||p==&duplicate;
+    if(std::strcmp(n,"UnityEngine.Timeline.ParticleControlPlayable")==0){for(auto*v:control_objects)if(v==p)return true;return p==&first||p==&second||p==&duplicate;}
     return false;
 }
 template<class T>bool mp4_actor_field(void*p,size_t offset,T&out){std::memcpy(&out,static_cast<uint8_t*>(p)+offset,sizeof(T));return true;}
@@ -196,6 +201,28 @@ int main(int argc,char**argv){
     roots={handle(&root)};root.inputs={mp4actor::Handle{},handle(&control)};
     image_base=reinterpret_cast<uintptr_t>(&script)-mp4_stage_profile.playable_script.rva;
     void* result[256]{};uint32_t seeds[256]{};
+    if(mode.rfind("discover_",0)==0){
+        h.count=0;
+        if(mode=="discover_union")h.owners[h.count++].particle=&other_particle;
+        if(mode=="discover_no_root")root_valid=false;
+        if(mode=="discover_closed")h.graph_receipt=true;
+        if(mode=="discover_configured")h.configured=true;
+        if(mode=="discover_wrong_type")first.ps=&prefab;
+        if(mode=="discover_capacity"){h.count=256;first.ps=&other_particle;}
+        std::vector<PC>many(205);std::vector<int>systems(205);std::vector<Node>nodes(205);
+        if(mode=="discover_205"){
+            root.inputs.clear();
+            for(size_t i=0;i<205;++i){many[i].ps=&systems[i];nodes[i].script=&many[i];
+                particle_objects.push_back(&systems[i]);control_objects.push_back(&many[i]);root.inputs.push_back(handle(&nodes[i]));}
+        }
+        Node extra;extra.script=&duplicate;if(mode=="discover_ambiguous")root.inputs.push_back(handle(&extra));
+        const bool accepted=mp4_stage_graph_controls(result,seeds,true);
+        const bool expected=mode=="discover_one"||mode=="discover_union"||mode=="discover_205";
+        assert(accepted==expected);
+        if(accepted){assert(h.count==(mode=="discover_205"?205u:mode=="discover_union"?2u:1u));
+            assert(retained_particles==(mode=="discover_205"?205u:1u));}
+        return 0;
+    }
     assert(mp4_stage_graph_controls(result,seeds));
     assert(result[0]==&first&&seeds[0]==71&&h.graph_receipt&&h.control_paths[0].length==1&&h.control_paths[0].inputs[0]==1);
     result[0]=nullptr;seeds[0]=0;h.rebuilding=true;graph_id=200;control.script=&second;
@@ -243,7 +270,8 @@ def graph_binary(tmp_path_factory):
 @pytest.mark.parametrize('mode', [
     'authorized', 'outside_transaction', 'path_changed', 'asset_changed',
     'source_changed', 'prefab', 'zero_seed', 'outside_stage', 'invalid_node',
-    'multiple_producers'])
+    'multiple_producers', 'discover_one', 'discover_union', 'discover_205', 'discover_no_root', 'discover_closed',
+    'discover_configured', 'discover_wrong_type', 'discover_capacity', 'discover_ambiguous'])
 def test_shipping_stage_graph_path_and_asset_receipts(graph_binary, mode):
     result = subprocess.run([str(graph_binary), mode], capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1060,3 +1088,66 @@ def stage_withdraw_binary(tmp_path_factory):
 def test_shipping_stage_logical_interception_withdrawal(stage_withdraw_binary,mode):
     result=subprocess.run([str(stage_withdraw_binary),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr
+
+
+@pytest.fixture(scope='module')
+def union_inventory_binary(tmp_path_factory):
+    compiler = os.environ.get('CXX') or shutil.which('g++') or shutil.which('clang++')
+    if not compiler:
+        pytest.skip('C++ compiler required')
+    actual = function((ROOT / 'client-presentation/native/bridge.cpp').read_text(), 'mp4_stage_refresh_inventory')
+    model = r'''
+#include "mp4_stage_state.hpp"
+#include <cassert>
+#include <map>
+#include <string>
+#include <vector>
+namespace mp4stage=idoly_mp4_stage;
+struct Host{
+ struct Source{void*environment=nullptr;}source;
+ size_t count=205;mp4stage::Owner owners[256]{};bool environment_particles[256]{};void*producer_particles[256]{};
+}mp4_stage_host;
+struct Array{std::vector<void*>items;}environment_array,equipment_array;
+int environment,root_component,equipment;bool graphs_current=true;std::map<uint32_t,void*>handles;uint32_t next_handle=1;
+bool mp4_stage_owner(void*){return true;}
+bool mp4_stage_refresh_controls(){return graphs_current;}
+void*mp4_stage_children(void*c){return c==&environment?&environment_array:c==&root_component?&equipment_array:nullptr;}
+uint32_t mp4_retain(void*p){handles[next_handle]=p;return next_handle++;}
+void*weak_get(uint32_t h){return handles.at(h);}void weak_free(uint32_t h){assert(handles.erase(h)==1);}
+bool mp4_stage_array(void*p,void***values,size_t*count,size_t limit){auto*a=static_cast<Array*>(p);*count=a->items.size();*values=a->items.data();return *count<=limit;}
+// ACTUAL
+int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];auto&h=mp4_stage_host;
+ int systems[206]{};h.source.environment=&environment;
+ for(size_t i=0;i<205;++i){h.owners[i].particle=&systems[i];h.owners[i].producer_kind=1;}
+ if(mode=="environment_subset"||mode=="environment_removed"||mode=="environment_duplicate"){
+  h.environment_particles[0]=true;environment_array.items={&systems[0]};}
+ if(mode=="environment_removed")environment_array.items.clear();
+ if(mode=="environment_duplicate")environment_array.items.push_back(&systems[0]);
+ if(mode=="environment_added")environment_array.items={&systems[205]};
+ if(mode=="timeline_moved_into_environment")environment_array.items={&systems[0]};
+ if(mode=="unproved_graph")graphs_current=false;
+ if(mode=="equipment"||mode=="equipment_ambiguous"){
+  for(size_t i=0;i<2;++i){h.owners[i].producer_kind=2;h.owners[i].producer=&equipment;h.producer_particles[i]=&root_component;}
+  equipment_array.items={&systems[0],&systems[1]};
+  if(mode=="equipment_ambiguous")equipment_array.items.push_back(&systems[2]);
+ }
+ const bool accepted=mp4_stage_refresh_inventory();
+ assert(accepted==(mode=="timeline_205"||mode=="environment_subset"||mode=="equipment"));assert(handles.empty());
+}
+'''
+    directory = tmp_path_factory.mktemp('stage-particle-union')
+    source, binary = directory / 'union.cpp', directory / 'union'
+    source.write_text(model.replace('// ACTUAL', actual))
+    result = subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-g', '-O1',
+        '-fsanitize=address,undefined', '-fno-pie', '-no-pie', '-I', str(ROOT / 'client-presentation/native'),
+        str(source), '-o', str(binary)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return binary
+
+
+@pytest.mark.parametrize('mode', ['timeline_205', 'environment_subset', 'environment_removed',
+    'environment_duplicate', 'environment_added', 'timeline_moved_into_environment', 'unproved_graph',
+    'equipment', 'equipment_ambiguous'])
+def test_actual_particle_union_keeps_distinct_producer_membership(union_inventory_binary, mode):
+    result = subprocess.run([str(union_inventory_binary), mode], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr

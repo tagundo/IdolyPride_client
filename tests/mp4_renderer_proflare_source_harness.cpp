@@ -33,10 +33,10 @@ bool mp4_actor_list(void*p,void***items,size_t*count,size_t bound){if(p!=&featur
 // ACTUAL_ORIGINAL_RENDERER_SOURCE
 // ACTUAL_PROFLARE_SOURCE
 void setup(){mp4_cam_profile.render_asset.rva=reinterpret_cast<uintptr_t>(&get_asset);put(&controller,96,static_cast<void*>(&additional));put(&additional,56,int32_t(-1));put(&asset,32,static_cast<void*>(&renderers));put(&asset,64,static_cast<void*>(&data_array));put(&asset,72,int32_t(0));put(&data,32,static_cast<void*>(&features));put(&data,40,static_cast<void*>(&feature_map));put(&data,48,static_cast<void*>(&post));put(&post,96,static_cast<void*>(&compute));put(&data,92,int32_t(0));put(&renderer,936,int32_t(0));renderers.values[0]=&renderer;data_array.values[0]=&data;}
-int main(int argc,char**argv){assert(argc==2);setup();int c=std::atoi(argv[1]);feature_items={&pf};put(&pf,48,static_cast<void*>(&pc));put(&pf,56,static_cast<void*>(&pr));put(&pf,80,static_cast<void*>(&pb));put(&pc,136,static_cast<void*>(&pb));put(&pr,136,static_cast<void*>(&pb));put(&pc,144,static_cast<void*>(&pd));put(&pr,144,static_cast<void*>(&pd));put(&pd,24,static_cast<void*>(&camera));bool expected=false,inactive=false,absent=false;
+int main(int argc,char**argv){assert(argc==2);setup();int c=std::atoi(argv[1]);feature_items={&pf};put(&pf,24,true);put(&pf,48,static_cast<void*>(&pc));put(&pf,56,static_cast<void*>(&pr));put(&pf,80,static_cast<void*>(&pb));put(&pc,136,static_cast<void*>(&pb));put(&pr,136,static_cast<void*>(&pb));put(&pc,144,static_cast<void*>(&pd));put(&pr,144,static_cast<void*>(&pd));put(&pd,24,static_cast<void*>(&camera));bool expected=false,inactive=false,absent=false,nullable=false;
  if(c==0)expected=true;
  else if(c==1){feature_items.clear();expected=absent=true;}
- else if(c==2){put(&pf,48,static_cast<void*>(nullptr));put(&pf,56,static_cast<void*>(nullptr));expected=inactive=true;}
+ else if(c==2){put(&pf,24,false);put(&pf,48,static_cast<void*>(nullptr));put(&pf,56,static_cast<void*>(nullptr));expected=inactive=true;}
  else if(c==3)feature_items.push_back(&pf);
  else if(c==4)put(&pf,48,static_cast<void*>(nullptr));
  else if(c==5)put(&pf,56,static_cast<void*>(nullptr));
@@ -54,12 +54,15 @@ int main(int argc,char**argv){assert(argc==2);setup();int c=std::atoi(argv[1]);f
  else if(c==17)feature_items={nullptr};
  else if(c==18)main_thread=false;
  else if(c==19)feature_items.resize(65,&pf);
+ else if(c==20){put(&pc,144,static_cast<void*>(nullptr));put(&pr,144,static_cast<void*>(nullptr));expected=nullable=true;}
+ else if(c==21){put(&pf,48,static_cast<void*>(nullptr));put(&pf,56,static_cast<void*>(nullptr));}
+ else if(c==22){put(&pf,48,static_cast<void*>(nullptr));put(&pf,56,static_cast<void*>(nullptr));fields.erase({&pf,24});}
  else assert(false);
  const auto before=fields;void*f=reinterpret_cast<void*>(1),*a=f,*b=f,*d=f,*e=f;
  bool result=mp4_renderer_proflare_source(&camera,&f,&a,&b,&d,&e);
  assert(result==expected&&fields==before);
  if(!expected||absent)assert(!f&&!a&&!b&&!d&&!e);
  else if(inactive)assert(f==&pf&&!a&&!b&&!d&&!e);
- else assert(f==&pf&&a==&pc&&b==&pr&&d==&pb&&e==&pd);
+ else assert(f==&pf&&a==&pc&&b==&pr&&d==&pb&&e==(nullable?nullptr:&pd));
  std::printf("case %d passed\n",c);
 }

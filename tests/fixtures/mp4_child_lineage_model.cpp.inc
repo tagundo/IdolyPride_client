@@ -26,6 +26,8 @@ StateApi mp4_actor_state_api(){return{};}
 struct GameApi{void(*director_graph_injected)(void*,mp4game::PlayableGraph*,const void*)=[](void*,mp4game::PlayableGraph*out,const void*){*out=current_graph;};}mp4_api;
 bool mp4_director_actual_operation(Call*out){if(!actual)return false;*out=f->call;return true;}
 #include "lineage-host.inc"
+bool mp4_child_birth_bindings(){return f->bindings;}
+#include "completed-graph-host.inc"
 void publication(mp4child::Graph graph,birth::Playable root={0x900,20,0}){current_graph=graph;Fixture::put(native_director,0x88,graph);Fixture::put(native_director,0x98,root);}
 int main(int argc,char**argv){assert(argc==2);mode=std::atoi(argv[1]);Fixture fixture;f=&fixture;f->spans.push_back({native_director,sizeof native_director});mp4_birth_catalogue.tuples[0]=f->tuples[0];publication(f->handle(1));
  mp4_child_lineage_hooks.capture=[](const birth::SourceTuple&,mp4child::Graph,birth::Playable,uint64_t*receipt){++captures;*receipt=501;return world::Result::ok;};
@@ -47,6 +49,15 @@ int main(int argc,char**argv){assert(argc==2);mode=std::atoi(argv[1]);Fixture fi
  Fixture::put(f->slots[1],0x20,uint32_t(22));publication(f->handle(0));
  if(mode==4)Fixture::put(native_director,0x98,birth::Playable{0x901,20,0});
  if(mode==9)f->tuples[0].asset++;
+ if(mode>=16){auto owner=state.owner;auto old=state.graph;auto next=f->handle(0);birth::Receipt proof{};
+  if(mode==17)++call.serial;if(mode==18)++owner.capture;if(mode==19)old.version+=2;if(mode==20)old=next;
+  if(mode==21)Fixture::put(native_director,0x98,birth::Playable{0x901,20,0});if(mode==22)mp4_child_lineage_bank.nodes[0].factory_returned=false;
+  if(mode==23)f->source_current=false;if(mode==24)held=false;if(mode==25)f->bindings=false;
+  if(mode==26)++mp4_child_lineage_bank.nodes[0].pending.factory;if(mode==27)++mp4_child_lineage_bank.nodes[0].pending.input.graph.handle;
+  if(mode==28)Fixture::put(native_director,0x88,f->handle(1));
+  const bool okay=mp4_child_completed_graph(call,owner,old,next,&proof);assert(okay==(mode==16));assert(!publishes&&!mp4_child_lineage_bank.retired_count);
+  if(okay)assert(proof.returned&&proof.birth&&proof.factory);return 0;
+ }
  auto result=mp4_child_lineage(nullptr,state,f->handle(0));
  if(mode==4){assert(result==world::Result::waiting&&!publishes);return 0;}
  if(mode==5||mode==7){assert(result==world::Result::unsupported&&!mp4_child_lineage_bank.retired_count);return 0;}

@@ -109,12 +109,21 @@ def test_archive_ambiguity_or_extra_program_is_rejected(tmp_path, monkeypatch, c
         audit.verify_archive(zip_file(tmp_path, files), "android")
 
 
+@pytest.mark.parametrize("name", ("f7ada0af4f174f0694ca6a487b8f543d", "level0"))
+def test_guid_and_scene_programs_require_an_original_object_manifest(tmp_path, monkeypatch, name):
+    raw, _ = serialized()
+    monkeypatch.setattr(audit, "PROGRAMS", {"android": {"resources.assets": audit.serialized_programs(raw)}})
+    files = {"assets/bin/Data/resources.assets": raw, "assets/bin/Data/" + name: raw}
+    with pytest.raises(ValueError, match="unexpected_program_file"):
+        audit.verify_archive(zip_file(tmp_path, files), "android")
+
+
 def test_source_manifest_covers_both_program_classes_and_platforms():
     assert set(audit.PROGRAMS) == {"android", "ios"}
     assert {c for files in audit.PROGRAMS.values() for objects in files.values() for c in (row["class_id"] for row in objects.values())} == {48, 72}
-    assert sum(map(len, audit.PROGRAMS["android"].values())) == 90
+    assert sum(map(len, audit.PROGRAMS["android"].values())) == 153
     assert sum(map(len, audit.PROGRAMS["ios"].values())) == 152
-    assert audit.source_manifest_digest("android") == "652d0d83a0aca3b09b4886ee5513c80d1469b303844cc191d8184a70e42860af"
+    assert audit.source_manifest_digest("android") == "1ade73b64ddef041e430400ff9c2e3dde2ac1417efbb2f231be0a33fb25fb180"
 
 
 def test_packager_guards_cover_inputs_final_output_and_language_resources():

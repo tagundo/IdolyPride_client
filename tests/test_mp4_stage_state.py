@@ -98,6 +98,32 @@ int main(int argc,char**argv){struct Cleanup{~Cleanup(){for(auto*l:allocated)del
  if(mode=="reject_uncontrolled"){context.controlled=false;assert(admit_particles(api(),owners,1,&context)==Result::unsupported&&fences==0);return 0;}
  if(mode=="empty_particles")ps.particles.clear();
  assert(s.configure(api(),owners,1,&context,7)==Result::ok);
+ if(mode.rfind("receipt_",0)==0){
+  Owner image{};uint64_t first=99;bool restored=true;
+  assert(!s.snapshot_receipt(&ps,&image,&first,&restored)&&!first&&!restored);
+  if(mode=="receipt_partial")badlist=true;
+  if(mode=="receipt_exhausted")particle_snapshot_sequence=~uint64_t(0);
+  const auto captured=s.capture();
+  if(mode=="receipt_partial"||mode=="receipt_exhausted"){
+   badlist=false;assert(captured!=Result::ok&&!s.snapshot_receipt(&ps,&image,&first,&restored)&&!first&&!restored);
+   assert(s.release(false)==Result::ok&&roots.empty());return 0;
+  }
+  assert(captured==Result::ok);const int before=writes;
+  assert(s.snapshot_receipt(&ps,&image,&first,&restored)&&first&&!restored&&image.particle==&ps&&image.producer==&producer&&image.producer_kind==1);
+  uint64_t again=0;assert(s.capture()==Result::ok&&s.snapshot_receipt(&ps,&image,&again,&restored)&&again==first&&writes==before);
+  if(mode=="receipt_tamper")allocated[0]->data[0]^=1;
+  if(mode=="receipt_source_lost")context.current=false;
+  if(mode=="receipt_root_lost")for(auto&r:roots)if(r.second==&producer){r.second=nullptr;break;}
+  if(mode=="receipt_tamper"||mode=="receipt_source_lost"||mode=="receipt_root_lost"){
+   assert(!s.snapshot_receipt(&ps,&image,&again,&restored)&&!again&&!restored&&writes==before);assert(s.release(false)==Result::ok);return 0;
+  }
+  assert(!s.snapshot_receipt(&other,&image,&again,&restored)&&!again&&!restored);
+  assert(s.restore()==Result::ok&&s.snapshot_receipt(&ps,&image,&again,&restored)&&again==first&&restored);
+  assert(s.release(false)==Result::ok&&!s.snapshot_receipt(&ps,&image,&again,&restored)&&!again&&!restored);
+  assert(s.configure(api(),owners,1,&context,7)==Result::ok&&s.capture()==Result::ok&&s.snapshot_receipt(&ps,&image,&again,&restored)&&again>first&&!restored);
+  assert(s.release(false)==Result::ok&&roots.empty());return 0;
+ }
+
  if(mode=="reject_playing"){ps.playing=true;ps.paused=false;assert(s.capture()==Result::unsupported&&writes==0);assert(s.release(false)==Result::ok&&roots.empty());return 0;}
  if(mode=="partial_capture"){badlist=true;assert(s.capture()==Result::unsupported);badlist=false;assert(s.capture()==Result::invalid);assert(s.release(false)==Result::ok&&roots.empty());return 0;}
  assert(s.capture()==Result::ok);assert(s.prepare()==Result::ok);assert(!s.allow_simulate(&ps)&&s.allow_simulate(&other));assert(!s.allow_simulate(&ps,0.1f,false,false,false));assert(s.allow_simulate(&other,0.1f,false,false,false));
@@ -142,7 +168,7 @@ def binary(tmp_path_factory):
  r=subprocess.run([compiler,'-std=c++17','-O2','-Wall','-Wextra','-Werror','-I',str(NATIVE),str(src),'-o',str(out)],capture_output=True,text=True,timeout=40)
  assert r.returncode==0,r.stdout+r.stderr
  return out
-@pytest.mark.parametrize('mode',['read_only_admit','reject_uncontrolled','reject_playing','partial_capture','rejected_clock','normal','empty_particles','live_producer','control_initialization','revoke_initialization_invalid_owner','revoke_invalid_owner','stale_inventory','stale_producer','saved_list_tamper','psy_normal','psy_rejected_clock','psy_revoke_invalid_owner','psy_authored','psy_foreign_camera','psy_foreign_controller','psy_busy_ticket','psy_scene_loss','psy_block_replaced'])
+@pytest.mark.parametrize('mode',['receipt_normal','receipt_partial','receipt_exhausted','receipt_tamper','receipt_source_lost','receipt_root_lost','read_only_admit','reject_uncontrolled','reject_playing','partial_capture','rejected_clock','normal','empty_particles','live_producer','control_initialization','revoke_initialization_invalid_owner','revoke_invalid_owner','stale_inventory','stale_producer','saved_list_tamper','psy_normal','psy_rejected_clock','psy_revoke_invalid_owner','psy_authored','psy_foreign_camera','psy_foreign_controller','psy_busy_ticket','psy_scene_loss','psy_block_replaced'])
 def test_shipping_stage_scope(binary,mode):
  r=subprocess.run([str(binary),mode],capture_output=True,text=True,timeout=5)
  assert r.returncode==0,r.stdout+r.stderr

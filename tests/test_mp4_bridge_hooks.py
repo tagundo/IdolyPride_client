@@ -24,10 +24,19 @@ using Method=const void;
 std::atomic<bool> ready{true};bool unity=true,available=true;
 std::vector<int> order;void* player=reinterpret_cast<void*>(7);void* param=reinterpret_cast<void*>(8);
 bool game_call(bool=false){return unity;}bool mp4_prepare_runtime(){return available;}
-namespace idoly_mp4_runtime {void observe_player_initializing(void*p,void*q){assert(p==player&&q==param);order.push_back(1);}}
+struct {uint64_t epoch=1;void*player=reinterpret_cast<void*>(7);void*presenter=nullptr;}mp4_actor_host;
+extern unsigned mp4_original_lifecycle_depth;
+void mp4_scene_restore_globals_before_source_change(void*){assert(!mp4_original_lifecycle_depth);order.push_back(10);}
+void mp4_scene_will_change(void*p){assert(p==player&&!mp4_original_lifecycle_depth);order.push_back(11);}
+void mp4_actor_scene_will_change(void*p){assert(p==player&&!mp4_original_lifecycle_depth);order.push_back(12);}
+namespace idoly_mp4_runtime {
+void observe_player_initializing(void*p,void*q){assert(p==player&&q==param&&!mp4_original_lifecycle_depth);order.push_back(1);}
+void observe_presenter_ended(void*){assert(false);}
+void observe_source_handoff_failed(void*){assert(false);}
+}
 '''+wrappers+r'''
 Mp4UniTask original(void*p,void*q,bool setup,Mp4CancellationToken ct,Method*m){
- assert(p==player&&q==param&&setup&&ct.source==reinterpret_cast<void*>(9)&&m==reinterpret_cast<void*>(10));
+ assert(p==player&&q==param&&setup&&ct.source==reinterpret_cast<void*>(9)&&m==reinterpret_cast<void*>(10)&&mp4_original_lifecycle_depth==1);
  order.push_back(2);Mp4UniTask result{};result.source=reinterpret_cast<void*>(11);result.token=-13;
  for(unsigned i=0;i<6;++i){result.padding[i]=uint8_t(i+20);}return result;
 }
@@ -38,7 +47,8 @@ int main(){
   Mp4UniTask result=mp4_player_initialize_hook(player,param,true,{reinterpret_cast<void*>(9)},reinterpret_cast<void*>(10));
   assert(result.source==reinterpret_cast<void*>(11)&&result.token==-13);
   for(unsigned i=0;i<6;++i)assert(result.padding[i]==i+20);
-  assert(order==(test==0?std::vector<int>{1,2}:std::vector<int>{2}));
+  assert(!mp4_original_lifecycle_depth);
+  assert(order==(test==0?std::vector<int>{10,11,12,1,2}:test==1?std::vector<int>{11,12,2}:std::vector<int>{10,11,12,2}));
  }
 }
 '''
@@ -50,9 +60,20 @@ def test_typed_original_first_hooks_and_thread_guards(tmp_path):
     compiler=shutil.which('g++') or shutil.which('clang++')
     if not compiler:pytest.skip('C++ compiler unavailable')
     source=(ROOT/'client-presentation/native/bridge.cpp').read_text()
-    begin=source.index('VoidMethod mp4_presenter_update_original;')
-    end=source.index('// BEGIN_MP4_OWNED_CLOCK_HOOKS',begin)
-    wrappers=source[begin:end]
+    # These wrappers no longer form one contiguous block. Extract their real
+    # declarations and bodies without pulling in unrelated producer hosts.
+    declarations = ('struct Mp4RenderContext ', 'VoidMethod mp4_presenter_update_original;',
+        'using Mp4CapturePass=', 'using Mp4EndCamera=', 'Mp4CapturePass mp4_capture_pass_original;',
+        'Mp4EndCamera mp4_end_camera_original;')
+    wrappers = '\n'.join(next(line for line in source.splitlines() if line.startswith(prefix))
+                         for prefix in declarations) + '\n'
+    for name in ('mp4_presenter_update_hook', 'mp4_capture_pass_hook', 'mp4_end_camera_hook'):
+        begin=source.index('void '+name+'(');opening=source.index('{',begin);depth=0
+        for end in range(opening,len(source)):
+            depth += (source[end]=='{')-(source[end]=='}')
+            if not depth:
+                wrappers+=source[begin:end+1]+'\n';break
+        else:raise AssertionError('Unclosed shipping hook: '+name)
     fixture=r'''
 #include <atomic>
 #include <cassert>

@@ -2434,3 +2434,137 @@ private:
 } // namespace idoly_mp4_srp
 
 // END_MP4_SRP_CONTROLLER_STATE
+
+// BEGIN_MP4_SHADER_LINEAGE_STATE
+namespace idoly_mp4_shader_lineage {
+struct Digest {uint8_t bytes[32]{};};
+inline bool equal(const Digest&a,const Digest&b){uint8_t difference=0;for(size_t i=0;i<32;++i)difference|=a.bytes[i]^b.bytes[i];return difference==0;}
+class Sha256 {
+ uint32_t state_[8]={0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
+ uint8_t block_[64]{};size_t used_=0;uint64_t bytes_=0;
+ static uint32_t rotate(uint32_t x,unsigned n){return (x>>n)|(x<<(32-n));}
+ void transform(){
+  static constexpr uint32_t k[64]={0x428a2f98u,0x71374491u,0xb5c0fbcfu,0xe9b5dba5u,0x3956c25bu,0x59f111f1u,0x923f82a4u,0xab1c5ed5u,0xd807aa98u,0x12835b01u,0x243185beu,0x550c7dc3u,0x72be5d74u,0x80deb1feu,0x9bdc06a7u,0xc19bf174u,0xe49b69c1u,0xefbe4786u,0x0fc19dc6u,0x240ca1ccu,0x2de92c6fu,0x4a7484aau,0x5cb0a9dcu,0x76f988dau,0x983e5152u,0xa831c66du,0xb00327c8u,0xbf597fc7u,0xc6e00bf3u,0xd5a79147u,0x06ca6351u,0x14292967u,0x27b70a85u,0x2e1b2138u,0x4d2c6dfcu,0x53380d13u,0x650a7354u,0x766a0abbu,0x81c2c92eu,0x92722c85u,0xa2bfe8a1u,0xa81a664bu,0xc24b8b70u,0xc76c51a3u,0xd192e819u,0xd6990624u,0xf40e3585u,0x106aa070u,0x19a4c116u,0x1e376c08u,0x2748774cu,0x34b0bcb5u,0x391c0cb3u,0x4ed8aa4au,0x5b9cca4fu,0x682e6ff3u,0x748f82eeu,0x78a5636fu,0x84c87814u,0x8cc70208u,0x90befffau,0xa4506cebu,0xbef9a3f7u,0xc67178f2u};
+  uint32_t w[64]{};for(size_t i=0;i<16;++i)w[i]=(uint32_t(block_[i*4])<<24)|(uint32_t(block_[i*4+1])<<16)|(uint32_t(block_[i*4+2])<<8)|block_[i*4+3];
+  for(size_t i=16;i<64;++i){const uint32_t a=w[i-15],b=w[i-2];w[i]=w[i-16]+(rotate(a,7)^rotate(a,18)^(a>>3))+w[i-7]+(rotate(b,17)^rotate(b,19)^(b>>10));}
+  uint32_t a=state_[0],b=state_[1],c=state_[2],d=state_[3],e=state_[4],f=state_[5],g=state_[6],h=state_[7];
+  for(size_t i=0;i<64;++i){const uint32_t t1=h+(rotate(e,6)^rotate(e,11)^rotate(e,25))+((e&f)^(~e&g))+k[i]+w[i];const uint32_t t2=(rotate(a,2)^rotate(a,13)^rotate(a,22))+((a&b)^(a&c)^(b&c));h=g;g=f;f=e;e=d+t1;d=c;c=b;b=a;a=t1+t2;}
+  state_[0]+=a;state_[1]+=b;state_[2]+=c;state_[3]+=d;state_[4]+=e;state_[5]+=f;state_[6]+=g;state_[7]+=h;
+ }
+public:
+ bool append(const void*data,size_t size){
+  if((size&&!data)||size>~uint64_t(0)-bytes_)return false;
+  const auto*p=static_cast<const uint8_t*>(data);bytes_+=size;
+  while(size){const size_t n=size<64-used_?size:64-used_;::memcpy(block_+used_,p,n);used_+=n;p+=n;size-=n;if(used_==64){transform();used_=0;}}
+  return true;
+ }
+ Digest finish(){
+  const uint64_t bits=bytes_*8;block_[used_++]=0x80;
+  if(used_>56){while(used_<64)block_[used_++]=0;transform();used_=0;}
+  while(used_<56)block_[used_++]=0;
+  for(unsigned i=0;i<8;++i)block_[63-i]=uint8_t(bits>>(i*8));
+  transform();Digest value{};
+  for(size_t i=0;i<8;++i)for(unsigned n=0;n<4;++n)value.bytes[i*4+n]=uint8_t(state_[i]>>(24-n*8));
+  return value;
+ }
+};
+struct KnownBundle {size_t bytes=0,shaders=0;Digest digest{};};
+enum class Kind:uint8_t{request,bundle,shader};
+struct Identity {uintptr_t native=0;int32_t instance=0;};
+inline bool same(Identity a,Identity b){return a.native==b.native&&a.instance==b.instance;}
+struct Api {
+ bool(*thread)()=nullptr;
+ bool(*identity)(void*,Kind,Identity&)=nullptr;
+ uint32_t(*retain)(void*)=nullptr;void*(*target)(uint32_t)=nullptr;void(*release)(uint32_t)=nullptr;
+ // Exact pinned original LoadAllAssets<Shader> result, not a caller-authored
+ // descriptor list. On success the host transfers one strong-root handle for
+ // the exact returned managed array. Registry retains it through all identity,
+ // per-Shader retain, and publication calls, then releases it on every path.
+ bool(*all_shaders)(void*,void**,size_t,size_t&,uint32_t&)=nullptr;
+};
+class Registry {
+ struct Root {void*object=nullptr;Identity identity{};uint32_t handle=0;uint16_t source=0;};
+ struct Pending {Root request{};uint16_t source=0;};
+ Api api_{};const KnownBundle*known_=nullptr;size_t known_count_=0;
+ Root bundles_[8]{},shaders_[128]{};Pending pending_[16]{};size_t bundle_count_=0,shader_count_=0;
+ bool poisoned_=false,publishing_=false;
+ bool rooted(Root&r,void*object,Kind kind,uint16_t source){Identity identity{};
+  if(!object||!api_.identity(object,kind,identity)||!identity.native)return false;
+  const uint32_t handle=api_.retain(object);if(!handle)return false;
+  if(api_.target(handle)!=object){api_.release(handle);return false;}
+  r={object,identity,handle,source};return true;
+ }
+ bool current(const Root&r,Kind kind)const{Identity identity{};return r.object&&r.handle&&api_.target(r.handle)==r.object&&api_.identity(r.object,kind,identity)&&same(identity,r.identity);}
+ void drop(Root&r){if(r.handle)api_.release(r.handle);r={};}
+ bool bundle(void*object,uint16_t source){
+  if(!source||source>known_count_||poisoned_||publishing_||!api_.thread())return false;
+  struct Publication{bool&active;explicit Publication(bool&v):active(v){active=true;}~Publication(){active=false;}} publication(publishing_);
+  for(size_t i=0;i<bundle_count_;++i)if(bundles_[i].object==object)return bundles_[i].source==source&&current(bundles_[i],Kind::bundle);
+  if(bundle_count_==8)return false;
+  Root candidate{};if(!rooted(candidate,object,Kind::bundle,source))return false;
+  void*values[64]{};size_t count=0;
+  uint32_t actual_array=0;
+  struct ArrayRoot{Api*api;uint32_t*handle;~ArrayRoot(){if(*handle)api->release(*handle);}}array_root{&api_,&actual_array};
+  bool loaded=false;
+  try{loaded=api_.all_shaders(object,values,64,count,actual_array);}catch(...){drop(candidate);throw;}
+  if(!loaded||!actual_array||!api_.target(actual_array)||count!=known_[source-1].shaders||count>64||!current(candidate,Kind::bundle)){drop(candidate);return false;}
+  // Validate the entire actual return array before publishing any provenance.
+  Identity identities[64]{};size_t fresh=0;
+  for(size_t i=0;i<count;++i){if(!values[i]||!api_.identity(values[i],Kind::shader,identities[i])||!identities[i].native){drop(candidate);return false;}
+   for(size_t j=0;j<i;++j)if(values[i]==values[j]){drop(candidate);return false;}
+   bool found=false;for(size_t j=0;j<shader_count_;++j)if(shaders_[j].object==values[i]){if(!current(shaders_[j],Kind::shader)){drop(candidate);return false;}found=true;break;}
+   if(!found)++fresh;
+  }
+  if(fresh>128-shader_count_){drop(candidate);return false;}
+  const size_t before=shader_count_;
+  for(size_t i=0;i<count;++i){bool found=false;for(size_t j=0;j<shader_count_;++j)found|=shaders_[j].object==values[i];
+   if(!found){if(!rooted(shaders_[shader_count_],values[i],Kind::shader,source)){while(shader_count_>before)drop(shaders_[--shader_count_]);drop(candidate);return false;}++shader_count_;}
+  }
+  if(!current(candidate,Kind::bundle)){while(shader_count_>before)drop(shaders_[--shader_count_]);drop(candidate);return false;}
+  for(size_t i=before;i<shader_count_;++i)if(!current(shaders_[i],Kind::shader)){while(shader_count_>before)drop(shaders_[--shader_count_]);drop(candidate);return false;}
+  bundles_[bundle_count_++]=candidate;return true;
+ }
+public:
+ Registry()=default;Registry(const Registry&)=delete;Registry&operator=(const Registry&)=delete;
+ bool configure(Api api,const KnownBundle*known,size_t count){
+  if(known_||!known||!count||count>8||!api.thread||!api.identity||!api.retain||!api.target||!api.release||!api.all_shaders||!api.thread())return false;
+  for(size_t i=0;i<count;++i)if(!known[i].bytes||known[i].bytes>16u*1024u*1024u||!known[i].shaders||known[i].shaders>64)return false;
+  api_=api;known_=known;known_count_=count;return true;
+ }
+ uint16_t identify(size_t bytes,const Digest&digest)const{
+  if(!known_||poisoned_)return 0;
+  for(size_t i=0;i<known_count_;++i)if(known_[i].bytes==bytes&&equal(known_[i].digest,digest))return uint16_t(i+1);
+  return 0;
+ }
+ // The host calls these only with actual saved-original return values. Input
+ // identity is rehashed after the call; an unknown/changed input grants none.
+ bool sync_result(void*actual_bundle,uint16_t before,uint16_t after){return before&&before==after&&bundle(actual_bundle,before);}
+ bool async_result(void*actual_request,uint16_t before,uint16_t after){
+  if(!known_||poisoned_||!api_.thread()||!before||before!=after||before>known_count_)return false;
+  for(auto&slot:pending_)if(slot.request.object==actual_request)return slot.source==before&&current(slot.request,Kind::request);
+  for(auto&slot:pending_)if(!slot.request.object){if(!rooted(slot.request,actual_request,Kind::request,before))return false;slot.source=before;return true;}
+  return false;
+ }
+ void forget_request(void*request){
+  if(!known_||!api_.thread())return;
+  for(auto&slot:pending_)if(slot.request.object==request){drop(slot.request);slot={};return;}
+ }
+ bool bundle_result(void*actual_request,void*actual_bundle){
+  if(!known_||poisoned_||!api_.thread()||!actual_request||!actual_bundle)return false;
+  for(auto&slot:pending_)if(slot.request.object==actual_request){
+   if(!current(slot.request,Kind::request)){drop(slot.request);slot={};return false;}
+   const bool result=bundle(actual_bundle,slot.source);drop(slot.request);slot={};return result;
+  }
+  return false;
+ }
+ bool admits(void*actual_shader)const{
+  if(!known_||poisoned_||!api_.thread()||!actual_shader)return false;
+  for(size_t i=0;i<shader_count_;++i)if(shaders_[i].object==actual_shader)return current(shaders_[i],Kind::shader);
+  return false;
+ }
+ void poison(){poisoned_=true;}
+ // Ordinary Unity-thread retirement only; never the no-GC source observer.
+ void clear(){for(auto&p:pending_){drop(p.request);p={};}for(size_t i=0;i<bundle_count_;++i)drop(bundles_[i]);for(size_t i=0;i<shader_count_;++i)drop(shaders_[i]);bundle_count_=shader_count_=0;known_=nullptr;known_count_=0;api_={};poisoned_=false;}
+};
+} // namespace idoly_mp4_shader_lineage
+// END_MP4_SHADER_LINEAGE_STATE

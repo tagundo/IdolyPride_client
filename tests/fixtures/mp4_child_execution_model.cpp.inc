@@ -16,6 +16,8 @@ QueueFixture*f=nullptr;bool source_live=true,held=true,thread=true,bindings=true
 int mode=0,raw_calls=0,finishes=0,settles=0,abandons=0,quarantines=0,play_state=0;
 uint64_t tickets=0;mp4child::Graph current_graph{};
 bool game_call(){return thread;}
+struct Catalogue{void*director=reinterpret_cast<void*>(0x55);}mp4_birth_catalogue;
+struct RngGate{template<class F>bool isolate(F action){action();return source_live;}}mp4_actor_mono_gate;
 struct Scene{bool active=true;struct{uint64_t generation=7;}source;uint32_t root_asset_handle=1;void*root_asset=reinterpret_cast<void*>(0xabc);}mp4_scene_host;
 bool mp4_scene_source_current(){return source_live;}
 struct{uint64_t epoch=7;uintptr_t asset=0xabc;}mp4_child_lineage_bank;
@@ -35,8 +37,9 @@ void rebuild(void*,const void*){++raw_calls;assert(mp4_raw_original_operation.in
 void evaluate(void*,const void*){++raw_calls;}
 void resume(void*,const void*){++raw_calls;play_state=1;}
 void pause(void*,const void*){++raw_calls;play_state=0;}
+void play(void*,const void*){++raw_calls;play_state=1;}
 int32_t state(void*,const void*){return play_state;}
-struct GameApi{struct{mp4child::Original director_rebuild=rebuild,director_resume=resume,director_pause=pause;int32_t(*director_state)(void*,const void*)=state;}automatic_playback;
+struct GameApi{struct{mp4child::Original director_rebuild=rebuild,director_resume=resume,director_pause=pause,director_play=play;int32_t(*director_state)(void*,const void*)=state;}automatic_playback;
  mp4child::Original director_evaluate=evaluate;
  void(*director_graph_injected)(void*,mp4child::Graph*,const void*)=[](void*,mp4child::Graph*out,const void*){*out=current_graph;};}mp4_api;
 namespace mp4game{using PlayableGraph=mp4child::Graph;}
@@ -51,6 +54,8 @@ int main(int argc,char**argv){assert(argc==2);mode=std::atoi(argv[1]);QueueFixtu
  Originals originals{enqueue_original,{append_original,append_original},collect_original,reset_original,{manager_original,manager_original}};mp4_director_maintenance::HostApi ha{};ha.bindings_current=[](void*,const Originals&){return bindings;};ha.quarantine=[](void*,const char*){++quarantines;};assert(mp4_child_pending_host.configure(api,originals,ha));
  mp4_child_execution_hooks.prepare=[](Kind,const mp4child::State&,mp4child::Graph,uint64_t*ticket,uint64_t*receipt){
   assert(!mp4_raw_original_operation.depth);if(mode==1)return world::Result::waiting;*ticket=++tickets;*receipt=mode==3?0:1000+tickets;if(mode==2)return world::Result::unsupported;if(mode==4)source_live=false;return world::Result::ok;};
+ mp4_child_execution_hooks.entered=[](uint64_t,const mp4child::State&,const Call&call){assert(mp4_raw_original_operation.depth&&mp4_raw_original_operation.invoked&&mp4_child_pending_host.journal().active()&&mp4_child_call_same(mp4_child_pending_host.journal().call(),call));return mode!=17;};
+ mp4_child_execution_hooks.returned=[](uint64_t,const mp4child::State&,const mp4child::Mutation&m){assert(mp4_raw_original_operation.depth&&m.issued&&m.returned);if(mode==19)throw 19;return mode!=18;};
  mp4_child_execution_hooks.finish=[](uint64_t,const mp4child::State&,const mp4child::Mutation&m){assert(!mp4_raw_original_operation.depth&&m.returned);++finishes;if(mode==6&&finishes==1)return world::Result::waiting;return world::Result::ok;};
  mp4_child_execution_hooks.settle=[](const mp4child::State&,const mp4child::Mutation&){++settles;if(mode==7&&settles==1)return world::Result::waiting;return world::Result::ok;};
  mp4_child_execution_hooks.bindings=[](){return bindings;};mp4_child_execution_hooks.abandon=[](uint64_t)noexcept{++abandons;};mp4_child_execution_hooks.quarantine=[](const char*)noexcept{++quarantines;};
@@ -61,9 +66,13 @@ int main(int argc,char**argv){assert(argc==2);mode=std::atoi(argv[1]);QueueFixtu
  if(mode==10)bindings=false;
  if(mode==11)held=false;
  if(mode==12)mp4_child_execution_hooks.prepare=nullptr;
+ if(mode==20)mp4_child_execution_hooks.entered=nullptr;
+ if(mode==21)mp4_child_execution_hooks.returned=nullptr;
+ if(mode==19){bool caught=false;try{calls.invoke(Kind::rebuild,s,&mutation);}catch(int v){caught=v==19;}assert(caught&&raw_calls==1&&mutation.issued&&mutation.returned&&!mp4_raw_original_operation.depth&&quarantines==1);return 0;}
  if(mode==9){bool caught=false;try{calls.invoke(Kind::rebuild,s,&mutation);}catch(int v){caught=v==42;}assert(caught&&raw_calls==1&&mutation.issued&&!mutation.returned&&!mp4_raw_original_operation.depth&&quarantines==1);return 0;}
  const auto result=calls.invoke(mode==13?Kind::play:(mode==14?Kind::stop:Kind::rebuild),s,&mutation);
- if(mode==1||mode==2||mode==3||mode==4||mode==5||mode==10||mode==11||mode==12){assert(result!=world::Result::ok&&!raw_calls&&!mutation.issued&&!mp4_raw_original_operation.depth);return 0;}
+ if(mode==1||mode==2||mode==3||mode==4||mode==5||mode==10||mode==11||mode==12||mode==17||mode==20||mode==21){assert(result!=world::Result::ok&&!raw_calls&&!mutation.issued&&!mp4_raw_original_operation.depth);return 0;}
+ if(mode==18){assert(result==world::Result::failed&&raw_calls==1&&mutation.issued&&mutation.returned&&!finishes&&quarantines==1&&!mp4_raw_original_operation.depth);return 0;}
  if(mode==8){assert(result==world::Result::stale&&raw_calls==1&&mutation.issued&&mutation.returned&&quarantines==1&&!mp4_raw_original_operation.depth);return 0;}
  if(mode==6)assert(result==world::Result::waiting&&mutation.issued&&mutation.returned);else assert(result==world::Result::ok);
  assert(raw_calls==1&&!mp4_raw_original_operation.depth&&!mp4_child_pending_host.journal().active());

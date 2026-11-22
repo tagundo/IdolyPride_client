@@ -34,5 +34,6 @@ int main(){using R=v::Result;int cases=0;int64_t f=-1;
  {auto h=host();v::Scope s;s.bind(h.ops(),h.s.identity);s.request(0,30,300);h.complete(s,0);assert(s.poll()==R::ready);h.s.playing=true;assert(s.request(0,30,300)==R::waiting&&h.writes==1);++cases;}
  {auto h=host();v::Scope s;assert(!s.bind({},h.s.identity));assert(s.bind(h.ops(),h.s.identity));assert(!s.bind(h.ops(),h.s.identity));s.abandon();assert(s.request(0,30,300)==R::invalid);++cases;}
  {auto h=host();v::Scope s;s.bind(h.ops(),h.s.identity);h.s.prepared=false;assert(s.request(0,30,300)==R::waiting&&h.writes==0);h.s.prepared=true;s.frame_ready(h.s.identity,0);assert(s.prepared_frame()==R::waiting);s.native_drain_completed(h.s.identity);assert(s.prepared_frame()==R::ready);assert(s.request(0,30,300)==R::ready&&h.writes==0);++cases;}
+ {auto h=host();v::Scope s;s.bind(h.ops(),h.s.identity);assert(s.request_frame(299,300)==R::waiting&&h.set==299);h.complete(s,299);assert(s.poll()==R::ready);assert(s.request_frame(299,300)==R::ready&&h.writes==1);assert(s.request_frame(300,300)==R::invalid);assert(s.request_frame(-1,300)==R::invalid);++cases;}
  std::printf("%d private video frame scheduling cases passed; native events modeled\n",cases);
 }
