@@ -50,6 +50,7 @@ struct Model {
   size_t span = 20;
   bool nonproc = false;
   unsigned calls = 0;
+  unsigned allocator_gaps = 0;
   void **original_slot = nullptr;
   void put(uintptr_t at, const void *p, size_t n) {
     for (auto &r : memory)
@@ -165,9 +166,19 @@ struct Model {
     return i;
   }
   std::string record(const Install &i) {
+    // Exact official sh_elf.c: S|load_bias|start-end|...; carries variable
+    // allocator diagnostics, never mandatory hook/code authority.
+    std::string allocator;
+    if (allocator_gaps) {
+      allocator = "S|" + hex(engine.base);
+      for (unsigned gap = 0; gap < allocator_gaps; ++gap)
+        allocator += "|" + hex(0x1000u + gap * 0x2000u) + "-" +
+                     hex(0x1100u + gap * 0x2000u);
+      allocator += ";";
+    }
     return "hook_func_addr," + hex(i.target) + "," + hex(i.replacement) + "," +
            std::to_string(i.span) + ",0," + hex(i.stub) +
-           ",10,B|arm64|hook;T|" + hex(i.target) + "|" +
+           ",10," + allocator + "B|arm64|hook;T|" + hex(i.target) + "|" +
            hex(i.original, i.span) + "|" + hex(i.patch, i.span) + ";" +
            (i.island_exit.address
                 ? "X|" + hex(i.island_exit.address) + "|1|" +
@@ -282,6 +293,45 @@ int main() {
         bad.resume += 4;
         CHECK(!shadow_gateway(pins[p], bad));
       }
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    Model m;
+    m.allocator_gaps = 4 + mode;
+    m.original(android_bootstrap_pins[0]);
+    auto installed = m.make(m.pin, 20, false);
+    if (mode == 2) installed.enter.data[0] ^= 1;
+    std::string records = m.record(installed);
+    if (mode == 1) {
+      const auto base = records.find("B|arm64|hook;");
+      CHECK(base != std::string::npos);
+      records.erase(base, strlen("B|arm64|hook;"));
+    }
+    Install parsed{};
+    const bool accepted = shadow_record(records.c_str(), records.size(),
+                                       installed.target, installed.replacement,
+                                       installed.gateway, installed.stub, &parsed);
+    CHECK(accepted == (mode != 1));
+    if (accepted) CHECK(shadow_gateway(m.pin, parsed) == (mode != 2));
+    if (mode == 3) {
+      // The whole real installer/parser retains mandatory live-code checks
+      // when the official allocator emits more than the former five fields.
+      global = &m;
+      ShadowSourceSpec spec{};
+      spec.image = m.pin.image;
+      spec.rva = m.pin.rva;
+      memcpy(spec.original, m.pin.original, 24);
+      spec.library = "libunity.so";
+      spec.symbol = "official-allocator-S";
+      ShadowService<1> service;
+      CHECK(service.configure({get_recordable,set_recordable,hook,get_records,free},
+                              {&m,Model::thread,Model::source,Model::read},&spec,1));
+      void *original = nullptr;
+      CHECK(service.install(0,0x400001000,&original));
+      CHECK(service.current(0));
+      m.memory[1].bytes[0] ^= 1;
+      CHECK(!service.current(0));
+    }
+    ++cases;
+  }
   for (unsigned badcase = 0; badcase < 10; ++badcase) {
     Model m;
     m.original(android_bootstrap_pins[0]);

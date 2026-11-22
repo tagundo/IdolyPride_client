@@ -50,6 +50,7 @@ struct QueueCandidate {
 // Frozen value storage, never a managed object or a render target. Host Add
 // borrows it only while holding queue_owner_mutex through the journal commit.
 static QueueCandidate queue_candidate;
+static char queue_candidate_error[96]="selected_mv_snapshot_missing";
 static uint64_t queue_observed_identity=0,queue_observed_generation=0;
 static void* queue_observed_player=nullptr;
 static void* queue_observed_presenter=nullptr;
@@ -80,19 +81,46 @@ inline bool queue_same_graphics(const queue_model::Graphics&a,const queue_model:
         &&a.render_scale==b.render_scale&&a.max_buffer_pixel==b.max_buffer_pixel&&a.aa_mode==b.aa_mode
         &&a.shadow_resolution==b.shadow_resolution&&a.expand_photography==b.expand_photography;
 }
+// No Audio/Actor export programme, Rebuild, Pause, or private API is queried.
+// The real ordinary initialization observer owns the immutable descriptor.
+inline Result probe_selection_source(){
+ pthread_mutex_lock(&control_mutex);const uint64_t generation=queue_selection_generation;pthread_mutex_unlock(&control_mutex);
+ void*player=game.selected_player();const uint64_t identity=selection.identity(player);
+ Result result=Result::waiting;const char*error="selected_mv_not_loaded";bool observed=false;
+ int32_t width=0,height=0;
+ if(player){
+  result=selection.selected(player,queue_descriptor_work);
+  if(result!=Result::ok)error=selection.error();
+  else if(identity){
+   observed=true;result=game.source_geometry(width,height);
+   error=result==Result::ok?"none":result==Result::waiting?"selected_capture_geometry_not_ready":"selected_capture_geometry_unsupported";
+  }
+ }
+ const bool current=player&&game.selected_player()==player&&identity&&selection.identity(player)==identity;
+ pthread_mutex_lock(&control_mutex);
+ if(generation!=queue_selection_generation||(player&&identity&&!current)){observed=false;result=Result::waiting;error="selected_mv_selection_changed";}
+ selected_mv=observed;
+ selected_source_width=observed&&result==Result::ok&&idoly_mp4_output::source_dimensions(width,height)?static_cast<uint32_t>(width):0;
+ selected_source_height=selected_source_width?static_cast<uint32_t>(height):0;
+ if(selected_source_width){published.source_width=selected_source_width;published.source_height=selected_source_height;}
+ if(observed)selected_identity=identity;
+ snprintf(selection_error,sizeof(selection_error),"%s",error);
+ pthread_mutex_unlock(&control_mutex);return result;
+}
 inline void queue_refresh_candidate(Result readiness){
-    // Called only after the existing full idle readiness probe on Unity.
+    // Called after the independent readonly selected-source probe on Unity.
     pthread_mutex_lock(&queue_owner_mutex);
     pthread_mutex_lock(&control_mutex);
     const uint64_t generation=queue_selection_generation,epoch=configured.epoch;
-    const uint32_t width=published.source_width,height=published.source_height;
+    const uint32_t width=selected_source_width,height=selected_source_height;
     const bool available=installed&&configured_valid&&!control_busy&&!start_pending;
     const bool parked=requested_pause_reason==IDMP4_PAUSE_LIFECYCLE_BACKGROUND
         ||requested_pause_reason==IDMP4_PAUSE_SURFACE_UNAVAILABLE;
-    char reason[96]{};snprintf(reason,sizeof(reason),"%s",readiness_error);
+    char reason[96]{};snprintf(reason,sizeof(reason),"%s",selection_error);
     pthread_mutex_unlock(&control_mutex);
     if(!available||!generation){pthread_mutex_unlock(&queue_owner_mutex);return;}
     if(readiness!=Result::ok){
+        snprintf(queue_candidate_error,sizeof(queue_candidate_error),"%s",reason);
         // A server menu can release only the original render target while the
         // selected logical MV remains unchanged. Preserve that verified value.
         const bool target_lost=!strcmp(reason,"selected_capture_geometry_not_ready")
@@ -106,6 +134,7 @@ inline void queue_refresh_candidate(Result readiness){
     queue_model::Graphics graphics{};
     if(!identity||!idoly_mp4_output::source_dimensions(width,height)
         ||!queue_graphics_snapshot||!queue_graphics_snapshot(graphics)||!queue_model::detail::graphics(graphics)){
+        snprintf(queue_candidate_error,sizeof(queue_candidate_error),"selected_graphics_snapshot_unavailable");
         if(queue_candidate.valid&&queue_candidate.generation==generation)
             invalidate_queue_selection("selected_graphics_snapshot_unavailable");
         pthread_mutex_unlock(&queue_owner_mutex);return;
@@ -127,6 +156,7 @@ inline void queue_refresh_candidate(Result readiness){
             queue_candidate.graphics=graphics;queue_candidate.width=width;queue_candidate.height=height;
         }
         queue_candidate.identity=identity;queue_candidate.generation=generation;queue_candidate.broker_epoch=epoch;queue_candidate.valid=true;
+        snprintf(queue_candidate_error,sizeof(queue_candidate_error),"none");
         snprintf(queue_selection_reason,sizeof(queue_selection_reason),"%s","none");
     }
     pthread_mutex_unlock(&control_mutex);pthread_mutex_unlock(&queue_owner_mutex);
@@ -147,13 +177,37 @@ inline void queue_set_storage_error(queue_model::Error result){
         snprintf(queue_error,sizeof(queue_error),"queue_%s_failed",queue_store().storage_stage());
     else queue_set_error(queue_model::error_code(result));
 }
+inline bool queue_cached_add(char*error,size_t capacity){
+ const char*reason=nullptr;char selected_reason[96]{};
+ pthread_mutex_lock(&control_mutex);
+ if(!queue_available||queue_blocked)reason="queue_not_configured";
+ else if(control_busy||start_pending||queue_active_published||queue_scene_owned||queue_request.kind!=QueueCommandKind::none)reason="queue_busy";
+ else if(!queue_candidate.valid){const char*missing=selected_mv?queue_candidate_error:"selected_mv_snapshot_missing";
+  if(!strcmp(missing,"none"))missing="selected_mv_snapshot_pending";
+  snprintf(selected_reason,sizeof(selected_reason),"%s",missing);reason=selected_reason;}
+ else if(!configured_valid||queue_candidate.generation!=queue_selection_generation||queue_candidate.broker_epoch!=configured.epoch
+  ||!selected_identity||queue_candidate.identity!=selected_identity)reason="selected_mv_selection_changed";
+ else if(!selected_mv)reason="selected_mv_snapshot_missing";
+ pthread_mutex_unlock(&control_mutex);
+ if(!reason){int64_t revision=-1;
+  if(!queue_graphics_revision||!queue_graphics_revision(revision)||revision<0)reason="selected_graphics_revision_unavailable";
+  else if(revision!=queue_candidate.graphics.revision)reason="selected_graphics_changed_before_enqueue";
+ }
+ if(!reason){pthread_mutex_lock(&control_mutex);
+  if(!configured_valid||queue_candidate.generation!=queue_selection_generation||queue_candidate.broker_epoch!=configured.epoch
+   ||control_busy||start_pending)reason="selected_mv_selection_changed";
+  pthread_mutex_unlock(&control_mutex);}
+ if(error&&capacity)snprintf(error,capacity,"%s",reason?reason:"none");
+ return !reason;
+}
 inline void queue_publish(){
     char next[16384]{};size_t at=0;
     auto append=[&](const char* format,auto... values){if(at>=sizeof(next))return;const int n=snprintf(next+at,sizeof(next)-at,format,values...);if(n<0||static_cast<size_t>(n)>=sizeof(next)-at){at=sizeof(next);return;}at+=static_cast<size_t>(n);};
     pthread_mutex_lock(&control_mutex);const bool command_pending=queue_pause_pending||queue_request.kind!=QueueCommandKind::none;pthread_mutex_unlock(&control_mutex);
-    append("{\"schema\":1,\"available\":%s,\"command_pending\":%s,\"error_code\":\"%s\",\"last_added_job_id\":\"%s\",\"running\":%s,\"paused\":%s,\"phase\":\"%s\",\"capacity\":8,\"current_job_id\":\"%s\",\"replay_available\":%s,\"can_run\":%s,\"storage_stage\":\"%s\",\"storage_errno\":%d,\"jobs\":[",
+    char add_error[96]{};const bool can_add=queue_cached_add(add_error,sizeof add_error);
+    append("{\"schema\":1,\"available\":%s,\"command_pending\":%s,\"error_code\":\"%s\",\"last_added_job_id\":\"%s\",\"running\":%s,\"paused\":%s,\"phase\":\"%s\",\"capacity\":8,\"current_job_id\":\"%s\",\"replay_available\":%s,\"can_run\":%s,\"can_add\":%s,\"add_error\":\"%s\",\"storage_stage\":\"%s\",\"storage_errno\":%d,\"jobs\":[",
         queue_available?"true":"false",command_pending?"true":"false",queue_error,queue_last_added,
-        queue_running?"true":"false",queue_paused?"true":"false",queue_phase,queue_active_id,queue_replay_available?"true":"false",queue_can_run?"true":"false",queue_store().storage_stage(),queue_store().storage_errno());
+        queue_running?"true":"false",queue_paused?"true":"false",queue_phase,queue_active_id,queue_replay_available?"true":"false",queue_can_run?"true":"false",can_add?"true":"false",add_error,queue_store().storage_stage(),queue_store().storage_errno());
     for(size_t i=0;i<queue_store().count();++i){const auto* queued=queue_store().at(i);if(!queued)continue;
         append("%s{\"job_id\":\"%s\",\"output_id\":\"%s\",\"timeline\":\"%s\",\"actor_count\":%u,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"fps_num\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"state\":\"%s\",\"error_code\":\"%s\"}",
             i?",":"",queued->id,queued->output_id,queued->descriptor.timeline_asset,queued->descriptor.actor_count,
@@ -193,6 +247,7 @@ inline bool queue_enqueue_candidate(const Options& requested){
         ||queue_candidate.broker_epoch!=configured.epoch||!configured_valid
         ||(selected_identity&&selected_identity!=queue_candidate.identity))
         error=strcmp(queue_selection_reason,"none")?queue_selection_reason:"selected_mv_selection_changed";
+    else if(!selected_mv)error="selected_mv_snapshot_missing";
     char failure[65]{};if(error)snprintf(failure,sizeof(failure),"%s",error);
     pthread_mutex_unlock(&control_mutex);
     if(error){queue_set_error(failure);queue_publish();pthread_mutex_unlock(&queue_owner_mutex);return false;}
@@ -247,6 +302,9 @@ inline bool queue_accept(QueueCommandKind kind,Options options={},int operation=
 }
 inline size_t queue_status(char* buffer,size_t capacity){
     if(!buffer||!capacity)return 0;
+    // Refresh only bounded host-owned values. This never resumes Unity or
+    // calls selection/geometry getters while the server menu owns the UI.
+    pthread_mutex_lock(&queue_owner_mutex);queue_publish();pthread_mutex_unlock(&queue_owner_mutex);
     pthread_mutex_lock(&control_mutex);
     const size_t n=strlen(queue_published);const bool pending=queue_pause_pending||queue_request.kind!=QueueCommandKind::none;
     if(n>=capacity){pthread_mutex_unlock(&control_mutex);return 0;}
@@ -290,6 +348,7 @@ inline void queue_process(const QueueRequest& request){
         queue_set_error("enqueue_requires_verified_snapshot");return;
     }
     if(request.kind==QueueCommandKind::run||request.kind==QueueCommandKind::resume){
+        if(native_scene_required&&!native_scene_installed&&!queue_active_id[0]){queue_set_error("offline_pipeline_not_verified");return;}
         if(!queue_replay_available){queue_set_error("replay_api_unavailable");return;}
         if(queue_active_id[0]){const auto* active=queue_store().find(queue_active_id);if(active&&active->state==queue_model::State::paused&&!queue_record(queue_store().resume(queue_active_id)))return;}
         queue_running=true;queue_paused=false;resume();
@@ -399,7 +458,7 @@ inline void queue_tick(){
     if(queue_replay_available&&!queue_blocked&&installed&&configured_valid){
         // Only original Unity callbacks inspect the router. Cold server menus
         // can read the last boolean without calling any managed method.
-        can_run=queue_replay().can_route();
+        can_run=(!native_scene_required||native_scene_installed)&&queue_replay().can_route();
     }
     pthread_mutex_lock(&control_mutex);queue_can_run=can_run;pthread_mutex_unlock(&control_mutex);
     queue_observe_selection();queue_execute();

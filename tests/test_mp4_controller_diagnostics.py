@@ -47,6 +47,7 @@ pthread_mutex_t control_mutex=PTHREAD_MUTEX_INITIALIZER;
 PublicStatus published;
 ControllerDiscovery controller_discovery;
 char readiness_error[96]="open_selected_mv_first";
+bool selected_mv=false;char selection_error[96]="open_selected_mv_first";uint32_t selected_source_width=0,selected_source_height=0;
 uint64_t unity_ticks=13,capture_acks=7;
 bool control_busy=false,pause_acknowledged=false;
 int requested_pause_reason=IDMP4_PAUSE_NONE;

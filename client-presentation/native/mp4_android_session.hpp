@@ -48,6 +48,8 @@ Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeSuspend(JNIEnv
 extern "C" JNIEXPORT void JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeResume(JNIEnv*,jclass){IDMP4SessionResume();}
 extern "C" JNIEXPORT jboolean JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeSelectionReady(JNIEnv*,jclass){return IDMP4SessionSelectionReady()?JNI_TRUE:JNI_FALSE;}
+extern "C" JNIEXPORT jboolean JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeReady(JNIEnv*,jclass){return IDMP4SessionReady()?JNI_TRUE:JNI_FALSE;}
 
 extern "C" JNIEXPORT jint JNICALL

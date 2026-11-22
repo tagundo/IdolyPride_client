@@ -166,6 +166,10 @@ static Configuration configured;
 static Options pending_options;
 static PublicStatus published;
 static char readiness_error[96]="open_selected_mv_first";
+// Readonly selection is independent of offline admission and render ownership.
+static bool selected_mv=false;
+static char selection_error[96]="open_selected_mv_first";
+static uint32_t selected_source_width=0,selected_source_height=0;
 struct ControllerDiscovery {
     char reason[96]="selected_render_controller_missing";
     char source[24]="none";
@@ -260,6 +264,7 @@ inline void invalidate_queue_selection(const char* reason="selected_mv_snapshot_
 }
 inline void queue_tick();
 inline void queue_refresh_candidate(Result readiness);
+inline Result probe_selection_source();
 static bool installed=false;
 enum class Stage{idle,begin,scene_acquire,audio_setup,render_setup,audio_request,audio_response,audio_load,audio_mix,audio_finalize,frame_request,frame_wait,frame_submit,finishing,retiring};
 // BEGIN_MP4_NATIVE_FRAME_SCHEDULE
@@ -616,8 +621,8 @@ inline Result probe_readiness(Snapshot& snapshot,bool force_native_admission=tru
     if(result!=Result::ok&&!strcmp(error,"selected_render_controller_missing")
         &&strcmp(controller_discovery.reason,"none"))error=controller_discovery.reason;
     // This is an observed original render texture, never a Screen estimate.
-    published.source_width=result==Result::ok&&idoly_mp4_output::source_dimensions(width,height)?static_cast<uint32_t>(width):0;
-    published.source_height=published.source_width?static_cast<uint32_t>(height):0;
+    published.source_width=result==Result::ok&&idoly_mp4_output::source_dimensions(width,height)?static_cast<uint32_t>(width):selected_mv?selected_source_width:0;
+    published.source_height=result==Result::ok&&published.source_width?static_cast<uint32_t>(height):selected_mv?selected_source_height:0;
     snprintf(readiness_error,sizeof(readiness_error),"%s",error);pthread_mutex_unlock(&control_mutex);
     return result;
 }
@@ -699,6 +704,7 @@ inline void observe_presenter_ended(void* presenter){
     game.release_shader_lease_for_scene(presenter);
     game.observe_presenter_ended(presenter);
     if(selected){pthread_mutex_lock(&control_mutex);selected_identity=0;observed_presenter_scope=nullptr;published.ready=false;
+        selected_mv=false;selected_source_width=selected_source_height=0;snprintf(selection_error,sizeof(selection_error),"selected_mv_ended");
         invalidate_queue_selection_locked("selected_mv_ended");
         controller_discovery=ControllerDiscovery{};
         snprintf(controller_discovery.reason,sizeof(controller_discovery.reason),"%s","selected_mv_ended");
@@ -713,7 +719,8 @@ inline void observe_source_will_change(void* source){
     // scalar-only; it must not make this old lease outlive the new scene.
     game.release_shader_lease_for_scene(source);
     game.invalidate_owned_scene(source);
-    invalidate_queue_selection("selected_mv_reinitializing");
+    pthread_mutex_lock(&control_mutex);selected_mv=false;selected_source_width=selected_source_height=0;
+    snprintf(selection_error,sizeof(selection_error),"selected_mv_reinitializing");invalidate_queue_selection_locked("selected_mv_reinitializing");pthread_mutex_unlock(&control_mutex);
 }
 // A pre-initialize observer is auxiliary to the original game lifecycle. If
 // it throws, the typed host forwards the original exactly once and calls this
@@ -1394,8 +1401,12 @@ inline void on_unity_tick_impl() {
     game.maintenance();
     if(!busy_stage()){
         pthread_mutex_lock(&control_mutex);const bool force_admission=start_pending;pthread_mutex_unlock(&control_mutex);
+        Result selected=probe_selection_source();
+        // A missing camera fallback may be populated by the ordinary source
+        // snapshot. Admission failure must never erase a positive selection.
+        queue_refresh_candidate(selected);
         Snapshot ready{};const Result readiness=probe_readiness(ready,force_admission);
-        queue_refresh_candidate(readiness);
+        if(selected!=Result::ok&&readiness==Result::ok){selected=probe_selection_source();queue_refresh_candidate(selected);}
         pthread_mutex_lock(&control_mutex);const bool pending=start_pending;pthread_mutex_unlock(&control_mutex);
         if(pending&&readiness==Result::waiting){
             const uint64_t now=milliseconds();
@@ -1440,7 +1451,9 @@ inline void on_unity_tick(){
 inline size_t status(char*buffer,size_t capacity){
     if(!buffer||!capacity)return 0;
     pthread_mutex_lock(&control_mutex);
-    const PublicStatus s=published;char readiness[96]{};snprintf(readiness,sizeof(readiness),"%s",readiness_error);
+    const PublicStatus s=published;char readiness[96]{},selection_reason[96]{};
+    snprintf(readiness,sizeof(readiness),"%s",readiness_error);
+    snprintf(selection_reason,sizeof(selection_reason),"%s",selection_error);const bool selected=selected_mv;
     const ControllerDiscovery discovery=controller_discovery;
     const NativeObservation observed=native_observation;
     const NativeSceneDiagnostics diagnostics=native_diagnostics;
@@ -1481,8 +1494,8 @@ inline size_t status(char*buffer,size_t capacity){
         static_cast<unsigned long long>(observed.accepted),observed.restored?"true":"false",observed.clock_restored?"true":"false",
         observed.camera_audio?"true":"false",observed.dependents?"true":"false",observed.world?"verified":"unverified");
     if(observed_count<=0||static_cast<size_t>(observed_count)>=sizeof(observation))return 0;
-    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"restoration_error\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u},\"observation\":%s,\"scene_diagnostics\":%s}",
-        static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",readiness,current_phase,
+    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"selected_mv\":%s,\"selection_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"restoration_error\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u},\"observation\":%s,\"scene_diagnostics\":%s}",
+        static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",readiness,selected?"true":"false",selection_reason,current_phase,
         paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,s.restoration_error,
         static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),
         static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.source_width,s.source_height,
@@ -1504,3 +1517,4 @@ extern "C" IDMP4_SESSION_API void IDMP4SessionCancel(){idoly_mp4_runtime::cancel
 extern "C" IDMP4_SESSION_API void IDMP4SessionSuspend(int reason){idoly_mp4_runtime::suspend(reason);}
 extern "C" IDMP4_SESSION_API void IDMP4SessionResume(){idoly_mp4_runtime::resume();}
 extern "C" IDMP4_SESSION_API int IDMP4SessionReady(){pthread_mutex_lock(&idoly_mp4_runtime::control_mutex);bool ready=idoly_mp4_runtime::published.ready;pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);return ready?1:0;}
+extern "C" IDMP4_SESSION_API int IDMP4SessionSelectionReady(){pthread_mutex_lock(&idoly_mp4_runtime::control_mutex);const bool selected=idoly_mp4_runtime::selected_mv;pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);return selected?1:0;}

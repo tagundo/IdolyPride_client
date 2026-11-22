@@ -30,7 +30,10 @@ bool close_consumed=false,graphics_override=false;
 qm::Graphics current_graphics{},effective_graphics{};
 std::vector<float> applied_scales;std::vector<std::string> replayed_timelines,replayed_assets;
 int reported_width=16;bool queue_source_valid=true;
-bool queue_source_geometry(void* controller,int32_t* width,int32_t* height){assert(controller==ptr(camera_controller));if(!queue_source_valid)return false;*width=16;*height=16;return true;}
+unsigned selection_queries=0,selection_resumes=0;bool host_selection_only=false;
+bool selection_type(void* value,const char* type){assert(!host_selection_only);++selection_queries;return istype(value,type);}
+void selection_resume(void*,Method*){++selection_resumes;}
+bool queue_source_geometry(void* controller,int32_t* width,int32_t* height){assert(!host_selection_only&&controller==ptr(camera_controller));++selection_queries;if(!queue_source_valid)return false;*width=16;*height=16;return true;}
 template<class T>T get(void* p,size_t at){T value{};if(p)std::memcpy(&value,static_cast<uint8_t*>(p)+at,sizeof(value));return value;}
 Obj* obj(void* p){return objects.at(p);}
 void* rp_new(replay::Kind kind){switch(kind){case replay::Kind::out_game_param:return ptr(make("Solis.OutGame.OutGameLivePlayerParam"));case replay::Kind::actor_descriptor:return ptr(make("Solis.Common.SolisActorDescriptor"));case replay::Kind::transition_param:return ptr(make("Solis.OutGame.LivePlayerTransitionParam"));}return nullptr;}
@@ -95,13 +98,64 @@ int main(int argc,char** argv){
     }
     router_scene=make("SceneSystem");router_home=make("HomeScreen");router_state=make("LiveState");
     connect_scene();Api selected=api();selected.director_get_duration=session_duration;selected.audio_clip_samples=session_samples;selected.audio_clip_frequency=session_rate;selected.timeline_get_tracks=session_tracks;selected.track_get_clips=session_clips;selected.bundle_load_file_async=session_load_bundle;selected.audio_clip_get_data=session_get_data;selected.bundle_unload=session_unload;selected.brain_manual_update=session_brain_update;selected.camera_clock_ok=session_camera_clock_ok;selected.camera_pixel_width=pixel_width;selected.camera_pixel_height=pixel_height;
-    if(scenario.rfind("capture_resume_",0)==0)selected.source_geometry=queue_source_geometry;
+    const bool selection_only=scenario.rfind("selection_only_",0)==0;
+    if(scenario.rfind("capture_resume_",0)==0||selection_only)selected.source_geometry=queue_source_geometry;
+    if(selection_only){selected.is_type=selection_type;selected.automatic_playback.director_resume=selection_resume;session_core::require_native_scene_pipeline();}
     session_core::install_game_api(selected,Layout{});
     session_core::install_queue_api(replay_api(),graphics_snapshot,graphics_apply,idoly_mp4_game::android_original_sha256,graphics_revision);
     assert(IDMP4SessionConfigure(argv[1],std::strtoull(argv[2],nullptr,10),argv[3],argv[4],1)==0);
     assert(IDMP4QueueConfigure(argv[9],argv[4])==0);
     // Paused/pending jobs are visible before any new original scene begins.
     char status[16384]{};assert(IDMP4QueueStatus(status,sizeof(status))&&std::strstr(status,"\"jobs\":[]"));
+    if(selection_only){
+        assert(session_core::installed&&session_core::native_scene_required&&!session_core::native_scene_installed);
+        assert(IDMP4SessionSelectionReady()==0&&IDMP4SessionReady()==0);
+        const bool observed=scenario!="selection_only_unobserved";
+        const bool geometry=scenario!="selection_only_geometry_missing";
+        if(observed)select_param(make_selection("A"));
+        if(scenario=="selection_only_snapshot_failed")selected_duration=0;
+        queue_source_valid=geometry;
+        const double source_time=time_value;const int source_mode=mode;
+        const float source_bgm=bgm_volume,source_voice=voice_volume,source_shader=shader;
+        const int graph_before=graph_steps,actor_before=actor_steps,eval_before=evals,capture_before=raw_captures;
+        // Execute the real idle observer. Offline admission is unavailable,
+        // but a real initialized descriptor and original RT can be captured.
+        for(int i=0;i<3;++i)pump();
+        assert(session_core::unity_ticks==3&&IDMP4SessionReady()==0);
+        assert((IDMP4SessionSelectionReady()==1)==observed);
+        char native[8192]{};assert(IDMP4SessionStatus(native,sizeof native));
+        assert(!session_core::busy_stage()&&!session_core::control_busy&&!session_core::start_pending);
+        assert(graph_steps==graph_before&&actor_steps==actor_before&&evals==eval_before&&raw_captures==capture_before);
+        assert(time_value==source_time&&mode==source_mode&&bgm_volume==source_bgm&&voice_volume==source_voice&&shader==source_shader);
+        assert(selection_resumes==0&&!opened&&!closed&&!loads&&!data_calls&&!geometry_apply_calls);
+        const unsigned queries_before=selection_queries;
+        const uint64_t ticks_before=session_core::unity_ticks;
+        // The server thread reads only cached recognition/options and commits
+        // the real journal. A host Add must not resume or call back into Unity.
+        host_selection_only=true;
+        std::thread server([&]{
+            assert(IDMP4QueueStatus(status,sizeof status));
+            assert((std::strstr(status,"\"can_add\":true")!=nullptr)==(observed&&geometry));
+            assert((IDMP4QueueEnqueue(60,1,2,32000000,192000)==0)==(observed&&geometry));
+            assert(IDMP4QueueRun()!=0&&IDMP4QueueResume()!=0);
+            assert(IDMP4SessionStart(60,1,2,32000000,192000)!=0);
+            assert(IDMP4SessionStartV2(60,1,2,32000000,192000,2880,2160)!=0);
+            assert(IDMP4SessionStatus(native,sizeof native)&&IDMP4QueueStatus(status,sizeof status));
+            assert((IDMP4SessionSelectionReady()==1)==observed&&IDMP4SessionReady()==0);
+        });server.join();host_selection_only=false;
+        assert(selection_queries==queries_before&&session_core::unity_ticks==ticks_before&&selection_resumes==0);
+        assert(!session_core::control_busy&&!session_core::start_pending&&!session_core::queue_running);
+        assert(session_core::queue_request.kind==session_core::QueueCommandKind::none&&!opened&&!closed&&!loads&&!data_calls);
+        assert(session_core::queue_store().count()==size_t(observed&&geometry));
+        if(observed&&geometry){
+            const auto* saved=session_core::queue_store().at(0);
+            assert(!std::strcmp(saved->descriptor.timeline_asset,"timeline_A")&&!std::strcmp(saved->descriptor.actors[0].assets[0],"body_A"));
+            assert(saved->options.width==16&&saved->options.height==16&&saved->options.fps_num==60&&saved->options.codec==2&&saved->options.video_bitrate==32000000);
+        }
+        std::printf("{\"queue\":%s,\"session\":%s,\"observed_ticks\":%llu,\"resume_calls\":%u,\"host_unity_calls\":%u}\n",status,native,static_cast<unsigned long long>(ticks_before),selection_resumes,selection_queries-queries_before);
+        session_core::queue_replay().reset();session_core::selection.reset();session_core::game.reset_observations();assert(handles.empty());
+        session_core::queue_store().close();if(session_core::queue_exports>=0)close(session_core::queue_exports);session_core::close_configuration(session_core::configured);return 0;
+    }
     if(scenario.rfind("capture_resume_",0)==0){
         void* a=make_selection("A");select_param(a);
         if(scenario=="capture_resume_timeout")queue_source_valid=false;
@@ -386,3 +440,37 @@ def test_host_pause_wins_over_pending_run_before_unity_tick(run_queue):
     assert result["queue"]["running"] is False
     assert result["queue"]["command_pending"] is False
     assert [job["state"] for job in result["queue"]["jobs"]] == ["pending", "pending"]
+
+
+@pytest.mark.parametrize("scenario,readiness_error", [
+    ("native_unbound", "offline_pipeline_not_verified"),
+    ("snapshot_failed", "unsupported_selected_duration"),
+])
+def test_readonly_selection_and_host_add_survive_unbound_offline_pipeline(run_queue, scenario, readiness_error):
+    result = run_queue("selection_only_" + scenario)
+    assert result["observed_ticks"] == 3
+    assert result["resume_calls"] == result["host_unity_calls"] == 0
+    assert result["session"]["selected_mv"] is True
+    assert result["session"]["selection_error"] == "none"
+    assert result["session"]["ready"] is False
+    assert result["session"]["readiness_error"] == readiness_error
+    assert result["session"]["source_width"] == result["session"]["source_height"] == 16
+    assert result["queue"]["can_add"] is True
+    assert result["queue"]["can_run"] is False
+    assert result["queue"]["command_pending"] is False
+    assert [(job["timeline"], job["state"]) for job in result["queue"]["jobs"]] == [("timeline_A", "pending")]
+
+
+@pytest.mark.parametrize("scenario,selected,error", [
+    ("geometry_missing", True, "selected_capture_geometry_not_ready"),
+    ("unobserved", False, "selected_mv_snapshot_missing"),
+])
+def test_readonly_selection_does_not_fabricate_add_geometry_or_initialization(run_queue, scenario, selected, error):
+    result = run_queue("selection_only_" + scenario)
+    assert result["session"]["selected_mv"] is selected
+    assert result["session"]["ready"] is False
+    assert result["queue"]["can_add"] is False
+    assert result["queue"]["add_error"] == error
+    assert result["queue"]["can_run"] is False
+    assert result["queue"]["jobs"] == []
+    assert result["resume_calls"] == result["host_unity_calls"] == 0

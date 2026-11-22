@@ -248,11 +248,29 @@ Config configuration(bool *has = nullptr) {
     return result;
 }
 void set_state(const char *value) {
+    if(!std::strcmp(value,"unsupported")||!std::strcmp(value,"init_failed"))
+        idoly_mp4_runtime::diagnostic_event("presentation_bootstrap",value,0,0,false);
     pthread_mutex_lock(&status_mutex); state.state = value; pthread_mutex_unlock(&status_mutex);
 #ifndef IDOLY_DARWIN_BRIDGE
     if (!std::strcmp(value, "unsupported") || !std::strcmp(value, "init_failed")) render_probe_init_failed();
 #endif
 }
+std::atomic<bool>mp4_export_observer_install_complete{false};
+std::atomic<bool>mp4_bootstrap_first_failed{false};
+char mp4_bootstrap_first_stage[96]{},mp4_bootstrap_first_code[96]{};
+void mp4_bootstrap_note(const char*stage,const char*code,bool failed=false){
+ if(failed&&!mp4_bootstrap_first_failed.load(std::memory_order_acquire)){
+  snprintf(mp4_bootstrap_first_stage,sizeof(mp4_bootstrap_first_stage),"%s",stage?stage:"bootstrap");
+  snprintf(mp4_bootstrap_first_code,sizeof(mp4_bootstrap_first_code),"%s",code?code:"unknown");
+  mp4_bootstrap_first_failed.store(true,std::memory_order_release);
+ }
+ idoly_mp4_runtime::diagnostic_event(stage,code,0,0,failed);
+}
+void mp4_bootstrap_publish_first_failure(){
+ if(mp4_bootstrap_first_failed.load(std::memory_order_acquire))
+  idoly_mp4_runtime::diagnostic_event(mp4_bootstrap_first_stage,mp4_bootstrap_first_code,0,0,true);
+}
+
 bool game_call(bool establish = false) {
 #ifdef IDOLY_DARWIN_BRIDGE
     const uintptr_t current = reinterpret_cast<uintptr_t>(pthread_self());
@@ -1821,6 +1839,10 @@ inline bool shadow_trace(Text value, Install *out) {
     size_t end = at;
     while (end < value.n && value.p[end] != ';')
       ++end;
+    // Official allocator diagnostics have a variable number of gap fields.
+    // They carry no hook/code evidence and must not consume the fixed schema
+    // capacity used for mandatory B/T/N/E/R records below.
+    if(end-at>=2&&value.p[at]=='S'&&value.p[at+1]=='|'){at=end+1;continue;}
     Text part[5]{};
     size_t count = 0;
     if (!split({value.p + at, end - at}, '|', part, 5, &count) || !count)
@@ -32965,8 +32987,15 @@ bool mp4_prepare_runtime() {
         pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);
         return false;
     };
-    if(!mp4_source_verified)return unavailable(mp4_binding_error);
     if(!game_call())return false;
+    if(!mp4_source_verified){
+        // Metadata descriptors can finish their original initialization after
+        // the loader worker. Retry only the real source verifier on Unity;
+        // no source flag or scene identity is synthesized by this retry.
+        static uint64_t previous=0;const uint64_t now=idoly_mp4_runtime::milliseconds();
+        if(!previous||now<previous||now-previous>=1000){previous=now;mp4_verify_original_calls();}
+        if(!mp4_source_verified)return unavailable(mp4_binding_error);
+    }
     mp4_capture_frontends_install();
     mp4_single_class=mp4_resolved_type_class(mp4_runtime_profile.single_type,"System","Single");
     if(!mp4_single_class)return unavailable(mp4_binding_error);
@@ -33115,6 +33144,8 @@ void mp4_observe_photography_presenter() {
     if(void* controller=mp4_selected_controller(presenter))idoly_mp4_runtime::observe_camera_controller(controller);
 }
 void mp4_unity_tick() {
+    static bool observed=false;
+    if(!observed){observed=true;idoly_mp4_runtime::diagnostic_event("unity_observation","original_callback_entered");}
     if(mp4_prepare_runtime()){
         if(mp4_prepare_actor_types())(void)mp4_install_animation_root();
 #ifndef IDOLY_DARWIN_BRIDGE
@@ -54488,7 +54519,19 @@ void*mp4_capture_native_android_source_context(){
  return mp4_android_hook_source_state.active.load(std::memory_order_acquire)?&mp4_android_hook_source_state:nullptr;
 }
 
-struct Hook { const pin::Entry *entry; void *replacement; void **original; void *stub = nullptr; };
+struct Hook { const pin::Entry *entry; void *replacement; void **original; void *stub = nullptr; const char*role=nullptr; };
+// Offline source observers may remain uncertified while ordinary graphics and
+// readonly MV selection still use their independently verified original API.
+void mp4_bootstrap_hook_failure(const char*stage,const char*role){
+ char code[96]{};snprintf(code,sizeof(code),"%s_errno_%d",role?role:"unknown_hook",shadowhook_get_errno());
+ mp4_bootstrap_note(stage,code,true);
+}
+bool mp4_optional_offline_hook(const pin::Entry&entry,const char*role){
+ return role&&!std::strncmp(role,"mp4_",4)
+  &&entry.rva!=pin::mp4_player_initialize.rva&&entry.rva!=pin::mp4_photography_initialize.rva
+  &&entry.rva!=pin::mp4_photography_player_initialize.rva&&entry.rva!=pin::mp4_photography_end.rva
+  &&entry.rva!=pin::mp4_presenter_update.rva&&entry.rva!=pin::mp4_presenter_end.rva;
+}
 void *install(void *) {
     Image image;
     for (unsigned attempt = 0; attempt < 900; ++attempt) {
@@ -54496,35 +54539,40 @@ void *install(void *) {
         if (image.base && image.unity) break;
         pause_ms(200);
     }
-    if (!image.base || !image.unity) { set_state("unsupported"); return nullptr; }
+    if (!image.base || !image.unity) { mp4_bootstrap_note("image_lookup","game_or_engine_image_missing",true);set_state("unsupported"); return nullptr; }
     held_library = dlopen(image.name, RTLD_NOW | RTLD_NOLOAD);
     Image held;
     if (held_library) dl_iterate_phdr(find_image, &held);
     if (!held_library || !held.base || std::strcmp(held.name, image.name) || !matches(held)) {
         if (held_library) { dlclose(held_library); held_library = nullptr; }
-        set_state("unsupported"); return nullptr;
+        mp4_bootstrap_note("primary_image","loader_hold_or_source_mismatch",true);set_state("unsupported"); return nullptr;
     }
     image = held;
-    if(!mp4_prepare_android_native_clock()){set_state("unsupported");return nullptr;}
+    const bool native_source=mp4_prepare_android_native_clock();
+    mp4_bootstrap_note("native_clock_source",native_source?"verified":mp4_native_clock_error.load(std::memory_order_acquire),!native_source);
     image_base = image.base; load_calls();
-    if(!mp4_prepare_fixed_root()||!mp4_prepare_animation_root()){set_state("unsupported");return nullptr;}
-    if (shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false)) { set_state("init_failed"); return nullptr; }
+    mp4_bootstrap_note("game_api_source",mp4_source_verified?"verified":mp4_binding_error,!mp4_source_verified);
+    const bool fixed_source=native_source&&mp4_prepare_fixed_root();
+    const bool animation_source=native_source&&mp4_prepare_animation_root();
+    mp4_bootstrap_note("world_source",fixed_source&&animation_source?"verified":"offline_source_unavailable",!fixed_source||!animation_source);
+    if (shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false)) { mp4_bootstrap_hook_failure("shadowhook_initialize","unique_mode");set_state("init_failed"); return nullptr; }
     shadowhook_set_recordable(false);
-    if(!mp4_android_managed_source_prepare(image)){
-        mp4_source_verified=false;snprintf(mp4_binding_error,sizeof(mp4_binding_error),"%s","managed_hook_source_cohort_unavailable");
-        set_state("init_failed");return nullptr;
-    }
+    const bool source_backend=native_source&&mp4_android_managed_source_prepare(image);
+    mp4_bootstrap_note("managed_source_backend",source_backend?"configured":"source_cohort_unavailable",!source_backend);
+    bool offline_complete=source_backend&&fixed_source&&animation_source;
     // Independent engine observers use the same loader-held source services.
     // Their typed originals are published by the real backend before entry;
     // no private Host/Frame/Audio authority is advertised during installation.
-    if(!mp4_child_native_install_android()||!mp4_capture_native_install_android()||!mp4_audio_native_install_android()){
-        mp4_source_verified=false;
-        snprintf(mp4_binding_error,sizeof(mp4_binding_error),"%s","native_observer_source_publication_failed");
-        set_state("init_failed");return nullptr;
-    }
+    const bool director_observers=source_backend&&mp4_child_native_install_android();
+    mp4_bootstrap_note("director_native_observers",director_observers?"published":"source_publication_unavailable",!director_observers);
+    const bool capture_observer=source_backend&&mp4_capture_native_install_android();
+    mp4_bootstrap_note("capture_native_observer",capture_observer?"published":"source_publication_unavailable",!capture_observer);
+    const bool audio_observers=source_backend&&mp4_audio_native_install_android();
+    mp4_bootstrap_note("audio_native_observers",audio_observers?"published":"source_publication_unavailable",!audio_observers);
+    offline_complete=offline_complete&&director_observers&&capture_observer&&audio_observers;
     mp4_managed_hook_receipts_ready.store(false,std::memory_order_release);
     mp4_shader_bootstrap_receipts_open.store(true,std::memory_order_release);mp4_managed_hook_count.store(0,std::memory_order_release);
-#define HOOK(entry, replacement, original) {&pin::entry, reinterpret_cast<void *>(replacement), reinterpret_cast<void **>(&original), nullptr}
+#define HOOK(entry, replacement, original) {&pin::entry, reinterpret_cast<void *>(replacement), reinterpret_cast<void **>(&original), nullptr,#entry}
     Hook hooks[] = {
         HOOK(mp4_scene_shader_loaded,mp4_scene_shader_loaded_hook,mp4_scene_shader_loaded_original),
         HOOK(mp4_scene_shader_unloaded,mp4_scene_shader_unloaded_hook,mp4_scene_shader_unloaded_original),
@@ -54659,8 +54707,9 @@ void *install(void *) {
     static_assert(sizeof hooks/sizeof hooks[0]<=mp4_managed_hook_capacity,"managed hook receipt capacity");
 #undef HOOK
     for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; ++i) {
-        bool finite_source=false;
-        for(size_t index=0;index<mp4_bootstrap::managed_source_count;++index)if(mp4_bootstrap::android_managed_source_pin(index)->rva==hooks[i].entry->rva){
+        const bool optional=mp4_optional_offline_hook(*hooks[i].entry,hooks[i].role);
+        bool finite_source=false,certified=true;
+        for(size_t index=0;source_backend&&index<mp4_bootstrap::managed_source_count;++index)if(mp4_bootstrap::android_managed_source_pin(index)->rva==hooks[i].entry->rva){
             finite_source=true;
             const bool installed=mp4_managed_source_backend.install(index,reinterpret_cast<uintptr_t>(hooks[i].replacement),hooks[i].original);
             hooks[i].stub=mp4_managed_source_backend.installed_stub(index);
@@ -54668,62 +54717,65 @@ void *install(void *) {
                 // A real backend may already have installed a forwarding hook.
                 // Retain its original gateway and withdraw all private grants;
                 // a missing copied-source receipt cannot be repaired by a stub.
-                mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
-                mp4_source_verified=false;
-                snprintf(mp4_binding_error,sizeof(mp4_binding_error),"managed_hook_source_trace_unverified_%llx",
-                    static_cast<unsigned long long>(hooks[i].entry->rva));
-                set_state("init_failed");return nullptr;
+                certified=false;offline_complete=false;
+                mp4_bootstrap_hook_failure("managed_source_certificate",hooks[i].role);
+                // A failed source receipt cannot be used for private routing.
+                // Keep a real already-installed ordinary gateway, or install
+                // ordinary forwarding below if no branch was published.
+                if(!hooks[i].stub&&!*hooks[i].original)finite_source=false;
             }
             break;
         }
         if(!finite_source)hooks[i].stub=shadowhook_hook_func_addr(reinterpret_cast<void *>(image_base+hooks[i].entry->rva),hooks[i].replacement,hooks[i].original);
         if (!hooks[i].stub) {
             mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
-            for (size_t j = i; j > 0; --j) shadowhook_unhook(hooks[j - 1].stub);
-            set_state("init_failed"); return nullptr;
+            if(!optional)for (size_t j = i; j > 0; --j)if(hooks[j-1].stub)shadowhook_unhook(hooks[j - 1].stub);
+            if(optional){offline_complete=false;mp4_bootstrap_hook_failure("optional_hook_failed",hooks[i].role);continue;}
+            mp4_bootstrap_hook_failure("primary_hook_failed",hooks[i].role);set_state("init_failed"); return nullptr;
         }
         if(!mp4_record_managed_hook(hooks[i].entry,hooks[i].stub,hooks[i].original,hooks[i].replacement)){
             mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
-            for(size_t j=i+1;j>0;--j)shadowhook_unhook(hooks[j-1].stub);
-            set_state("init_failed");return nullptr;
+            if(optional){offline_complete=false;mp4_bootstrap_hook_failure("optional_hook_receipt_unavailable",hooks[i].role);continue;}
+            for(size_t j=i+1;j>0;--j)if(hooks[j-1].stub)shadowhook_unhook(hooks[j-1].stub);
+            mp4_bootstrap_hook_failure("primary_hook_receipt_failed",hooks[i].role);set_state("init_failed");return nullptr;
         }
-        if(hooks[i].entry==&pin::mp4_scene_shader_load){
+        if(hooks[i].entry==&pin::mp4_scene_shader_load&&certified){
             if(!mp4_scene_shader_frontends_current()||!mp4_scene_shader_origin_install()){
-                mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
-                mp4_source_verified=false;set_state("init_failed");return nullptr;
+                offline_complete=false;mp4_bootstrap_note("scene_origin_observers","source_publication_unavailable",true);
             }
         }
         if (hooks[i].entry==&pin::font_awake) pause_ms(500); // Font delay follows the early source observers.
     }
     if(!mp4_capture_queue_frontends_bind(pin::mp4_capture_add_target,pin::mp4_capture_request_target)){
-        mp4_source_verified=false;set_state("init_failed");return nullptr;
+        offline_complete=false;mp4_bootstrap_note("capture_queue_observers","source_publication_unavailable",true);
     }
     if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready() || !wardrobe_lifecycle.ready()
             || !wardrobe_exit_tracker.ready() || !sound_tracker.ready()) {
         mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
         for (size_t i=sizeof hooks/sizeof hooks[0];i>0;--i) shadowhook_unhook(hooks[i-1].stub);
-        set_state("init_failed");return nullptr;
+        mp4_bootstrap_note("primary_helpers","graphics_playback_helpers_unready",true);set_state("init_failed");return nullptr;
     }
-    mp4_native_time_stub=shadowhook_hook_func_addr(reinterpret_cast<void*>(mp4_native_base+mp4_native_profile.update.rva),
-        reinterpret_cast<void*>(mp4_native_time_hook),reinterpret_cast<void**>(&mp4_native_time_original));
+    mp4_native_time_stub=native_source?shadowhook_hook_func_addr(reinterpret_cast<void*>(mp4_native_base+mp4_native_profile.update.rva),
+        reinterpret_cast<void*>(mp4_native_time_hook),reinterpret_cast<void**>(&mp4_native_time_original)):nullptr;
     if(!mp4_native_time_stub||!mp4_install_native_clock_api()){
         mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
-        if(mp4_native_time_stub){shadowhook_unhook(mp4_native_time_stub);mp4_native_time_stub=nullptr;}
-        for(size_t i=sizeof hooks/sizeof hooks[0];i>0;--i)shadowhook_unhook(hooks[i-1].stub);
+        // An installed ordinary forwarding branch keeps its genuine original
+        // gateway even when the separate owned-clock API could not publish.
         if(!mp4_native_time_original)mp4_native_clock_error.store("native_clock_native_hook_failed",std::memory_order_release);
-        set_state("init_failed");return nullptr;
+        offline_complete=false;mp4_bootstrap_hook_failure("native_clock_install","native_time_update");
     }
-    mp4_fixed_loop_condition_stub=shadowhook_hook_func_addr(
+    mp4_fixed_loop_condition_stub=fixed_source?shadowhook_hook_func_addr(
         reinterpret_cast<void*>(mp4_native_base+mp4_world_profile.fixed_condition.rva),
-        reinterpret_cast<void*>(mp4_fixed_loop_condition_hook),reinterpret_cast<void**>(&mp4_fixed_loop_condition_original));
+        reinterpret_cast<void*>(mp4_fixed_loop_condition_hook),reinterpret_cast<void**>(&mp4_fixed_loop_condition_original)):nullptr;
     if(!mp4_fixed_loop_condition_stub||!mp4_install_fixed_root()){
         mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
-        if(mp4_fixed_loop_condition_stub){shadowhook_unhook(mp4_fixed_loop_condition_stub);mp4_fixed_loop_condition_stub=nullptr;}
-        shadowhook_unhook(mp4_native_time_stub);mp4_native_time_stub=nullptr;
-        for(size_t i=sizeof hooks/sizeof hooks[0];i>0;--i)shadowhook_unhook(hooks[i-1].stub);
-        set_state("init_failed");return nullptr;
+        // Unpublished FixedGate forwards that same original once. Retain the
+        // installed gateway rather than discarding an ordinary callback edge.
+        offline_complete=false;mp4_bootstrap_hook_failure("fixed_root_install","fixed_root_condition");
     }
-    std::memcpy(mp4_fixed_patched_prefix,reinterpret_cast<void*>(mp4_native_base+mp4_world_profile.fixed_condition.rva),16);
+    if(mp4_fixed_loop_condition_stub)std::memcpy(mp4_fixed_patched_prefix,reinterpret_cast<void*>(mp4_native_base+mp4_world_profile.fixed_condition.rva),16);
+    mp4_export_observer_install_complete.store(offline_complete,std::memory_order_release);
+    mp4_bootstrap_note("primary_presentation","published");
     mp4_managed_hook_receipts_ready.store(true,std::memory_order_release);
     mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
     mp4_control_factory_hook_ready=mp4_control_create_original!=nullptr;
@@ -54732,6 +54784,10 @@ void *install(void *) {
     state.fps = state.quality = state.resolution = state.aa = state.shadow = state.expanded = true;
     pthread_mutex_unlock(&status_mutex);
     ready.store(true, std::memory_order_release);
+    idoly_mp4_runtime::diagnostic_module(13,offline_complete,"offline_observer_certificates_unavailable");
+    idoly_mp4_runtime::diagnostic_module(14,director_observers,"native_director_gateway_unverified");
+    idoly_mp4_runtime::diagnostic_module(18,idoly_mp4_runtime::native_clock_available(),"native_clock_unbound");
+    mp4_bootstrap_publish_first_failure();
     pthread_t actor_worker;
     if(!pthread_create(&actor_worker,nullptr,mp4_install_actor_burst,nullptr))pthread_detach(actor_worker);
     else mp4_actor_route_error.store("actor_burst_worker_failed",std::memory_order_release);
@@ -54748,7 +54804,7 @@ extern "C" JNIEXPORT void JNICALL Java_game_qualiarts_idolypride_presentation_Na
     if (started.exchange(true)) return;
     pthread_t worker;
     if (!pthread_create(&worker, nullptr, install, nullptr)) pthread_detach(worker);
-    else set_state("init_failed");
+    else{mp4_bootstrap_note("installer_thread","thread_create_failed",true);set_state("init_failed");}
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_configure(
         JNIEnv *, jclass, jint schema, jlong revision, jboolean custom, jint quality, jint fps, jfloat scale,
@@ -55165,17 +55221,14 @@ void mp4_publish_pipeline_diagnostics(){
  diagnostic_module(11,mp4_srp_source_mutations.context&&mp4_srp_source_mutations.current&&mp4_srp_source_mutations.fenced
   &&mp4_srp_source_mutations.root_add&&mp4_srp_source_mutations.source_retired,"srp_mutations_unbound");
  diagnostic_module(12,mp4_audio_native_hook_ready&&mp4_audio_process_hook_ready,"audio_frontends_unbound");
-#ifdef IDOLY_DARWIN_BRIDGE
- diagnostic_module(13,ready.load(std::memory_order_acquire),"managed_observers_unpublished");
-#else
- diagnostic_module(13,mp4_managed_hook_receipts_ready.load(std::memory_order_acquire),"managed_observers_unpublished");
-#endif
+ diagnostic_module(13,mp4_export_observer_install_complete.load(std::memory_order_acquire),"offline_observer_certificates_unavailable");
  diagnostic_module(14,mp4_child_native_hooks_current(),"native_director_gateway_unverified");
  diagnostic_module(15,mp4_capture_queue_frontends_current(),"capture_queue_frontends_unbound");
  diagnostic_module(16,mp4_initial_source_gpu_fence.completed,"initial_source_gpu_fence_not_completed");
  diagnostic_module(17,mp4_render_hold_frontends(),"camera_render_interception_unverified");
  diagnostic_module(18,idoly_mp4_runtime::native_clock_available(),"native_clock_unbound");
  diagnostic_module(19,mp4_api_installed,"game_api_unbound");
+ mp4_bootstrap_publish_first_failure();
 }
 // END_MP4_EXPORT_PIPELINE_DIAGNOSTICS
 

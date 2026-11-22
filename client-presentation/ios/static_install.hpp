@@ -121,11 +121,16 @@ void *install(void *) {
         header=mapped_unity_header();
         if (!header) pause_ms(200);
     }
-    if (!header) { set_state("unsupported"); return nullptr; }
+    if (!header) { mp4_bootstrap_note("primary_image","unity_image_missing",true);set_state("unsupported"); return nullptr; }
     image_base=reinterpret_cast<uintptr_t>(header);
-    if (!verify_static_image(header)) { set_state("unsupported"); return nullptr; }
-    if(!mp4_prepare_native_clock(image_base)||!mp4_prepare_fixed_root()||!mp4_prepare_animation_root()){set_state("unsupported");return nullptr;}
+    if (!verify_static_image(header)) { mp4_bootstrap_note("primary_image","static_image_or_gateway_mismatch",true);set_state("unsupported"); return nullptr; }
+    const bool native_source=mp4_prepare_native_clock(image_base);
+    const bool fixed_source=native_source&&mp4_prepare_fixed_root();
+    const bool animation_source=native_source&&mp4_prepare_animation_root();
+    bool offline_complete=native_source&&fixed_source&&animation_source;
+    mp4_bootstrap_note("native_clock_source",native_source?"verified":mp4_native_clock_error.load(std::memory_order_acquire),!native_source);
     load_calls();
+    mp4_bootstrap_note("game_api_source",mp4_source_verified?"verified":mp4_binding_error,!mp4_source_verified);
     shared_cache_load_calls();
 #define HOOK(entry, replacement, original) {&pin::entry,reinterpret_cast<void *>(replacement),reinterpret_cast<void **>(&original)}
     Hook hooks[]={
@@ -266,7 +271,11 @@ void *install(void *) {
     }
     mp4_control_factory_hook_ready=mp4_control_create_original!=nullptr;
     if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready() || !sound_tracker.ready()) { set_state("init_failed"); return nullptr; }
-    if(!mp4_install_native_clock_api()||!mp4_install_fixed_root()){set_state("init_failed");return nullptr;}
+    const bool clock_installed=native_source&&mp4_install_native_clock_api();
+    const bool fixed_installed=fixed_source&&mp4_install_fixed_root();
+    offline_complete=offline_complete&&clock_installed&&fixed_installed;
+    if(!clock_installed)mp4_bootstrap_note("native_clock_install","source_publication_unavailable",true);
+    if(!fixed_installed)mp4_bootstrap_note("fixed_root_install","source_publication_unavailable",true);
     // All originals are valid before the first replacement is visible. Any
     // concurrent invocation during publication takes the original path.
     for (auto &hook:hooks) {
@@ -274,23 +283,32 @@ void *install(void *) {
             reinterpret_cast<uintptr_t>(hook.replacement),__ATOMIC_RELEASE);
         if(hook.entry==&pin::mp4_scene_shader_load
             &&(!mp4_scene_shader_frontends_current()||!mp4_scene_shader_origin_install())){
-            set_state("init_failed");return nullptr;
+            offline_complete=false;mp4_bootstrap_note("scene_origin_observers","source_publication_unavailable",true);
         }
     }
     const pin::Entry*director_native_entries[]={&pin::mp4_director_enqueue,&pin::mp4_director_append_a,
         &pin::mp4_director_append_b,&pin::mp4_director_collect,&pin::mp4_director_deferred_a,
         &pin::mp4_director_deferred_b,&pin::mp4_director_graph_create};
-    if(!mp4_child_native_install_static(director_native_entries,7)
-        ||!mp4_capture_native_install_static(pin::mp4_capture_native_publication)
-        ||!mp4_audio_native_install_static(pin::mp4_audio_canonical_target,pin::mp4_audio_source_process_target)
-        ||!mp4_capture_queue_frontends_bind(pin::mp4_capture_add_target,pin::mp4_capture_request_target)){
-        set_state("init_failed");return nullptr;
-    }
+    const bool director_observers=mp4_child_native_install_static(director_native_entries,7);
+    const bool capture_observer=mp4_capture_native_install_static(pin::mp4_capture_native_publication);
+    const bool audio_observers=mp4_audio_native_install_static(pin::mp4_audio_canonical_target,pin::mp4_audio_source_process_target);
+    const bool queue_observers=mp4_capture_queue_frontends_bind(pin::mp4_capture_add_target,pin::mp4_capture_request_target);
+    if(!director_observers)mp4_bootstrap_note("director_native_observers","source_publication_unavailable",true);
+    if(!capture_observer)mp4_bootstrap_note("capture_native_observer","source_publication_unavailable",true);
+    if(!audio_observers)mp4_bootstrap_note("audio_native_observers","source_publication_unavailable",true);
+    if(!queue_observers)mp4_bootstrap_note("capture_queue_observers","source_publication_unavailable",true);
+    offline_complete=offline_complete&&director_observers&&capture_observer&&audio_observers&&queue_observers;
+    mp4_export_observer_install_complete.store(offline_complete,std::memory_order_release);
     mp4_actor_managed_installed.store(true,std::memory_order_release);
     mp4_actor_burst_installed.store(true,std::memory_order_release);
     shared_hooks_ready.store(true,std::memory_order_release);
     pthread_mutex_lock(&status_mutex);
     state.fps=state.quality=state.resolution=state.aa=state.shadow=state.expanded=true;
     pthread_mutex_unlock(&status_mutex);
-    ready.store(true,std::memory_order_release); return nullptr;
+    ready.store(true,std::memory_order_release);
+    mp4_bootstrap_note("primary_presentation","published");
+    idoly_mp4_runtime::diagnostic_module(13,offline_complete,"offline_observer_certificates_unavailable");
+    idoly_mp4_runtime::diagnostic_module(14,director_observers,"native_director_gateway_unverified");
+    idoly_mp4_runtime::diagnostic_module(18,clock_installed,"native_clock_unbound");
+    mp4_bootstrap_publish_first_failure();return nullptr;
 }

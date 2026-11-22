@@ -38,6 +38,8 @@ IDMP4_SESSION_API size_t IDMP4SessionStatus(char *buffer, size_t capacity);
 IDMP4_SESSION_API size_t IDMP4SessionDiagnostics(char *buffer, size_t capacity);
 IDMP4_SESSION_API void IDMP4SessionCancel(void);
 IDMP4_SESSION_API int IDMP4SessionReady(void);
+// Cached readonly MV recognition; does not authorize export or queue Run.
+IDMP4_SESSION_API int IDMP4SessionSelectionReady(void);
 
 // Suspend is acknowledged at the next boundary between Unity actions. Pending
 // audio, capture/readback, encoder backpressure and exact frame PTS stay owned.
