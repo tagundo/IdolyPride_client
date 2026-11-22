@@ -351,6 +351,7 @@ int normal_mode=0,descriptor_calls=0;
 bool mp4_particle_renderer_normal_program_bindings(){return normal_mode!=1;}
 bool mp4_particle_renderer_descriptor_bindings(){return normal_mode!=2;}
 bool mp4_particle_renderer_descriptor_restore(Mp4ParticleRendererCacheImage&i,uint64_t plan,uint64_t r){assert(i.captured&&plan&&r&&public_restored&&mp4_particle_renderer_reader_current());++descriptor_calls;if(normal_mode==3)return false;((uint8_t*)state)[0x22]=0x6a;((uint8_t*)modules)[0x480]=0x6b;return true;}
+bool mp4_stage_activation_physical_family(void*,uint32_t*,uint64_t*){return false;}
 bool (*mp4_activation_additional_family)(void*,uint32_t*,uint64_t*)=nullptr;
 #include "particle-native-coordinator-host.inc"
 void*manager=nullptr,*manager_global=nullptr,*manager_rows=nullptr;
@@ -368,6 +369,8 @@ bool early_good=true;struct{bool current(){return early_good;}}mp4_early_source_
 bool mp4_scene_bootstrap_key(const Key&k){return main_thread&&source&&held&&!mp4_raw_original_operation.depth&&!mp4_rebuild_ledger.active&&k.epoch==7&&k.job==11&&k.source==(uintptr_t)particle&&k.root_asset==(uintptr_t)renderer_type;}
 struct Mp4ControlPassiveImage{};bool mp4_source_control_director_plan(const Mp4TimelineContext&,const Mp4ControlPassiveImage&,const Mp4ControlSourceLeaf&){return false;}
 #include "particle-source-bootstrap-adapter.inc"
+// Activation lifecycle is a separate provider; this PS-only service model refuses it.
+bool mp4_source_control_activation_plan(const Mp4TimelineContext&,const Mp4ControlPassiveImage&,const Mp4ControlSourceLeaf&){return false;}
 #include "source-control-ps-plan.inc"
 #include "particle-cache-gate.inc"
 Key key{};

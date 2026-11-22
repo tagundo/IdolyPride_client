@@ -6,7 +6,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 F = ROOT / 'tests/fixtures/mp4_timeline_animation'
-S = (ROOT / 'client-presentation/native/bridge.cpp').read_text()
+S = ((ROOT / 'client-presentation/native/bridge.cpp').read_text()
+     + (ROOT / 'client-presentation/native/mp4_actor_state.hpp').read_text())
 H = ''.join('#include <'+name+'>\n' for name in ['cstdint','cstddef','cstring','cstdlib','atomic','new','cassert','map','string'])
 
 def block(name):
