@@ -176,6 +176,64 @@ def test_manifest_cannot_repackage_production_identity(tmp_path):
     assert (root / "AndroidManifest.xml").read_bytes() == before
 
 
+def compiled_unified_manifest(*, probe=False):
+    xml='''N: android=http://schemas.android.com/apk/res/android (line=2)
+  E: manifest (line=2)
+    A: package="game.qualiarts.idolypride.local.diagnostics" (Raw: "game.qualiarts.idolypride.local.diagnostics")
+    E: uses-sdk (line=3)
+      A: android:targetSdkVersion(0x01010270)=36
+    E: application (line=4)
+      A: android:appComponentFactory(0x0101057a)="game.qualiarts.idolypride.localserver.UnifiedComponentFactory"
+      A: android:debuggable(0x0101000f)=false
+      E: activity (line=5)
+        A: android:name(0x01010003)="game.qualiarts.idolypride.localserver.MainActivity"
+        A: android:theme(0x01010000)=@0x01030238
+        E: intent-filter (line=6)
+          E: action (line=7)
+            A: android:name(0x01010003)="android.intent.action.MAIN"
+      E: activity (line=8)
+        A: android:name(0x01010003)="game.qualiarts.idolypride.localserver.UnifiedGameActivity"
+      E: activity-alias (line=9)
+        A: android:name(0x01010003)="com.google.firebase.MessagingUnityPlayerActivity"
+        A: android:targetActivity(0x01010202)="game.qualiarts.idolypride.localserver.MainActivity"
+'''
+    if probe:
+        xml=xml.replace('debuggable(0x0101000f)=false','debuggable(0x0101000f)=true')
+        xml+='''      E: provider (line=10)
+        A: android:name(0x01010003)="game.qualiarts.idolypride.qa.ui.QaUiProvider"
+        A: android:exported(0x01010010)=false
+'''
+    return xml
+
+
+def test_observer_compiled_manifest_preserves_actual_factory_and_activity_tree():
+    before,after=compiled_unified_manifest(),compiled_unified_manifest(probe=True)
+    after=after.replace('(line=5)','(line=400)').replace('android:theme','http://schemas.android.com/apk/res/android:theme')
+    assert qa.verify_manifest_preserved(before,after,qa.UNIFIED_PROFILE)=={
+        'compiled_manifest_structure_preserved':True,'manifest_factory_and_activities_preserved':True}
+
+
+@pytest.mark.parametrize('old,new',[
+    ('localserver.UnifiedComponentFactory','localserver.OtherFactory'),
+    ('appComponentFactory(0x0101057a)','appComponentFactory(0x0101057b)'),
+    ('localserver.MainActivity','localserver.OtherActivity'),
+    ('localserver.UnifiedGameActivity','localserver.OtherGameActivity'),
+    ('targetActivity(0x01010202)','targetActivity(0x01010203)'),
+    ('@0x01030238','@0x01030239'),
+    ('android.intent.action.MAIN','android.intent.action.VIEW'),
+    ('targetSdkVersion(0x01010270)=36','targetSdkVersion(0x01010270)=35'),
+])
+def test_observer_manifest_rejects_factory_bypass_and_nested_launch_contract_drift(old,new):
+    with pytest.raises(qa.AndroidPackagingError,match='changed application factory/activity'):
+        qa.verify_manifest_preserved(compiled_unified_manifest(),compiled_unified_manifest(probe=True).replace(old,new),qa.UNIFIED_PROFILE)
+
+
+def test_observer_manifest_rejects_missing_factory_in_current_product_input():
+    before=compiled_unified_manifest().replace('localserver.UnifiedComponentFactory','localserver.OtherFactory')
+    with pytest.raises(qa.AndroidPackagingError,match='exact launcher component factory'):
+        qa.verify_manifest_preserved(before,compiled_unified_manifest(probe=True),qa.UNIFIED_PROFILE)
+
+
 @pytest.mark.parametrize("bad", ("duplicate", "../private", "/absolute", "bad\\member"))
 def test_inventory_rejects_duplicates_and_unsafe_zip_names(tmp_path, bad):
     path = tmp_path / "input.zip"

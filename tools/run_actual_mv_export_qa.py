@@ -56,6 +56,92 @@ def verified_activity_start(raw, component=MAIN):
          "unified_launcher_activity_identity_mismatch")
 
 
+def verified_observer_manifest(evidence):
+    need(isinstance(evidence,dict)
+         and evidence.get("compiled_manifest_structure_preserved") is True
+         and evidence.get("manifest_factory_and_activities_preserved") is True,
+         "qa_manifest_component_preservation_unverified")
+
+
+LAUNCH_ROW = re.compile(r"^(\d\d-\d\d \d\d:\d\d:\d\d\.\d+)\s+(\d+)\s+(\d+)\s+([VDIWEF])\s+([^:]+):\s?(.*)$")
+LAUNCH_SENSITIVE = re.compile(r"authorization|password|passcode|(?:auth|access|refresh|id)[_-]?token|"
+    r"(?:transfer|handoff|account|player|user|seed|device|android|advertising)[_ -]?id\s*[:=]|\bID:\s*\d", re.I)
+
+
+def launch_log_evidence(raw, package=PACKAGE):
+    """Retain bounded launch context and ALL target process incarnations.
+
+    A final surviving provider PID is not necessarily the failed Activity PID.
+    Package-only line filtering also drops transaction/exception continuations.
+    """
+    need(isinstance(raw, str) and len(raw) <= 4 * 1024 * 1024, "launch_log_evidence_oversized")
+    lines=raw.splitlines()[-4096:]
+    rows=[LAUNCH_ROW.match(line) for line in lines]
+    target=re.compile(re.escape(package)+r"(?![A-Za-z0-9_.])")
+    pids=set();history=[];anchors=[]
+    for index,(line,row) in enumerate(zip(lines,rows)):
+        if not target.search(line):
+            continue
+        anchors.append(index)
+        if not row:
+            continue
+        stamp,pid,_,_,tag,message=row.groups();tag=tag.strip()
+        event=None;observed=None
+        start=re.search(r"\bStart proc (\d+):"+re.escape(package)+r"(?:/|\b)",message)
+        event_start=re.search(r"\[\s*\d+,\s*(\d+),\s*\d+,\s*"+re.escape(package)+r"\s*,",message)
+        event_pid=re.search(r"\[\s*\d+,\s*(\d+),\s*"+re.escape(package)+r"\s*[,\]]",message)
+        died=re.search(re.escape(package)+r"\s*\(pid (\d+)\).*\bhas died\b",message)
+        if start:
+            event,observed="process_start",int(start[1])
+        elif tag=="am_proc_start"and event_start:
+            event,observed="process_start",int(event_start[1])
+        elif tag in("am_crash","am_proc_died","am_kill")and event_pid:
+            event,observed={"am_crash":"crash","am_proc_died":"process_died","am_kill":"process_killed"}[tag],int(event_pid[1])
+        elif died:
+            event,observed="process_died",int(died[1])
+        elif tag=="ActivityTaskManager"and"Force finishing activity"in message:
+            event="activity_force_finished"
+        elif tag=="ActivityTaskManager"and re.search(r"\bSTART u\d+\b",message):
+            event="activity_start_requested"
+        if event:
+            entry={"timestamp":stamp,"kind":event,"tag":tag,"record":index}
+            if observed:
+                pids.add(observed);entry["pid"]=observed
+            if event=="activity_start_requested":
+                caller=re.search(r"\bfrom uid (\d+)\b",message)
+                if caller:entry["caller_uid"]=int(caller[1])
+            history.append(entry)
+    # Crash/transaction stack lines retain their target PID even without a
+    # package name. Include surrounding system-server records, not just anchors.
+    chosen=set()
+    for index in anchors:
+        chosen.update(range(max(0,index-32),min(len(lines),index+33)))
+    for index,row in enumerate(rows):
+        if row and int(row[2])in pids:
+            chosen.add(index)
+            tag,message=row[5].strip(),row[6]
+            kind=("fatal_exception"if tag=="AndroidRuntime"and"FATAL EXCEPTION"in message else
+                  "factory_load_failed"if"Unable to instantiate appComponentFactory"in message else
+                  "launch_transaction_failed"if"Failed to execute the transaction"in message else None)
+            if kind:history.append({"timestamp":row[1],"kind":kind,"tag":tag,"pid":int(row[2]),"record":index})
+    history.sort(key=lambda row:row["record"])
+    for event in history:event.pop("record")
+    selected=[];bytes_kept=0;redacted=0
+    for index in sorted(chosen):
+        line=lines[index];row=rows[index]
+        if LAUNCH_SENSITIVE.search(line):
+            redacted+=1
+            types=re.findall(r"(?:[A-Za-z_$][A-Za-z0-9_$]*\.)+[A-Za-z_$][A-Za-z0-9_$]*(?:Exception|Error)\b",line)
+            line=(line[:row.start(6)]if row else"")+(", ".join(types[:3])+": "if types else"")+"[sensitive launch log content omitted]"
+        encoded=len(line.encode("utf-8"))+1
+        if bytes_kept+encoded>128*1024:
+            break
+        selected.append(line);bytes_kept+=encoded
+    return {"schema":1,"package":package,"observed_process_ids":sorted(pids),
+        "events":history[:256],"redacted_records":redacted,"input_records":len(lines),
+        "retained_records":len(selected),"context":"\n".join(selected)+("\n"if selected else"")}
+
+
 def integer(value, minimum=0, maximum=9007199254740991):
     return type(value) is int and minimum <= value <= maximum
 
@@ -398,6 +484,22 @@ class ActualRun:
         self.journal.append(event)
         (self.proof / "phase-journal.json").write_text(json.dumps(self.journal, ensure_ascii=False, indent=2) + "\n")
 
+    def capture_launch_evidence(self, stage):
+        need(stage in("initial","final"),"launch_evidence_stage_invalid")
+        raw=self.device.adb("logcat","-b","main","-b","system","-b","crash","-b","events",
+                            "-d","-t","4096","-v","threadtime",check=False)
+        evidence=launch_log_evidence(raw)
+        context=evidence.pop("context")
+        pids=self.device.adb("shell","pidof",PACKAGE,check=False).split()
+        evidence["current_process_ids"]=[int(pid)for pid in pids if pid.isdigit()][:8]
+        evidence["pre_launch_process_ids"]=getattr(self,"pre_launch_pids",[])
+        (self.proof/(stage+"-launch-system-context.txt")).write_text(context)
+        (self.proof/(stage+"-launch-process-history.json")).write_text(json.dumps(evidence,indent=2)+"\n")
+        self.report.setdefault("launch_evidence",{})[stage]={"observed_process_ids":evidence["observed_process_ids"],
+            "current_process_ids":evidence["current_process_ids"],"events":len(evidence["events"]),
+            "retained_records":evidence["retained_records"]}
+        return context
+
     def mp4(self):
         token = self.device.adb("exec-out", "run-as", PACKAGE, "cat", "files/idoly-qa-ui-token", check=False).strip()
         need(HEX64.fullmatch(token), "qa_observer_token_unavailable")
@@ -472,13 +574,20 @@ class ActualRun:
         # its Activity so a stale probe window cannot be mistaken for a game UI.
         self.device.adb("shell", "am", "force-stop", ENVIRONMENT_PROBE)
         self.record("unified_launcher_start_requested")
+        before=self.device.adb("shell","pidof",PACKAGE,check=False).split()
+        self.pre_launch_pids=[int(pid)for pid in before if pid.isdigit()][:8]
         started = self.device.adb("shell", "am", "start", "-W", "-a", "android.intent.action.MAIN",
                                   "-c", "android.intent.category.LAUNCHER", "-n", MAIN,
                                   timeout=120, merge_error=True)
         (self.proof / "launcher-start.txt").write_text(started[:16384])
+        try:
+            launch_context=self.capture_launch_evidence("initial")
+        except (Rejected,OSError,subprocess.SubprocessError):
+            self.report["initial_launch_context_collection_unavailable"]=True
+            launch_context=""
         verified_activity_start(started)
         self.record("unified_launcher_start_accepted")
-        factory = self.device.adb("logcat", "-d", "-t", "128", "-v", "brief", "-s", "IdolyLauncher", check=False)
+        factory="\n".join(line for line in launch_context.splitlines()if"IdolyLauncher"in line)
         (self.proof / "launcher-constructor.txt").write_text(factory[-16384:])
         starts = self.device.adb("logcat", "-b", "system", "-d", "-t", "5000", "-v", "brief", "-s", "ActivityTaskManager", check=False)
         (self.proof / "initial-own-activity-launch-log.txt").write_text("\n".join(line for line in starts.splitlines() if PACKAGE in line)[-65536:])
@@ -804,6 +913,7 @@ class ActualRun:
             need(subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
                  == self.args.source_commit, "runtime_source_checkout_differs")
             evidence = json.loads(self.args.qa_evidence.read_bytes())
+            verified_observer_manifest(evidence)
             marker = evidence.get("qa_ui", {})
             need(evidence.get("input_profile") == "unified-current" and evidence.get("qa_only") is True
                  and evidence.get("software_aes_and_no_store_input") is False
@@ -841,6 +951,10 @@ class ActualRun:
             except (Rejected, OSError, ValueError, subprocess.SubprocessError):
                 pass
         finally:
+            try:
+                self.capture_launch_evidence("final")
+            except (Rejected,OSError,subprocess.SubprocessError):
+                self.report["launch_context_collection_unavailable"]=True
             try:
                 activities = self.device.adb("shell", "dumpsys", "activity", "activities", check=False)
                 resumed = [line.strip() for line in activities.splitlines()

@@ -296,6 +296,79 @@ def verify_provider_xml(xml, input_profile=DIAGNOSTIC_PROFILE):
         raise AndroidPackagingError("Compiled QA provider/exported/debuggable manifest contract differs")
 
 
+def manifest_structure(xml):
+    """Canonical compiled manifest semantics, retaining attribute resource IDs.
+
+    aapt2 line numbers, attribute order and optional Raw string annotations are
+    presentation details. Component order, resource IDs, values and nested intent
+    records are runtime declarations and must survive the observer round trip.
+    """
+    if not isinstance(xml, str) or len(xml) > 512 * 1024:
+        raise AndroidPackagingError("Compiled manifest evidence exceeds its bound")
+    roots, stack = [], []
+    for line in xml.splitlines():
+        match = re.match(r"^(\s*)E:\s*([A-Za-z0-9_.:-]+)(?:\s+\(line=\d+\))?\s*$", line)
+        if match:
+            indent = len(match[1])
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            node = {"tag": match[2], "attributes": [], "children": []}
+            (stack[-1][1]["children"] if stack else roots).append(node)
+            stack.append((indent, node))
+        elif re.match(r"^\s*A:", line):
+            if not stack:
+                raise AndroidPackagingError("Compiled manifest attribute has no owner")
+            value = re.sub(r"\s+\(Raw:\s*.*\)\s*$", "", line.strip()[2:].strip())
+            # Normalize only the known namespace spelling; keep numeric IDs.
+            value = value.replace("http://schemas.android.com/apk/res/android:", "android:")
+            if "=" not in value:
+                raise AndroidPackagingError("Compiled manifest attribute is malformed")
+            key, val = value.split("=", 1)
+            if any(k == key for k, _ in stack[-1][1]["attributes"]):
+                raise AndroidPackagingError("Compiled manifest has duplicate attributes")
+            stack[-1][1]["attributes"].append((key.strip(), val.strip()))
+        elif line.strip() and not re.match(r"^\s*N:", line):
+            raise AndroidPackagingError("Unexpected compiled manifest evidence line")
+    if len(roots) != 1 or roots[0]["tag"] != "manifest":
+        raise AndroidPackagingError("Compiled manifest root is not unique")
+    def sort(node):
+        node["attributes"].sort()
+        for child in node["children"]:
+            sort(child)
+    sort(roots[0])
+    return roots[0]
+
+
+def verify_manifest_preserved(before_xml, after_xml, input_profile=DIAGNOSTIC_PROFILE):
+    before, after = manifest_structure(before_xml), manifest_structure(after_xml)
+    def application(tree):
+        apps = [n for n in tree["children"] if n["tag"] == "application"]
+        if len(apps) != 1:
+            raise AndroidPackagingError("Compiled application declaration is not unique")
+        return apps[0]
+    old_app, new_app = application(before), application(after)
+    def field(node, name):
+        found = [v for k, v in node["attributes"] if k == "android:" + name or k.startswith("android:" + name + "(")]
+        return found[0] if len(found) == 1 else None
+    if input_profile == UNIFIED_PROFILE:
+        if field(old_app, "appComponentFactory") != '"game.qualiarts.idolypride.localserver.UnifiedComponentFactory"':
+            raise AndroidPackagingError("Current unified input has no exact launcher component factory")
+        names = [field(n, "name") for n in old_app["children"] if n["tag"] == "activity"]
+        if any(names.count('"game.qualiarts.idolypride.localserver.' + name + '"') != 1
+               for name in ("MainActivity", "UnifiedGameActivity")):
+            raise AndroidPackagingError("Current unified input launcher/game activities differ")
+    probes = [n for n in new_app["children"] if n["tag"] == "provider" and field(n, "name") == '"' + PROVIDER + '"']
+    if len(probes) != 1:
+        raise AndroidPackagingError("Compiled QA provider declaration is not unique")
+    new_app["children"].remove(probes[0])
+    for app in (old_app, new_app):
+        app["attributes"] = [(k, v) for k, v in app["attributes"]
+                             if not (k == "android:debuggable" or k.startswith("android:debuggable("))]
+    if before != after:
+        raise AndroidPackagingError("QA manifest changed application factory/activity or another original declaration")
+    return {"compiled_manifest_structure_preserved": True, "manifest_factory_and_activities_preserved": True}
+
+
 def qa_signing_material(keystore=None):
     """Reuse only an explicitly supplied private QA key, with an env password.
 
@@ -353,6 +426,8 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
     with tempfile.TemporaryDirectory(prefix=".idoly-qa-ui-", dir=output.parent) as temporary:
         work = Path(temporary)
         dex, java_hashes = compile_dex(work, executable, sdk, platform)
+        source_xml = _run([sdk / "aapt2", "dump", "xmltree", source, "--file", "AndroidManifest.xml"],
+                          "QA source manifest semantics").stdout
         decoded = work / "decoded"
         _run([executable, "-jar", editor, "d", "-dex", "-t", "xml", "-i", source, "-o", decoded], "QA UI manifest decode")
         added_dex = add_provider(decoded, input_profile)
@@ -406,6 +481,7 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
         if f"package: name='{package_name}'" not in badging:
             raise AndroidPackagingError("QA output changed its input profile's package identity")
         verify_provider_xml(xml, input_profile)
+        manifest_preservation = verify_manifest_preserved(source_xml, xml, input_profile)
         expected = {**members, "AndroidManifest.xml": hashlib.sha256(manifest).hexdigest(),
                     **{name: hashlib.sha256(raw).hexdigest() for name, raw in additions.items()}}
         with ZipFile(signed) as archive:
@@ -420,6 +496,7 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
             "source_apk_sha256": expected_source_sha256, "output_apk_sha256": digest(signed), "output_bytes": signed.stat().st_size,
             "qa_ui": marker, "changed_apk_members": ["AndroidManifest.xml", *additions],
             "all_existing_members_preserved_except_manifest_and_signatures": True,
+            **manifest_preservation,
             "preserved_dex_sha256": {name: value for name, value in members.items() if DEX_NAME.fullmatch(name)},
             "preserved_metadata_sha256": members[METADATA_NAME], "preserved_il2cpp_sha256": members[IL2CPP],
             "preserved_aes_sha256": members[FAST_AES],

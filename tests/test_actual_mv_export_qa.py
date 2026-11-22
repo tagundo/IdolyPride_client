@@ -15,6 +15,75 @@ def test_activity_start_requires_the_actual_menu_activity():
     qa.verified_activity_start("Starting: Intent\nStatus: ok\nActivity: " + qa.MAIN + "\nComplete\n")
 
 
+@pytest.mark.parametrize('value',[None,False,1,'true'])
+def test_actual_runtime_requires_compiled_factory_preservation_receipt(value):
+    evidence={'compiled_manifest_structure_preserved':True,'manifest_factory_and_activities_preserved':value}
+    with pytest.raises(qa.Rejected,match='manifest_component_preservation'):
+        qa.verified_observer_manifest(evidence)
+    qa.verified_observer_manifest({'compiled_manifest_structure_preserved':True,'manifest_factory_and_activities_preserved':True})
+
+
+def logrow(pid,tag,message,second=0):
+    return f"11-22 00:49:{second:02d}.000 {pid:5d} {pid:5d} E {tag}: {message}"
+
+
+def test_launch_history_keeps_failed_process_before_surviving_provider_restart():
+    raw='\n'.join([
+        logrow(580,'ActivityTaskManager','START u0 {cmp='+qa.MAIN+'} from uid 0',0),
+        logrow(580,'ActivityManager','Start proc 4100:'+qa.PACKAGE+'/u0a210 for top-activity',1),
+        logrow(4100,'TransactionExecutor','Failed to execute the transaction: ClientTransaction{',2),
+        logrow(4100,'AndroidRuntime','FATAL EXCEPTION: main',2),
+        logrow(4100,'AndroidRuntime','java.lang.NoClassDefFoundError: missing launch class',2),
+        logrow(4100,'AndroidRuntime','    at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:4000)',2),
+        logrow(580,'am_crash','[0,4100,'+qa.PACKAGE+',538984005,java.lang.NoClassDefFoundError,missing]',2),
+        logrow(580,'am_proc_died','[0,4100,'+qa.PACKAGE+',0]',3),
+        logrow(580,'ActivityTaskManager','Force finishing activity '+qa.MAIN,3),
+        *[logrow(700,'Unrelated','noise',4)for _ in range(200)],
+        logrow(580,'am_proc_start','[0,4156,10210,'+qa.PACKAGE+',service,SDKProvider]',5),
+        logrow(4156,'Provider','provider remains running',6),
+    ])
+    evidence=qa.launch_log_evidence(raw)
+    assert evidence['observed_process_ids']==[4100,4156]
+    assert [(event['kind'],event.get('pid'))for event in evidence['events']]==[
+        ('activity_start_requested',None),('process_start',4100),('launch_transaction_failed',4100),('fatal_exception',4100),
+        ('crash',4100),('process_died',4100),('activity_force_finished',None),('process_start',4156)]
+    assert evidence['events'][0]['caller_uid']==0
+    assert 'NoClassDefFoundError'in evidence['context']and'performLaunchActivity'in evidence['context']
+    assert 'provider remains running'in evidence['context']
+
+
+def test_launch_context_keeps_package_free_system_transaction_stack():
+    raw='\n'.join([
+        logrow(580,'ActivityManager','Start proc 4100:'+qa.PACKAGE+'/u0a210 for top-activity'),
+        logrow(580,'ActivityTaskManager','Failed to launch activity: android.os.TransactionTooLargeException'),
+        logrow(580,'ActivityTaskManager','    at android.app.servertransaction.ClientTransaction.schedule(ClientTransaction.java:1)'),
+        logrow(580,'ActivityTaskManager','Force finishing activity '+qa.MAIN),
+    ])
+    context=qa.launch_log_evidence(raw)['context']
+    assert 'TransactionTooLargeException'in context and'ClientTransaction.schedule'in context
+
+
+def test_launch_context_redacts_account_fields_and_keeps_exception_type():
+    raw='\n'.join([
+        logrow(580,'ActivityManager','Start proc 4100:'+qa.PACKAGE+'/u0a210 for top-activity'),
+        logrow(4100,'AndroidRuntime','java.lang.IllegalStateException: password=private-value account_id=9999'),
+        logrow(4100,'Debug','Authorization: Bearer should-never-appear'),
+        logrow(4100,'Debug','device_id=unique-device-value'),
+    ])
+    evidence=qa.launch_log_evidence(raw)
+    assert evidence['redacted_records']==3
+    for secret in('private-value','9999','should-never-appear','unique-device-value'):
+        assert secret not in evidence['context']
+    assert 'java.lang.IllegalStateException'in evidence['context']
+
+
+def test_launch_context_requires_exact_package_and_bounded_input():
+    evidence=qa.launch_log_evidence(logrow(580,'ActivityManager','Start proc 4100:'+qa.PACKAGE+'.other/u0a210'))
+    assert not evidence['events']and not evidence['context']
+    with pytest.raises(qa.Rejected,match='oversized'):
+        qa.launch_log_evidence('x'*(4*1024*1024+1))
+
+
 @pytest.mark.parametrize("raw,code", [
     ("Error type 3\nError: Activity class does not exist", "activity_start_rejected"),
     ("Starting: Intent\nStatus: timeout\n", "activity_start_rejected"),
