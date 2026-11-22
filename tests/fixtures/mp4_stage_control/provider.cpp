@@ -36,6 +36,10 @@ int inputs(mp4actor::Handle*n,Method*){return n->handle==1?1:0;}void input(mp4ac
 API mp4_actor_state_api(){return {valid,roots,root,inputs,input};}void get_graph(mp4actor::Handle*,mp4actor::Handle*out,Method*){*out={42,2,0};}
 bool mp4_type_is(void*p,const char*){return p==&ps||p==&otherps;}bool mp4_alive(void*p){return p;}
 template<class T>bool mp4_actor_field(void*p,size_t at,T&v){if(!p)return false;std::memcpy(&v,static_cast<uint8_t*>(p)+at,sizeof v);return true;}
+bool admission_receipt=true,admission_duplicate=false;void*admission_particle=&ps;
+bool mp4_stage_admission_particle(const Witness&w,void*d,void*a,mp4actor::Handle graph,mp4actor::Handle node,void*script,void*particle,uint32_t seed){
+ return admission_receipt&&!admission_duplicate&&source_current&&w.generation==11&&d==&director&&a==&asset&&graph.handle==42&&graph.version==2&&node.handle==3&&node.version==2&&script==&pc&&particle==admission_particle&&seed==7;
+}
 bool mp4_equipment_graph_witness(const Witness&){return source_admitted;}bool mp4_scene_same_source(const Witness&a,const Witness&b){return a.generation==b.generation;}
 struct Mp4ActorTempRoot{void*p;explicit Mp4ActorTempRoot(void*x):p(x){}void*get()const{return p;}};
 void*mp4_stage_children(void*){return array;}bool mp4_stage_array(void*a,void***out,size_t*n,size_t){*out=static_cast<void**>(a);*n=array_count;return true;}
@@ -43,15 +47,15 @@ bool mp4_stage_full_owner(void*){return full_owner;}bool mp4_stage_control_curre
 #include "pins.inc"
 #include "provider.cpp"
 int main(int argc,char**argv){assert(argc==2);const std::string c=argv[1];Mp4TimelineContext ctx;ctx.director=&director;ctx.asset=&asset;pc.particle=&ps;mp4_actor_profile.playable_graph_get.rva=reinterpret_cast<uintptr_t>(get_graph);mp4actor::Handle node{3,2,0};
- if(c=="admission"||c=="admit_foreign"||c=="admit_duplicate"||c=="admit_receipt")ctx.phase=Mp4TimelineProofPhase::admission;
- if(c=="admit_foreign")array[0]=&otherps;else if(c=="admit_duplicate"){array[1]=&ps;array_count=2;}else if(c=="admit_receipt")source_admitted=false;
+ if(c=="admission"||c=="admit_foreign"||c=="admit_duplicate"||c=="admit_receipt"||c=="admit_timeline_sibling"||c=="admit_unpublished")ctx.phase=Mp4TimelineProofPhase::admission;
+ if(c=="admit_foreign")admission_particle=&otherps;else if(c=="admit_duplicate")admission_duplicate=true;else if(c=="admit_timeline_sibling"){array[0]=&otherps;array_count=1;}else if(c=="admit_unpublished")admission_receipt=false;else if(c=="admit_receipt")source_admitted=false;
  if(c=="pins_lost")pins_current=false;else if(c=="source_lost")source_current=false;else if(c=="zero_seed")pc.seed=0;else if(c=="seed_changed")pc.seed=8;else if(c=="wrong_particle")pc.particle=&otherps;else if(c=="wrong_path")path_valid=false;else if(c=="wrong_graph")ctx.graph.version=4;else if(c=="uncaptured")mp4_scene_host.captured=0;else if(c=="scope_lost")full_owner=false;else if(c=="producer_lost")control_current=false;else if(c=="wrong_producer")mp4_stage_host.current_producers[0]=&foreign;else if(c=="source_epoch")++mp4_stage_host.source.generation;
  if(c=="restore"||c=="restore_pending"){ctx.phase=Mp4TimelineProofPhase::source_restored;mp4_stage_host.restored=c=="restore";}
  if(c=="restore_plan")ctx.phase=Mp4TimelineProofPhase::source_restore;
  if(c=="light"){assert(mp4_stage_other_node(ctx,node,&light)==Mp4TimelineVerdict::unclosed);return 0;}
  if(c=="unknown"){assert(mp4_stage_other_node(ctx,node,&unknown)==Mp4TimelineVerdict::unrecognized);return 0;}
  if(c=="control_runtime"||c=="light_runtime"||c=="unknown_runtime"){Clip clip;clip.asset=c=="control_runtime"?&control_asset:c=="light_runtime"?&light_asset:&unknown;Mp4TimelineRuntime runtime{&clip};assert(mp4_stage_other_runtime(ctx,runtime)==(c=="unknown_runtime"?Mp4TimelineVerdict::unrecognized:Mp4TimelineVerdict::unclosed));return 0;}
- const bool ok=c=="active"||c=="admission"||c=="restore"||c=="restore_plan"||c=="userdata";
+ const bool ok=c=="active"||c=="admit_timeline_sibling"||c=="admission"||c=="restore"||c=="restore_plan"||c=="userdata";
  assert(mp4_stage_other_node(ctx,node,&pc)==(ok?Mp4TimelineVerdict::closed:Mp4TimelineVerdict::unclosed));
  assert(mp4_stage_other_userdata(ctx,node,&pc,&userdata)==ok);
 }

@@ -4869,6 +4869,8 @@ struct Mp4SceneHost {
     void* last_player=nullptr;void* last_presenter=nullptr;
     const char* error="native_scene_parts_not_registered";
 } mp4_scene_host;
+void mp4_stage_admission_drop()noexcept;
+void mp4_stage_admission_withdraw()noexcept;
 // Independent retirement providers retain their own anchors after scene
 // resources are released. A missing provider cannot enable the pipeline.
 struct Mp4ScenePostRestoreApi {
@@ -4931,8 +4933,10 @@ Mp4SceneResult mp4_scene_part_result(const Mp4ScenePart& part,Mp4SceneResult res
 }
 [[maybe_unused]] Mp4SceneResult mp4_scene_admit(void*){
     auto& host=mp4_scene_host;
-    if(!mp4_scene_parts_available())return mp4_scene_fail(Mp4SceneResult::unsupported,"native_scene_bindings_not_ready");
+    if(!mp4_scene_parts_available()){mp4_stage_admission_withdraw();return mp4_scene_fail(Mp4SceneResult::unsupported,"native_scene_bindings_not_ready");}
     if(host.active)return mp4_scene_fail(Mp4SceneResult::invalid,"native_scene_already_owned");
+    mp4_stage_admission_drop();
+    struct AdmissionExit{bool keep=false;~AdmissionExit(){if(!keep)mp4_stage_admission_drop();}}admission_exit;
     host.logical_checkpoint=host.detached=host.post_started=host.post_begin_failed=false;
     host.last_camera_restore=host.last_dependency_restore=false;
     host.admitted=0;host.admitted_source=Mp4SceneWitness{};
@@ -4949,7 +4953,7 @@ Mp4SceneResult mp4_scene_part_result(const Mp4ScenePart& part,Mp4SceneResult res
             return mp4_scene_fail(Mp4SceneResult::stale,"native_scene_changed_during_admission");
         host.admitted|=1u<<i;
     }
-    host.error="none";return Mp4SceneResult::ok;
+    admission_exit.keep=true;host.error="none";return Mp4SceneResult::ok;
 }
 [[maybe_unused]] bool mp4_scene_normal_animation_closed(){
     auto& host=mp4_scene_host;Mp4SceneWitness current{};
@@ -5150,6 +5154,7 @@ Mp4SceneResult mp4_scene_verify_source_restored(void*){
     return mp4_scene_post_restore.release();
 }
 Mp4SceneResult mp4_scene_release(void*,bool owned){
+    mp4_stage_admission_drop();
     mp4_scene_revoke_grants(nullptr);
     auto& host=mp4_scene_host;if(!host.active)return Mp4SceneResult::ok;
     if(!host.releasing){
@@ -5236,10 +5241,11 @@ const char* mp4_scene_error(void*){return mp4_scene_host.error;}
 }
 void mp4_scene_will_change(void* value){
     auto& host=mp4_scene_host;
-    if(value&&(value==host.admitted_source.player||value==host.admitted_source.presenter))host.admitted=0;
+    if(value&&(value==host.admitted_source.player||value==host.admitted_source.presenter)){host.admitted=0;mp4_stage_admission_withdraw();}
     if(value&&(value==host.last_player||value==host.last_presenter))
         host.last_camera_restore=host.last_dependency_restore=false;
     if(!host.active||!value||(value!=host.source.player&&value!=host.source.presenter))return;
+    mp4_stage_admission_withdraw();
     mp4_scene_revoke_grants(nullptr);
     host.invalidated=true;host.release_owned=false;
     for(unsigned i=0;i<host.count;++i)if(host.started&(1u<<i))host.parts[i].invalidate(host.parts[i].context,value);
@@ -5403,7 +5409,8 @@ struct Mp4WorldHost {
     mp4world::Scope scope;
     Mp4SceneWitness source{};
     uint32_t types[5]{},global_types[3]{};
-    uint64_t epoch=0;
+    uint64_t epoch=0,driving_tick=0;
+    bool driving_prepared=false,driving_granted=false,driving_marked=false;
     bool verified=false,invalidated=false,restoration_verified=false,animation_owned=false;
     const char* error="world_source_not_verified";
 } mp4_world_host;
@@ -5414,9 +5421,14 @@ struct Mp4WorldQueryRoot {
     bool valid()const{return token&&weak_get(token)==value;}
 };
 bool mp4_scene_normal_animation_closed(); // supplied by aggregate owner
+bool mp4_world_driving_permission();
+Mp4SceneResult mp4_world_driving_prepare(uint64_t);
+Mp4SceneResult mp4_world_driving_grant(uint64_t);
+Mp4SceneResult mp4_world_driving_quiesce();
+Mp4SceneResult mp4_world_driving_release();
 bool mp4_world_source_current(void*){
     auto& host=mp4_world_host;
-    if(!game_call()||host.invalidated||!host.source.player||!host.source.presenter)return false;
+    if(!game_call()||host.invalidated||!host.source.player||!host.source.presenter||!mp4_world_driving_permission())return false;
     Mp4SceneWitness current{};
     return idoly_mp4_runtime::game.selected_scene_witness(current)
         &&mp4_scene_same_source(host.source,current)
@@ -5744,7 +5756,10 @@ Mp4SceneResult mp4_world_capture(void*){
     if(!mp4_animation_gate.closed(host.epoch)){host.error="world_animation_cycle_pending";return Mp4SceneResult::waiting;}
     return mp4_world_result(host.scope.capture());
 }
-Mp4SceneResult mp4_world_quiesce(void*){return mp4_world_capture(nullptr);}
+Mp4SceneResult mp4_world_quiesce(void*){
+    const auto captured=mp4_world_capture(nullptr);
+    return captured==Mp4SceneResult::ok?mp4_world_driving_quiesce():captured;
+}
 Mp4SceneResult mp4_world_prepare(void*){return mp4_world_result(mp4_world_host.scope.prepare());}
 Mp4SceneResult mp4_world_reset(void*){return mp4_world_result(mp4_world_host.scope.reset());}
 Mp4SceneResult mp4_world_restore(void*){
@@ -5757,6 +5772,7 @@ Mp4SceneResult mp4_world_release(void*,bool owned){
     // Aggregate MUST call this only after all Actor/Stage/Camera release methods
     // have finished, including asynchronous job fencing on invalidated sources.
     auto& host=mp4_world_host;if(!owned)host.restoration_verified=false;
+    const auto driving=mp4_world_driving_release();if(driving!=Mp4SceneResult::ok)return driving;
     if(host.animation_owned&&!mp4_animation_gate.release(host.epoch)){
         host.error="world_animation_pair_pending";return Mp4SceneResult::waiting;}
     host.animation_owned=false;
@@ -5788,14 +5804,13 @@ Mp4SceneResult mp4_world_prepare_step(void*,uint64_t tick,double){
         host.error="world_native_phase_routes_unverified";return Mp4SceneResult::unsupported;}
     if(!host.animation_owned||!mp4_animation_gate.prepare(host.epoch,tick)){
         host.error="world_animation_step_not_closed";return Mp4SceneResult::stale;}
-    return mp4_world_result(host.scope.validate());
+    const auto valid=mp4_world_result(host.scope.validate());
+    return valid==Mp4SceneResult::ok?mp4_world_driving_prepare(tick):valid;
 }
 Mp4SceneResult mp4_world_grant(void*,uint64_t tick){
     if(!mp4_native_phase_routes_ready()){
         mp4_world_host.error="world_native_phase_routes_unverified";return Mp4SceneResult::unsupported;}
-    if(!mp4_animation_gate.grant(mp4_world_host.epoch,tick)){
-        mp4_world_host.error="world_animation_grant_failed";return Mp4SceneResult::stale;}
-    return Mp4SceneResult::ok;
+    return mp4_world_driving_grant(tick);
 }
 bool mp4_world_restoration_verified(void*){return mp4_world_host.restoration_verified;}
 const char* mp4_world_error(void*){return std::strcmp(mp4_world_host.error,"none")?mp4_world_host.error:mp4_world_host.scope.error();}
@@ -7718,10 +7733,16 @@ mp4stage::EquipmentApi mp4_stage_equipment_make_api(){
 
 Mp4SceneResult mp4_stage_result(mp4stage::Result r){return static_cast<Mp4SceneResult>(static_cast<int>(r));}
 bool mp4_stage_available(void*){return mp4_stage_equipment_target_factory&&mp4_stage_equipment_target_factory().valid()&&mp4_equipment_dispatch_begin&&mp4_equipment_dispatch_end&&mp4_equipment_observe_late&&mp4_equipment_invalidate_late&&mp4_stage_source_verified&&mp4_actor_source_verified&&mp4_stage_prepare_types();}
+uint64_t mp4_stage_admission_begin(const Mp4SceneWitness&);
+bool mp4_stage_admission_observe(uint64_t,const Mp4SceneWitness&);
+bool mp4_stage_admission_seal(uint64_t,bool);
+bool mp4_stage_admission_before_capture(const Mp4SceneWitness&);
 Mp4SceneResult mp4_stage_admit(void *, const Mp4SceneWitness &witness) {
     auto &h = mp4_stage_host;
     if (h.configured || h.admitting)
         return Mp4SceneResult::invalid;
+    const uint64_t admission_attempt=mp4_stage_admission_begin(witness);
+    if(!admission_attempt){h.error="stage_particle_admission_unavailable";return Mp4SceneResult::unsupported;}
     struct AdmissionCleanup {
         mp4stage::EquipmentScope probe;
         bool finished = false;
@@ -7770,6 +7791,8 @@ Mp4SceneResult mp4_stage_admit(void *, const Mp4SceneWitness &witness) {
             if (result == mp4stage::Result::ok)
                 result = exit.probe.admit();
         }
+        if(result==mp4stage::Result::ok&&!mp4_stage_admission_observe(admission_attempt,witness))
+            result=mp4stage::Result::unsupported;
         exit.error = collected ? (result == mp4stage::Result::ok
                                       ? "none"
                                       : std::strcmp(mp4_equipment_targets.error, "none")
@@ -7783,6 +7806,8 @@ Mp4SceneResult mp4_stage_admit(void *, const Mp4SceneWitness &witness) {
     const auto cleanup = exit.finish();
     if (result == mp4stage::Result::ok)
         result = cleanup;
+    const bool admitted=mp4_stage_admission_seal(admission_attempt,result==mp4stage::Result::ok);
+    if(result==mp4stage::Result::ok&&!admitted){h.error="stage_particle_admission_seal_failed";result=mp4stage::Result::unsupported;}
     return mp4_stage_result(result);
 }
 Mp4SceneResult mp4_stage_configure(void*,const Mp4SceneWitness& witness){
@@ -7808,6 +7833,8 @@ Mp4SceneResult mp4_stage_quiesce(void*){
 }
 Mp4SceneResult mp4_stage_capture(void*){
     if(!mp4_stage_refresh_inventory()||!mp4_stage_refresh_controls())return Mp4SceneResult::stale;
+    if(!mp4_stage_admission_before_capture(mp4_stage_host.source)){
+        mp4_stage_host.error="stage_particle_admission_changed";return Mp4SceneResult::stale;}
     auto r=mp4_stage_equipment.capture();if(r!=mp4stage::Result::ok)return mp4_stage_result(r);
     r=mp4_stage_particles.capture();if(r!=mp4stage::Result::ok)return mp4_stage_result(r);
     return mp4_stage_result(mp4_stage_psyllium.capture());
@@ -7845,6 +7872,7 @@ Mp4SceneResult mp4_stage_restore(void*){
     return mp4_stage_result(r);
 }
 Mp4SceneResult mp4_stage_release(void*,bool owned){
+    mp4_stage_admission_drop();
     auto r=mp4_stage_equipment.release(owned);if(r!=mp4stage::Result::ok)return mp4_stage_result(r);
     r=mp4_stage_particles.release(owned);
     if(r!=mp4stage::Result::ok)return mp4_stage_result(r);
@@ -13027,6 +13055,14 @@ uint64_t mp4_gpu_auxiliary_serial=0,mp4_gpu_auxiliary_dispatched_ticket=0;
 }
 // END_MP4_GPU_AUXILIARY_HOST
 
+// BEGIN_MP4_PROFLARE_GPU_OWNER_API
+struct Mp4ProFlareGpuOwner{uint64_t source=0,job=0,draw_sequence=0,draw_token=0;};
+[[maybe_unused]] bool mp4_proflare_gpu_origin(uint64_t,uint64_t,void*,Mp4ProFlareGpuOwner*);
+[[maybe_unused]] bool mp4_proflare_gpu_current(const Mp4ProFlareGpuOwner&);
+[[maybe_unused]] bool mp4_proflare_gpu_quiet(const Mp4ProFlareGpuOwner&);
+// END_MP4_PROFLARE_GPU_OWNER_API
+
+
 
 
 // BEGIN_MP4_CAMERA_MOTION_HOST
@@ -17158,8 +17194,9 @@ void mp4_scene_diagnostic_parts(const Mp4SceneWitness& witness,const Mp4ScenePar
     auto& host=mp4_scene_host;
     struct Ledger {
         Mp4SceneHost& host;unsigned admitted;Mp4SceneWitness source;
-        ~Ledger(){host.admitted=admitted;host.admitted_source=source;}
+        ~Ledger(){mp4_stage_admission_drop();host.admitted=admitted;host.admitted_source=source;}
     } ledger{host,host.admitted,host.admitted_source};
+    mp4_stage_admission_drop();
     host.admitted=0;host.admitted_source=witness;output.available=true;
     for(unsigned i=0;i<4;++i){
         auto& part=output.parts[i];
@@ -19495,6 +19532,417 @@ constexpr const auto&mp4_stage_other_pins=ios_stage_other_pins;
 constexpr const auto&mp4_stage_other_pins=android_stage_other_pins;
 #endif
 
+// BEGIN_MP4_STAGE_PARTICLE_ADMISSION_HOST
+// A successful readonly Stage.admit owns ONE source admission receipt. This
+// bank survives only its temporary Stage cleanup; it grants no rebuild/remap,
+// native PS lifecycle or snapshot authority. Each classifier use reobserves the
+// exact live Director/root/input path/script/PS/seed and retained native ID.
+struct Mp4StageAdmissionParticle {
+  mp4stage::Owner owner{};
+  void *particle_go = nullptr, *director = nullptr, *asset = nullptr;
+  void *equipment_particle_root = nullptr;
+  uintptr_t equipment_root_native = 0;
+  int32_t equipment_root_id = 0;
+  uintptr_t particle_native = 0, go_native = 0, producer_native = 0;
+  int32_t particle_id = 0, go_id = 0, producer_id = 0;
+  uint32_t seed = 0;
+  uint64_t asset_fingerprint = 0;
+  Mp4StagePath path{};
+  mp4actor::Handle graph{}, node{};
+};
+struct Mp4StageAdmissionParticles {
+  Mp4SceneWitness source{};
+  Mp4StageAdmissionParticle particles[mp4stage::max_particles]{};
+  uint32_t roots[2048]{};
+  void *objects[2048]{};
+  size_t count = 0, root_count = 0;
+  uint64_t attempt = 0, receipt = 0, withdraw_sequence = 0;
+  bool observed = false, committed = false;
+} mp4_stage_admission_particles;
+uint64_t mp4_stage_admission_particle_sequence = 0;
+// Source observers may run off-thread/in a no-GC boundary. They mutate ONLY
+// these atomics; source references remain held until main-thread retirement.
+std::atomic<bool> mp4_stage_admission_withdrawn{true};
+std::atomic<uint64_t> mp4_stage_admission_withdraw_sequence{0};
+void mp4_stage_admission_withdraw() noexcept {
+  mp4_stage_admission_withdrawn.store(true, std::memory_order_release);
+  auto sequence =
+      mp4_stage_admission_withdraw_sequence.load(std::memory_order_acquire);
+  while (sequence != ~uint64_t(0) &&
+         !mp4_stage_admission_withdraw_sequence.compare_exchange_strong(
+             sequence, sequence + 1, std::memory_order_acq_rel)) {
+  }
+}
+
+void mp4_stage_admission_drop() noexcept {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return;
+  }
+  mp4_stage_admission_withdrawn.store(true, std::memory_order_release);
+  auto &b = mp4_stage_admission_particles;
+  for (size_t i = 0; i < b.root_count; ++i)
+    if (b.roots[i])
+      weak_free(b.roots[i]);
+  b = {};
+}
+bool mp4_stage_admission_keep(void *object) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  if (!object)
+    return true;
+  auto &b = mp4_stage_admission_particles;
+  for (size_t i = 0; i < b.root_count; ++i)
+    if (b.objects[i] == object)
+      return weak_get(b.roots[i]) == object;
+  if (b.root_count == 2048)
+    return false;
+  auto root = mp4_retain(object);
+  if (!root || weak_get(root) != object) {
+    if (root)
+      weak_free(root);
+    return false;
+  }
+  b.objects[b.root_count] = object;
+  b.roots[b.root_count++] = root;
+  return true;
+}
+bool mp4_stage_admission_roots() {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  const auto &b = mp4_stage_admission_particles;
+  for (size_t i = 0; i < b.root_count; ++i)
+    if (weak_get(b.roots[i]) != b.objects[i])
+      return false;
+  return true;
+}
+bool mp4_stage_admission_source(const Mp4SceneWitness &w) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  auto &b = mp4_stage_admission_particles;
+  Mp4SceneWitness now{};
+  if (mp4_stage_admission_withdrawn.load(std::memory_order_acquire) ||
+      b.withdraw_sequence != mp4_stage_admission_withdraw_sequence.load(
+                                 std::memory_order_acquire) ||
+      !b.attempt || !mp4_source_verified || !mp4_stage_source_verified ||
+      !mp4_scene_same_source(w, b.source) ||
+      !idoly_mp4_runtime::game.selected_scene_witness(now) ||
+      !mp4_scene_same_source(now, b.source) || !mp4_stage_admission_roots()) {
+    mp4_stage_admission_drop();
+    return false;
+  }
+  return true;
+}
+uint64_t mp4_stage_admission_begin(const Mp4SceneWitness &w) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return 0;
+  }
+  mp4_stage_admission_drop();
+  Mp4SceneWitness now{};
+  if (!game_call() || !w.generation || !w.presenter || !w.environment ||
+      !w.director || !w.camera || !w.player || !mp4_source_verified ||
+      !mp4_stage_source_verified ||
+      mp4_stage_admission_particle_sequence == ~uint64_t(0) ||
+      !idoly_mp4_runtime::game.selected_scene_witness(now) ||
+      !mp4_scene_same_source(now, w))
+    return 0;
+  auto &b = mp4_stage_admission_particles;
+  b.source = w;
+  b.attempt = ++mp4_stage_admission_particle_sequence;
+  b.withdraw_sequence =
+      mp4_stage_admission_withdraw_sequence.load(std::memory_order_acquire);
+  if (b.withdraw_sequence == ~uint64_t(0)) {
+    mp4_stage_admission_drop();
+    return 0;
+  }
+  for (void *p : {w.presenter, w.player, w.director, w.controller, w.camera,
+                  w.brain, w.bgm, w.voice, w.environment, w.camera_director,
+                  w.camera_asset, w.camera_track})
+    if (!mp4_stage_admission_keep(p)) {
+      mp4_stage_admission_drop();
+      return 0;
+    }
+  mp4_stage_admission_withdrawn.store(false, std::memory_order_release);
+  if (b.withdraw_sequence !=
+      mp4_stage_admission_withdraw_sequence.load(std::memory_order_acquire)) {
+    mp4_stage_admission_drop();
+    return 0;
+  }
+  return b.attempt;
+}
+bool mp4_stage_admission_native(void *object, uintptr_t *native,
+                                int32_t *instance) {
+  return object && native && instance && mp4_alive(object) &&
+         mp4_actor_field(object, 16, *native) && *native &&
+         mp4_actor_field(reinterpret_cast<void *>(*native), 8, *instance) &&
+         *instance;
+}
+bool mp4_stage_admission_identity(const Mp4StageAdmissionParticle &e) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  uintptr_t particle = 0, go = 0;
+  int32_t particle_id = 0, go_id = 0;
+  if (!mp4_type_is(e.owner.particle, "UnityEngine.ParticleSystem") ||
+      !mp4_stage_admission_native(e.owner.particle, &particle, &particle_id) ||
+      particle != e.particle_native || particle_id != e.particle_id ||
+      mp4_api.component_game_object(e.owner.particle, nullptr) !=
+          e.particle_go ||
+      !mp4_stage_admission_native(e.particle_go, &go, &go_id) ||
+      go != e.go_native || go_id != e.go_id)
+    return false;
+  if (e.owner.producer_kind == 2) {
+    uintptr_t native = 0, root_native = 0;
+    int32_t id = 0, root_id = 0;
+    void *root = nullptr;
+    return mp4_type_is(e.owner.producer,
+                       "Solis.Live.Equipment.Environment.LiveParticleEffect") &&
+           mp4_stage_admission_native(e.owner.producer, &native, &id) &&
+           native == e.producer_native && id == e.producer_id &&
+           mp4_actor_field(e.owner.producer,
+                           mp4stage::Layout::live_particle_system, root) &&
+           root == e.equipment_particle_root &&
+           mp4_stage_admission_native(root, &root_native, &root_id) &&
+           root_native == e.equipment_root_native &&
+           root_id == e.equipment_root_id;
+  }
+  return e.owner.producer_kind == 1 &&
+         mp4_timeline_exact(e.owner.producer, mp4_stage_other_pins.particle);
+}
+bool mp4_stage_admission_resolve(const Mp4StageAdmissionParticle &e,
+                                 mp4actor::Handle *out) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  if (!out || e.owner.producer_kind != 1 || !e.director || !e.asset ||
+      !mp4_stage_admission_identity(e) || !mp4_alive(e.director) ||
+      mp4_api.director_get_asset(e.director, nullptr) != e.asset)
+    return false;
+  uint64_t fingerprint = 0;
+  if (!mp4_stage_tracks(e.asset, e.director, fingerprint) ||
+      fingerprint != e.asset_fingerprint)
+    return false;
+  mp4game::PlayableGraph actual{};
+  mp4_api.director_graph_injected(e.director, &actual, nullptr);
+  mp4actor::Handle graph{};
+  ::memcpy(static_cast<void *>(&graph), &actual, 16);
+  if (!mp4_actor_same_handle(graph, e.graph))
+    return false;
+  auto api = mp4_actor_state_api();
+  if (!api.graph_valid(&graph, nullptr) || e.path.length > 64)
+    return false;
+  const int32_t roots = api.graph_root_count(&graph, nullptr);
+  if (roots < 0 || roots > 256 || e.path.root >= roots)
+    return false;
+  mp4actor::Handle node{};
+  api.graph_root(&graph, e.path.root, &node, nullptr);
+  for (size_t i = 0; i < e.path.length; ++i) {
+    if (!node.handle || !api.playable_valid(&node, nullptr))
+      return false;
+    const int32_t inputs = api.playable_input_count(&node, nullptr);
+    if (inputs < 0 || inputs > 256 || e.path.inputs[i] >= inputs)
+      return false;
+    mp4actor::Handle next{};
+    api.playable_input(&node, e.path.inputs[i], &next, nullptr);
+    node = next;
+  }
+  if (!node.handle || !api.playable_valid(&node, nullptr))
+    return false;
+  using Script = void *(*)(mp4actor::Handle *, Method *);
+  void *script = reinterpret_cast<Script>(
+      image_base + mp4_stage_profile.playable_script.rva)(&node, nullptr);
+  void *particle = nullptr;
+  uint32_t seed = 0;
+  if (script != e.owner.producer ||
+      !mp4_timeline_exact(script, mp4_stage_other_pins.particle) ||
+      !mp4_actor_field(script, mp4stage::Layout::control_particle, particle) ||
+      particle != e.owner.particle ||
+      !mp4_actor_field(script, mp4stage::Layout::control_random_seed, seed) ||
+      !seed || seed != e.seed)
+    return false;
+  *out = node;
+  return true;
+}
+// Called only after ALL readonly Stage admit providers returned success, while
+// the original temporary h still exists. Publication remains pending until the
+// actual probe cleanup also succeeds and seal() is called by that same attempt.
+bool mp4_stage_admission_observe(uint64_t attempt, const Mp4SceneWitness &w) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  auto &b = mp4_stage_admission_particles;
+  const auto &h = mp4_stage_host;
+  if (!attempt || b.attempt != attempt || b.observed || b.committed ||
+      b.count || !mp4_stage_admission_source(w) || !h.admitting ||
+      h.configured || h.rebuilding || !h.graph_receipt ||
+      !mp4_scene_same_source(h.source, w) ||
+      h.count > mp4stage::max_particles || h.director_count > 64 ||
+      !mp4_stage_owner(nullptr))
+    return false;
+  void *controls[mp4stage::max_particles]{};
+  uint32_t seeds[mp4stage::max_particles]{};
+  if (!mp4_stage_graph_controls(controls, seeds))
+    return false;
+  for (size_t i = 0; i < h.count; ++i) {
+    const auto &owner = h.owners[i];
+    if (!owner.particle || !owner.producer ||
+        (owner.producer_kind != 1 && owner.producer_kind != 2) ||
+        h.current_producers[i] != owner.producer ||
+        !mp4_stage_control_current(nullptr, owner))
+      return false;
+    for (size_t j = 0; j < i; ++j)
+      if (b.particles[j].owner.particle == owner.particle)
+        return false;
+    auto &e = b.particles[i];
+    e.owner = owner;
+    e.particle_go = mp4_api.component_game_object(owner.particle, nullptr);
+    if (!e.particle_go || !mp4_stage_admission_keep(owner.particle) ||
+        !mp4_stage_admission_keep(owner.producer) ||
+        !mp4_stage_admission_keep(e.particle_go) ||
+        !mp4_stage_admission_native(owner.particle, &e.particle_native,
+                                    &e.particle_id) ||
+        !mp4_stage_admission_native(e.particle_go, &e.go_native, &e.go_id))
+      return false;
+    if (owner.producer_kind == 1) {
+      if (controls[i] != owner.producer || !seeds[i] ||
+          seeds[i] != h.source_seeds[i])
+        return false;
+      e.path = h.control_paths[i];
+      e.seed = seeds[i];
+      if (e.path.director >= h.director_count)
+        return false;
+      e.director = h.directors[e.path.director];
+      e.asset = h.director_assets[e.path.director];
+      e.asset_fingerprint = h.timeline_receipts[e.path.director];
+      e.graph = h.graph_receipts[e.path.director];
+      if (!mp4_stage_admission_keep(e.director) ||
+          !mp4_stage_admission_keep(e.asset) ||
+          !mp4_stage_admission_resolve(e, &e.node))
+        return false;
+    } else {
+      e.equipment_particle_root = h.producer_particles[i];
+      if (controls[i] || !e.equipment_particle_root ||
+          !mp4_stage_admission_keep(e.equipment_particle_root) ||
+          !mp4_stage_admission_native(owner.producer, &e.producer_native,
+                                      &e.producer_id) ||
+          !mp4_stage_admission_native(e.equipment_particle_root,
+                                      &e.equipment_root_native,
+                                      &e.equipment_root_id) ||
+          !mp4_stage_admission_identity(e))
+        return false;
+    }
+    ++b.count;
+  }
+  b.observed = true;
+  return mp4_stage_admission_source(w);
+}
+bool mp4_stage_admission_seal(uint64_t attempt, bool succeeded) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  auto &b = mp4_stage_admission_particles;
+  if (!attempt || b.attempt != attempt || !succeeded || !b.observed ||
+      b.committed || mp4_stage_host.admitting || mp4_stage_host.configured ||
+      mp4_stage_host.graph_receipt || !mp4_stage_admission_source(b.source)) {
+    mp4_stage_admission_drop();
+    return false;
+  }
+  for (size_t i = 0; i < b.count; ++i) {
+    const auto &e = b.particles[i];
+    mp4actor::Handle actual{};
+    if (!mp4_stage_admission_identity(e) ||
+        (e.owner.producer_kind == 1 &&
+         (!mp4_stage_admission_resolve(e, &actual) ||
+          !mp4_actor_same_handle(actual, e.node)))) {
+      mp4_stage_admission_drop();
+      return false;
+    }
+  }
+  b.receipt = b.attempt;
+  b.committed = true;
+  return true;
+}
+bool mp4_stage_admission_particle(const Mp4SceneWitness &w, void *director,
+                                  void *asset, mp4actor::Handle graph,
+                                  mp4actor::Handle node, void *script,
+                                  void *particle, uint32_t seed) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  auto &b = mp4_stage_admission_particles;
+  if (!b.committed || !b.receipt || !mp4_stage_admission_source(w))
+    return false;
+  size_t matches = 0;
+  for (size_t i = 0; i < b.count; ++i) {
+    const auto &e = b.particles[i];
+    if (e.owner.producer_kind != 1 || e.owner.particle != particle ||
+        e.owner.producer != script)
+      continue;
+    mp4actor::Handle actual{};
+    if (e.director != director || e.asset != asset || e.seed != seed ||
+        !mp4_actor_same_handle(e.graph, graph) ||
+        !mp4_actor_same_handle(e.node, node) ||
+        !mp4_stage_admission_resolve(e, &actual) ||
+        !mp4_actor_same_handle(actual, node))
+      return false;
+    ++matches;
+  }
+  return matches == 1;
+}
+bool mp4_stage_admission_before_capture(const Mp4SceneWitness &w) {
+  if (!game_call()) {
+    mp4_stage_admission_withdraw();
+    return false;
+  }
+  auto &b = mp4_stage_admission_particles;
+  const auto &h = mp4_stage_host;
+  if (!b.committed || !b.receipt || !mp4_stage_admission_source(w) ||
+      !mp4_stage_clock_held(nullptr) || !h.configured || h.admitting ||
+      h.rebuilding || !mp4_scene_same_source(h.source, w) ||
+      h.count != b.count || !mp4_stage_owner(nullptr))
+    return false;
+  for (size_t i = 0; i < b.count; ++i) {
+    const auto &e = b.particles[i];
+    const auto &owner = h.owners[i];
+    if (owner.particle != e.owner.particle ||
+        owner.producer != e.owner.producer ||
+        owner.producer_kind != e.owner.producer_kind ||
+        h.current_producers[i] != e.owner.producer ||
+        !mp4_stage_control_current(nullptr, owner) ||
+        !mp4_stage_admission_identity(e))
+      return false;
+    if (owner.producer_kind == 1) {
+      const auto &path = h.control_paths[i];
+      mp4actor::Handle actual{};
+      if (path.director >= h.director_count ||
+          h.directors[path.director] != e.director ||
+          h.director_assets[path.director] != e.asset ||
+          h.timeline_receipts[path.director] != e.asset_fingerprint ||
+          h.source_seeds[i] != e.seed ||
+          ::memcmp(&path, &e.path, sizeof(path)) ||
+          !mp4_actor_same_handle(h.graph_receipts[path.director], e.graph) ||
+          !mp4_stage_admission_resolve(e, &actual) ||
+          !mp4_actor_same_handle(actual, e.node))
+        return false;
+    }
+  }
+  return mp4_stage_admission_source(w);
+}
+
+// END_MP4_STAGE_PARTICLE_ADMISSION_HOST
+
 // Readonly factory observation only. This deliberately does NOT require a
 // selected Timeline/output lease: the first ordinary CreatePlayable runs
 // before such a lease exists. Accepted original cohort, exact types, callable
@@ -19615,23 +20063,11 @@ bool mp4_stage_other_particle_node(const Mp4TimelineContext &c,
   if (static_cast<uint8_t>(c.phase) > 3)
     return false;
   if (c.phase == Mp4TimelineProofPhase::admission) {
-    // A successful same-witness Stage.admit already closed ALL selected
-    // PS/producer caches/seeds/paths. Rebuild concrete target membership now;
-    // no stale temporary Stage globals survive that readonly admission.
-    if (!mp4_equipment_graph_witness(c.witness))
-      return false;
-    Mp4ActorTempRoot target(particle),
-        array(mp4_stage_children(c.witness.environment));
-    void **values = nullptr;
-    size_t count = 0;
-    if (!target.get() || !array.get() ||
-        !mp4_stage_array(array.get(), &values, &count, mp4stage::max_particles))
-      return false;
-    size_t matches = 0;
-    for (size_t i = 0; i < count; ++i)
-      if (values[i] == particle)
-        ++matches;
-    return matches == 1 && mp4_stage_other_same_graph(c, node, script);
+    // Stage.admit retained the actual selected graph/path/PC target union.
+    // Environment ancestry is not a producer relationship.
+    return mp4_equipment_graph_witness(c.witness) &&
+           mp4_stage_admission_particle(c.witness,c.director,c.asset,c.graph,node,script,particle,seed) &&
+           mp4_stage_other_same_graph(c,node,script);
   }
   const auto &h = mp4_stage_host;
   if (!h.configured || !mp4_scene_same_source(c.witness, h.source) ||
@@ -21475,6 +21911,10 @@ struct Api {
   uint32_t (*retain)(void *) = nullptr;
   void *(*target)(uint32_t) = nullptr;
   void (*release)(uint32_t) = nullptr;
+  bool (*pending_director_current)(void *, Round, void *) = nullptr;
+  Result (*visit_director)(void *, Round, void *, Emit, void *,
+                           uint64_t *) = nullptr;
+
   bool valid() const {
     return current && held && owner_current && pending_current && visit &&
            node_current && fresh && read && write && retain && target &&
@@ -21488,6 +21928,7 @@ class Scope {
     Node source{}, live{}, retired{};
     State saved{}, observed{};
     bool restored = false, write_duty = false;
+    Round live_round = Round::source;
   };
   struct Root {
     static void *operator new(size_t, void *p) noexcept { return p; }
@@ -21499,6 +21940,7 @@ class Scope {
     static void *operator new(size_t, void *p) noexcept { return p; }
     static void operator delete(void *, void *) noexcept {}
     Node node{};
+    State observed{};
     bool matched = false;
   };
   Api api_{};
@@ -21511,6 +21953,7 @@ class Scope {
   Round round_ = Round::source;
   bool captured_ = false, visiting_ = false, expecting_ = false;
   Round pending_round_ = Round::source;
+  void *pending_director_ = nullptr;
   const char *error_ = "none";
   static bool same_handle(Handle a, Handle b) {
     return a.handle == b.handle && a.version == b.version;
@@ -21524,6 +21967,38 @@ class Scope {
       if (a.path[i] != b.path[i])
         return false;
     return true;
+  }
+  static bool same_node(const Node &a, const Node &b) {
+    return same_key(a.key, b.key) && a.script == b.script &&
+           same_handle(a.graph, b.graph) && same_handle(a.runtime, b.runtime) &&
+           same_handle(a.node, b.node) && a.factory == b.factory &&
+           a.birth == b.birth;
+  }
+  bool all_round(Round r) const {
+    for (size_t i = 0; i < count_; ++i)
+      if (entries_[i].live_round != r)
+        return false;
+    return true;
+  }
+  void update_round(Round completed) {
+    // Mixed per-Director generations keep the last globally complete round.
+    // They do not grant siblings any fresh-node or callback authority.
+    if (!count_ || all_round(completed))
+      round_ = completed;
+  }
+  bool any_round(Round r) const {
+    for (size_t i = 0; i < count_; ++i)
+      if (entries_[i].live_round == r)
+        return true;
+    return false;
+  }
+  bool pending_for(void *director) const {
+    return expecting_ && api_.held(ctx_) &&
+           (pending_director_ ? (director == pending_director_ &&
+                                 api_.pending_director_current &&
+                                 api_.pending_director_current(
+                                     ctx_, pending_round_, pending_director_))
+                              : api_.pending_current(ctx_, pending_round_));
   }
   static bool same_state(const State &a, const State &b) {
     uint64_t x = 0, y = 0;
@@ -21604,7 +22079,8 @@ class Scope {
   }
   static bool map_emit(void *p, const Node &n) {
     auto &s = *static_cast<Scope *>(p);
-    if (s.pending_count_ == max_nodes || !n.script || !n.graph.handle ||
+    if ((s.pending_director_ && n.key.director != s.pending_director_) ||
+        s.pending_count_ == max_nodes || !n.script || !n.graph.handle ||
         !n.runtime.handle || !n.node.handle || !n.factory || !n.birth ||
         n.key.length > 64 || !s.api_.owner_current(s.ctx_, n.key) ||
         !s.api_.node_current(s.ctx_, n) || !s.root_node(n))
@@ -21628,13 +22104,31 @@ public:
   bool current() const {
     if (!captured_ || !identity() || visiting_)
       return false;
-    if (expecting_)
+    if (expecting_) {
+      if (pending_director_) {
+        if (!pending_for(pending_director_))
+          return false;
+        for (size_t i = 0; i < count_; ++i) {
+          const auto &e = entries_[i];
+          if (e.live.key.director == pending_director_)
+            continue;
+          if (!api_.node_current(ctx_, e.live))
+            return false;
+          if (e.live_round == Round::restored) {
+            State now{};
+            if (!api_.read(ctx_, e.live, &now) || !same_state(now, e.saved))
+              return false;
+          }
+        }
+        return true;
+      }
       return api_.held(ctx_) && api_.pending_current(ctx_, pending_round_);
+    }
     for (size_t i = 0; i < count_; ++i) {
       const auto &e = entries_[i];
       if (!api_.node_current(ctx_, e.live))
         return false;
-      if (round_ == Round::restored) {
+      if (e.live_round == Round::restored) {
         State now{};
         if (!api_.read(ctx_, e.live, &now) || !same_state(now, e.saved))
           return false;
@@ -21665,9 +22159,16 @@ public:
       explicit Visiting(bool &p) : v(p) { v = true; }
       ~Visiting() { v = false; }
     };
-    uint64_t recipe=0;Result r=Result::invalid;
-    {Visiting guard(visiting_);r=api_.visit(ctx_,Round::source,capture_emit,this,&recipe);}
-    if(r==Result::waiting){(void)release(false);return fail(Result::waiting,"director_nodes_source_recipe_waiting");}
+    uint64_t recipe = 0;
+    Result r = Result::invalid;
+    {
+      Visiting guard(visiting_);
+      r = api_.visit(ctx_, Round::source, capture_emit, this, &recipe);
+    }
+    if (r == Result::waiting) {
+      (void)release(false);
+      return fail(Result::waiting, "director_nodes_source_recipe_waiting");
+    }
     if (r != Result::ok || !recipe)
       return fail(r == Result::ok ? Result::unsupported : r,
                   "director_nodes_source_recipe_unclosed");
@@ -21676,12 +22177,131 @@ public:
     return identity() ? Result::ok
                       : fail(Result::stale, "director_nodes_capture_changed");
   }
+  Result expect_remap(Round round, void *director) {
+    if (!director || !captured_ || expecting_ || visiting_ || !current() ||
+        !api_.held(ctx_) || !api_.visit_director ||
+        !api_.pending_director_current ||
+        (round != Round::exporting && round != Round::restoring) ||
+        !api_.pending_director_current(ctx_, round, director))
+      return fail(Result::stale, "director_nodes_director_transition_unowned");
+    for (size_t i = 0; i < count_; ++i)
+      if (entries_[i].source.key.director == director &&
+          round == Round::exporting &&
+          entries_[i].live_round != Round::source &&
+          entries_[i].live_round != Round::exporting)
+        return fail(Result::invalid, "director_nodes_director_round_order");
+    expecting_ = true;
+    pending_round_ = round;
+    pending_director_ = director;
+    return Result::ok;
+  }
+  Result remap_director(Round round, void *director) {
+    if (!director || !captured_ || !identity() || visiting_ || !expecting_ ||
+        pending_director_ != director || pending_round_ != round ||
+        !pending_for(director) || !api_.visit_director || !current())
+      return fail(Result::stale, "director_nodes_director_remap_unowned");
+    pending_count_ = 0;
+    for (size_t i = 0; i < max_nodes; ++i)
+      pending_[i].matched = false;
+    struct Visiting {
+      bool &v;
+      explicit Visiting(bool &p) : v(p) { v = true; }
+      ~Visiting() { v = false; }
+    } guard(visiting_);
+    uint64_t recipe = 0;
+    const auto status =
+        api_.visit_director(ctx_, round, director, map_emit, this, &recipe);
+    if (status != Result::ok)
+      return status;
+    size_t expected = 0;
+    for (size_t i = 0; i < count_; ++i)
+      expected += entries_[i].source.key.director == director;
+    if (!recipe || pending_count_ != expected)
+      return fail(Result::unsupported,
+                  "director_nodes_director_recipe_incomplete");
+    for (size_t i = 0; i < count_; ++i) {
+      auto &e = entries_[i];
+      if (e.source.key.director != director)
+        continue;
+      size_t found = pending_count_;
+      for (size_t j = 0; j < pending_count_; ++j)
+        if (same_key(e.source.key, pending_[j].node.key)) {
+          if (found != pending_count_)
+            return fail(Result::unsupported,
+                        "director_nodes_director_fresh_alias");
+          found = j;
+        }
+      if (found == pending_count_ || pending_[found].matched)
+        return fail(Result::unsupported, "director_nodes_director_key_missing");
+      const auto &node = pending_[found].node;
+      if (!(e.live_round == round && same_node(e.live, node)) &&
+          !api_.fresh(ctx_, round, e.live, node))
+        return fail(Result::stale, "director_nodes_director_birth_mismatch");
+      State state{};
+      if (!api_.read(ctx_, node, &state) || !valid_state(state))
+        return fail(Result::unsupported,
+                    "director_nodes_director_state_invalid");
+      pending_[found].observed = state;
+      pending_[found].matched = true;
+    }
+    if (!identity() || !pending_for(director))
+      return fail(Result::stale, "director_nodes_director_source_changed");
+    for (size_t i = 0; i < pending_count_; ++i) {
+      if (!api_.node_current(ctx_, pending_[i].node))
+        return fail(Result::stale, "director_nodes_director_fresh_changed");
+      for (size_t j = 0; j < count_; ++j) {
+        const auto &sibling = entries_[j].live;
+        if (sibling.key.director != director &&
+            (pending_[i].node.script == sibling.script ||
+             same_handle(pending_[i].node.node, sibling.node)))
+          return fail(Result::unsupported,
+                      "director_nodes_director_sibling_alias");
+      }
+    }
+    for (size_t i = 0; i < count_; ++i) {
+      auto &e = entries_[i];
+      if (e.source.key.director == director)
+        continue;
+      if (!api_.node_current(ctx_, e.live))
+        return fail(Result::stale, "director_nodes_director_sibling_changed");
+      if (e.live_round == Round::restored) {
+        State now{};
+        if (!api_.read(ctx_, e.live, &now) || !same_state(now, e.saved))
+          return fail(Result::stale,
+                      "director_nodes_director_sibling_state_changed");
+      }
+    }
+    for (size_t i = 0; i < count_; ++i) {
+      auto &e = entries_[i];
+      if (e.source.key.director != director)
+        continue;
+      for (size_t j = 0; j < pending_count_; ++j)
+        if (same_key(e.source.key, pending_[j].node.key)) {
+          if (!same_node(e.live, pending_[j].node))
+            e.retired = e.live;
+          e.live = pending_[j].node;
+          e.live_round = round;
+          e.observed = pending_[j].observed;
+          e.restored = e.write_duty = false;
+          break;
+        }
+    }
+    recipe_ ^= recipe;
+    recipe_ *= 1099511628211ULL;
+    expecting_ = false;
+    pending_director_ = nullptr;
+    pending_round_ = Round::source;
+    update_round(round);
+    return Result::ok;
+  }
   Result expect_remap(Round round) {
-    if (!captured_ || !identity() || visiting_ || !api_.held(ctx_) ||
+    if (!captured_ || !identity() || visiting_ || expecting_ ||
+        !api_.held(ctx_) ||
         (round != Round::exporting && round != Round::restoring) ||
         !api_.pending_current(ctx_, round))
       return fail(Result::stale, "director_nodes_transition_unowned");
     expecting_ = true;
+    pending_director_ = nullptr;
     pending_round_ = round;
     return Result::ok;
   }
@@ -21689,13 +22309,14 @@ public:
     if (!captured_ || !identity() || visiting_ || !api_.held(ctx_) ||
         (round != Round::exporting && round != Round::restoring))
       return fail(Result::stale, "director_nodes_remap_unavailable");
-    if (!expecting_ && round_ == round)
+    if (!expecting_ && round_ == round && all_round(round))
       return current()
                  ? Result::ok
                  : fail(Result::stale, "director_nodes_mapped_source_changed");
-    if (round == Round::exporting && round_ != Round::source)
+    if (round == Round::exporting && round_ != Round::source &&
+        round_ != Round::exporting)
       return fail(Result::invalid, "director_nodes_round_order");
-    if (expecting_ && pending_round_ != round)
+    if (expecting_ && (pending_round_ != round || pending_director_))
       return fail(Result::invalid, "director_nodes_pending_round_mismatch");
     pending_count_ = 0;
     for (size_t i = 0; i < max_nodes; ++i)
@@ -21724,11 +22345,14 @@ public:
           found = j;
         }
       if (found == pending_count_ || pending_[found].matched ||
-          !api_.fresh(ctx_, round, e.source, pending_[found].node))
+          (!(e.live_round == round &&
+             same_node(e.live, pending_[found].node)) &&
+           !api_.fresh(ctx_, round, e.live, pending_[found].node)))
         return fail(Result::stale, "director_nodes_birth_recipe_mismatch");
       State now{};
       if (!api_.read(ctx_, pending_[found].node, &now) || !valid_state(now))
         return fail(Result::unsupported, "director_nodes_fresh_state_invalid");
+      pending_[found].observed = now;
       pending_[found].matched = true;
     }
     if (!identity())
@@ -21737,12 +22361,11 @@ public:
       auto &e = entries_[i];
       for (size_t j = 0; j < pending_count_; ++j)
         if (same_key(e.source.key, pending_[j].node.key)) {
-          if (round_ == Round::exporting && round == Round::restoring)
+          if (!same_node(e.live, pending_[j].node))
             e.retired = e.live;
           e.live = pending_[j].node;
-          if (!api_.read(ctx_, e.live, &e.observed))
-            return fail(Result::stale,
-                        "director_nodes_remap_observation_changed");
+          e.live_round = round;
+          e.observed = pending_[j].observed;
           e.restored = e.write_duty = false;
           break;
         }
@@ -21750,6 +22373,7 @@ public:
     round_ = round;
     recipe_ = recipe;
     expecting_ = false;
+    pending_director_ = nullptr;
     pending_round_ = Round::source;
     return Result::ok;
   }
@@ -21760,7 +22384,7 @@ public:
       return fail(Result::stale, "director_nodes_restore_source_changed");
     if (!api_.held(ctx_))
       return fail(Result::waiting, "director_nodes_restore_not_held");
-    if (expecting_ || round_ == Round::exporting)
+    if (expecting_ || any_round(Round::exporting))
       return fail(Result::waiting, "director_nodes_source_graph_not_remapped");
     for (size_t i = 0; i < count_; ++i) {
       auto &e = entries_[i];
@@ -21785,20 +22409,38 @@ public:
           !same_state(now, e.saved))
         return fail(Result::stale, "director_nodes_restore_write_failed");
       e.restored = true;
+      e.live_round = Round::restored;
     }
     round_ = Round::restored;
     error_ = "none";
     return Result::ok;
   }
-  bool retired_receiver(void *script, const Key &key) const {
-    if (!captured_ || !identity())
+  // Retained metadata lookup for typed original callbacks. While a genuine
+  // rebuild is pending this never queries the destroyed old native graph.
+  bool lookup_receiver(void *script, bool retired, Node *out) const {
+    if (!script || !out || !captured_ || !identity())
       return false;
-    for (size_t i = 0; i < count_; ++i)
-      if ((entries_[i].source.script == script ||
-           entries_[i].retired.script == script) &&
-          same_key(entries_[i].source.key, key))
-        return true;
-    return false;
+    size_t matches = 0;
+    for (size_t i = 0; i < count_; ++i) {
+      const auto &e = entries_[i];
+      const Node *n =
+          retired ? (pending_for(e.live.key.director) && e.live.script == script
+                         ? &e.live
+                     : e.retired.script == script ? &e.retired
+                     : e.source.script == script  ? &e.source
+                                                  : nullptr)
+          : e.live.script == script ? &e.live
+                                    : nullptr;
+      if (n) {
+        *out = *n;
+        ++matches;
+      }
+    }
+    return matches == 1;
+  }
+  bool retired_receiver(void *script, const Key &key) const {
+    Node node{};
+    return lookup_receiver(script, true, &node) && same_key(node.key, key);
   }
   Result release(bool owned) {
     if (!epoch_)
@@ -21825,6 +22467,7 @@ public:
     epoch_ = recipe_ = 0;
     captured_ = expecting_ = false;
     round_ = pending_round_ = Round::source;
+    pending_director_ = nullptr;
     error_ = "none";
     return Result::ok;
   }
@@ -21839,6 +22482,12 @@ using Mp4DirectorContexts = mp4dn::Result (*)(
     mp4dn::Round, mp4dn::Result (*)(void *, Mp4TimelineContext &), void *,
     uint64_t *);
 Mp4DirectorContexts mp4_director_node_contexts = nullptr;
+using Mp4DirectorContextsFor = mp4dn::Result (*)(
+    mp4dn::Round, void *, mp4dn::Result (*)(void *, Mp4TimelineContext &),
+    void *, uint64_t *);
+Mp4DirectorContextsFor mp4_director_node_contexts_for = nullptr;
+bool (*mp4_director_control_pending_for)(mp4dn::Round, void *) = nullptr;
+
 uint64_t (*mp4_director_control_graph_birth)(const Mp4TimelineContext &) =
     nullptr;
 bool (*mp4_director_control_fresh_birth)(mp4dn::Round, const mp4dn::Node &,
@@ -21848,7 +22497,9 @@ bool mp4_director_node_schema(void *script) {
   if (!mp4_stage_other_pins_ready() ||
       !mp4_timeline_exact(script, mp4_stage_other_pins.director_control))
     return false;
-  for(const auto&binding:mp4_director_control_pins.calls)if(!mp4_prefix(binding)&&!mp4_hook_was_statically_verified(binding))return false;
+  for (const auto &binding : mp4_director_control_pins.calls)
+    if (!mp4_prefix(binding) && !mp4_hook_was_statically_verified(binding))
+      return false;
   const char *names[] = {"director", "m_SyncTime", "m_AssetDuration"};
   const size_t offsets[] = {16, 24, 32};
   const uint32_t kinds[] = {18, 2, 13};
@@ -21864,15 +22515,36 @@ bool mp4_director_node_schema(void *script) {
   }
   return true;
 }
-bool(*mp4_director_control_target_current)(void*)=nullptr;
-bool mp4_director_node_authored_target(const mp4ctl::Owner&owner,void*target){
- if(!mp4_director_control_target_current||!mp4_director_control_target_current(target))return false;
- struct Context{void*director=nullptr;void*tracks[1]{};void*clips[1]{};void*clip_tracks[1]{};size_t track_count=1,clip_count=1;const mp4ctl::Owner*owner=nullptr;};
- Context c{};c.director=owner.director;c.tracks[0]=owner.track;c.clips[0]=owner.clip;c.clip_tracks[0]=owner.track;c.owner=&owner;
- Mp4ControlEdgeObservation observed{};
- if(!mp4_control_edge_observe_impl(c,0,observed,[](const Context&v){return mp4_control_owner_current(nullptr,*v.owner);}))return false;
- size_t matches=0;for(size_t i=0;i<observed.count;++i)if(observed.children[i]==target)++matches;
- return matches==1&&mp4_director_control_target_current(target);
+bool (*mp4_director_control_target_current)(void *) = nullptr;
+bool mp4_director_node_authored_target(const mp4ctl::Owner &owner,
+                                       void *target) {
+  if (!mp4_director_control_target_current ||
+      !mp4_director_control_target_current(target))
+    return false;
+  struct Context {
+    void *director = nullptr;
+    void *tracks[1]{};
+    void *clips[1]{};
+    void *clip_tracks[1]{};
+    size_t track_count = 1, clip_count = 1;
+    const mp4ctl::Owner *owner = nullptr;
+  };
+  Context c{};
+  c.director = owner.director;
+  c.tracks[0] = owner.track;
+  c.clips[0] = owner.clip;
+  c.clip_tracks[0] = owner.track;
+  c.owner = &owner;
+  Mp4ControlEdgeObservation observed{};
+  if (!mp4_control_edge_observe_impl(c, 0, observed, [](const Context &v) {
+        return mp4_control_owner_current(nullptr, *v.owner);
+      }))
+    return false;
+  size_t matches = 0;
+  for (size_t i = 0; i < observed.count; ++i)
+    if (observed.children[i] == target)
+      ++matches;
+  return matches == 1 && mp4_director_control_target_current(target);
 }
 bool mp4_director_node_owner(void *, const mp4dn::Key &key) {
   mp4ctl::Owner owner{};
@@ -21881,7 +22553,8 @@ bool mp4_director_node_owner(void *, const mp4dn::Key &key) {
          owner.track == key.track && owner.clip == key.clip &&
          mp4_control_owner_current(nullptr, owner) &&
          mp4_type_is(key.target, "UnityEngine.Playables.PlayableDirector") &&
-         mp4_alive(key.target)&&mp4_director_node_authored_target(owner,key.target);
+         mp4_alive(key.target) &&
+         mp4_director_node_authored_target(owner, key.target);
 }
 bool mp4_director_node_current(void *, const mp4dn::Node &n) {
   if (!mp4_director_node_owner(nullptr, n.key) ||
@@ -21943,10 +22616,12 @@ struct Mp4DirectorNodeVisit {
   mp4dn::Round round = mp4dn::Round::source;
   mp4dn::Emit emit = nullptr;
   void *context = nullptr;
+  void *director = nullptr;
 };
 mp4dn::Result mp4_director_node_context(void *opaque, Mp4TimelineContext &c) {
   auto &visit = *static_cast<Mp4DirectorNodeVisit *>(opaque);
-  if (!visit.emit || !mp4_timeline_current(c) || c.element_count > 4096 ||
+  if (!visit.emit || (visit.director && c.director != visit.director) ||
+      !mp4_timeline_current(c) || c.element_count > 4096 ||
       !mp4_timeline_runtime_elements(c, false))
     return mp4dn::Result::stale;
   for (size_t i = 0; i < c.element_count; ++i) {
@@ -21979,8 +22654,8 @@ mp4dn::Result mp4_director_node_context(void *opaque, Mp4TimelineContext &c) {
         return mp4dn::Result::waiting;
     }
     struct Path {
-      static void*operator new(size_t,void*p)noexcept{return p;}
-      static void operator delete(void*,void*)noexcept{}
+      static void *operator new(size_t, void *p) noexcept { return p; }
+      static void operator delete(void *, void *) noexcept {}
       mp4actor::Handle node{};
       uint16_t input[64]{};
       uint16_t length = 0;
@@ -21994,7 +22669,8 @@ mp4dn::Result mp4_director_node_context(void *opaque, Mp4TimelineContext &c) {
     } cleanup{paths};
     // Path has trivial bytes but default construction is explicit in C++17.
     size_t used = 1;
-    for(size_t j=0;j<4096;++j)new(&paths[j])Path{};
+    for (size_t j = 0; j < 4096; ++j)
+      new (&paths[j]) Path{};
     paths[0].node = runtime;
     auto api = mp4_actor_state_api();
     for (size_t p = 0; p < used; ++p) {
@@ -22065,6 +22741,18 @@ mp4dn::Result mp4_director_node_context(void *opaque, Mp4TimelineContext &c) {
     Mp4DirectorNodeVisit v{round, emit, context};
     return mp4_director_node_contexts(round, mp4_director_node_context, &v,
                                       recipe);
+  };
+  a.pending_director_current = [](void *, mp4dn::Round round, void *director) {
+    return mp4_director_control_pending_for &&
+           mp4_director_control_pending_for(round, director);
+  };
+  a.visit_director = [](void *, mp4dn::Round round, void *director,
+                        mp4dn::Emit emit, void *context, uint64_t *recipe) {
+    if (!mp4_director_node_contexts_for || !director)
+      return mp4dn::Result::unsupported;
+    Mp4DirectorNodeVisit v{round, emit, context, director};
+    return mp4_director_node_contexts_for(
+        round, director, mp4_director_node_context, &v, recipe);
   };
   a.node_current = mp4_director_node_current;
   a.fresh = [](void *, mp4dn::Round r, const mp4dn::Node &old,
@@ -24331,8 +25019,8 @@ const auto&mp4_child_playback_pins=idoly_mp4_playback::ios_profile;
 #else
 const auto&mp4_child_playback_pins=idoly_mp4_playback::android_profile;
 #endif
-bool mp4_child_bindings_current(){
- if(!game_call()||!mp4_source_verified||!mp4_actor_source_verified||!mp4_child_speed_bindings()||!mp4_child_execution_ready()
+bool mp4_child_original_bindings_current(){
+ if(!game_call()||!mp4_source_verified||!mp4_actor_source_verified||!mp4_child_speed_bindings()
   ||!mp4_child_birth_configured||!mp4_child_birth_bindings())return false;
  const auto&p=mp4_child_playback_pins;
  for(const auto*pin:{&p.director_state,&p.director_play,&p.director_pause,&p.director_resume,&p.director_rebuild}){
@@ -24351,6 +25039,7 @@ bool mp4_child_bindings_current(){
   &&reinterpret_cast<uintptr_t>(a.director_resume)==image_base+p.director_resume.rva
   &&reinterpret_cast<uintptr_t>(a.director_rebuild)==image_base+p.director_rebuild.rva;
 }
+bool mp4_child_bindings_current(){return mp4_child_execution_ready()&&mp4_child_original_bindings_current();}
 bool mp4_child_call_bindings(void*,mp4child::Original rebuild,mp4child::Original evaluate,mp4child::Original resume,mp4child::Original pause){
  return mp4_child_bindings_current()&&reinterpret_cast<uintptr_t>(rebuild)==reinterpret_cast<uintptr_t>(mp4_api.automatic_playback.director_rebuild)
   &&reinterpret_cast<uintptr_t>(evaluate)==reinterpret_cast<uintptr_t>(mp4_api.director_evaluate)
@@ -24573,6 +25262,576 @@ mp4child::Result mp4_child_parent_state_checkpoint(){
 
 // END_MP4_CHILD_SOURCE_ASSEMBLY_HOST
 
+// BEGIN_MP4_CHILD_DRIVING_STATE
+// Actual RuntimeClip/DirectorControl driving, independent from a fictional
+// persistent native parent relation. All private samples use the ORIGINAL
+// callbacks. No time setter, native evaluation or universal parent seek here.
+namespace mp4_child_driving {
+namespace dn=idoly_mp4_director_nodes;
+namespace dm=mp4_director_maintenance;
+namespace child=mp4_child_source;
+using Result=child::Result;
+enum class Event:uint8_t {prepare=0,play=1,pause=2,process=3,update_time=4,sync_start=5,sync_stop=6};
+enum class Dispatch:uint8_t {ordinary,owned,reject};
+struct Role {dn::Node node{};uint64_t source_capture=0;bool active=false;};
+using Emit=bool(*)(void*,const Role&);
+struct Stamp {dm::Call call{};uint64_t tick=0;uint8_t phase=0;bool frame=false;};
+struct Ticket {uint64_t serial=0;uint16_t depth=0;};
+struct Api {
+ void*context=nullptr;
+ bool(*current)(void*,uint64_t,uintptr_t)=nullptr;
+ bool(*held)(void*)=nullptr;
+ // Actual installed typed original gateways/callback source cohort AND exact
+ // native phase Journal routes, not a configured flag or generic permission.
+ bool(*bindings)(void*)=nullptr;
+ Result(*source_roles)(void*,Emit,void*,uint64_t*)=nullptr;
+ Result(*live_roles)(void*,Emit,void*,uint64_t*)=nullptr;
+ bool(*edge)(void*,const Role&,const child::State&,uint64_t)=nullptr;
+ bool(*node_current)(void*,const dn::Node&)=nullptr;
+ // Actual current same Raw/Journal call. For frames: kind7 plus accepted
+ // AnimationGate phase/tick original-stack witness; held Rebuild/Eval/Play/
+ // Pause use their actual already-invoked typed Call, never a whole epoch.
+ bool(*origin)(void*,Stamp*)=nullptr;
+ bool(*frame_closed)(void*,uint64_t,uint64_t)=nullptr;
+ bool(*frame_issued_current)(void*,uint64_t,uint64_t)=nullptr;
+ bool(*frame_revoked_unconsumed)(void*,uint64_t,uint64_t)=nullptr;
+ bool(*nested_origin)(void*,Event,Event,uintptr_t,uintptr_t)=nullptr;
+ double(*target_time)(void*,void*)=nullptr;
+};
+class Scope {
+ static constexpr size_t max_roles=4096,max_depth=256;
+ struct Row {static void*operator new(size_t,void*p)noexcept{return p;}static void operator delete(void*,void*)noexcept{}
+ Role source{};uint16_t events[7]{};bool observed=false,last_active=false;};
+ struct Entry {static void*operator new(size_t,void*p)noexcept{return p;}static void operator delete(void*,void*)noexcept{}
+ dn::Node node{};Stamp stamp{};Event event=Event::prepare;uint64_t serial=0;size_t row=0;bool invoked=false;uintptr_t original_return=0;};
+ Api api_{};Row*rows_=nullptr;Entry*stack_=nullptr;size_t count_=0,depth_=0;
+ uint64_t epoch_=0,sequence_=0,recipe_=0,tick_=0;uintptr_t asset_=0;
+ bool configured_=false,captured_=false,visiting_=false,frame_=false,frame_issued_=false,have_tick_=false,failed_=false;
+ const char*error_="none";
+ static bool key(const dn::Key&a,const dn::Key&b){
+  if(a.director!=b.director||a.asset!=b.asset||a.track!=b.track||a.clip!=b.clip||a.control_asset!=b.control_asset||a.target!=b.target||a.length!=b.length||a.length>64)return false;
+  for(size_t i=0;i<a.length;++i)if(a.path[i]!=b.path[i])return false;return true;
+ }
+ static bool handle(dn::Handle a,dn::Handle b){return a.handle==b.handle&&a.version==b.version;}
+ static bool same_node(const dn::Node&a,const dn::Node&b){return key(a.key,b.key)&&a.script==b.script&&handle(a.graph,b.graph)&&handle(a.runtime,b.runtime)&&handle(a.node,b.node)&&a.factory==b.factory&&a.birth==b.birth;}
+ static bool same_call(const dm::Call&a,const dm::Call&b){return a.kind==b.kind&&a.epoch==b.epoch&&a.serial==b.serial&&a.source_asset==b.source_asset&&a.receiver==b.receiver&&a.method==b.method&&a.original_receipt==b.original_receipt;}
+ static bool same_stamp(const Stamp&a,const Stamp&b){return a.frame==b.frame&&a.tick==b.tick&&a.phase==b.phase&&same_call(a.call,b.call);}
+ Result fail(Result result,const char*why){failed_=true;error_=why;return result;}
+ bool identity()const{return captured_&&!failed_&&api_.bindings(api_.context)&&api_.current(api_.context,epoch_,asset_);}
+ size_t find(const dn::Key&k)const{size_t found=count_;for(size_t i=0;i<count_;++i)if(key(rows_[i].source.node.key,k)){if(found!=count_)return count_;found=i;}return found;}
+ bool valid_stamp(const Stamp&s)const{
+  if(!s.call.epoch||s.call.epoch!=epoch_||s.call.source_asset!=asset_||!s.call.serial||!s.call.method||!s.call.receiver||!s.call.original_receipt)return false;
+  if(s.frame)return frame_&&frame_issued_&&s.tick==tick_&&s.phase<8&&s.call.kind==dm::Kind::native_phase;
+  return !frame_issued_&&api_.held(api_.context)&&(s.call.kind==dm::Kind::play||s.call.kind==dm::Kind::stop||s.call.kind==dm::Kind::rebuild||s.call.kind==dm::Kind::zero_evaluate||s.call.kind==dm::Kind::saved_evaluate||s.call.kind==dm::Kind::maintenance);
+ }
+ static bool capture_emit(void*p,const Role&r){auto&s=*static_cast<Scope*>(p);
+  if(s.count_==max_roles||!r.source_capture||!r.node.factory||r.node.birth||!r.node.script||!r.node.node.handle||!r.node.runtime.handle||r.node.key.length>64
+   ||!s.api_.node_current(s.api_.context,r.node)||s.find(r.node.key)!=s.count_)return false;
+  s.rows_[s.count_++].source=r;return true;
+ }
+ static bool live_emit(void*p,const Role&r){auto&s=*static_cast<Scope*>(p);const size_t index=s.find(r.node.key);
+  if(index==s.count_||s.rows_[index].observed||!r.node.factory||!r.node.birth||!s.api_.node_current(s.api_.context,r.node))return false;
+  auto&row=s.rows_[index];row.observed=true;
+  if(r.active&&!row.events[static_cast<size_t>(Event::process)])return false;
+  if(!r.active&&row.last_active&&!row.events[static_cast<size_t>(Event::pause)])return false;
+  row.last_active=r.active;return true;
+ }
+public:
+ Scope()=default;Scope(const Scope&)=delete;Scope&operator=(const Scope&)=delete;
+ bool configure(Api api){if(configured_||!api.current||!api.held||!api.bindings||!api.source_roles||!api.live_roles||!api.edge||!api.node_current||!api.origin||!api.frame_closed||!api.frame_issued_current||!api.frame_revoked_unconsumed||!api.nested_origin||!api.target_time)return false;api_=api;configured_=true;return true;}
+ bool captured()const{return captured_;}bool failed()const{return failed_;}const char*error()const{return error_;}
+ Result capture(uint64_t epoch,uintptr_t asset){
+  if(captured_)return identity()?Result::ok:Result::stale;
+  if(!configured_||!epoch||!asset||!api_.bindings(api_.context)||!api_.current(api_.context,epoch,asset)||!api_.held(api_.context))return Result::unsupported;
+  rows_=static_cast<Row*>(::malloc(max_roles*sizeof(Row)));stack_=static_cast<Entry*>(::malloc(max_depth*sizeof(Entry)));
+  if(!rows_||!stack_){::free(rows_);::free(stack_);rows_=nullptr;stack_=nullptr;return fail(Result::failed,"child_drive_allocation_failed");}
+  for(size_t i=0;i<max_roles;++i)new(&rows_[i])Row{};for(size_t i=0;i<max_depth;++i)new(&stack_[i])Entry{};
+  epoch_=epoch;asset_=asset;Result result=Result::failed;
+  {struct Visit{bool&v;Visit(bool&x):v(x){v=true;}~Visit(){v=false;}}visit(visiting_);result=api_.source_roles(api_.context,capture_emit,this,&recipe_);}
+  if(result!=Result::ok||!recipe_){const auto r=result==Result::ok?Result::unsupported:result;(void)release();return r;}
+  captured_=true;return identity()?Result::ok:fail(Result::stale,"child_drive_capture_source_changed");
+ }
+ Result timing(const child::State&s,bool incoming,uint64_t dependency_recipe){
+  if(!identity()||!api_.held(api_.context)||s.owner.epoch!=epoch_||s.root_asset!=asset_||!dependency_recipe)return Result::stale;
+  size_t roles=0,active=0;
+  for(size_t i=0;i<count_;++i){const auto&r=rows_[i].source;if(reinterpret_cast<uintptr_t>(r.node.key.target)!=s.owner.director)continue;
+   if(!api_.edge(api_.context,r,s,dependency_recipe))return Result::unsupported;++roles;active+=r.active?1:0;}
+  if(incoming!=(roles!=0))return Result::stale;
+  if(!roles||s.mode<0||s.mode>3||!__builtin_isfinite(s.time))return Result::unsupported;
+  // Manual source children retain the actual existing compiled Control role.
+  // GameTime/Unscaled/DSP source children need exactly one ACTUAL CURRENT active
+  // RuntimeClip control. A future/inactive authored clip cannot admit them.
+  return s.mode==3||active==1?Result::ok:Result::unsupported;
+ }
+ Result begin_frame(uint64_t tick){
+  if(!identity()||visiting_||depth_||frame_||!api_.held(api_.context)||(!have_tick_?tick!=0:tick_==~uint64_t(0)||tick!=tick_+1))return Result::invalid;
+  tick_=tick;frame_=true;frame_issued_=false;
+  for(size_t i=0;i<count_;++i){for(auto&n:rows_[i].events)n=0;rows_[i].observed=false;}
+  return Result::ok;
+ }
+ // Preparation is neutral bookkeeping. Actual native grant has a separate
+ // exact epoch/tick receipt; an unissued preparation cannot own Kind7 or block
+ // genuine held Raw1..6 restoration callbacks.
+ Result mark_frame_issued(uint64_t tick){
+  if(!identity()||!frame_||tick!=tick_||visiting_||depth_||!api_.frame_issued_current(api_.context,epoch_,tick))return Result::invalid;
+  frame_issued_=true;return Result::ok;
+ }
+ Result discard_prepared_frame(uint64_t tick){
+  if(!identity()||!frame_||frame_issued_||tick!=tick_||visiting_||depth_||!api_.held(api_.context))return Result::invalid;
+  frame_=false;if(have_tick_)--tick_;return Result::ok;
+ }
+ Result discard_issued_unconsumed(uint64_t tick){
+  if(!identity()||!frame_||!frame_issued_||tick!=tick_||visiting_||depth_||!api_.held(api_.context)
+   ||!api_.frame_revoked_unconsumed(api_.context,epoch_,tick))return Result::invalid;
+  for(size_t i=0;i<count_;++i)for(const auto&event:rows_[i].events)if(event)return Result::invalid;
+  frame_=frame_issued_=false;if(have_tick_)--tick_;return Result::ok;
+ }
+ Dispatch enter(Event event,const dn::Node&node,Ticket*out){
+  if(out)*out={};if(!out||!captured_)return Dispatch::ordinary;
+  if(!identity()||visiting_||event>Event::process||depth_==max_depth||sequence_==~uint64_t(0)||!api_.node_current(api_.context,node))return Dispatch::reject;
+  const size_t row=find(node.key);Stamp stamp{};
+  if(row==count_||!api_.origin(api_.context,&stamp)||!valid_stamp(stamp))return Dispatch::reject;
+  auto&e=stack_[depth_];e={node,stamp,event,++sequence_,row,false};++depth_;*out={e.serial,static_cast<uint16_t>(depth_)};return Dispatch::owned;
+ }
+ Dispatch enter_nested(Event event,void*script,dn::Handle argument,bool graph,double time,uintptr_t caller,Ticket*out){
+  if(out)*out={};if(!out||!captured_)return Dispatch::ordinary;
+  if(!identity()||!depth_||event<Event::update_time||event>Event::sync_stop||depth_==max_depth||sequence_==~uint64_t(0))return Dispatch::reject;
+  const auto&parent=stack_[depth_-1];Stamp stamp{};
+  if(!parent.invoked||parent.node.script!=script||parent.event>Event::process||!caller
+   ||!api_.nested_origin(api_.context,parent.event,event,caller,parent.original_return)||!api_.origin(api_.context,&stamp)||!same_stamp(stamp,parent.stamp)
+   ||!api_.node_current(api_.context,parent.node)||!handle(argument,graph?parent.node.graph:parent.node.node)
+   ||(graph&&!__builtin_isfinite(time)))return Dispatch::reject;
+  auto&e=stack_[depth_];e={parent.node,stamp,event,++sequence_,parent.row,false};++depth_;*out={e.serial,static_cast<uint16_t>(depth_)};return Dispatch::owned;
+ }
+ // Called only at entry to the SAME-ABI musttail Prepare original thunk.
+ // Capture its real machine return PC; the original tail-B to SyncStart
+ // inherits this exact continuation. No native query or caller-supplied epoch.
+ bool record_original_return(void*script,uintptr_t actual)noexcept{
+  if(!captured_||!depth_||!actual)return false;auto&e=stack_[depth_-1];
+  if(e.event!=Event::prepare||e.node.script!=script||!e.invoked||e.original_return)return false;
+  e.original_return=actual;return true;
+ }
+ bool invoked(Ticket t){if(!identity()||!depth_||t.depth!=depth_)return false;auto&e=stack_[depth_-1];Stamp now{};
+  if(e.serial!=t.serial||e.invoked||!api_.origin(api_.context,&now)||!same_stamp(now,e.stamp))return false;e.invoked=true;return true;}
+ bool returned(Ticket t){
+  if(!captured_||!depth_||t.depth!=depth_)return false;auto&e=stack_[depth_-1];Stamp now{};
+  const bool valid=identity()&&e.serial==t.serial&&e.invoked&&api_.origin(api_.context,&now)&&same_stamp(now,e.stamp)&&api_.node_current(api_.context,e.node)
+   &&__builtin_isfinite(api_.target_time(api_.context,e.node.key.target));
+  if(!valid)return false;
+  if(e.stamp.frame){auto&n=rows_[e.row].events[static_cast<size_t>(e.event)];if(n==65535)return false;++n;}
+  e={};--depth_;return true;
+ }
+ // Exact stack withdrawal on exception/source loss. No old native query and
+ // no original call. The outer job must quarantine before ordinary fallback.
+ void abandon(Ticket t)noexcept{if(depth_&&t.depth==depth_&&stack_[depth_-1].serial==t.serial){stack_[depth_-1]={};--depth_;}failed_=true;error_="child_drive_original_unclosed";}
+ Result finish_frame(uint64_t tick){
+  if(failed_)return Result::failed;
+  if(!identity())return Result::stale;
+  if(!frame_||!frame_issued_||tick!=tick_||depth_||visiting_||!api_.held(api_.context)||!api_.frame_closed(api_.context,epoch_,tick))return Result::waiting;
+  uint64_t complete=0;Result result=Result::failed;
+  {struct Visit{bool&v;Visit(bool&x):v(x){v=true;}~Visit(){v=false;}}visit(visiting_);result=api_.live_roles(api_.context,live_emit,this,&complete);}
+  if(result!=Result::ok)return fail(result,"child_drive_frame_recipe_unclosed");
+  if(!complete)return fail(Result::unsupported,"child_drive_frame_recipe_missing");
+  for(size_t i=0;i<count_;++i)if(!rows_[i].observed)return fail(Result::unsupported,"child_drive_frame_role_missing");
+  frame_=frame_issued_=false;have_tick_=true;return identity()?Result::ok:fail(Result::stale,"child_drive_frame_source_changed");
+ }
+ Result release()noexcept{
+  if(depth_||visiting_)return Result::waiting;
+  ::free(rows_);::free(stack_);rows_=nullptr;stack_=nullptr;count_=0;epoch_=recipe_=tick_=0;asset_=0;
+  frame_=frame_issued_=have_tick_=captured_=failed_=false;error_="none";return Result::ok;
+ }
+};
+} // namespace mp4_child_driving
+// END_MP4_CHILD_DRIVING_STATE
+
+// BEGIN_MP4_CHILD_DRIVING_PINS
+// Exact original DirectorControl hooks7. Standard descriptor aliases use
+// selectors/source24 below; nested hidden MethodInfo is opaque, never decoded.
+struct Mp4ChildDrivingHookPins{struct Method{uintptr_t rva;uint8_t source24[24];}methods[7];struct Edge{uint8_t from,to;uintptr_t branch,return_pc;uint32_t instruction;bool tail;}edges[3];};
+[[maybe_unused]] constexpr Mp4ChildDrivingHookPins mp4_child_driving_hooks_android={
+ {{0x8ef6fd4,{0xff,0x03,0x02,0xd1,0xfe,0x23,0x00,0xf9,0xf8,0x5f,0x05,0xa9,0xf6,0x57,0x06,0xa9,0xf4,0x4f,0x07,0xa9,0xf7,0x8b,0x00,0xd0}},{0x8ef7484,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0xf4,0x8b,0x00,0xb0,0xd5,0x4f,0x00,0xd0,0x88,0xc6,0x75,0x39,0xb5,0xaa,0x47,0xf9}},{0x8ef7558,{0xfe,0x0f,0x1d,0xf8,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xf5,0x8b,0x00,0xb0,0xd6,0x4f,0x00,0xd0,0xa8,0xca,0x75,0x39}},{0x8ef7658,{0xff,0x03,0x01,0xd1,0xfe,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9,0xf6,0x8b,0x00,0xb0,0xd7,0x4f,0x00,0xd0}},{0x8ef79ac,{0xe9,0x23,0xbc,0x6d,0xfe,0x0b,0x00,0xf9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9,0xf6,0x8b,0x00,0xb0,0xc8,0xde,0x75,0x39}},{0x8ef73c4,{0xff,0xc3,0x00,0xd1,0xe8,0x0b,0x00,0xfd,0xfe,0x4f,0x02,0xa9,0xe1,0x0b,0x00,0xa9,0xf3,0x03,0x00,0xaa,0x00,0x08,0x40,0xf9}},{0x8ef7b44,{0xff,0xc3,0x00,0xd1,0xe8,0x0b,0x00,0xfd,0xfe,0x4f,0x02,0xa9,0xe1,0x0b,0x00,0xa9,0xf3,0x03,0x00,0xaa,0x00,0x08,0x40,0xf9}}},
+ {{0,5,0x8ef7180,0,0x14000091,true},{3,4,0x8ef7758,0x8ef775c,0x94000095,false},{3,6,0x8ef7844,0x8ef7848,0x940000c0,false}}
+};
+[[maybe_unused]] constexpr Mp4ChildDrivingHookPins mp4_child_driving_hooks_ios={
+ {{0x7798c40,{0xff,0x03,0x02,0xd1,0xf8,0x5f,0x04,0xa9,0xf6,0x57,0x05,0xa9,0xf4,0x4f,0x06,0xa9,0xfd,0x7b,0x07,0xa9,0xfd,0xc3,0x01,0x91}},{0x7799174,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91,0xf3,0x03,0x00,0xaa,0xf4,0x8b,0x01,0xf0}},{0x77992a4,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91,0xf4,0x03,0x03,0xaa,0xf3,0x03,0x00,0xaa}},{0x77993e0,{0xff,0x43,0x01,0xd1,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9,0xfd,0x7b,0x04,0xa9,0xfd,0x03,0x01,0x91}},{0x7799798,{0xe9,0x23,0xbc,0x6d,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9,0xfd,0xc3,0x00,0x91,0xf3,0x03,0x02,0xaa}},{0x7799098,{0xff,0x03,0x01,0xd1,0xe9,0x23,0x01,0x6d,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9,0xfd,0xc3,0x00,0x91,0xf3,0x03,0x00,0xaa}},{0x7799934,{0xff,0x03,0x01,0xd1,0xe9,0x23,0x01,0x6d,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9,0xfd,0xc3,0x00,0x91,0xf3,0x03,0x00,0xaa}}},
+ {{0,5,0x7798e24,0,0x1400009d,true},{3,4,0x7799528,0x779952c,0x9400009c,false},{3,6,0x7799614,0x7799618,0x940000c8,false}}
+};
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto&mp4_child_driving_hooks=mp4_child_driving_hooks_ios;
+#else
+constexpr const auto&mp4_child_driving_hooks=mp4_child_driving_hooks_android;
+#endif
+
+// END_MP4_CHILD_DRIVING_PINS
+
+// BEGIN_MP4_CHILD_DRIVING_HOST
+// Actual source RuntimeClip/DirectorControl roles and entered native-phase
+// receipts. No persistent graph-parent state, all-Manual admission or seek.
+namespace mp4drive=mp4_child_driving;
+mp4drive::Scope mp4_child_driving_scope;
+std::atomic<bool> mp4_child_driving_active{false},mp4_child_driving_rejected{false};
+bool (*mp4_child_driving_hooks_current)()=nullptr;
+// Installation must prove each exact typed target, source24, saved original,
+// gateway and publication. Root joins its already-existing complete Context
+// recipe through mp4_director_node_contexts, never a configured-only flag.
+bool mp4_child_driving_bindings(void*){
+ return game_call()&&mp4_child_driving_hooks_current&&mp4_child_driving_hooks_current()
+  &&mp4_native_phase_routes_ready()&&mp4_api.active_enabled
+  &&reinterpret_cast<uintptr_t>(mp4_api.active_enabled)==image_base+mp4_profile.active_enabled.rva
+  &&mp4_prefix(mp4_profile.active_enabled)&&mp4_child_original_bindings_current();
+}
+bool mp4_child_driving_source_current(void*,uint64_t epoch,uintptr_t asset){
+ return !mp4_child_driving_rejected.load(std::memory_order_acquire)&&game_call()
+  &&mp4_child_lineage_current()&&epoch==mp4_child_lineage_bank.epoch
+  &&asset==mp4_child_lineage_bank.asset&&mp4_scene_source_current();
+}
+[[maybe_unused]] bool mp4_child_driving_same_node(const mp4dn::Node&a,const mp4dn::Node&b){
+ const auto&x=a.key;const auto&y=b.key;
+ if(x.director!=y.director||x.asset!=y.asset||x.track!=y.track||x.clip!=y.clip||x.control_asset!=y.control_asset||x.target!=y.target||x.length!=y.length||x.length>64
+  ||a.script!=b.script||a.graph.handle!=b.graph.handle||a.graph.version!=b.graph.version||a.runtime.handle!=b.runtime.handle||a.runtime.version!=b.runtime.version||a.node.handle!=b.node.handle||a.node.version!=b.node.version||a.factory!=b.factory||a.birth!=b.birth)return false;
+ for(size_t i=0;i<x.length;++i)if(x.path[i]!=y.path[i])return false;
+ return true;
+}
+// Normal live callbacks require the real current graph/path. A retiring
+// callback needs a separate exact BEFORE/current raw-call adapter; this
+// function deliberately grants no old graph fallback.
+bool mp4_child_driving_node_current(void*,const mp4dn::Node&node){return mp4_director_node_current(nullptr,node);}
+struct Mp4ChildDrivingRoles {
+ mp4dn::Round round=mp4dn::Round::source;
+ mp4drive::Emit emit=nullptr;void*context=nullptr;Mp4TimelineContext*timeline=nullptr;
+ uint64_t source_capture=0;
+};
+bool mp4_child_driving_runtime_active(Mp4TimelineContext&c,const mp4dn::Node&node,bool*out){
+ if(out)*out=false;
+ if(!out||!mp4_timeline_current(c)||!mp4_timeline_lists_current(c))return false;
+ size_t element=c.element_count;
+ for(size_t i=0;i<c.element_count;++i){
+  void*clip=nullptr;
+  if(!mp4_timeline_exact(c.elements[i],mp4_timeline_pins.clip)||!mp4_actor_field(c.elements[i],24,clip))continue;
+  if(clip==node.key.clip&&c.runtime_playables[i].handle==node.runtime.handle&&c.runtime_playables[i].version==node.runtime.version){if(element!=c.element_count)return false;element=i;}
+ }
+ if(element==c.element_count)return false;
+ // The exact original Evaluate clears/fills scratch32, evaluates every entry,
+ // and appends the same entries in order to authoritative24. It leaves both
+ // lists populated at return. Null intervalTree16 early-returns and cannot
+ // certify a current active set. Root's finite callback closure and Context
+ // recipe must remain current after EvaluateCallbacks48.
+ void*tree=nullptr;if(!mp4_actor_field(c.root_script,16,tree)||!tree)return false;
+ const Mp4TimelineList*active=nullptr,*scratch=nullptr;
+ for(size_t i=0;i<c.list_count;++i){const auto&l=c.lists[i];if(l.owner!=c.root_script)continue;
+  if(l.owner_offset==24){if(active)return false;active=&l;}
+  if(l.owner_offset==32){if(scratch)return false;scratch=&l;}}
+ if(!active||!scratch||active->stride!=8||scratch->stride!=8||active->count<0||active->count>4096||active->count!=scratch->count)return false;
+ for(int32_t i=0;i<active->count;++i){void*a=nullptr,*b=nullptr;
+  ::memcpy(&a,active->data+static_cast<size_t>(i)*8,8);::memcpy(&b,scratch->data+static_cast<size_t>(i)*8,8);if(a!=b)return false;}
+ size_t count=0;
+ for(int32_t i=0;i<active->count;++i){void*entry=nullptr;::memcpy(&entry,active->data+static_cast<size_t>(i)*8,8);count+=entry==c.elements[element]?1:0;}
+ if(count>1)return false;
+ uint32_t bit=0,root_bit=0;
+ if(!mp4_actor_field(c.elements[element],16,bit)||!mp4_actor_field(c.root_script,40,root_bit)||root_bit>1||bit>1)return false;
+ const bool active_now=count==1&&bit==root_bit;
+ if(!mp4_timeline_lists_current(c)||!mp4_timeline_current(c))return false;
+ *out=active_now;return true;
+}
+bool mp4_child_driving_role_emit(void*opaque,const mp4dn::Node&node){
+ auto&v=*static_cast<Mp4ChildDrivingRoles*>(opaque);bool active=false;
+ if(!v.timeline||!v.emit||!v.source_capture||!mp4_child_driving_runtime_active(*v.timeline,node,&active))return false;
+ const mp4drive::Role role{node,v.source_capture,active};return v.emit(v.context,role);
+}
+mp4dn::Result mp4_child_driving_roles_context(void*opaque,Mp4TimelineContext&c){
+ auto&v=*static_cast<Mp4ChildDrivingRoles*>(opaque);
+ if(v.timeline||!mp4_child_lineage_current()||!mp4_timeline_current(c))return mp4dn::Result::stale;
+ uint64_t capture=0;size_t matches=0;
+ for(size_t i=0;i<mp4_child_lineage_bank.count;++i){const auto&n=mp4_child_lineage_bank.nodes[i];
+  if(n.current.owner.director==reinterpret_cast<uintptr_t>(c.director)&&n.current.owner.asset==reinterpret_cast<uintptr_t>(c.asset)
+   &&n.current.graph.native==c.identity.native&&n.current.graph.slot==c.graph.handle&&n.current.graph.version==(c.graph.version&~uint32_t(1))&&!n.factory_returned){capture=n.current.source_capture;++matches;}}
+ if(matches!=1||!capture)return mp4dn::Result::unsupported;
+ struct Current{Mp4ChildDrivingRoles&v;Current(Mp4ChildDrivingRoles&a,Mp4TimelineContext&c,uint64_t p):v(a){v.timeline=&c;v.source_capture=p;}~Current(){v.timeline=nullptr;v.source_capture=0;}}current(v,c,capture);
+ Mp4DirectorNodeVisit visit{v.round,mp4_child_driving_role_emit,&v};
+ return mp4_director_node_context(&visit,c);
+}
+mp4drive::Result mp4_child_driving_roles(mp4dn::Round round,mp4drive::Emit emit,void*context,uint64_t*recipe){
+ if(recipe)*recipe=0;
+ if(!recipe||!emit||!mp4_director_node_contexts||!mp4_actor_clock_held(nullptr)||!mp4_child_lineage_current())return mp4drive::Result::unsupported;
+ Mp4ChildDrivingRoles visit{round,emit,context};const auto r=mp4_director_node_contexts(round,mp4_child_driving_roles_context,&visit,recipe);
+ if(r==mp4dn::Result::ok)return *recipe?mp4drive::Result::ok:mp4drive::Result::unsupported;
+ return r==mp4dn::Result::waiting?mp4drive::Result::waiting:r==mp4dn::Result::stale?mp4drive::Result::stale:r==mp4dn::Result::failed?mp4drive::Result::failed:mp4drive::Result::unsupported;
+}
+bool mp4_child_driving_edge(void*,const mp4drive::Role&r,const mp4child::State&s,uint64_t recipe){
+ const auto&b=mp4_child_dependency_bank;
+ if(!b.active||b.running||recipe!=b.recipe||!recipe||b.epoch!=s.owner.epoch||b.asset!=s.root_asset||b.count!=mp4_birth_catalogue.count
+  ||mp4_child_dependencies_current(nullptr,b.edges,b.edge_count,recipe)!=mp4child::Result::ok
+  ||r.node.key.target!=reinterpret_cast<void*>(s.owner.director)||!mp4_child_native_owner(nullptr,s.owner))return false;
+ size_t parent=b.count,child=b.count;
+ for(size_t i=0;i<b.count;++i){if(!mp4_child_tuple_same(b.owners[i],mp4_birth_catalogue.tuples[i]))return false;
+  if(b.owners[i].director==reinterpret_cast<uintptr_t>(r.node.key.director)&&b.owners[i].asset==reinterpret_cast<uintptr_t>(r.node.key.asset))parent=i;
+  if(mp4_child_tuple_same(b.owners[i],s.owner))child=i;}
+ if(parent==b.count||child==b.count||parent==child||!mp4_child_driving_node_current(nullptr,r.node))return false;
+ size_t edges=0;for(size_t i=0;i<b.edge_count;++i)edges+=b.edges[i].parent==parent&&b.edges[i].child==child?1:0;
+ if(edges!=1)return false;
+ if(s.mode!=3&&r.active){
+  if(!r.active||!mp4_api.active_enabled(reinterpret_cast<void*>(s.owner.director),nullptr)
+   ||mp4_api.director_get_asset(reinterpret_cast<void*>(s.owner.director),nullptr)!=reinterpret_cast<void*>(s.owner.asset))return false;
+  mp4child::Graph actual{};mp4_child_graph(reinterpret_cast<void*>(s.owner.director),&actual,nullptr);
+  if(!mp4_child_graph_same(actual,s.graph)||!mp4_child_graph_valid(&actual,nullptr))return false;
+ }
+ return true;
+}
+bool mp4_child_driving_origin(void*,mp4drive::Stamp*out){
+ if(out)*out={};mp4_director_maintenance::Call call{};
+ if(!out||!game_call()||!mp4_director_actual_operation(&call)||!mp4_child_pending_host.journal().current_call(call))return false;
+ if(call.kind==mp4_director_maintenance::Kind::native_phase){uint64_t tick=0;uint8_t phase=0;
+  if(!mp4_native_phase_call_current(call,&tick,&phase))return false;*out={call,tick,phase,true};return true;}
+ if(!mp4_actor_clock_held(nullptr)||!mp4_child_invoked_operation(call))return false;
+ *out={call,0,0,false};return true;
+}
+bool mp4_child_driving_nested_origin(void*,mp4drive::Event parent,mp4drive::Event nested,uintptr_t caller,uintptr_t actual_return){
+ if(!game_call()||!mp4_child_driving_bindings(nullptr)||!caller)return false;
+ for(const auto&e:mp4_child_driving_hooks.edges){
+  if(e.from!=static_cast<uint8_t>(parent)||e.to!=static_cast<uint8_t>(nested))continue;
+  const uintptr_t branch=image_base+e.branch;
+  if(!mp4_mapped(branch,4,false)||read<uint32_t>(reinterpret_cast<void*>(branch),0)!=e.instruction)return false;
+  return e.tail?actual_return&&caller==actual_return:caller==image_base+e.return_pc;
+ }
+ return false;
+}
+mp4drive::Api mp4_child_driving_api(){
+ mp4drive::Api a{};a.current=mp4_child_driving_source_current;a.held=mp4_actor_clock_held;a.bindings=mp4_child_driving_bindings;
+ a.source_roles=[](void*,mp4drive::Emit emit,void*c,uint64_t*r){return mp4_child_driving_roles(mp4dn::Round::source,emit,c,r);};
+ a.live_roles=[](void*,mp4drive::Emit emit,void*c,uint64_t*r){return mp4_child_driving_roles(mp4dn::Round::exporting,emit,c,r);};
+ a.edge=mp4_child_driving_edge;a.node_current=mp4_child_driving_node_current;a.origin=mp4_child_driving_origin;
+ a.frame_closed=[](void*,uint64_t epoch,uint64_t tick){return game_call()&&mp4_animation_gate.completed_frame(epoch,tick);};
+ a.frame_issued_current=[](void*,uint64_t epoch,uint64_t tick){return game_call()&&mp4_animation_gate.issued_frame(epoch,tick);};
+ a.frame_revoked_unconsumed=[](void*,uint64_t epoch,uint64_t tick){return game_call()&&mp4_animation_gate.revoked_unconsumed_frame(epoch,tick);};
+ a.nested_origin=mp4_child_driving_nested_origin;a.target_time=[](void*,void*target){return mp4_api.director_get_time(target,nullptr);};return a;
+}
+bool mp4_child_driving_configured=false;
+[[maybe_unused]] mp4child::Result mp4_child_driving_capture(uint64_t epoch,uintptr_t asset){
+ if(!mp4_child_driving_configured){if(!mp4_child_driving_scope.configure(mp4_child_driving_api()))return mp4child::Result::unsupported;mp4_child_driving_configured=true;}
+ const auto r=mp4_child_driving_scope.capture(epoch,asset);if(r!=mp4child::Result::ok)return r;
+ // Empty roles are a positive complete Context recipe, never inactive-ok.
+ mp4_child_driving_active.store(true,std::memory_order_release);return mp4child::Result::ok;
+}
+[[maybe_unused]] mp4child::Result mp4_child_driving_timing(const mp4child::State&s,bool incoming,uint64_t recipe){
+ const auto r=mp4_child_driving_capture(s.owner.epoch,s.root_asset);if(r!=mp4child::Result::ok)return r;
+ return mp4_child_driving_scope.timing(s,incoming,recipe);
+}
+[[maybe_unused]] mp4child::Result mp4_child_driving_begin_frame(uint64_t tick){return mp4_child_driving_scope.begin_frame(tick);}
+[[maybe_unused]] mp4child::Result mp4_child_driving_mark_issued(uint64_t tick){return mp4_child_driving_scope.mark_frame_issued(tick);}
+[[maybe_unused]] mp4child::Result mp4_child_driving_discard_prepared(uint64_t tick){return mp4_child_driving_scope.discard_prepared_frame(tick);}
+[[maybe_unused]] mp4child::Result mp4_child_driving_discard_issued_unconsumed(uint64_t tick){return mp4_child_driving_scope.discard_issued_unconsumed(tick);}
+[[maybe_unused]] mp4child::Result mp4_child_driving_finish_frame(uint64_t tick){return mp4_child_driving_scope.finish_frame(tick);}
+[[maybe_unused]] mp4child::Result mp4_child_driving_release(){
+ if(!game_call())return mp4child::Result::waiting;const auto r=mp4_child_driving_scope.release();
+ if(r==mp4child::Result::ok){mp4_child_driving_active.store(false,std::memory_order_release);mp4_child_driving_rejected.store(false,std::memory_order_release);}return r;
+}
+// END_MP4_CHILD_DRIVING_HOST
+
+// BEGIN_MP4_WORLD_DRIVING_FRAME_HOST
+// World is the last prepared participant. These latches follow actual Driver
+// and AnimationGate results; retry cannot begin or grant the same frame twice.
+bool mp4_world_driving_permission(){
+ return !mp4_child_driving_active.load(std::memory_order_acquire)
+  ||(!mp4_child_driving_rejected.load(std::memory_order_acquire)
+     &&mp4_child_driving_scope.captured()&&!mp4_child_driving_scope.failed());
+}
+void mp4_world_driving_clear_frame(){
+ auto&h=mp4_world_host;h.driving_prepared=h.driving_granted=h.driving_marked=false;h.driving_tick=0;
+}
+Mp4SceneResult mp4_world_driving_prepare(uint64_t tick){
+ auto&h=mp4_world_host;
+ if(!game_call()||!mp4_child_driving_active.load(std::memory_order_acquire)||!mp4_world_driving_permission()){
+  h.error="world_child_driving_not_captured";return Mp4SceneResult::unsupported;
+ }
+ if(h.driving_prepared){
+  if(h.driving_tick==tick&&!h.driving_granted&&!h.driving_marked)return Mp4SceneResult::ok;
+  h.error="world_child_driving_frame_pending";return Mp4SceneResult::invalid;
+ }
+ if(h.driving_granted||h.driving_marked){h.error="world_child_driving_state_invalid";return Mp4SceneResult::failed;}
+ const auto result=mp4_child_driving_begin_frame(tick);
+ if(result!=mp4child::Result::ok){h.error="world_child_driving_prepare_failed";return mp4_world_result(result);}
+ h.driving_tick=tick;h.driving_prepared=true;return Mp4SceneResult::ok;
+}
+Mp4SceneResult mp4_world_driving_grant(uint64_t tick){
+ auto&h=mp4_world_host;
+ if(!game_call()||!h.driving_prepared||h.driving_tick!=tick||!mp4_world_driving_permission()||!mp4_world_source_current(nullptr)){
+  h.error="world_child_driving_frame_not_prepared";return Mp4SceneResult::stale;
+ }
+ if(!h.driving_granted){
+  if(!mp4_animation_gate.grant(h.epoch,tick)){h.error="world_animation_grant_failed";return Mp4SceneResult::stale;}
+  // This duty is retained even if the following Driver acknowledgment fails.
+  h.driving_granted=true;
+ }
+ if(!mp4_animation_gate.issued_frame(h.epoch,tick)){
+  h.error="world_animation_grant_withdrawn";return Mp4SceneResult::stale;
+ }
+ if(!h.driving_marked){
+  const auto result=mp4_child_driving_mark_issued(tick);
+  if(result!=mp4child::Result::ok){h.error="world_child_driving_issue_failed";return mp4_world_result(result);}
+  h.driving_marked=true;
+ }
+ return Mp4SceneResult::ok;
+}
+Mp4SceneResult mp4_world_driving_quiesce(){
+ auto&h=mp4_world_host;
+ if(!h.driving_prepared)return !h.driving_granted&&!h.driving_marked?Mp4SceneResult::ok:Mp4SceneResult::failed;
+ // A prepared unissued bank is neutral to genuine held restore operations.
+ // Leave it intact across prepare/capture WAIT; release can discard bookkeeping.
+ if(!h.driving_granted)return !h.driving_marked?Mp4SceneResult::ok:Mp4SceneResult::failed;
+ if(!mp4_animation_gate.closed(h.epoch)||!mp4_actor_clock_held(nullptr)||!mp4_director_boundary_closed(nullptr))return Mp4SceneResult::waiting;
+ mp4child::Result result=mp4child::Result::waiting;
+ if(mp4_animation_gate.completed_frame(h.epoch,h.driving_tick)){
+  if(!h.driving_marked){h.error="world_child_driving_unacknowledged_frame";return Mp4SceneResult::failed;}
+  result=mp4_child_driving_finish_frame(h.driving_tick);
+ }else if(mp4_animation_gate.revoked_unconsumed_frame(h.epoch,h.driving_tick)){
+  // Zero original callbacks, proved by Gate AND Driver's exact stack/events.
+  result=h.driving_marked?mp4_child_driving_discard_issued_unconsumed(h.driving_tick)
+                         :mp4_child_driving_discard_prepared(h.driving_tick);
+ }else{
+  // A partially executed revoked cycle still owes actual physical/callback
+  // abort closure. closed()/held alone cannot pretend that frame completed.
+  h.error="world_native_partial_frame_unclosed";return Mp4SceneResult::waiting;
+ }
+ if(result==mp4child::Result::ok)mp4_world_driving_clear_frame();
+ else if(result!=mp4child::Result::waiting)h.error="world_child_driving_finish_failed";
+ return mp4_world_result(result);
+}
+Mp4SceneResult mp4_world_driving_release(){
+ const auto result=mp4_child_driving_release();
+ if(result==mp4child::Result::ok)mp4_world_driving_clear_frame();
+ return mp4_world_result(result);
+}
+// END_MP4_WORLD_DRIVING_FRAME_HOST
+
+
+// BEGIN_MP4_CHILD_DRIVING_HOOKS
+// Exact source7 ABI. FrameData64 is passed indirectly in X3 on AAPCS64;
+// ProcessFrame additionally passes playerData X4 and hidden MethodInfo X5.
+struct Mp4ChildDrivingFrameData {
+ uint64_t id=0;double delta=0;float weight=0,effective_weight=0;
+ double effective_parent_delay=0;float effective_parent_speed=0,effective_speed=0;
+ uint32_t flags=0,padding=0;mp4actor::Handle output{};
+};
+static_assert(sizeof(Mp4ChildDrivingFrameData)==64&&__builtin_offsetof(Mp4ChildDrivingFrameData,flags)==40&&__builtin_offsetof(Mp4ChildDrivingFrameData,output)==48,"immutable original FrameData64 ABI");
+using Mp4ChildDrivingFrameOriginal=void(*)(void*,mp4actor::Handle,Mp4ChildDrivingFrameData,Method*);
+using Mp4ChildDrivingLoweredOriginal=void(*)(void*,mp4actor::Handle,const Mp4ChildDrivingFrameData*,Method*);
+using Mp4ChildDrivingProcessOriginal=void(*)(void*,mp4actor::Handle,Mp4ChildDrivingFrameData,void*,Method*);
+using Mp4ChildDrivingTimeOriginal=void(*)(void*,mp4actor::Handle,Method*);
+using Mp4ChildDrivingSyncOriginal=void(*)(void*,mp4actor::Handle,double,Method*);
+Mp4ChildDrivingFrameOriginal mp4_child_driving_prepare_original=nullptr,mp4_child_driving_play_original=nullptr,mp4_child_driving_pause_original=nullptr;
+Mp4ChildDrivingLoweredOriginal mp4_child_driving_prepare_lowered=nullptr;
+Mp4ChildDrivingProcessOriginal mp4_child_driving_process_original=nullptr;
+Mp4ChildDrivingTimeOriginal mp4_child_driving_update_original=nullptr;
+Mp4ChildDrivingSyncOriginal mp4_child_driving_start_original=nullptr,mp4_child_driving_stop_original=nullptr;
+void mp4_child_driving_reject(const char*why)noexcept{
+ mp4_child_driving_rejected.store(true,std::memory_order_release);
+ // Off-thread callback entry only withdraws this atomic permission. It cannot
+ // touch main-owned Scope state or acquire permission on a later requery.
+ if(game_call()&&mp4_child_execution_hooks.quarantine)mp4_child_execution_hooks.quarantine(why);
+}
+bool mp4_child_driving_method(void*script,Method*opaque_method,mp4drive::Event event){
+ // The incoming hidden MethodInfo has no separately proven dispatcher value.
+ // Forward it unchanged; resolve the descriptor independently from the exact
+ // source script class and finite selector. Installed hook/native origin
+ // receipts, not an incoming hidden pointer, authorize the callback.
+ (void)opaque_method;
+ const size_t index=static_cast<size_t>(event);const char*names[]={"PrepareFrame","OnBehaviourPlay","OnBehaviourPause","ProcessFrame"};
+ if(index>=4||!mp4_child_driving_bindings(nullptr)||!mp4_director_node_schema(script)||!font_method)return false;
+ Method*expected=font_method(object_class(script),names[index],index==3?3:2);uintptr_t entry=0;
+ return expected&&mp4_actor_field(const_cast<void*>(expected),0,entry)&&entry==image_base+mp4_child_driving_hooks.methods[index].rva;
+}
+mp4drive::Dispatch mp4_child_driving_enter(mp4drive::Event event,void*script,mp4actor::Handle playable,Method*method,mp4drive::Ticket*out){
+ if(out)*out={};
+ if(!mp4_child_driving_active.load(std::memory_order_acquire))return mp4drive::Dispatch::ordinary;
+ if(!game_call()||!out||!mp4_director_nodes.captured()||!mp4_child_driving_method(script,method,event))return mp4drive::Dispatch::reject;
+ mp4dn::Node node{};
+ if(!mp4_director_nodes.lookup_receiver(script,false,&node)||node.node.handle!=playable.handle||node.node.version!=playable.version)return mp4drive::Dispatch::reject;
+ return mp4_child_driving_scope.enter(event,node,out);
+}
+void mp4_child_driving_record_return(void*script,uintptr_t pc)noexcept{
+ if(!game_call()||!mp4_child_driving_scope.record_original_return(script,pc))mp4_child_driving_reject("child_drive_tail_return_unverified");
+}
+// The nominal FrameData64 musttail overload is intentionally NOT used: Clang
+// can pop its by-value spill before the callee reads it. This explicitly
+// lowered AAPCS64 thunk preserves X3 pointing to Hook-owned live FrameData64.
+// Actual compiled ARM64 argument/64-byte/SP/tail-return tests pin this form.
+#if defined(__aarch64__) && defined(__clang__)
+__attribute__((noinline)) void mp4_child_driving_prepare_thunk(void*script,mp4actor::Handle playable,const Mp4ChildDrivingFrameData*frame,Method*method){
+ mp4_child_driving_record_return(script,reinterpret_cast<uintptr_t>(__builtin_return_address(0)));
+ [[clang::musttail]] return mp4_child_driving_prepare_lowered(script,playable,frame,method);
+}
+#else
+// Non-ARM builds may compile protocol fixtures but cannot publish this thunk.
+void mp4_child_driving_prepare_thunk(void*script,mp4actor::Handle playable,const Mp4ChildDrivingFrameData*frame,Method*method){
+ mp4_child_driving_reject("child_drive_tail_abi_unsupported");mp4_child_driving_prepare_lowered(script,playable,frame,method);
+}
+#endif
+struct Mp4ChildDrivingGuard{
+ mp4drive::Ticket ticket{};bool entered=false,closed=false;
+ ~Mp4ChildDrivingGuard(){if(entered&&!closed){mp4_child_driving_scope.abandon(ticket);mp4_child_driving_reject("child_drive_original_unclosed");}}
+ bool begin(mp4drive::Dispatch dispatch){
+  if(dispatch==mp4drive::Dispatch::ordinary)return false;
+  if(dispatch!=mp4drive::Dispatch::owned){mp4_child_driving_reject("child_drive_origin_unverified");return false;}
+  entered=true;if(!mp4_child_driving_scope.invoked(ticket)){mp4_child_driving_scope.abandon(ticket);closed=true;mp4_child_driving_reject("child_drive_entry_unverified");return false;}return true;
+ }
+ void finish(){if(entered&&!closed){if(!mp4_child_driving_scope.returned(ticket)){mp4_child_driving_scope.abandon(ticket);mp4_child_driving_reject("child_drive_return_unverified");}closed=true;}}
+};
+[[maybe_unused]] void mp4_child_driving_prepare_hook(void*script,mp4actor::Handle playable,Mp4ChildDrivingFrameData frame,Method*method){
+ if(!mp4_child_driving_prepare_original)return;
+ Mp4ChildDrivingGuard guard{};const auto d=mp4_child_driving_enter(mp4drive::Event::prepare,script,playable,method,&guard.ticket);
+ if(guard.begin(d)){mp4_child_driving_prepare_thunk(script,playable,&frame,method);guard.finish();}
+ else mp4_child_driving_prepare_original(script,playable,frame,method);
+}
+[[maybe_unused]] void mp4_child_driving_play_hook(void*script,mp4actor::Handle playable,Mp4ChildDrivingFrameData frame,Method*method){
+ if(!mp4_child_driving_play_original)return;
+ Mp4ChildDrivingGuard guard{};const auto d=mp4_child_driving_enter(mp4drive::Event::play,script,playable,method,&guard.ticket);
+ if(guard.begin(d)){mp4_child_driving_play_original(script,playable,frame,method);guard.finish();}
+ else mp4_child_driving_play_original(script,playable,frame,method);
+}
+[[maybe_unused]] void mp4_child_driving_pause_hook(void*script,mp4actor::Handle playable,Mp4ChildDrivingFrameData frame,Method*method){
+ if(!mp4_child_driving_pause_original)return;
+ Mp4ChildDrivingGuard guard{};const auto d=mp4_child_driving_enter(mp4drive::Event::pause,script,playable,method,&guard.ticket);
+ if(guard.begin(d)){mp4_child_driving_pause_original(script,playable,frame,method);guard.finish();}
+ else mp4_child_driving_pause_original(script,playable,frame,method);
+}
+[[maybe_unused]] void mp4_child_driving_process_hook(void*script,mp4actor::Handle playable,Mp4ChildDrivingFrameData frame,void*data,Method*method){
+ if(!mp4_child_driving_process_original)return;
+ Mp4ChildDrivingGuard guard{};const auto d=mp4_child_driving_enter(mp4drive::Event::process,script,playable,method,&guard.ticket);
+ if(guard.begin(d)){mp4_child_driving_process_original(script,playable,frame,data,method);guard.finish();}
+ else mp4_child_driving_process_original(script,playable,frame,data,method);
+}
+mp4drive::Dispatch mp4_child_driving_enter_nested(mp4drive::Event event,void*script,mp4actor::Handle argument,bool graph,double time,uintptr_t caller,mp4drive::Ticket*out){
+ if(out)*out={};
+ if(!mp4_child_driving_active.load(std::memory_order_acquire))return mp4drive::Dispatch::ordinary;
+ if(!game_call()||!out)return mp4drive::Dispatch::reject;
+ mp4dn::Handle h{};::memcpy(static_cast<void*>(&h),&argument,16);
+ return mp4_child_driving_scope.enter_nested(event,script,h,graph,time,caller,out);
+}
+[[maybe_unused]] void mp4_child_driving_update_hook(void*script,mp4actor::Handle playable,Method*method){
+ if(!mp4_child_driving_update_original)return;
+ const uintptr_t caller=reinterpret_cast<uintptr_t>(__builtin_return_address(0));Mp4ChildDrivingGuard guard{};
+ const auto d=mp4_child_driving_enter_nested(mp4drive::Event::update_time,script,playable,false,0,caller,&guard.ticket);
+ if(guard.begin(d)){mp4_child_driving_update_original(script,playable,method);guard.finish();}
+ else mp4_child_driving_update_original(script,playable,method);
+}
+[[maybe_unused]] void mp4_child_driving_start_hook(void*script,mp4actor::Handle graph,double time,Method*method){
+ if(!mp4_child_driving_start_original)return;
+ const uintptr_t caller=reinterpret_cast<uintptr_t>(__builtin_return_address(0));Mp4ChildDrivingGuard guard{};
+ const auto d=mp4_child_driving_enter_nested(mp4drive::Event::sync_start,script,graph,true,time,caller,&guard.ticket);
+ if(guard.begin(d)){mp4_child_driving_start_original(script,graph,time,method);guard.finish();}
+ else mp4_child_driving_start_original(script,graph,time,method);
+}
+[[maybe_unused]] void mp4_child_driving_stop_hook(void*script,mp4actor::Handle graph,double time,Method*method){
+ if(!mp4_child_driving_stop_original)return;
+ const uintptr_t caller=reinterpret_cast<uintptr_t>(__builtin_return_address(0));Mp4ChildDrivingGuard guard{};
+ const auto d=mp4_child_driving_enter_nested(mp4drive::Event::sync_stop,script,graph,true,time,caller,&guard.ticket);
+ if(guard.begin(d)){mp4_child_driving_stop_original(script,graph,time,method);guard.finish();}
+ else mp4_child_driving_stop_original(script,graph,time,method);
+}
+// END_MP4_CHILD_DRIVING_HOOKS
+
+
+
 // BEGIN_MP4_DORMANT_ANIMATOR_PINS
 struct Mp4DormantAnimatorPins {mp4game::Binding root_motion,keep_state,write_defaults;};
 [[maybe_unused]] inline constexpr Mp4DormantAnimatorPins mp4_dormant_animator_android={
@@ -24755,6 +26014,10 @@ struct Api {
   uint32_t (*retain)(void *) = nullptr;
   void *(*target)(uint32_t) = nullptr;
   void (*release)(uint32_t) = nullptr;
+  bool (*pending_director_current)(void *, Round, void *) = nullptr;
+  Result (*visit_director)(void *, Round, void *, Emit, void *,
+                           uint64_t *) = nullptr;
+
   bool valid() const {
     return current && held && owner_current && pending_current && visit &&
            node_current && fresh && read && write && retain && target &&
@@ -24768,6 +26031,7 @@ class Scope {
     Node source{}, live{}, retired{};
     State saved{}, observed{};
     bool restored = false, write_duty = false;
+    Round live_round = Round::source;
   };
   struct Root {
     static void *operator new(size_t, void *p) noexcept { return p; }
@@ -24779,6 +26043,7 @@ class Scope {
     static void *operator new(size_t, void *p) noexcept { return p; }
     static void operator delete(void *, void *) noexcept {}
     Node node{};
+    State observed{};
     bool matched = false;
   };
   Api api_{};
@@ -24791,6 +26056,7 @@ class Scope {
   Round round_ = Round::source;
   bool captured_ = false, visiting_ = false, expecting_ = false;
   Round pending_round_ = Round::source;
+  void *pending_director_ = nullptr;
   const char *error_ = "none";
   static bool same_handle(Handle a, Handle b) {
     return a.handle == b.handle && a.version == b.version;
@@ -24804,6 +26070,38 @@ class Scope {
       if (a.path[i] != b.path[i])
         return false;
     return true;
+  }
+  static bool same_node(const Node &a, const Node &b) {
+    return same_key(a.key, b.key) && a.script == b.script &&
+           same_handle(a.graph, b.graph) && same_handle(a.runtime, b.runtime) &&
+           same_handle(a.node, b.node) && a.factory == b.factory &&
+           a.birth == b.birth;
+  }
+  bool all_round(Round r) const {
+    for (size_t i = 0; i < count_; ++i)
+      if (entries_[i].live_round != r)
+        return false;
+    return true;
+  }
+  void update_round(Round completed) {
+    // Mixed per-Director generations keep the last globally complete round.
+    // They do not grant siblings any fresh-node or callback authority.
+    if (!count_ || all_round(completed))
+      round_ = completed;
+  }
+  bool any_round(Round r) const {
+    for (size_t i = 0; i < count_; ++i)
+      if (entries_[i].live_round == r)
+        return true;
+    return false;
+  }
+  bool pending_for(void *director) const {
+    return expecting_ && api_.held(ctx_) &&
+           (pending_director_ ? (director == pending_director_ &&
+                                 api_.pending_director_current &&
+                                 api_.pending_director_current(
+                                     ctx_, pending_round_, pending_director_))
+                              : api_.pending_current(ctx_, pending_round_));
   }
   static bool same_state(const State &a, const State &b) {
     return a.post == b.post && a.initial == b.initial;
@@ -24877,7 +26175,8 @@ class Scope {
   }
   static bool map_emit(void *p, const Node &n) {
     auto &s = *static_cast<Scope *>(p);
-    if (s.pending_count_ == max_nodes || !n.script || !n.graph.handle ||
+    if ((s.pending_director_ && n.key.director != s.pending_director_) ||
+        s.pending_count_ == max_nodes || !n.script || !n.graph.handle ||
         !n.runtime.handle || !n.node.handle || !n.factory || !n.birth ||
         n.key.length > 64 || !s.api_.owner_current(s.ctx_, n.key) ||
         !s.api_.node_current(s.ctx_, n) || !s.root_node(n))
@@ -24901,13 +26200,31 @@ public:
   bool current() const {
     if (!captured_ || !identity() || visiting_)
       return false;
-    if (expecting_)
+    if (expecting_) {
+      if (pending_director_) {
+        if (!pending_for(pending_director_))
+          return false;
+        for (size_t i = 0; i < count_; ++i) {
+          const auto &e = entries_[i];
+          if (e.live.key.director == pending_director_)
+            continue;
+          if (!api_.node_current(ctx_, e.live))
+            return false;
+          if (e.live_round == Round::restored) {
+            State now{};
+            if (!api_.read(ctx_, e.live, &now) || !same_state(now, e.saved))
+              return false;
+          }
+        }
+        return true;
+      }
       return api_.held(ctx_) && api_.pending_current(ctx_, pending_round_);
+    }
     for (size_t i = 0; i < count_; ++i) {
       const auto &e = entries_[i];
       if (!api_.node_current(ctx_, e.live))
         return false;
-      if (round_ == Round::restored) {
+      if (e.live_round == Round::restored) {
         State now{};
         if (!api_.read(ctx_, e.live, &now) || !same_state(now, e.saved))
           return false;
@@ -24956,12 +26273,134 @@ public:
     return identity() ? Result::ok
                       : fail(Result::stale, "activation_nodes_capture_changed");
   }
+  Result expect_remap(Round round, void *director) {
+    if (!director || !captured_ || expecting_ || visiting_ || !current() ||
+        !api_.held(ctx_) || !api_.visit_director ||
+        !api_.pending_director_current ||
+        (round != Round::exporting && round != Round::restoring) ||
+        !api_.pending_director_current(ctx_, round, director))
+      return fail(Result::stale,
+                  "activation_nodes_director_transition_unowned");
+    for (size_t i = 0; i < count_; ++i)
+      if (entries_[i].source.key.director == director &&
+          round == Round::exporting &&
+          entries_[i].live_round != Round::source &&
+          entries_[i].live_round != Round::exporting)
+        return fail(Result::invalid, "activation_nodes_director_round_order");
+    expecting_ = true;
+    pending_round_ = round;
+    pending_director_ = director;
+    return Result::ok;
+  }
+  Result remap_director(Round round, void *director) {
+    if (!director || !captured_ || !identity() || visiting_ || !expecting_ ||
+        pending_director_ != director || pending_round_ != round ||
+        !pending_for(director) || !api_.visit_director || !current())
+      return fail(Result::stale, "activation_nodes_director_remap_unowned");
+    pending_count_ = 0;
+    for (size_t i = 0; i < max_nodes; ++i)
+      pending_[i].matched = false;
+    struct Visiting {
+      bool &v;
+      explicit Visiting(bool &p) : v(p) { v = true; }
+      ~Visiting() { v = false; }
+    } guard(visiting_);
+    uint64_t recipe = 0;
+    const auto status =
+        api_.visit_director(ctx_, round, director, map_emit, this, &recipe);
+    if (status != Result::ok)
+      return status;
+    size_t expected = 0;
+    for (size_t i = 0; i < count_; ++i)
+      expected += entries_[i].source.key.director == director;
+    if (!recipe || pending_count_ != expected)
+      return fail(Result::unsupported,
+                  "activation_nodes_director_recipe_incomplete");
+    for (size_t i = 0; i < count_; ++i) {
+      auto &e = entries_[i];
+      if (e.source.key.director != director)
+        continue;
+      size_t found = pending_count_;
+      for (size_t j = 0; j < pending_count_; ++j)
+        if (same_key(e.source.key, pending_[j].node.key)) {
+          if (found != pending_count_)
+            return fail(Result::unsupported,
+                        "activation_nodes_director_fresh_alias");
+          found = j;
+        }
+      if (found == pending_count_ || pending_[found].matched)
+        return fail(Result::unsupported,
+                    "activation_nodes_director_key_missing");
+      const auto &node = pending_[found].node;
+      if (!(e.live_round == round && same_node(e.live, node)) &&
+          !api_.fresh(ctx_, round, e.live, node))
+        return fail(Result::stale, "activation_nodes_director_birth_mismatch");
+      State state{};
+      if (!api_.read(ctx_, node, &state) || !valid_state(state) ||
+          state.post != e.saved.post)
+        return fail(Result::unsupported,
+                    "activation_nodes_director_state_invalid");
+      pending_[found].observed = state;
+      pending_[found].matched = true;
+    }
+    if (!identity() || !pending_for(director))
+      return fail(Result::stale, "activation_nodes_director_source_changed");
+    for (size_t i = 0; i < pending_count_; ++i) {
+      if (!api_.node_current(ctx_, pending_[i].node))
+        return fail(Result::stale, "activation_nodes_director_fresh_changed");
+      for (size_t j = 0; j < count_; ++j) {
+        const auto &sibling = entries_[j].live;
+        if (sibling.key.director != director &&
+            (pending_[i].node.script == sibling.script ||
+             same_handle(pending_[i].node.node, sibling.node)))
+          return fail(Result::unsupported,
+                      "activation_nodes_director_sibling_alias");
+      }
+    }
+    for (size_t i = 0; i < count_; ++i) {
+      auto &e = entries_[i];
+      if (e.source.key.director == director)
+        continue;
+      if (!api_.node_current(ctx_, e.live))
+        return fail(Result::stale, "activation_nodes_director_sibling_changed");
+      if (e.live_round == Round::restored) {
+        State now{};
+        if (!api_.read(ctx_, e.live, &now) || !same_state(now, e.saved))
+          return fail(Result::stale,
+                      "activation_nodes_director_sibling_state_changed");
+      }
+    }
+    for (size_t i = 0; i < count_; ++i) {
+      auto &e = entries_[i];
+      if (e.source.key.director != director)
+        continue;
+      for (size_t j = 0; j < pending_count_; ++j)
+        if (same_key(e.source.key, pending_[j].node.key)) {
+          if (!same_node(e.live, pending_[j].node))
+            e.retired = e.live;
+          e.live = pending_[j].node;
+          e.live_round = round;
+          e.observed = pending_[j].observed;
+          e.restored = e.write_duty = false;
+          break;
+        }
+    }
+    recipe_ ^= recipe;
+    recipe_ *= 1099511628211ULL;
+    expecting_ = false;
+    pending_director_ = nullptr;
+    pending_round_ = Round::source;
+    update_round(round);
+    return Result::ok;
+  }
   Result expect_remap(Round round) {
-    if (!captured_ || !identity() || visiting_ || !api_.held(ctx_) ||
+    if (!captured_ || !identity() || visiting_ || expecting_ ||
+        !api_.held(ctx_) ||
         (round != Round::exporting && round != Round::restoring) ||
         !api_.pending_current(ctx_, round))
       return fail(Result::stale, "activation_nodes_transition_unowned");
     expecting_ = true;
+    pending_director_ = nullptr;
     pending_round_ = round;
     return Result::ok;
   }
@@ -24969,13 +26408,14 @@ public:
     if (!captured_ || !identity() || visiting_ || !api_.held(ctx_) ||
         (round != Round::exporting && round != Round::restoring))
       return fail(Result::stale, "activation_nodes_remap_unavailable");
-    if (!expecting_ && round_ == round)
+    if (!expecting_ && round_ == round && all_round(round))
       return current() ? Result::ok
                        : fail(Result::stale,
                               "activation_nodes_mapped_source_changed");
-    if (round == Round::exporting && round_ != Round::source)
+    if (round == Round::exporting && round_ != Round::source &&
+        round_ != Round::exporting)
       return fail(Result::invalid, "activation_nodes_round_order");
-    if (expecting_ && pending_round_ != round)
+    if (expecting_ && (pending_round_ != round || pending_director_))
       return fail(Result::invalid, "activation_nodes_pending_round_mismatch");
     pending_count_ = 0;
     for (size_t i = 0; i < max_nodes; ++i)
@@ -25004,13 +26444,16 @@ public:
           found = j;
         }
       if (found == pending_count_ || pending_[found].matched ||
-          !api_.fresh(ctx_, round, e.source, pending_[found].node))
+          (!(e.live_round == round &&
+             same_node(e.live, pending_[found].node)) &&
+           !api_.fresh(ctx_, round, e.live, pending_[found].node)))
         return fail(Result::stale, "activation_nodes_birth_recipe_mismatch");
       State now{};
       if (!api_.read(ctx_, pending_[found].node, &now) || !valid_state(now) ||
           now.post != e.saved.post)
         return fail(Result::unsupported,
                     "activation_nodes_fresh_state_invalid");
+      pending_[found].observed = now;
       pending_[found].matched = true;
     }
     if (!identity())
@@ -25019,12 +26462,11 @@ public:
       auto &e = entries_[i];
       for (size_t j = 0; j < pending_count_; ++j)
         if (same_key(e.source.key, pending_[j].node.key)) {
-          if (round_ == Round::exporting && round == Round::restoring)
+          if (!same_node(e.live, pending_[j].node))
             e.retired = e.live;
           e.live = pending_[j].node;
-          if (!api_.read(ctx_, e.live, &e.observed))
-            return fail(Result::stale,
-                        "activation_nodes_remap_observation_changed");
+          e.live_round = round;
+          e.observed = pending_[j].observed;
           e.restored = e.write_duty = false;
           break;
         }
@@ -25032,6 +26474,7 @@ public:
     round_ = round;
     recipe_ = recipe;
     expecting_ = false;
+    pending_director_ = nullptr;
     pending_round_ = Round::source;
     return Result::ok;
   }
@@ -25042,7 +26485,7 @@ public:
       return fail(Result::stale, "activation_nodes_restore_source_changed");
     if (!api_.held(ctx_))
       return fail(Result::waiting, "activation_nodes_restore_not_held");
-    if (expecting_ || round_ == Round::exporting)
+    if (expecting_ || any_round(Round::exporting))
       return fail(Result::waiting,
                   "activation_nodes_source_graph_not_remapped");
     for (size_t i = 0; i < count_; ++i) {
@@ -25069,6 +26512,7 @@ public:
           !same_state(now, e.saved))
         return fail(Result::stale, "activation_nodes_restore_write_failed");
       e.restored = true;
+      e.live_round = Round::restored;
     }
     round_ = Round::restored;
     error_ = "none";
@@ -25080,11 +26524,14 @@ public:
     size_t matches = 0;
     for (size_t i = 0; i < count_; ++i) {
       const auto &e = entries_[i];
-      const Node *n = retired ? (e.retired.script == script  ? &e.retired
-                                 : e.source.script == script ? &e.source
-                                                             : nullptr)
-                      : e.live.script == script ? &e.live
-                                                : nullptr;
+      const Node *n =
+          retired ? (pending_for(e.live.key.director) && e.live.script == script
+                         ? &e.live
+                     : e.retired.script == script ? &e.retired
+                     : e.source.script == script  ? &e.source
+                                                  : nullptr)
+          : e.live.script == script ? &e.live
+                                    : nullptr;
       if (n) {
         *out = *n;
         ++matches;
@@ -25093,14 +26540,8 @@ public:
     return matches == 1;
   }
   bool retired_receiver(void *script, const Key &key) const {
-    if (!captured_ || !identity())
-      return false;
-    for (size_t i = 0; i < count_; ++i)
-      if ((entries_[i].source.script == script ||
-           entries_[i].retired.script == script) &&
-          same_key(entries_[i].source.key, key))
-        return true;
-    return false;
+    Node node{};
+    return lookup_receiver(script, true, &node) && same_key(node.key, key);
   }
   Result release(bool owned) {
     if (!epoch_)
@@ -25127,6 +26568,7 @@ public:
     epoch_ = recipe_ = 0;
     captured_ = expecting_ = false;
     round_ = pending_round_ = Round::source;
+    pending_director_ = nullptr;
     error_ = "none";
     return Result::ok;
   }
@@ -25141,6 +26583,12 @@ using Mp4ActivationContexts = mp4an::Result (*)(
     mp4an::Round, mp4an::Result (*)(void *, Mp4TimelineContext &), void *,
     uint64_t *);
 Mp4ActivationContexts mp4_activation_node_contexts = nullptr;
+using Mp4ActivationContextsFor = mp4an::Result (*)(
+    mp4an::Round, void *, mp4an::Result (*)(void *, Mp4TimelineContext &),
+    void *, uint64_t *);
+Mp4ActivationContextsFor mp4_activation_node_contexts_for = nullptr;
+bool (*mp4_activation_control_pending_for)(mp4an::Round, void *) = nullptr;
+
 uint64_t (*mp4_activation_control_graph_birth)(const Mp4TimelineContext &) =
     nullptr;
 bool (*mp4_activation_control_fresh_birth)(mp4an::Round, const mp4an::Node &,
@@ -25261,10 +26709,12 @@ struct Mp4ActivationNodeVisit {
   mp4an::Round round = mp4an::Round::source;
   mp4an::Emit emit = nullptr;
   void *context = nullptr;
+  void *director = nullptr;
 };
 mp4an::Result mp4_activation_node_context(void *opaque, Mp4TimelineContext &c) {
   auto &visit = *static_cast<Mp4ActivationNodeVisit *>(opaque);
-  if (!visit.emit || !mp4_timeline_current(c) || c.element_count > 4096 ||
+  if (!visit.emit || (visit.director && c.director != visit.director) ||
+      !mp4_timeline_current(c) || c.element_count > 4096 ||
       !mp4_timeline_runtime_elements(c, false))
     return mp4an::Result::stale;
   for (size_t i = 0; i < c.element_count; ++i) {
@@ -25384,6 +26834,18 @@ mp4an::Result mp4_activation_node_context(void *opaque, Mp4TimelineContext &c) {
     Mp4ActivationNodeVisit v{round, emit, context};
     return mp4_activation_node_contexts(round, mp4_activation_node_context, &v,
                                         recipe);
+  };
+  a.pending_director_current = [](void *, mp4an::Round round, void *director) {
+    return mp4_activation_control_pending_for &&
+           mp4_activation_control_pending_for(round, director);
+  };
+  a.visit_director = [](void *, mp4an::Round round, void *director,
+                        mp4an::Emit emit, void *context, uint64_t *recipe) {
+    if (!mp4_activation_node_contexts_for || !director)
+      return mp4an::Result::unsupported;
+    Mp4ActivationNodeVisit v{round, emit, context, director};
+    return mp4_activation_node_contexts_for(
+        round, director, mp4_activation_node_context, &v, recipe);
   };
   a.node_current = mp4_activation_node_current;
   a.fresh = [](void *, mp4an::Round r, const mp4an::Node &old,
@@ -26678,14 +28140,20 @@ using Mp4SrpFrame=void(*)(void*,Mp4RenderContext,void*,Method*);
 Mp4SrpAdd mp4_srp_add_precull_original=nullptr;
 VoidMethod mp4_srp_invoke_precull_original=nullptr;
 Mp4SrpFrame mp4_srp_begin_frame_original=nullptr;
+void mp4_srp_dispatch_add(Mp4SrpAdd,void*,void*,Method*,uintptr_t);
+void mp4_srp_dispatch_invoke(VoidMethod,void*,Method*,uintptr_t);
+void mp4_srp_dispatch_frame(Mp4SrpFrame,void*,Mp4RenderContext,void*,Method*,uintptr_t);
 void mp4_srp_add_precull_hook(void*self,void*action,Method*method){
-    mp4_srp_add_precull_original(self,action,method);
+ const uintptr_t caller=reinterpret_cast<uintptr_t>(__builtin_extract_return_addr(__builtin_return_address(0)));
+ mp4_srp_dispatch_add(mp4_srp_add_precull_original,self,action,method,caller);
 }
 void mp4_srp_invoke_precull_hook(void*self,Method*method){
-    mp4_srp_invoke_precull_original(self,method);
+ const uintptr_t caller=reinterpret_cast<uintptr_t>(__builtin_extract_return_addr(__builtin_return_address(0)));
+ mp4_srp_dispatch_invoke(mp4_srp_invoke_precull_original,self,method,caller);
 }
 void mp4_srp_begin_frame_hook(void*self,Mp4RenderContext context,void*cameras,Method*method){
-    mp4_srp_begin_frame_original(self,context,cameras,method);
+ const uintptr_t caller=reinterpret_cast<uintptr_t>(__builtin_extract_return_addr(__builtin_return_address(0)));
+ mp4_srp_dispatch_frame(mp4_srp_begin_frame_original,self,context,cameras,method,caller);
 }
 // END_MP4_SRP_MUTATION_HOOKS
 
@@ -29316,6 +30784,185 @@ bool mp4_srp_state_restore(void*context,const mp4srp::Image&image){
 }
 // END_MP4_RENDERER_SRP_STATE_HOST
 
+// BEGIN_MP4_SRP_DISPATCH_PINS
+// Exact source Foot.ScheduleJob interface Add call-site, four instructions.
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr uintptr_t mp4_srp_foot_add_return=0x7ba743c;
+constexpr mp4game::Binding mp4_srp_foot_add_call={0x7ba742c,{0x08,0x08,0x40,0xa9,0xe0,0x03,0x15,0xaa,0xe1,0x03,0x14,0xaa,0x00,0x01,0x3f,0xd6}};
+#else
+constexpr uintptr_t mp4_srp_foot_add_return=0x9220384;
+constexpr mp4game::Binding mp4_srp_foot_add_call={0x9220374,{0x08,0x08,0x40,0xa9,0xe0,0x03,0x15,0xaa,0xe1,0x03,0x14,0xaa,0x00,0x01,0x3f,0xd6}};
+#endif
+// END_MP4_SRP_DISPATCH_PINS
+
+// BEGIN_MP4_SRP_DISPATCH_HOST
+// A typed SRP callback precedes the renderer's draw ticket. Actual hook entry
+// plus current Runtime intent owns only this controller's finite queue/first
+// mutation. A later actual original-draw receipt joins that entry explicitly.
+struct Mp4SrpRenderKey{uint64_t generation=0,tick=0;bool prewarm=false;};
+bool mp4_srp_same_key(const Mp4SrpRenderKey&a,const Mp4SrpRenderKey&b){return a.generation==b.generation&&a.tick==b.tick&&a.prewarm==b.prewarm;}
+struct Mp4SrpDispatchHost{
+ Mp4SrpControllerHost*state=nullptr;void*context=nullptr;uint64_t epoch=0,job=0,sequence=0;
+ bool(*current)(void*,uint64_t,uint64_t)=nullptr;bool(*held_fenced)(void*)=nullptr;
+ // Only an actual saved Root operation may supply this alternative receipt.
+ // Missing callback refuses non-Mono additions; ambient ownership grants none.
+ bool(*root_add)(void*,void*,void*,uintptr_t,uint64_t*)=nullptr;
+ Mp4SrpRenderKey last{};void*native_context=nullptr;uint64_t frame_receipt=0,draw_receipt=0;
+ bool have_frame=false;const char*error="srp_dispatch_not_captured";
+};
+std::atomic<Mp4SrpDispatchHost*>mp4_srp_dispatch_published{nullptr};
+std::atomic<bool>mp4_srp_dispatch_foreign_dirty{false};
+struct Mp4SrpEntered{
+ Mp4SrpDispatchHost*host=nullptr;mp4srp::Operation operation=mp4srp::Operation::add;
+ void*controller=nullptr,*argument=nullptr,*native_context=nullptr;uintptr_t caller=0;
+ bool accepted=false,calling_original=false;Mp4SrpEntered*previous=nullptr;
+};
+thread_local Mp4SrpEntered*mp4_srp_entered=nullptr;
+struct Mp4SrpEntryScope{
+ Mp4SrpEntered value{};
+ Mp4SrpEntryScope(Mp4SrpDispatchHost*h,mp4srp::Operation op,void*self,void*argument,void*context,uintptr_t caller){
+  value.host=h;value.operation=op;value.controller=self;value.argument=argument;value.native_context=context;value.caller=caller;
+  value.previous=mp4_srp_entered;mp4_srp_entered=&value;
+ }
+ ~Mp4SrpEntryScope(){mp4_srp_entered=value.previous;}
+};
+bool mp4_srp_dispatch_boundary(const Mp4SrpDispatchHost&h){
+ return game_call()&&h.state&&h.context&&h.epoch&&h.job&&h.current&&h.held_fenced
+  &&!mp4_srp_dispatch_foreign_dirty.load(std::memory_order_acquire)
+  &&h.current(h.context,h.epoch,h.job)&&mp4_srp_state_current(h.state,h.state->source.controller,h.state->source.camera);
+}
+bool mp4_srp_dispatch_held(void*context){auto*h=static_cast<Mp4SrpDispatchHost*>(context);return h&&mp4_srp_dispatch_boundary(*h)&&h->held_fenced(h->context);}
+bool mp4_srp_dispatch_mono_add(const Mp4SrpDispatchHost&h,void*action,uintptr_t caller){
+ mp4actor::MonoInvocation invocation{};void*target=nullptr;uintptr_t pointer=0;
+ if(!mp4_actor_mono_gate.invocation(invocation)||invocation.epoch!=h.epoch||!invocation.serial||!invocation.invocation
+  ||invocation.phase!=mp4actor::MonoPhase::actor_late||!invocation.random_depth
+  ||(invocation.callback!=mp4_actor_late_original&&invocation.callback!=mp4_actor_derived_late_ref_original&&invocation.callback!=mp4_actor_derived_late_shared_original)
+  ||!mp4_actor_field(action,32,target)||!mp4_actor_field(action,16,pointer)
+  ||!mp4_renderer_srp_actor(h.state->source,invocation.receiver,false))return false;
+ if(pointer==image_base+mp4_srp_pins.aabb.rva){
+  // Source ActorLate invokes ApplyAABB directly; no positive Add callsite
+  // exists there. AABB additions require the separate actual Root receipt.
+  return false;
+ }
+ if(pointer!=image_base+mp4_srp_pins.foot_apply.rva||caller!=image_base+mp4_srp_foot_add_return||!mp4_prefix(mp4_srp_foot_add_call)
+  ||!mp4_renderer_srp_actor(h.state->source,target,true))return false;
+ // ActorLate may call several different extensions. Tie this exact Foot to
+ // the actually entered Actor receiver, not merely any selected-cast member.
+ void*list=nullptr,*array=nullptr;void**items=nullptr;size_t count=0;uint32_t version=0;void*copy[64]{};bool found=false;
+ if(!mp4_actor_field(invocation.receiver,mp4_actor_profile.fields.actor_extensions,list)
+  ||!mp4_renderer_srp_list(list,items,count,array,version,64))return false;
+ Mp4ActorTempRoot keep(list);if(keep.get()!=list)return false;
+ for(size_t i=0;i<count;++i){copy[i]=items[i];found|=copy[i]==target;}
+ return found&&mp4_renderer_srp_list_same(list,array,version,copy,count,64);
+}
+bool mp4_srp_dispatch_entered(void*context,mp4srp::Operation operation,void*controller,void*argument){
+ auto*h=static_cast<Mp4SrpDispatchHost*>(context);auto*entry=mp4_srp_entered;
+ if(!h||!entry||entry->host!=h||entry->operation!=operation||entry->controller!=controller||entry->argument!=argument
+  ||mp4_srp_dispatch_published.load(std::memory_order_acquire)!=h||!mp4_srp_dispatch_boundary(*h))return false;
+ if(operation==mp4srp::Operation::frame)return entry->native_context!=0;
+ if(operation==mp4srp::Operation::invoke){const auto*parent=entry->previous;
+  return parent&&parent->host==h&&parent->operation==mp4srp::Operation::frame&&parent->controller==controller
+   &&parent->accepted&&parent->calling_original;
+ }
+ if(mp4_srp_dispatch_mono_add(*h,argument,entry->caller))return true;
+ uint64_t receipt=0;return h->root_add&&h->root_add(h->context,controller,argument,entry->caller,&receipt)&&receipt;
+}
+bool mp4_srp_dispatch_intent(const Mp4SrpDispatchHost&h,Mp4SrpRenderKey&key){
+ key={};using namespace idoly_mp4_runtime;
+ if(!mp4_srp_dispatch_boundary(h)||!native_render_job_current()||job.generation!=h.job)return false;
+ if(!job.auto_started&&(job.prewarm_requested||job.prewarm_inflight)
+  &&(job.stage==Stage::render_setup||job.stage==Stage::frame_request)&&native_engine_clock.held()){
+  key={job.generation,0,true};return true;
+ }
+ if(!native_engine_clock.have_tick())return false;
+ const uint64_t tick=native_engine_clock.tick(),generation=native_simulation_render_generation(tick);
+ if(!generation||generation!=h.job)return false;key={generation,tick,false};return true;
+}
+Mp4SrpDispatchHost*mp4_srp_dispatch_owner(void*self){
+ auto*h=mp4_srp_dispatch_published.load(std::memory_order_acquire);if(!h)return nullptr;
+ if(!game_call()){mp4_srp_dispatch_foreign_dirty.store(true,std::memory_order_release);return nullptr;}
+ return h->state&&self==h->state->source.controller?h:nullptr;
+}
+void mp4_srp_dispatch_fail(Mp4SrpDispatchHost&h,const char*error){h.error=error;if(h.state)h.state->lease.reject();}
+void mp4_srp_dispatch_add(Mp4SrpAdd original,void*self,void*action,Method*method,uintptr_t caller){
+ auto*h=mp4_srp_dispatch_owner(self);if(!h){original(self,action,method);return;}
+ Mp4SrpEntryScope entry(h,mp4srp::Operation::add,self,action,0,caller);mp4srp::Token token{};
+ bool accepted=false;try{accepted=mp4_srp_dispatch_boundary(*h)&&h->state->lease.begin_add(self,action,token);}catch(...){mp4_srp_dispatch_fail(*h,"srp_add_admission_exception");}
+ if(!accepted)mp4_srp_dispatch_fail(*h,"srp_add_origin_unclosed");
+ entry.value.accepted=accepted;entry.value.calling_original=true;
+ try{original(self,action,method);entry.value.calling_original=false;
+  if(accepted&&!h->state->lease.end_add(token))mp4_srp_dispatch_fail(*h,"srp_add_result_unclosed");
+ }catch(...){entry.value.calling_original=false;mp4_srp_dispatch_fail(*h,"srp_add_original_exception");throw;}
+}
+void mp4_srp_dispatch_invoke(VoidMethod original,void*self,Method*method,uintptr_t caller){
+ auto*h=mp4_srp_dispatch_owner(self);if(!h){original(self,method);return;}
+ Mp4SrpEntryScope entry(h,mp4srp::Operation::invoke,self,nullptr,0,caller);mp4srp::Token token{};
+ bool accepted=false;try{accepted=mp4_srp_dispatch_boundary(*h)&&h->state->lease.begin_invoke(self,token);}catch(...){mp4_srp_dispatch_fail(*h,"srp_invoke_admission_exception");}
+ if(!accepted)mp4_srp_dispatch_fail(*h,"srp_invoke_origin_unclosed");
+ entry.value.accepted=accepted;entry.value.calling_original=true;
+ // Original OnBeginFrame may supply an unspecified hidden MethodInfo value.
+ // Forward it verbatim; ownership never reads or validates that hidden value.
+ try{original(self,method);entry.value.calling_original=false;
+  if(accepted&&!h->state->lease.end_invoke(token))mp4_srp_dispatch_fail(*h,"srp_invoke_result_unclosed");
+ }catch(...){entry.value.calling_original=false;mp4_srp_dispatch_fail(*h,"srp_invoke_original_exception");throw;}
+}
+void mp4_srp_dispatch_frame(Mp4SrpFrame original,void*self,Mp4RenderContext context,void*cameras,Method*method,uintptr_t caller){
+ auto*h=mp4_srp_dispatch_owner(self);if(!h){original(self,context,cameras,method);return;}
+ if(!mp4_srp_dispatch_boundary(*h)){mp4_srp_dispatch_fail(*h,"srp_frame_source_unclosed");original(self,context,cameras,method);return;}
+ Mp4SrpRenderKey key{};
+ // A selected held display retry has no new logical frame. Its source queue
+ // and first-camera flag stay untouched even though Unity emits this callback.
+ if(!mp4_srp_dispatch_intent(*h,key)||(h->have_frame&&mp4_srp_same_key(h->last,key)))return;
+ Mp4SrpEntryScope entry(h,mp4srp::Operation::frame,self,cameras,context.pointer,caller);mp4srp::FramePlan plan{};
+ bool planned=false;try{planned=mp4_srp_state_frame_plan(h->state,cameras,plan);}catch(...){mp4_srp_dispatch_fail(*h,"srp_frame_plan_exception");}
+ if(planned&&!plan.selected_invocations)return;
+ mp4srp::Token token{};bool accepted=false;
+ try{accepted=planned&&plan.selected_invocations==1&&context.pointer&&h->sequence!=~uint64_t(0)&&h->state->lease.begin_frame(self,cameras,token);}catch(...){mp4_srp_dispatch_fail(*h,"srp_frame_admission_exception");}
+ if(!accepted)mp4_srp_dispatch_fail(*h,"srp_frame_entry_unclosed");
+ entry.value.accepted=accepted;entry.value.calling_original=true;
+ try{original(self,context,cameras,method);entry.value.calling_original=false;
+  if(accepted){if(!h->state->lease.end_frame(token))mp4_srp_dispatch_fail(*h,"srp_frame_result_unclosed");
+   else{h->last=key;h->have_frame=true;h->native_context=context.pointer;h->frame_receipt=++h->sequence;h->draw_receipt=0;h->error="none";}}
+ }catch(...){entry.value.calling_original=false;mp4_srp_dispatch_fail(*h,"srp_frame_original_exception");throw;}
+}
+[[maybe_unused]] bool mp4_srp_dispatch_draw_receipt(Mp4SrpDispatchHost&h,uint64_t generation,uint64_t tick,bool prewarm,
+ Mp4RenderContext context,void*camera,uint64_t actual_draw_receipt,uint64_t*frame_receipt){
+ if(frame_receipt)*frame_receipt=0;Mp4SrpRenderKey live_intent{};
+ if(!mp4_srp_dispatch_intent(h,live_intent)||!mp4_srp_same_key(h.last,live_intent))return false;
+ if(mp4_srp_dispatch_published.load(std::memory_order_acquire)!=&h||!frame_receipt||!actual_draw_receipt||!h.state||!h.have_frame||!h.frame_receipt||!mp4_srp_dispatch_boundary(h)
+  ||h.state->lease.poisoned()||h.state->lease.open()||camera!=h.state->source.camera||context.pointer!=h.native_context
+  ||!mp4_srp_same_key(h.last,{generation,tick,prewarm})||(h.draw_receipt&&h.draw_receipt!=actual_draw_receipt))return false;
+ h.draw_receipt=actual_draw_receipt;*frame_receipt=h.frame_receipt;return true;
+}
+[[maybe_unused]] bool mp4_srp_dispatch_current(const Mp4SrpDispatchHost&h){
+ return mp4_srp_dispatch_published.load(std::memory_order_acquire)==&h&&mp4_srp_dispatch_boundary(h)
+  &&h.state->lease.captured()&&!h.state->lease.poisoned();
+}
+[[maybe_unused]] bool mp4_srp_dispatch_capture(Mp4SrpDispatchHost&h,Mp4SrpControllerHost&state,const Mp4SceneWitness&source,
+ void*context,uint64_t epoch,uint64_t job,bool(*current)(void*,uint64_t,uint64_t),bool(*held_fenced)(void*),
+ bool(*root_add)(void*,void*,void*,uintptr_t,uint64_t*)){
+ if(!game_call()||mp4_srp_dispatch_published.load(std::memory_order_acquire)||h.state||!context||!epoch||!job||!current||!held_fenced)return false;
+ h.state=&state;h.context=context;h.epoch=epoch;h.job=job;h.current=current;h.held_fenced=held_fenced;h.root_add=root_add;
+ mp4_srp_dispatch_foreign_dirty.store(false,std::memory_order_release);
+ if(!mp4_srp_controller_capture(state,source,&h,mp4_srp_dispatch_held,mp4_srp_dispatch_entered)){h={};return false;}
+ mp4_srp_dispatch_published.store(&h,std::memory_order_release);h.error="none";return true;
+}
+// Safe in the no-GC source observer. Root cleanup follows ordinary callback
+// unwinding/GPU retirement; it must not destroy a dispatcher still on stack.
+[[maybe_unused]] void mp4_srp_dispatch_withdraw(Mp4SrpDispatchHost&h){
+ if(mp4_srp_dispatch_published.load(std::memory_order_acquire)==&h)mp4_srp_dispatch_published.store(nullptr,std::memory_order_release);
+}
+[[maybe_unused]] bool mp4_srp_dispatch_clear(Mp4SrpDispatchHost&h){
+ if(!game_call())return false;
+ for(auto*entry=mp4_srp_entered;entry;entry=entry->previous)if(entry->host==&h)return false;
+ mp4_srp_dispatch_withdraw(h);
+ if(h.state){h.state->lease.clear();h.state->source={};h.state->context=nullptr;h.state->held_fenced=nullptr;h.state->entered_original=nullptr;}
+ h={};return true;
+}
+// END_MP4_SRP_DISPATCH_HOST
+
+
+
 // BEGIN_MP4_ORIGINAL_RENDERER_USERS_HOST
 // Exact selected camera is the initial normal-MV capability. An additional
 // camera requires its own actual selected-scene producer receipt in the host.
@@ -30553,6 +32200,639 @@ void mp4_capture_publication_complete(void*controller,uint64_t serial,
   &&mp4_capture_publication_program(const_cast<Mp4CaptureProductionHost*>(&h),r.epoch,r.job);
 }
 // END_MP4_CAPTURE_PRODUCTION_HOST
+
+// BEGIN_MP4_CAPTURE_QUEUE_GATE
+// Shared CPU-only Add/Remove serialization. Never hold over GPU waits.
+namespace idoly_mp4_capture_queue {
+class Gate {
+ struct Entry {Gate*gate=nullptr;Entry*parent=nullptr;bool cancel=false,interrupted=false;};
+ uint8_t state_=0;static thread_local Entry*entry_;
+ static void pause()noexcept{
+#if defined(__aarch64__)
+  __asm__ __volatile__("yield" ::: "memory");
+#else
+  __asm__ __volatile__("" ::: "memory");
+#endif
+ }
+public:
+ bool cancel_on_thread()const noexcept{for(auto*p=entry_;p;p=p->parent)if(p->gate==this&&p->cancel)return true;return false;}
+ class Add {
+  Gate*gate_=nullptr;Entry entry_{};bool owns_=false,borrowed_cancel_=false;
+ public:
+  Add()=default;Add(const Add&)=delete;Add&operator=(const Add&)=delete;
+  explicit Add(Gate&gate)noexcept{enter(gate);}
+  ~Add(){leave();}
+  bool enter(Gate&gate)noexcept{
+   if(gate_)return false;
+   gate_=&gate;
+   for(auto*p=Gate::entry_;p;p=p->parent)if(p->gate==&gate){
+    if(p->cancel){p->interrupted=true;borrowed_cancel_=true;}
+    entry_={&gate,Gate::entry_,false,false};Gate::entry_=&entry_;return true;
+   }
+   uint8_t expected=0;
+   while(!__atomic_compare_exchange_n(&gate.state_,&expected,uint8_t(1),false,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED)){expected=0;Gate::pause();}
+   owns_=true;entry_={&gate,Gate::entry_,false,false};Gate::entry_=&entry_;return true;
+  }
+  bool interrupted_cancel()const noexcept{return borrowed_cancel_;}
+  void leave()noexcept{
+   if(!gate_)return;
+   if(Gate::entry_!=&entry_)__builtin_trap();
+   Gate::entry_=entry_.parent;
+   if(owns_)__atomic_store_n(&gate_->state_,uint8_t(0),__ATOMIC_RELEASE);
+   gate_=nullptr;owns_=false;
+  }
+ };
+ class Cancel {
+  Gate*gate_=nullptr;Entry entry_{};
+ public:
+  Cancel()=default;Cancel(const Cancel&)=delete;Cancel&operator=(const Cancel&)=delete;
+  ~Cancel(){leave();}
+  bool try_enter(Gate&gate)noexcept{
+   if(gate_)return false;
+   uint8_t expected=0;
+   if(!__atomic_compare_exchange_n(&gate.state_,&expected,uint8_t(2),false,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED))return false;
+   gate_=&gate;entry_={&gate,Gate::entry_,true,false};Gate::entry_=&entry_;return true;
+  }
+  bool current()const noexcept{return gate_&&Gate::entry_==&entry_&&!entry_.interrupted;}
+  void leave()noexcept{
+   if(!gate_)return;
+   if(Gate::entry_!=&entry_)__builtin_trap();
+   Gate::entry_=entry_.parent;__atomic_store_n(&gate_->state_,uint8_t(0),__ATOMIC_RELEASE);gate_=nullptr;
+  }
+ };
+};
+inline thread_local Gate::Entry*Gate::entry_=nullptr;
+} // namespace idoly_mp4_capture_queue
+
+// END_MP4_CAPTURE_QUEUE_GATE
+
+// BEGIN_MP4_CAPTURE_QUEUE_JOURNAL
+// Shared-only finite producer custody. This never grants a frame or GPU fence.
+namespace idoly_mp4_capture_queue {
+struct alignas(8) Target {uint8_t bytes[40]{};};
+inline bool same(const Target&a,const Target&b){
+ constexpr size_t at[]={0,4,8,16,24,28,32},n[]={4,4,4,8,4,4,4};
+ for(size_t i=0;i<7;++i)if(memcmp(a.bytes+at[i],b.bytes+at[i],n[i]))return false;
+ return true;
+}
+struct Set {void*object=nullptr;int32_t version=0,count=0,last=0;bool exact=false;};
+struct Origin {void*controller=nullptr,*wrapper=nullptr,*texture=nullptr;uintptr_t native=0;uint64_t serial=0;};
+struct Returns {uintptr_t update_add=0,capture_add=0,request_capture=0;};
+struct Api {
+ bool(*thread)()=nullptr;
+ // Historical strong roots on the SAME retained capture component. No former
+ // controller/source graph read is permitted here or in observe/resource.
+ bool(*retained)(void*,void*,uint64_t,uint64_t)=nullptr;
+ bool(*request_origin)(void*,void*controller,uint64_t*)=nullptr;
+ // CURRENT exact owned Update cursor + typed Request historical origin. Never
+ // scan arbitrary born resources or use the raw Adapter in-flight getter.
+ bool(*update_origin)(void*,void*capture,Origin*)=nullptr;
+ // Historical constructor/root/native custody + original RTID(texture) value.
+ // A0 assignment and current scene permission are deliberately not required.
+ bool(*resource)(void*,Origin*,const Target&)=nullptr;
+ // Closed source read: count0, or count1 with exact semantic target/event1010;
+ // retain exact set identity/version/lastIndex across the complete read.
+ bool(*observe)(void*,void*capture,const Target&,Set*)=nullptr;
+};
+class Journal {
+public:
+ class Capture;
+ class Add;
+ struct Receipt {uint64_t mutation=0,request=0;Origin origin{};Target target{};Set set{};bool returned=false,owned=false;};
+ bool bind(Api api,void*context,void*capture,uint64_t epoch,uint64_t job,Returns returns)noexcept{
+  try{
+  if(bound_||!api.thread||!api.thread()||!api.retained||!api.request_origin||!api.update_origin||!api.resource||!api.observe
+   ||!context||!capture||!epoch||!job||!returns.update_add||!returns.capture_add||!returns.request_capture)return false;
+  api_=api;context_=context;capture_=capture;epoch_=epoch;job_=job;returns_=returns;
+  if(!api_.retained(context_,capture_,epoch_,job_))return false;
+  Target none{};Set before{};
+  if(!api_.observe(context_,capture_,none,&before)||before.count!=0)return false;
+  receipt_={};mutation_=0;depth_=capture_open_=0;
+  __atomic_store_n(&dirty_,uint8_t(0),__ATOMIC_RELEASE);bound_=true;return true;
+  }catch(...){foreign();return false;}
+ }
+ // Off-thread hook path calls only this scalar withdrawal, then original once.
+ void foreign()noexcept{__atomic_store_n(&dirty_,uint8_t(1),__ATOMIC_RELEASE);}
+ // CPU-only set/custody recheck after a separately validated resource token.
+ // Original Remove's closed scalar predicate cannot retire these resources.
+ bool pending_set(void*capture,uint64_t epoch,uint64_t job,const Target&target,uint64_t mutation)noexcept{
+  try{
+   if(!bound_||!api_.thread()||capture!=capture_||epoch!=epoch_||job!=job_||depth_||dirty()||!receipt_.owned
+    ||!mutation||mutation!=receipt_.mutation||!same(target,receipt_.target)||!api_.retained(context_,capture_,epoch_,job_))return false;
+   Set now{};
+   return api_.observe(context_,capture_,target,&now)&&now.count==1&&now.exact
+    &&now.object==receipt_.set.object&&now.version==receipt_.set.version&&now.last==receipt_.set.last&&!dirty();
+  }catch(...){foreign();return false;}
+ }
+ bool pending(void*capture,uint64_t epoch,uint64_t job,const Target&target,uint64_t*mutation=nullptr)noexcept{
+  try{
+   const uint64_t token=receipt_.mutation;
+   if(mutation)*mutation=0;
+   if(!pending_set(capture,epoch,job,target,token))return false;
+   Origin check=receipt_.origin;
+   if(!api_.resource(context_,&check,target)||check.controller!=receipt_.origin.controller
+    ||check.wrapper!=receipt_.origin.wrapper||check.texture!=receipt_.origin.texture||check.native!=receipt_.origin.native
+    ||check.serial!=receipt_.origin.serial||!pending_set(capture,epoch,job,target,token))return false;
+   if(mutation)*mutation=token;
+   return true;
+  }catch(...){foreign();return false;}
+ }
+ const Receipt&receipt()const{return receipt_;}
+ bool withdrawn()const{return dirty();}
+ bool finish(){if(!bound_||!api_.thread()||depth_||capture_open_)return false;bound_=false;return true;}
+private:
+ bool dirty()const{return __atomic_load_n(&dirty_,__ATOMIC_ACQUIRE)!=0;}
+ Api api_{};void*context_=nullptr,*capture_=nullptr;uint64_t epoch_=0,job_=0,mutation_=0;
+ Returns returns_{};Receipt receipt_{};uint32_t depth_=0,capture_open_=0;uint8_t dirty_=0;bool bound_=false;
+ static thread_local Capture*path_;
+};
+class Journal::Capture {
+public:
+ Capture(Journal&j,void*controller,const Target&target,int32_t event,uintptr_t actual_return)noexcept:owner_(&j),parent_(path_){
+  try{
+  // Every main-thread overload invocation masks its parent, including an
+  // ordinary same-controller invocation inside the actual owned root request.
+  if(!j.bound_||!j.api_.thread())return;
+  attached_=true;path_=this;++j.capture_open_;target_=target;
+  uint64_t serial=0;
+  if(actual_return!=j.returns_.request_capture||event!=1010||!controller||j.dirty()
+   ||!j.api_.request_origin(j.context_,controller,&serial)||!serial)return;
+  for(auto*p=parent_;p;p=p->parent_)if(p->owner_==&j&&p->owned_&&p->origin_.controller==controller&&p->origin_.serial==serial)return;
+  origin_.controller=controller;origin_.serial=serial;owned_=true;
+  }catch(...){owned_=false;j.foreign();}
+ }
+ ~Capture(){if(attached_){path_=parent_;--owner_->capture_open_;}}
+ Capture(const Capture&)=delete;Capture&operator=(const Capture&)=delete;
+private:
+ friend class Add;
+ Journal*owner_=nullptr;Capture*parent_=nullptr;Origin origin_{};Target target_{};bool attached_=false,owned_=false;
+};
+class Journal::Add {
+public:
+ Add(Journal&j,void*capture,const Target&target,int32_t event,uintptr_t actual_return)noexcept:owner_(&j),target_(target){
+  try{
+  if(!j.bound_)return;
+  if(!j.api_.thread()){j.foreign();return;}
+  if(capture!=j.capture_)return;
+  attached_=true;++j.depth_;
+  if(j.depth_!=1||j.dirty()||!j.api_.retained(j.context_,capture,j.epoch_,j.job_)){j.foreign();return;}
+  if(j.mutation_==~uint64_t(0)){j.foreign();return;}mutation_=++j.mutation_;
+  bool owned=false;
+  if(event==1010&&actual_return==j.returns_.update_add){
+   owned=j.api_.update_origin(j.context_,capture,&origin_);
+   uint64_t serial=0;
+   owned=owned&&origin_.controller&&origin_.serial&&j.api_.request_origin(j.context_,origin_.controller,&serial)&&serial==origin_.serial;
+  }else if(event==1010&&actual_return==j.returns_.capture_add){
+   auto*p=path_;owned=p&&p->owner_==&j&&p->owned_&&same(p->target_,target);
+   if(owned)origin_=p->origin_;
+  }
+  if(!owned||!j.api_.resource(j.context_,&origin_,target)){j.foreign();return;}
+  if(!j.api_.observe(j.context_,capture,target,&before_)
+   ||(before_.count!=0&&(before_.count!=1||!before_.exact||!j.receipt_.owned||!same(j.receipt_.target,target)
+    ||before_.object!=j.receipt_.set.object||before_.version!=j.receipt_.set.version||before_.last!=j.receipt_.set.last))){j.foreign();return;}
+  owned_=true;
+  }catch(...){owned_=false;j.foreign();}
+ }
+ ~Add(){if(attached_&&!finished_)finish(false);}
+ // Invoke after original exactly once, including throw/failure finally paths.
+ // A throw may follow the actual set insertion: the positive closed postread
+ // records that historical queue custody without pretending body success.
+ bool finish(bool returned)noexcept{
+  if(!attached_||finished_)return false;
+  finished_=true;auto&j=*owner_;
+  bool result=false;
+  try{if(owned_&&!j.dirty()&&j.depth_==1&&j.api_.retained(j.context_,j.capture_,j.epoch_,j.job_)){
+   Set after{};
+   if(j.api_.observe(j.context_,j.capture_,target_,&after)&&!j.dirty()){
+    if(after.count==1&&after.exact&&j.api_.resource(j.context_,&origin_,target_)&&!j.dirty()){
+     j.receipt_={mutation_,origin_.serial,origin_,target_,after,returned,true};result=true;
+    }else if(after.count==0){j.receipt_.owned=false;result=true;}
+    else j.foreign();
+   }else j.foreign();
+  }
+  }catch(...){j.foreign();result=false;}
+  --j.depth_;return result;
+ }
+ Add(const Add&)=delete;Add&operator=(const Add&)=delete;
+private:
+ Journal*owner_=nullptr;Origin origin_{};Target target_{};Set before_{};uint64_t mutation_=0;
+ bool attached_=false,owned_=false,finished_=false;
+};
+inline thread_local Journal::Capture*Journal::path_=nullptr;
+} // namespace idoly_mp4_capture_queue
+
+// END_MP4_CAPTURE_QUEUE_JOURNAL
+
+// BEGIN_MP4_CAPTURE_QUEUE_PINS
+struct Mp4CaptureQueuePins{mp4game::Binding add,capture,intptr_equal;uintptr_t update_add,capture_add,request_capture;};
+[[maybe_unused]] inline constexpr Mp4CaptureQueuePins mp4_capture_queue_android={{0x8dfe7ac,{0xff,0x43,0x2,0xd1,0xfe,0x33,0x0,0xf9,0xf6,0x57,0x7,0xa9,0xf4,0x4f,0x8,0xa9}},{0x923d57c,{0xff,0x83,0x2,0xd1,0xfe,0x33,0x0,0xf9,0xf8,0x5f,0x7,0xa9,0xf6,0x57,0x8,0xa9}},{0x8680414,{0x1f,0x0,0x1,0xeb,0xe0,0x17,0x9f,0x1a,0xc0,0x3,0x5f,0xd6,0xfe,0xf,0x1e,0xf8}},0x923d4c8,0x923d684,0x923d570};
+[[maybe_unused]] inline constexpr Mp4CaptureQueuePins mp4_capture_queue_ios={{0x767d10c,{0xff,0x83,0x1,0xd1,0xf6,0x57,0x3,0xa9,0xf4,0x4f,0x4,0xa9,0xfd,0x7b,0x5,0xa9}},{0x7bcb8b0,{0xff,0xc3,0x1,0xd1,0xf8,0x5f,0x3,0xa9,0xf6,0x57,0x4,0xa9,0xf4,0x4f,0x5,0xa9}},{0x6d85f40,{0x1f,0x0,0x1,0xeb,0xe0,0x17,0x9f,0x1a,0xc0,0x3,0x5f,0xd6,0xf4,0x4f,0xbe,0xa9}},0x7bcb7e8,0x7bcb9dc,0x7bcb8a0};
+
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto&mp4_capture_queue_pins=mp4_capture_queue_ios;
+#else
+constexpr const auto&mp4_capture_queue_pins=mp4_capture_queue_android;
+#endif
+
+// END_MP4_CAPTURE_QUEUE_PINS
+
+// BEGIN_MP4_CAPTURE_QUEUE_HOST
+namespace mp4cq=idoly_mp4_capture_queue;
+struct Mp4CaptureQueueHost {
+ mp4cq::Journal journal{};mp4cq::Gate gate{};Mp4CaptureProductionHost*production=nullptr;
+ void*context=nullptr,*component=nullptr,*controller=nullptr;uint32_t root=0;uintptr_t native=0;
+ uint64_t epoch=0,job=0;
+ bool(*allocation)(void*,uint64_t,uint64_t,void*,void*,uintptr_t,bool*)=nullptr;
+ bool bound=false;
+};
+// Stable registry outlives every Host reuse. Reader publication and count use
+// one seq_cst order: no reader can load an old pointer after writer saw zero.
+Mp4CaptureQueueHost*mp4_capture_queue_published=nullptr;
+Mp4CaptureQueueHost*mp4_capture_queue_retiring=nullptr; // owner-thread only
+uint64_t mp4_capture_queue_readers=0;
+uint8_t mp4_capture_queue_untracked=0;
+struct Mp4CaptureQueueReader {
+ Mp4CaptureQueueHost*value=nullptr;bool entered=false,loaded=false;
+ Mp4CaptureQueueReader()=default;Mp4CaptureQueueReader(const Mp4CaptureQueueReader&)=delete;
+ Mp4CaptureQueueReader&operator=(const Mp4CaptureQueueReader&)=delete;
+ ~Mp4CaptureQueueReader(){leave();}
+ bool begin()noexcept{
+  if(entered)return false;
+  uint64_t expected=__atomic_load_n(&mp4_capture_queue_readers,__ATOMIC_SEQ_CST);
+  do{if(expected==~uint64_t(0)){__atomic_store_n(&mp4_capture_queue_untracked,uint8_t(1),__ATOMIC_SEQ_CST);return false;}}
+  while(!__atomic_compare_exchange_n(&mp4_capture_queue_readers,&expected,expected+1,false,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST));
+  entered=true;return true;
+ }
+ Mp4CaptureQueueHost*published()noexcept{
+  if(!entered)return nullptr;
+  if(!loaded){value=__atomic_load_n(&mp4_capture_queue_published,__ATOMIC_SEQ_CST);loaded=true;}
+  return value;
+ }
+ void leave()noexcept{
+  if(entered)__atomic_fetch_sub(&mp4_capture_queue_readers,uint64_t(1),__ATOMIC_SEQ_CST);
+  entered=loaded=false;value=nullptr;
+ }
+};
+bool mp4_capture_queue_retained(void*opaque,void*component,uint64_t epoch,uint64_t job){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);uintptr_t native=0;
+ return game_call()&&h&&h->bound&&component==h->component&&epoch==h->epoch&&job==h->job
+  &&h->root&&weak_get(h->root)==component&&mp4_exact_type(component,"VL.Rendering.VLSRPCapture")
+  &&mp4_alive(component)&&mp4_actor_field(component,16,native)&&native&&native==h->native;
+}
+bool mp4_capture_queue_observe(void*opaque,void*component,const mp4cq::Target&target,mp4cq::Set*out){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);
+ if(!h||!out||!mp4_actor_refresh_maps()||!mp4_capture_queue_retained(h,component,h->epoch,h->job))return false;
+ void*set=nullptr;if(!mp4_actor_field(component,32,set))return false;
+ if(!set){void*after=nullptr;
+  if(!mp4_renderer_capture_set_idle(component)||!mp4_actor_field(component,32,after)||after)return false;
+  *out={};return true;
+ }
+ if(!mp4_actor_mapped(set,16,false))return false;
+ void*klass=object_class(set);const char*name=class_name(klass);const char*space=class_namespace(klass);
+ if(!name||!space||strcmp(name,"HashSet`1")||strcmp(space,"System.Collections.Generic"))return false;
+ size_t count_at=0,last_at=0,version_at=0;
+ if(!mp4_renderer_capture_i32_field(klass,"_count",count_at)||!mp4_renderer_capture_i32_field(klass,"_lastIndex",last_at)
+  ||!mp4_renderer_capture_i32_field(klass,"_version",version_at))return false;
+ int32_t count=-1,last=-1,version=0;
+ if(!mp4_actor_field(set,count_at,count)||count<0||count>1||!mp4_actor_field(set,last_at,last)||last<0||last>64
+  ||!mp4_actor_field(set,version_at,version))return false;
+ Mp4CaptureTarget40 expected{};memcpy(expected.bytes,target.bytes,40);
+ const bool exact=count==1&&mp4_renderer_capture_request_set_owned(component,expected);
+ if((count==0&&!mp4_renderer_capture_set_idle(component))||(count==1&&!exact))return false;
+ void*after=nullptr;int32_t after_count=-1,after_last=-1,after_version=0;
+ if(!mp4_actor_field(component,32,after)||after!=set||!mp4_actor_field(set,count_at,after_count)||after_count!=count
+  ||!mp4_actor_field(set,last_at,after_last)||after_last!=last||!mp4_actor_field(set,version_at,after_version)||after_version!=version
+  ||!mp4_capture_queue_retained(h,component,h->epoch,h->job))return false;
+ *out={set,version,count,last,exact};return true;
+}
+bool mp4_capture_queue_request_origin(void*opaque,void*controller,uint64_t*out){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);uint64_t serial=0;
+ if(!game_call()||!h||!h->bound||controller!=h->controller||!out
+  ||!h->production||__atomic_load_n(&mp4_capture_production_published,__ATOMIC_ACQUIRE)!=h->production
+  ||!(serial=mp4_capture_production_request(controller)))return false;
+ *out=serial;return true;
+}
+bool mp4_capture_queue_update_origin(void*opaque,void*component,mp4cq::Origin*out){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);uint64_t serial=0;
+ if(!h||!out||component!=h->component||!h->production||!h->production->configured
+  ||!mp4_capture_queue_request_origin(h,h->controller,&serial)
+  ||!h->production->bank.publication_origin(h->controller,serial))return false;
+ *out={h->controller,nullptr,nullptr,0,serial};return true;
+}
+bool mp4_capture_queue_target(void*texture,const mp4cq::Target&actual){
+ if(!texture||!mp4_prefix(mp4_capture_owned_pins.target_ctor))return false;
+ Mp4CaptureTarget40 expected{};using Ctor=void(*)(Mp4CaptureTarget40*,void*,const Method*);
+ reinterpret_cast<Ctor>(image_base+mp4_capture_owned_pins.target_ctor.rva)(&expected,texture,nullptr);
+ mp4cq::Target value{};memcpy(value.bytes,expected.bytes,40);return mp4cq::same(actual,value);
+}
+bool mp4_capture_queue_resource(void*opaque,mp4cq::Origin*origin,const mp4cq::Target&target){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);
+ if(!game_call()||!h||!h->bound||!origin||origin->controller!=h->controller||!origin->serial||!h->allocation)return false;
+ if(origin->wrapper||origin->texture||origin->native){bool queued=false;
+  return origin->wrapper&&origin->texture&&origin->native
+   &&h->allocation(h->context,h->epoch,h->job,origin->wrapper,origin->texture,origin->native,&queued)&&queued
+   &&mp4_capture_queue_target(origin->texture,target);
+ }
+ if(!h->production)return false;
+ bool found=false;mp4cq::Origin match=*origin;
+ for(uint32_t i=0;i<h->production->bank.count();++i){mp4production::Resource resource{};
+  if(!h->production->bank.historical(i,&resource)||resource.epoch!=h->epoch||resource.job!=h->job
+   ||!resource.wrapper_returned||!resource.texture_returned||!resource.native_known||!resource.native
+   ||!resource.wrapper||!resource.texture||!mp4_capture_queue_target(resource.texture,target))continue;
+  bool queued=false;
+  if(!h->allocation(h->context,h->epoch,h->job,resource.wrapper,resource.texture,resource.native,&queued)||!queued||found)return false;
+  match.wrapper=resource.wrapper;match.texture=resource.texture;match.native=resource.native;found=true;
+ }
+ if(found)*origin=match;
+ return found;
+}
+[[maybe_unused]] bool mp4_capture_queue_bind(Mp4CaptureQueueHost&h,Mp4CaptureProductionHost&production,
+ void*context,bool(*allocation)(void*,uint64_t,uint64_t,void*,void*,uintptr_t,bool*),bool actual_frontends){
+ if(!game_call()||h.bound||h.root||!production.configured||!context||!allocation||!actual_frontends
+  ||__atomic_load_n(&mp4_capture_queue_published,__ATOMIC_SEQ_CST)||mp4_capture_queue_retiring
+  ||__atomic_load_n(&mp4_capture_queue_readers,__ATOMIC_SEQ_CST)||__atomic_load_n(&mp4_capture_queue_untracked,__ATOMIC_SEQ_CST)
+  ||!mp4_capture_production_assignment_current(&production,production.source.generation,production.job))return false;
+ void*component=nullptr;uintptr_t native=0;
+ if(!mp4_actor_field(production.source.controller,168,component)||!mp4_exact_type(component,"VL.Rendering.VLSRPCapture")
+  ||!mp4_alive(component)||!mp4_actor_field(component,16,native)||!native||!mp4_renderer_capture_set_idle(component))return false;
+ h.root=mp4_retain(component);if(!h.root||weak_get(h.root)!=component){if(h.root)weak_free(h.root);h.root=0;return false;}
+ h.production=&production;h.context=context;__atomic_store_n(&h.component,component,__ATOMIC_RELEASE);h.controller=production.source.controller;h.native=native;
+ h.epoch=production.source.generation;h.job=production.job;h.allocation=allocation;h.bound=true;
+ mp4cq::Api api{[](){return game_call();},mp4_capture_queue_retained,mp4_capture_queue_request_origin,
+  mp4_capture_queue_update_origin,mp4_capture_queue_resource,mp4_capture_queue_observe};
+ const mp4cq::Returns returns{image_base+mp4_capture_queue_pins.update_add,image_base+mp4_capture_queue_pins.capture_add,image_base+mp4_capture_queue_pins.request_capture};
+ if(!h.journal.bind(api,&h,component,h.epoch,h.job,returns)){
+  weak_free(h.root);h.root=0;h.bound=false;return false;
+ }
+ __atomic_store_n(&mp4_capture_queue_published,&h,__ATOMIC_SEQ_CST);return true;
+}
+// Provider for Root's independently retained AliasCancel host. This is only
+// historical queue custody; Root still requires unwind+idle renderer+GPU fence.
+[[maybe_unused]] bool mp4_capture_queue_pending(void*opaque,uint64_t epoch,uint64_t job,void*component,const Mp4CaptureTarget40&target){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);mp4cq::Target value{};memcpy(value.bytes,target.bytes,40);
+ return game_call()&&h&&h->bound&&h->journal.pending(component,epoch,job,value);
+}
+[[maybe_unused]] bool mp4_capture_queue_finish(Mp4CaptureQueueHost&h){
+ if(!game_call()||!h.bound)return false;
+ if(!mp4_capture_queue_retiring){
+  auto*expected=&h;
+  if(!__atomic_compare_exchange_n(&mp4_capture_queue_published,&expected,static_cast<Mp4CaptureQueueHost*>(nullptr),false,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST))return false;
+  mp4_capture_queue_retiring=&h;
+ }
+ if(mp4_capture_queue_retiring!=&h||__atomic_load_n(&mp4_capture_queue_readers,__ATOMIC_SEQ_CST))return false;
+ mp4cq::Gate::Cancel closing;if(!closing.try_enter(h.gate)||!h.journal.finish())return false;
+ if(h.root)weak_free(h.root);
+ h.root=0;h.bound=false;mp4_capture_queue_retiring=nullptr;return true;
+}
+// Actual Add frontend calls this BEFORE journal construction/original. The
+// lease spans original Add and finally postread. Offthread touches only cached
+// scalars/atomic withdrawal, and waits for CPU Remove only; no Unity read here.
+struct Mp4CaptureQueueAdd {
+ // Reverse destruction releases the gate BEFORE the registry reader.
+ Mp4CaptureQueueReader reader{};mp4cq::Gate::Add gate{};
+ mp4cq::Journal*journal()noexcept{
+  auto*h=reader.published();return game_call()&&h&&h->bound?&h->journal:nullptr;
+ }
+};
+[[maybe_unused]] bool mp4_capture_queue_add_enter(Mp4CaptureQueueAdd&lease,void*component)noexcept{
+ if(!lease.reader.begin())return false;
+ auto*h=lease.reader.published();if(!h)return false;
+ if(!game_call())h->journal.foreign();
+ if(component!=__atomic_load_n(&h->component,__ATOMIC_ACQUIRE))return false;
+ if(!lease.gate.enter(h->gate))return false;
+ if(lease.gate.interrupted_cancel())h->journal.foreign();
+ return true;
+}
+struct Mp4CaptureQueueCancel {
+ mp4cq::Gate::Cancel lease{};Mp4CaptureQueueHost*host=nullptr;
+ bool current()const noexcept{return host&&lease.current()&&host->bound&&!host->journal.withdrawn()
+  &&__atomic_load_n(&mp4_capture_queue_published,__ATOMIC_SEQ_CST)==host
+  &&!__atomic_load_n(&mp4_capture_queue_readers,__ATOMIC_SEQ_CST)
+  &&!__atomic_load_n(&mp4_capture_queue_untracked,__ATOMIC_SEQ_CST);}
+};
+// Main-thread try only. False is WAIT/no mutation; no stale pre-gate witness is
+// accepted. Caller keeps this lease across final pending check, direct original
+// CPU Remove and final count0/withdrawal checks. GPU wait/poll precedes begin.
+[[maybe_unused]] bool mp4_capture_queue_cancel_enter(void*opaque,Mp4CaptureQueueCancel&cancel,
+ uint64_t epoch,uint64_t job,void*component){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);
+ if(!game_call()||!h||cancel.host||!h->bound||epoch!=h->epoch||job!=h->job||component!=h->component
+  ||__atomic_load_n(&mp4_capture_queue_published,__ATOMIC_SEQ_CST)!=h
+  ||__atomic_load_n(&mp4_capture_queue_readers,__ATOMIC_SEQ_CST)||__atomic_load_n(&mp4_capture_queue_untracked,__ATOMIC_SEQ_CST)
+  ||!mp4_prefix(mp4_capture_queue_pins.intptr_equal)||!cancel.lease.try_enter(h->gate))return false;
+ cancel.host=h;return cancel.current();
+}
+[[maybe_unused]] bool mp4_capture_queue_pending_resource(void*opaque,uint64_t epoch,uint64_t job,void*component,
+ const Mp4CaptureTarget40&target,uint64_t*token){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);mp4cq::Target value{};memcpy(value.bytes,target.bytes,40);
+ return game_call()&&h&&h->bound&&token&&h->journal.pending(component,epoch,job,value,token);
+}
+[[maybe_unused]] bool mp4_capture_queue_pending_set(void*opaque,uint64_t epoch,uint64_t job,void*component,
+ const Mp4CaptureTarget40&target,uint64_t token){
+ auto*h=static_cast<Mp4CaptureQueueHost*>(opaque);mp4cq::Target value{};memcpy(value.bytes,target.bytes,40);
+ return game_call()&&h&&h->bound&&h->journal.pending_set(component,epoch,job,value,token);
+}
+[[maybe_unused]] bool mp4_capture_queue_cancel_begin(void*opaque,Mp4CaptureQueueCancel&cancel,
+ uint64_t epoch,uint64_t job,void*component,const Mp4CaptureTarget40&target){
+ uint64_t token=0;
+ return mp4_capture_queue_pending_resource(opaque,epoch,job,component,target,&token)
+  &&mp4_capture_queue_cancel_enter(opaque,cancel,epoch,job,component)
+  &&mp4_capture_queue_pending_set(opaque,epoch,job,component,target,token)&&cancel.current();
+}
+// Actual Bridge Add hook calls active() only on the owning game thread. Its
+// offthread branch calls foreign() and forwards original unchanged exactlyonce.
+[[maybe_unused]] mp4cq::Journal*mp4_capture_queue_active(){
+ if(!game_call())return nullptr;
+ auto*h=__atomic_load_n(&mp4_capture_queue_published,__ATOMIC_ACQUIRE);return h&&h->bound?&h->journal:nullptr;
+}
+[[maybe_unused]] void mp4_capture_queue_foreign()noexcept{
+ Mp4CaptureQueueReader reader;if(!reader.begin())return;auto*h=reader.published();if(h)h->journal.foreign();
+}
+// END_MP4_CAPTURE_QUEUE_HOST
+
+// BEGIN_MP4_CAPTURE_ALIAS_PINS
+struct Mp4CaptureAliasPins{mp4game::Binding remove;};
+[[maybe_unused]] inline constexpr Mp4CaptureAliasPins mp4_capture_alias_android={{0x8dfe8bc,{0xff,0x83,0x01,0xd1,0xfe,0x1b,0x00,0xf9,0xf6,0x57,0x04,0xa9,0xf4,0x4f,0x05,0xa9}}};
+[[maybe_unused]] inline constexpr Mp4CaptureAliasPins mp4_capture_alias_ios={{0x767d200,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}}};
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto&mp4_capture_alias_pins=mp4_capture_alias_ios;
+#else
+constexpr const auto&mp4_capture_alias_pins=mp4_capture_alias_android;
+#endif
+// END_MP4_CAPTURE_ALIAS_PINS
+
+// BEGIN_MP4_CAPTURE_ALIAS_HOST
+// Cleanup custody is separate from a live source/frame permission. The capture
+// component and original renderer are retained while the selected source is
+// still verified; cleanup never resolves a former controller after handoff.
+struct Mp4CaptureAliasHost {
+ Mp4SceneWitness source{};uint64_t job=0;void*context=nullptr;
+ void*component=nullptr,*renderer=nullptr,*queue=nullptr;uintptr_t component_native=0;
+ uint32_t roots[3]{};
+ bool(*unwound)(void*,uint64_t,uint64_t)=nullptr;
+ // Must cover every capture draw/readback using this job's private targets
+ // and prevent any further request/draw from being issued for the job. A
+ // held clock, elapsed timer, EndCameraRendering or Submit return is not a fence.
+ bool(*gpu_retired)(void*,uint64_t,uint64_t)=nullptr;
+ // Historical Bank allocation custody. queued_possible is true only after
+ // both actual constructors returned; A0 assignment is deliberately not
+ // required for cleanup. This never grants a frame/output permission.
+ bool(*allocation)(void*,uint64_t,uint64_t,void*,void*,uintptr_t,bool*queued_possible)=nullptr;
+ Mp4CaptureQueueHost*producer=nullptr; // actual typed producer, retained separately
+ // Exact historical controller-field detach/source-owner retirement receipt.
+ // Handoff or job sealing alone is insufficient: old A0 may still alias this
+ // wrapper. This query never reopens the former controller after handoff.
+ bool(*owner_detached)(void*,uint64_t,uint64_t,void*,void*,uintptr_t)=nullptr;
+ // Source-program/readback alias closure, including sticky ordinary Add
+ // withdrawal even if that foreign entry has since been consumed/cleared.
+ bool(*consumers_closed)(void*,uint64_t,uint64_t,void*,void*,uintptr_t)=nullptr;
+ bool bound=false,busy=false,invalid=false;
+};
+bool mp4_capture_alias_empty_queue(Mp4CaptureAliasHost&h){
+ void*queue=nullptr;void*field=nullptr;void**items=nullptr;size_t count=0;void*array=nullptr;uint32_t version=0;
+ return h.bound&&h.renderer&&h.queue&&h.roots[1]&&h.roots[2]
+  &&weak_get(h.roots[1])==h.renderer&&weak_get(h.roots[2])==h.queue
+  &&mp4_exact_type(h.renderer,"VL.Rendering.VLSRPRenderer")
+  &&mp4_renderer_srp_field(object_class(h.renderer),"m_ActiveRenderPassQueue",48,false,field)
+  &&mp4_actor_field(h.renderer,48,queue)&&queue==h.queue
+  &&mp4_renderer_srp_list(queue,items,count,array,version,4096)&&count==0
+  &&mp4_renderer_srp_list_same(queue,array,version,nullptr,0,4096);
+}
+bool mp4_capture_alias_component(const Mp4CaptureAliasHost&h){
+ uintptr_t native=0;
+ return h.bound&&h.component&&h.roots[0]&&weak_get(h.roots[0])==h.component
+  &&mp4_exact_type(h.component,"VL.Rendering.VLSRPCapture")&&mp4_alive(h.component)
+  &&mp4_actor_field(h.component,16,native)&&native&&native==h.component_native;
+}
+bool mp4_capture_alias_producer(const Mp4CaptureAliasHost&h){
+ auto*p=h.producer;
+ return game_call()&&p&&p->bound&&p->component==h.component&&p->native==h.component_native
+  &&p->controller==h.source.controller&&p->epoch==h.source.generation&&p->job==h.job
+  &&__atomic_load_n(&mp4_capture_queue_published,__ATOMIC_SEQ_CST)==p
+  &&!__atomic_load_n(&mp4_capture_queue_untracked,__ATOMIC_SEQ_CST)&&!p->journal.withdrawn()
+  &&mp4_capture_queue_retained(p,h.component,h.source.generation,h.job);
+}
+bool mp4_capture_alias_release(Mp4CaptureAliasHost&h){
+ if(!game_call()||h.busy)return false;
+ // The coordinator calls this only after every produced native target was
+ // disposed or its actual cleanup custody was transferred. This routine is
+ // root release, not a replacement for that native-resource ledger.
+ for(auto&root:h.roots){if(root)weak_free(root);root=0;}
+ h.bound=false;h.producer=nullptr;h.component=h.renderer=h.queue=nullptr;h.component_native=0;return true;
+}
+[[maybe_unused]] bool mp4_capture_alias_bind(Mp4CaptureAliasHost&h,const Mp4SceneWitness&source,
+ uint64_t job,void*context,bool(*unwound)(void*,uint64_t,uint64_t),
+ bool(*retired)(void*,uint64_t,uint64_t),bool(*allocation)(void*,uint64_t,uint64_t,void*,void*,uintptr_t,bool*),
+ Mp4CaptureQueueHost&producer,
+ bool(*detached)(void*,uint64_t,uint64_t,void*,void*,uintptr_t),
+ bool(*closed)(void*,uint64_t,uint64_t,void*,void*,uintptr_t)){
+ if(!game_call()||h.bound||h.roots[0]||h.roots[1]||h.roots[2]||!source.generation||!job
+  ||!context||!unwound||!retired||!allocation||!detached||!closed||!mp4_source_verified||!mp4_actor_source_verified)return false;
+ Mp4OriginalRendererSource actual{};void*component=nullptr,*queue=nullptr;uintptr_t native=0;
+ if(!mp4_original_renderer_source_detail(actual)||!mp4_scene_same_source(source,actual.scene)
+  ||!mp4_actor_field(source.controller,168,component)||!mp4_exact_type(component,"VL.Rendering.VLSRPCapture")
+  ||!mp4_alive(component)||!mp4_actor_field(component,16,native)||!native
+  ||!mp4_actor_field(actual.renderer,48,queue)||!queue
+  ||!mp4_renderer_capture_set_idle(component))return false;
+ void*values[]={component,actual.renderer,queue};
+ for(size_t i=0;i<3;++i){h.roots[i]=mp4_retain(values[i]);
+  if(!h.roots[i]||weak_get(h.roots[i])!=values[i]){mp4_capture_alias_release(h);return false;}}
+ h.source=source;h.job=job;h.context=context;h.unwound=unwound;h.gpu_retired=retired;h.allocation=allocation;h.producer=&producer;h.owner_detached=detached;h.consumers_closed=closed;
+ h.component=component;h.renderer=actual.renderer;h.queue=queue;h.component_native=native;h.bound=true;h.invalid=h.busy=false;
+ Mp4OriginalRendererSource after{};
+ if(!mp4_capture_alias_producer(h)||!mp4_capture_alias_empty_queue(h)||!mp4_original_renderer_source_detail(after)
+  ||!mp4_scene_same_source(after.scene,source)||after.renderer!=actual.renderer
+  ||!mp4_capture_alias_component(h)||!mp4_renderer_capture_set_idle(component)){
+  mp4_capture_alias_release(h);return false;}
+ return true;
+}
+// The only possible pending entry is removed through the ORIGINAL target-only
+// Remove, after a closed read proves count==1, matching RenderTargetIdentifier
+// and event1010. No Clear, HashSet layout write or renderer pass removal occurs.
+[[maybe_unused]] bool mp4_capture_alias_unreferenced(void*opaque,void*wrapper,void*texture,uintptr_t native){
+ auto*h=static_cast<Mp4CaptureAliasHost*>(opaque);bool queued_possible=false;
+ if(!game_call()||!h||!h->bound||h->busy||h->invalid||!wrapper||!texture||!native
+  ||!h->unwound||!h->gpu_retired||!h->allocation||!h->owner_detached||!h->consumers_closed)return false;
+ struct Busy{bool&flag;explicit Busy(bool&v):flag(v){flag=true;}~Busy(){flag=false;}} busy(h->busy);
+ try{
+  if(!mp4_capture_alias_producer(*h)||!h->unwound(h->context,h->source.generation,h->job)
+   ||!h->allocation(h->context,h->source.generation,h->job,wrapper,texture,native,&queued_possible)
+   ||!h->gpu_retired(h->context,h->source.generation,h->job)
+   ||!h->owner_detached(h->context,h->source.generation,h->job,wrapper,texture,native)
+   ||!mp4_capture_alias_component(*h)||!mp4_capture_alias_empty_queue(*h))return false;
+  uintptr_t actual_native=0;void*actual_texture=nullptr;
+  if(!mp4_exact_type(wrapper,"VL.VLRenderTexture")
+   ||(queued_possible&&(!mp4_actor_field(wrapper,16,actual_texture)||actual_texture!=texture))
+   ||!mp4_exact_type(texture,"UnityEngine.RenderTexture")||!mp4_alive(texture)
+   ||!mp4_actor_field(texture,16,actual_native)||actual_native!=native)return false;
+  const bool pending=!mp4_renderer_capture_set_idle(h->component);
+  Mp4CaptureTarget40 target{};uint64_t token=0;
+  if(pending){
+   if(!queued_possible||!mp4_prefix(mp4_capture_alias_pins.remove)||!mp4_prefix(mp4_capture_owned_pins.target_ctor))return false;
+   using TargetCtor=void(*)(Mp4CaptureTarget40*,void*,const Method*);
+   reinterpret_cast<TargetCtor>(image_base+mp4_capture_owned_pins.target_ctor.rva)(&target,texture,nullptr);
+   if(!mp4_capture_queue_pending_resource(h->producer,h->source.generation,h->job,h->component,target,&token))return false;
+  }
+  // All potentially waiting/callout providers run BEFORE Cancel. In particular
+  // the last consumer receipt closes ordinary aliases even for an empty set.
+  if(!h->unwound(h->context,h->source.generation,h->job)
+   ||!h->allocation(h->context,h->source.generation,h->job,wrapper,texture,native,&queued_possible)
+   ||!h->gpu_retired(h->context,h->source.generation,h->job)
+   ||!h->owner_detached(h->context,h->source.generation,h->job,wrapper,texture,native)
+   ||!h->consumers_closed(h->context,h->source.generation,h->job,wrapper,texture,native)
+   ||!mp4_capture_alias_producer(*h))return false;
+  Mp4CaptureQueueCancel cancel;
+  if(!mp4_capture_queue_cancel_enter(h->producer,cancel,h->source.generation,h->job,h->component)
+   ||!cancel.current()||!mp4_capture_alias_component(*h)||!mp4_capture_alias_empty_queue(*h))return false;
+  // CPU-only closed set/native-component checks below; no GPU, resource,
+  // owner-detach or consumer callback may run under this lease.
+  if(pending){
+   if(!queued_possible||!mp4_renderer_capture_request_set_owned(h->component,target)
+    ||!mp4_capture_queue_pending_set(h->producer,h->source.generation,h->job,h->component,target,token)
+    ||!cancel.current())return false;
+   using Remove=bool(*)(void*,const Mp4CaptureTarget40*,const Method*);
+   const bool removed=reinterpret_cast<Remove>(image_base+mp4_capture_alias_pins.remove.rva)(h->component,&target,nullptr);
+   if(!removed){h->invalid=true;return false;}
+  }
+  return cancel.current()&&mp4_capture_alias_component(*h)&&mp4_renderer_capture_set_idle(h->component)
+   &&mp4_capture_alias_empty_queue(*h)&&cancel.current();
+ }catch(...){h->invalid=true;return false;}
+}
+// END_MP4_CAPTURE_ALIAS_HOST
+
+// BEGIN_MP4_CAPTURE_QUEUE_HOOKS
+// Exact source value-type ABI: RTID40 is passed indirectly in X1. These two
+// frontends remain uninstalled until their own source/gateway receipts exist.
+using Mp4CaptureQueueOriginal=void(*)(void*,const mp4cq::Target*,int32_t,Method*);
+Mp4CaptureQueueOriginal mp4_capture_add_original=nullptr,mp4_capture_target_request_original=nullptr;
+[[maybe_unused]] __attribute__((noinline)) void mp4_capture_add_hook(void*self,const mp4cq::Target*target,int32_t event,Method*method){
+ const uintptr_t caller=reinterpret_cast<uintptr_t>(__builtin_extract_return_addr(__builtin_return_address(0)));
+ // This reader MUST span the original even when no published owner/gate was
+ // found. A failed enter never permits destruction/reset to race that call.
+ Mp4CaptureQueueAdd lease;(void)mp4_capture_queue_add_enter(lease,self);
+ if(!game_call()){mp4_capture_add_original(self,target,event,method);return;}
+ auto*journal=lease.journal();
+ if(!journal){mp4_capture_add_original(self,target,event,method);return;}
+ if(!target){journal->foreign();mp4_capture_add_original(self,target,event,method);return;}
+ mp4cq::Journal::Add receipt(*journal,self,*target,event,caller);
+ mp4_capture_add_original(self,target,event,method);
+ (void)receipt.finish(true); // destructor closes false on original throw
+}
+[[maybe_unused]] __attribute__((noinline)) void mp4_capture_target_request_hook(void*self,const mp4cq::Target*target,int32_t event,Method*method){
+ const uintptr_t caller=reinterpret_cast<uintptr_t>(__builtin_extract_return_addr(__builtin_return_address(0)));
+ if(!game_call()){mp4_capture_queue_foreign();mp4_capture_target_request_original(self,target,event,method);return;}
+ auto*journal=mp4_capture_queue_active();
+ if(!journal){mp4_capture_target_request_original(self,target,event,method);return;}
+ if(!target){journal->foreign();mp4_capture_target_request_original(self,target,event,method);return;}
+ // EVERY overload invocation masks the outer selected root path, including
+ // ordinary nested same-controller/same-target requests.
+ mp4cq::Journal::Capture receipt(*journal,self,*target,event,caller);
+ mp4_capture_target_request_original(self,target,event,method);
+}
+// END_MP4_CAPTURE_QUEUE_HOOKS
+
+
+
 // BEGIN_MP4_CAPTURE_FRONTEND_SOURCE_HOST
 #ifdef IDOLY_DARWIN_BRIDGE
 bool mp4_capture_static_frontend(const pin::Entry&e,uintptr_t replacement,uintptr_t original){
@@ -30944,6 +33224,41 @@ void mp4_owned_render_call(Mp4RenderCamera original,Mp4RenderContext context,voi
     exit.success=isolated&&mp4_camera_source_current(nullptr);
     if(!exit.success){host.invalidated=true;host.error="camera_render_rng_ownership_lost";}
 }
+// BEGIN_MP4_PROFLARE_GPU_OWNER_HOST
+// This is the physical draw/upload owner, not Data membership. The Stage
+// original Try/Initialize/returned-Data journal independently proves that the
+// exact Data belongs to this operation, including before its first upload.
+bool mp4_proflare_gpu_current(const Mp4ProFlareGpuOwner&owner){
+ if(!game_call()||!owner.source||!owner.job||!owner.draw_sequence||!owner.draw_token
+  ||!mp4_owned_render_ticket_active||mp4_owned_render_depth!=1||mp4_unowned_render_depth)return false;
+ const auto&submission=mp4_owned_render_submission;const auto&gpu=mp4_gpu_fence_host;
+ return submission.source_generation==owner.source&&submission.job_generation==owner.job&&submission.draw_token==owner.draw_token
+  &&gpu.configured&&!gpu.sealed&&gpu.draw&&gpu.source==owner.source&&gpu.epoch==owner.job
+  &&gpu.sequence==owner.draw_sequence&&gpu.active_token==owner.draw_token;
+}
+bool mp4_proflare_gpu_origin(uint64_t source,uint64_t job,void*camera,Mp4ProFlareGpuOwner*out){
+ if(!out)return false;*out={};
+ if(!game_call()||!source||!job||!camera||camera!=mp4_owned_render_camera||!mp4_owned_render_submission.context.pointer)return false;
+ const auto&gpu=mp4_gpu_fence_host;Mp4ProFlareGpuOwner owner{source,job,gpu.sequence,mp4_owned_render_submission.draw_token};
+ if(!mp4_proflare_gpu_current(owner))return false;*out=owner;return true;
+}
+bool mp4_proflare_gpu_quiet(const Mp4ProFlareGpuOwner&owner){
+ if(!game_call()||!owner.source||!owner.job||!owner.draw_sequence||!owner.draw_token
+  ||mp4_owned_render_ticket_active||mp4_owned_render_depth||mp4_unowned_render_depth)return false;
+ const auto&render=mp4_gpu_fence_host;const auto&upload=mp4_gpu_auxiliary_host;
+ // Only the real Ledger.retire_sequence path advances these retirement
+ // counters after physical completion. Do not infer quiet from Submit return,
+ // elapsed time, a held clock, or absence of a current draw ticket alone.
+ if(!render.configured||render.draw||render.source!=owner.source||render.epoch!=owner.job
+  ||render.sequence<owner.draw_sequence||render.last_token<owner.draw_token||render.retired!=render.sequence)return false;
+ if(upload.draw)return false;
+ if(upload.configured&&(upload.source!=owner.source||upload.epoch!=owner.job||upload.retired!=upload.sequence))return false;
+ // No source/Unity object is inspected here; retirement may follow a source
+ // handoff. Dispose and list removal must precede final GPU-host finish/reset.
+ return true;
+}
+// END_MP4_PROFLARE_GPU_OWNER_HOST
+
 void mp4_render_stack_hook(Mp4RenderContext context,void* camera,Method* method){mp4_owned_render_call(mp4_render_stack_original,context,camera,method);}
 void mp4_render_camera_hook(Mp4RenderContext context,void* camera,Method* method){mp4_owned_render_call(mp4_render_camera_original,context,camera,method);}
 using Mp4VlbDraw=void(*)(void*,void*,void*,void*,Method*);

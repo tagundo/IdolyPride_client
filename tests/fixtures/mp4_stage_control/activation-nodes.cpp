@@ -46,7 +46,7 @@ bool write(void *, const Node &n, const State &s) {
   return true;
 }
 bool fresh(void *, Round r, const Node &old, const Node &now) {
-  return fresh_ok && old.graph.handle == 1 &&
+  return fresh_ok && old.graph.handle == (r == Round::exporting ? 1u : 2u) &&
          now.graph.handle == (r == Round::exporting ? 2u : 3u) &&
          now.birth == 100;
 }

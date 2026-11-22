@@ -38,6 +38,7 @@ W live{reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<vo
     reinterpret_cast<void*>(7),reinterpret_cast<void*>(8),reinterpret_cast<void*>(9),reinterpret_cast<void*>(10),reinterpret_cast<void*>(11),reinterpret_cast<void*>(12),7};
 bool on_thread=true,witness_available=true,automatic=true,held=true,mp4_api_installed=true;unsigned witness_calls=0;
 bool game_call(){return on_thread;}
+bool driving_permission=true;bool mp4_world_driving_permission(){return driving_permission;}
 bool mp4_exact_type(void*p,const char*){return p==reinterpret_cast<void*>(13);}
 bool mp4_alive(void*p){return p!=nullptr;}
 struct GameApi{void* director_get_asset(void*,void*){return reinterpret_cast<void*>(13);}}mp4_api;
@@ -48,6 +49,9 @@ struct RngLease{void restore_rng_before_source_change(){++actor_globals;}void ab
 void mp4_shader_lease_abandon(void*)noexcept{}
 void mp4_audio_abandon_globals()noexcept{}
 void mp4_stage_withdraw_interception()noexcept{}
+unsigned admission_drops=0,admission_withdrawals=0;bool admission_receipt=true;int admission_throw=-1;
+void mp4_stage_admission_drop()noexcept{++admission_drops;admission_receipt=false;}
+void mp4_stage_admission_withdraw()noexcept{++admission_withdrawals;admission_receipt=false;}
 void mp4_camera_abandon_globals_before_source_change()noexcept{++camera_globals;}
 void mp4_camera_restore_globals_before_source_change(){++camera_globals;}
 std::map<uint32_t,void*> roots;uint32_t nextroot=1;int allocation_fail_after=-1;
@@ -101,7 +105,7 @@ R prepare_render(void* c,uint64_t tick){assert(tick==0);++static_cast<Part*>(c)-
 R detach(void* c){auto& p=*static_cast<Part*>(c);return operation(p,"detach",p.detached);}
 R finalized(void* c){auto& p=*static_cast<Part*>(c);return operation(p,"finalize",p.finalized);}
 bool verified(void* c){return static_cast<Part*>(c)->restoration&&static_cast<Part*>(c)->restore>0;}
-R admit(void* c,const W& w){assert(w.generation==live.generation);auto& p=*static_cast<Part*>(c);++p.admitted;return p.restorable?R::ok:R::unsupported;}
+R admit(void* c,const W& w){assert(w.generation==live.generation);auto& p=*static_cast<Part*>(c);++p.admitted;if(p.index==admission_throw)throw std::runtime_error("admission");if(p.restorable&&p.index==2)admission_receipt=true;return p.restorable?R::ok:R::unsupported;}
 int post_begins=0,post_detaches=0,post_verifies=0,post_releases=0;bool post_checkpoint=false,post_begin_throws=false,post_begin_fails=false;
 R post_begin(bool checkpoint){++post_begins;post_checkpoint=checkpoint;if(post_begin_throws)throw std::runtime_error("observer");return post_begin_fails?R::failed:R::ok;}
 R post_detach(bool checkpoint){++post_detaches;assert(checkpoint==post_checkpoint);return R::ok;}
@@ -120,7 +124,7 @@ int main(int argc,char** argv){
     assert(argc==2);std::string mode=argv[1];
     if(mode=="missing_part"){install(true);assert(!mp4_scene_parts_available());assert(!mp4_scene_owner_current(nullptr));return 0;}
     install();assert(mp4_scene_parts_available());
-    if(mode=="smart_callgraph"){
+    if(mode=="smart_callgraph"||mode=="smart_callgraph_rejected"){
         mp4_world_host.source=live;mp4_camera_host.source=live;
         mp4_scene_host.parts[1].owner_current=mp4_camera_source_current;
         mp4_scene_host.parts[3].owner_current=mp4_world_source_current;
@@ -128,6 +132,7 @@ int main(int argc,char** argv){
         const unsigned before=witness_calls;
         assert(mp4_scene_normal_animation_closed()&&mp4_scene_owner_current(nullptr)&&mp4_world_fixed_subtree_closed());
         assert(witness_calls>before&&witness_calls-before<32);
+        if(mode=="smart_callgraph_rejected"){driving_permission=false;assert(!mp4_scene_owner_current(nullptr)&&!mp4_world_fixed_subtree_closed()&&mp4_scene_grant(nullptr,0)==R::stale);for(auto&p:parts)assert(!p.grant);return 0;}
         ++live.generation;assert(!mp4_world_fixed_subtree_closed()&&!mp4_scene_owner_current(nullptr));return 0;
     }
     if(mode=="global_handoff"){mp4_scene_restore_globals_before_source_change(nullptr);assert(actor_globals==1&&camera_globals==1);on_thread=false;mp4_scene_restore_globals_before_source_change(nullptr);assert(actor_globals==1&&camera_globals==1);return 0;}
@@ -199,8 +204,10 @@ int main(int argc,char** argv){
         assert(mp4_scene_normal_animation_closed());++live.generation;assert(!mp4_scene_normal_animation_closed());
         --live.generation;mp4_scene_will_change(live.player);assert(!mp4_scene_normal_animation_closed());return 0;
     }
-    if(mode=="admit"){assert(mp4_scene_admit(nullptr)==R::ok&&roots.empty()&&!mp4_scene_host.active);for(auto& p:parts)assert(p.admitted==1&&!p.configure);return 0;}
-    if(mode=="admit_reject"){parts[2].restorable=false;assert(mp4_scene_admit(nullptr)==R::unsupported&&roots.empty()&&!mp4_scene_host.active);assert(parts[0].admitted==1&&parts[1].admitted==1&&parts[2].admitted==1&&!parts[3].admitted);return 0;}
+    if(mode=="admit"){assert(mp4_scene_admit(nullptr)==R::ok&&roots.empty()&&!mp4_scene_host.active&&admission_receipt&&admission_drops==1);for(auto& p:parts)assert(p.admitted==1&&!p.configure);return 0;}
+    if(mode=="admit_after_stage_reject"){parts[3].restorable=false;assert(mp4_scene_admit(nullptr)==R::unsupported&&!admission_receipt&&admission_drops==2);assert(parts[2].admitted==1&&parts[3].admitted==1);return 0;}
+    if(mode=="admit_exception"){admission_throw=3;try{mp4_scene_admit(nullptr);assert(false);}catch(const std::runtime_error&){}assert(!admission_receipt&&admission_drops==2);return 0;}
+    if(mode=="admit_reject"){parts[2].restorable=false;assert(mp4_scene_admit(nullptr)==R::unsupported&&roots.empty()&&!mp4_scene_host.active&&!admission_receipt&&admission_drops==2);assert(parts[0].admitted==1&&parts[1].admitted==1&&parts[2].admitted==1&&!parts[3].admitted);return 0;}
     if(mode=="unavailable"){parts[2].available=false;assert(!mp4_scene_owner_current(nullptr));return 0;}
     if(mode=="not_owned_clock"){held=false;assert(!mp4_scene_owner_current(nullptr));assert(roots.empty());return 0;}
     if(mode=="not_automatic"){automatic=false;assert(!mp4_scene_owner_current(nullptr));return 0;}
@@ -300,7 +307,7 @@ int main(int argc,char** argv){
     return binary
 
 
-@pytest.mark.parametrize("mode",["normal","post_begin_failure","post_begin_exception","detach_partial","detach_pending_end","detach_checkpoint","detach_missing_provider","abandon_globals","abandon_loops_before_resource_wait","pending_end_blocks_detach","global_handoff","render_only","missing_render_arm","smart_callgraph","revoke_stale","cancel_before_reset","prepare_failed_restored","finalize_wait","admit","admit_reject","admit_ledger","missing_camera_grant","missing_stage_grant","missing_world_grant","camera_attest_failed","stage_attest_failed","missing_part","unavailable","not_owned_clock","not_automatic","allocation_failure","configure_partial","root_lost","stale_callback","capture_wait","prepare_wait","reset_wait","world_not_restorable","stale_epoch","invalidate","restore_wait","release_wait"])
+@pytest.mark.parametrize("mode",["normal","post_begin_failure","post_begin_exception","detach_partial","detach_pending_end","detach_checkpoint","detach_missing_provider","abandon_globals","abandon_loops_before_resource_wait","pending_end_blocks_detach","global_handoff","render_only","missing_render_arm","smart_callgraph","smart_callgraph_rejected","revoke_stale","cancel_before_reset","prepare_failed_restored","finalize_wait","admit","admit_reject","admit_after_stage_reject","admit_exception","admit_ledger","missing_camera_grant","missing_stage_grant","missing_world_grant","camera_attest_failed","stage_attest_failed","missing_part","unavailable","not_owned_clock","not_automatic","allocation_failure","configure_partial","root_lost","stale_callback","capture_wait","prepare_wait","reset_wait","world_not_restorable","stale_epoch","invalidate","restore_wait","release_wait"])
 def test_production_aggregate_preserves_order_roots_and_partial_phase_ownership(aggregate,mode):
     result=subprocess.run([str(aggregate),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

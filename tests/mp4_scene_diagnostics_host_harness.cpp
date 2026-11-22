@@ -16,7 +16,8 @@ struct Game {Mp4SceneWitness current{7,reinterpret_cast<void*>(7)};bool selected
 int calls[4]{},throw_family=-1,change_after=-1,failed_family=-1;
 bool empty_error=false,none_error=false;
 Mp4SceneResult result_for_failure=Mp4SceneResult::unsupported;
-unsigned expected_mask=0;
+unsigned expected_mask=0,admission_drops=0;bool admission_receipt=true;
+void mp4_stage_admission_drop()noexcept{++admission_drops;admission_receipt=false;}
 Mp4SceneResult admit(void*context,const Mp4SceneWitness&witness){
     const unsigned family=static_cast<unsigned>(reinterpret_cast<uintptr_t>(context)-1);
     assert(family<4&&witness.generation==7&&mp4_scene_host.admitted_source.generation==7);
@@ -24,6 +25,7 @@ Mp4SceneResult admit(void*context,const Mp4SceneWitness&witness){
     if(static_cast<int>(family)==change_after)++idoly_mp4_runtime::game.current.generation;
     if(static_cast<int>(family)==throw_family)throw std::runtime_error("family admission fixture");
     if(static_cast<int>(family)==failed_family)return result_for_failure;
+    if(family==2)admission_receipt=true;
     expected_mask|=1u<<family;return Mp4SceneResult::ok;
 }
 const char*error(void*){return empty_error?"":none_error?"none":"actual_family_error";}
@@ -44,6 +46,7 @@ int main(int argc,char**argv){
     idoly_mp4_runtime::NativeSceneDiagnostics out{};
     const auto witness=idoly_mp4_runtime::game.current; // Same frozen local copy as the real probe.
     mp4_scene_diagnostic_parts(witness,parts,verified,out);
+    assert(admission_drops==2&&!admission_receipt); // diagnostic receipts never transfer to export
     assert(out.available&&mp4_scene_host.admitted==15&&mp4_scene_host.admitted_source.generation==91);
     assert(mp4_scene_host.admitted_source.source==reinterpret_cast<void*>(91));
     for(int i=0;i<4;++i){

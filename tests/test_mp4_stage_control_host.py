@@ -20,9 +20,9 @@ def _between(source: str, begin: str, end: str) -> str:
     return source[start:stop]
 
 
-def _function(source: str, name: str) -> str:
+def _function(source: str, name: str, return_type: str = "bool") -> str:
     """Find a function's complete body, excluding subsequent unrelated hosts."""
-    start = source.index("bool " + name + "(")
+    start = source.index(return_type + " " + name + "(")
     brace = source.index("{", start)
     # The bounded source-only predicate has no brace characters in literals.
     depth = 0
@@ -39,7 +39,11 @@ def _function(source: str, name: str) -> str:
 def _write_shipping_bodies(destination: Path) -> None:
     source = (NATIVE / "bridge.cpp").read_text()
     bodies = {
-        "pins.inc": _between(source, "struct Mp4StageOtherPins{", "bool mp4_control_source_pins_ready()"),
+        "pins.inc": _between(source, "struct Mp4StageOtherPins{", "// BEGIN_MP4_STAGE_PARTICLE_ADMISSION_HOST"),
+        "particle-admission-receipt-host.cpp": _between(source,
+            "// BEGIN_MP4_STAGE_PARTICLE_ADMISSION_HOST", "// END_MP4_STAGE_PARTICLE_ADMISSION_HOST"),
+        "particle-admission-wiring.cpp.inc": "\n".join(_function(source, name, "Mp4SceneResult") for name in (
+            "mp4_stage_admit", "mp4_stage_capture")),
         "activation-node-scope.hpp.inc": _between(source,
             "namespace idoly_mp4_activation_nodes {", "} // namespace idoly_mp4_activation_nodes")
             + "} // namespace idoly_mp4_activation_nodes\n",
@@ -87,12 +91,16 @@ def test_shipping_stage_control_models(tmp_path: Path) -> None:
     assert compiler, "host C++ compiler required"
     _write_shipping_bodies(tmp_path)
     explicit = {
+        "particle-admission-wiring": ["normal", "no_attempt", "collect_throw", "collect_failed",
+            "particles_failed", "psyllium_failed", "palette_wait", "equipment_configure_failed",
+            "equipment_failed", "equipment_throw", "observe_failed", "observe_throw", "cleanup_failed",
+            "cleanup_throw", "seal_failed", "capture_inventory", "capture_controls", "capture_receipt"],
         "control-assets": ["normal", "capture_invalid", "capture_partial", "infinity",
             "unknown", "untrusted", "unreceipted", "input_change", "inflight",
             "owner_lost", "original_exception", "wrong_result", "cleanup_false",
             "restore_superseded", "restore_owner_lost", "restore_writer_failed",
             "reuse", "inventory_exception"],
-        "provider": ["admission", "admit_foreign", "admit_duplicate", "admit_receipt",
+        "provider": ["admission", "admit_foreign", "admit_duplicate", "admit_receipt", "admit_timeline_sibling", "admit_unpublished",
             "pins_lost", "source_lost", "zero_seed", "seed_changed", "wrong_particle",
             "wrong_path", "wrong_graph", "uncaptured", "scope_lost", "producer_lost",
             "wrong_producer", "source_epoch", "restore", "restore_pending", "restore_plan",
@@ -140,4 +148,4 @@ def test_shipping_stage_control_models(tmp_path: Path) -> None:
             result = subprocess.run([str(binary), case], env=env, capture_output=True, text=True)
             assert result.returncode == 0, (fixture.name, case, result.stdout, result.stderr)
         total += len(cases)
-    assert total >= 330, total
+    assert total >= 440, total

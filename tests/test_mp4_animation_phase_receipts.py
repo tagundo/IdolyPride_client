@@ -23,6 +23,7 @@ void observe(unsigned n){
  const bool valid=gate.granted_phase(17,&tick,&phase);
  assert(queries==before); // receipt getters never invoke thread/Unity callbacks
  assert(valid==accepted);
+ assert(gate.issued_frame(17,current_tick)==accepted);
  if(valid){assert(tick==current_tick&&phase==n);assert(!gate.completed_frame(17,current_tick));}
  else{assert(tick==0&&phase==0);}
  tick=999;phase=99;assert(!gate.granted_phase(18,&tick,&phase)&&tick==0&&phase==0);
@@ -50,20 +51,23 @@ void outside(){uint64_t t=999;uint8_t p=99;const unsigned q=queries;
 }
 int main(int argc,char**argv){
  assert(argc==2);mode=argv[1];AnimationApi api{{p0,p1,p2,p3,p4,p5,p6,p7},thread};assert(gate.install(api));
- outside();assert(!gate.completed_frame(17,0));
+ outside();assert(!gate.completed_frame(17,0)&&!gate.issued_frame(17,0));
  if(mode=="ordinary"){for(unsigned i=0;i<8;++i)assert(gate.invoke(i));outside();assert(!gate.completed_frame(17,0));return 0;}
- assert(gate.acquire(17));outside();assert(!gate.completed_frame(17,0));
+ assert(gate.acquire(17));outside();assert(!gate.completed_frame(17,0)&&!gate.revoked_unconsumed_frame(17,0));
+ if(mode=="revoke_unissued"){gate.revoke_grants(17);assert(!gate.revoked_unconsumed_frame(17,0)&&gate.release(17));return 0;}
  if(mode=="maintenance_initial"){
   maintenance=true;assert(gate.maintenance(17,{nullptr,before,after}));maintenance=false;
   outside();assert(!gate.completed_frame(17,0));assert(gate.release(17));return 0;
  }
- assert(gate.grant(17,0));outside();accepted=true;
+ assert(!gate.issued_frame(17,0));assert(gate.grant(17,0));outside();accepted=true;
+ assert(gate.issued_frame(17,0)&&!gate.issued_frame(18,0)&&!gate.issued_frame(17,1));
  if(mode=="offthread"){
   owner=false;accepted=false;assert(gate.invoke(0));owner=true;
   outside();assert(!gate.completed_frame(17,0)&&!gate.healthy(17));assert(gate.release(17));return 0;
  }
- if(mode=="revoke_before"){
-  gate.revoke_grants(17);accepted=false;
+ if(mode=="revoke_before"||mode=="revoked_unconsumed"){
+  assert(!gate.revoked_unconsumed_frame(17,0));gate.revoke_grants(17);accepted=false;
+  assert(gate.revoked_unconsumed_frame(17,0)&&!gate.revoked_unconsumed_frame(18,0)&&!gate.revoked_unconsumed_frame(17,1));
   for(unsigned i=0;i<8;++i)assert(!gate.invoke(i));
   assert(!gate.completed_frame(17,0)&&gate.release(17));return 0;
  }
@@ -78,16 +82,16 @@ int main(int argc,char**argv){
  }
  if(mode=="revoke_inside"||mode=="reject_inside"){
   for(unsigned i=0;i<3;++i){assert(gate.invoke(i));}accepted=false;outside();
-  assert(!gate.completed_frame(17,0)&&!gate.invoke(3));assert(gate.invoke(4));
+  assert(!gate.completed_frame(17,0)&&!gate.revoked_unconsumed_frame(17,0)&&!gate.invoke(3));assert(gate.invoke(4));
   assert(!gate.completed_frame(17,0)&&gate.release(17));return 0;
  }
  for(unsigned i=0;i<8;++i){assert(gate.invoke(i));outside();if(i<7)assert(!gate.completed_frame(17,0));}
- accepted=false;assert(gate.completed_frame(17,0)&&!gate.completed_frame(18,0)&&!gate.completed_frame(17,1));
+ accepted=false;assert(!gate.issued_frame(17,0));assert(gate.completed_frame(17,0)&&!gate.completed_frame(18,0)&&!gate.completed_frame(17,1));
  if(mode=="maintenance_after"){
   maintenance=true;assert(gate.maintenance(17,{nullptr,before,after}));maintenance=false;
   outside();assert(gate.completed_frame(17,0));
  }
- assert(gate.grant(17,1));current_tick=1;accepted=true;assert(!gate.completed_frame(17,0));
+ assert(gate.grant(17,1));current_tick=1;accepted=true;assert(gate.issued_frame(17,1)&&!gate.issued_frame(17,0)&&!gate.completed_frame(17,0));
  for(unsigned i=0;i<8;++i){assert(gate.invoke(i));}accepted=false;
  assert(gate.completed_frame(17,1)&&!gate.completed_frame(17,0));
  assert(gate.release(17));outside();assert(!gate.completed_frame(17,1));return 0;
@@ -102,7 +106,7 @@ def binary(tmp_path_factory):
     result=subprocess.run([compiler,"-std=c++17","-Wall","-Wextra","-Werror","-fsanitize=address,undefined","-fno-omit-frame-pointer","-no-pie","-I",str(ROOT/"client-presentation/native"),str(source),"-o",str(out)],capture_output=True,text=True)
     assert result.returncode==0,result.stderr
     return out
-@pytest.mark.parametrize("mode",["ordinary","sequence","maintenance_initial","maintenance_after","offthread","revoke_before","revoke_inside","reject_inside","throw","recursive"])
+@pytest.mark.parametrize("mode",["ordinary","sequence","maintenance_initial","maintenance_after","offthread","revoke_before","revoked_unconsumed","revoke_unissued","revoke_inside","reject_inside","throw","recursive"])
 def test_actual_phase_receipt_lifetime(binary,mode):
     result=subprocess.run([str(binary),mode],capture_output=True,text=True)
     assert result.returncode==0,result.stderr

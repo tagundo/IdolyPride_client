@@ -749,6 +749,17 @@ public:
     // Read-only receipt for lifecycle caused by an actually executing accepted
     // native phase. Cleanup End after scalar revoke deliberately returns false.
     bool granted_inflight(uint64_t epoch)const{return healthy(epoch)&&inside_&&!maintenance_&&open(epoch);}
+    // Successful grant, including the interval before its first original
+    // callback. A merely prepared or revoked frame never satisfies this.
+    bool issued_frame(uint64_t epoch,uint64_t tick)const{
+        return healthy(epoch)&&have_tick_&&tick_==tick&&!maintenance_&&open(epoch);
+    }
+    // Revocation before even the first accepted original leaves no native
+    // Begin/End or callback duty. A partial/dirty cycle never gets this proof.
+    bool revoked_unconsumed_frame(uint64_t epoch,uint64_t tick)const{
+        return healthy(epoch)&&have_tick_&&tick_==tick&&!inside_&&!maintenance_
+            &&!pair_&&!open(epoch)&&!next_&&!seen_;
+    }
     // Scalar-only observation of that SAME original's accepted position. This
     // cannot grant a frame or adopt a callback entered outside invoke(). The
     // owner-thread caller keeps the native original stack alive while reading.
