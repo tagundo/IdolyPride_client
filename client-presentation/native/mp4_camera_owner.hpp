@@ -2766,6 +2766,10 @@ inline constexpr Profile ios_profile={0xa93c518,false,
 namespace idoly_mp4_capture_publication {
 struct Api {
     bool(*thread)()=nullptr;
+    // Claims a real begin-issued operation ONCE. This is historical provenance,
+    // not a new live-current grant inferred from non-null enter arguments.
+    bool(*issued)(void*,void*,void*,uint64_t,uint64_t,uint64_t)=nullptr;
+    bool(*publication_origin)(void*,void*,uint64_t)=nullptr;
     bool(*current)(void*,uint64_t,uint64_t)=nullptr;
     bool(*owned_request)(void*,void* camera,void* controller,uint64_t request)=nullptr;
     bool(*current_capture)(void*,void* controller,void** wrapper,void** texture)=nullptr;
@@ -2775,29 +2779,46 @@ struct Api {
 };
 struct Receipt {
     uint64_t epoch=0,job=0,request=0;void*controller=nullptr;void*wrapper=nullptr;void*texture=nullptr;
-    uint32_t suppressed=0;bool valid=false;
+    uint32_t suppressed=0;bool valid=false,issued=false;
 };
 class Request {
     Api api_{};void*ctx_=nullptr;void*camera_=nullptr;void*controller_=nullptr;
     uint64_t epoch_=0,job_=0,request_=0;int32_t property_=0;uintptr_t origin_=0;
     Request*parent_=nullptr;void*wrapper_=nullptr;void*texture_=nullptr;
-    uint32_t suppressed_=0;bool active_=false,authorized_=false,valid_=false;
+    uint32_t suppressed_=0;bool active_=false,authorized_=false,valid_=false,historical_=false;
     inline static thread_local Request*current_=nullptr;
     bool current()const noexcept{try{return authorized_&&valid_&&api_.thread()&&api_.current(ctx_,epoch_,job_)
         &&api_.owned_request(ctx_,camera_,controller_,request_)&&api_.source_program(ctx_,epoch_,job_);}catch(...){return false;}}
 public:
     Request()=default;Request(const Request&)=delete;Request&operator=(const Request&)=delete;
     ~Request(){if(active_)finish();}
+    struct Abort {};
+    static bool historical_origin(void*controller,uint64_t*serial=nullptr)noexcept{
+        if(serial)*serial=0;
+        const auto*s=current_;
+        if(!s||!s->active_||!s->historical_||controller!=s->controller_)return false;
+        if(serial)*serial=s->request_;
+        return true;
+    }
+    bool must_abort()const noexcept{return historical_&&!current();}
+    static bool valid_origin(void*controller,uint64_t serial)noexcept{
+        const auto*s=current_;return s&&s->active_&&s->historical_&&s->valid_&&s->authorized_
+            &&s->controller_==controller&&s->request_==serial;
+    }
     // Called for EVERY actual typed CaptureRequest invocation. An ordinary or
     // nested unowned request still masks its parent, then forwards all writes.
     bool enter(Api api,void*ctx,void*camera,void*controller,uint64_t epoch,uint64_t job,
             uint64_t request,int32_t property,uintptr_t pinned_original_return){
         if(active_)return false;
-        wrapper_=nullptr;texture_=nullptr;suppressed_=0;
+        wrapper_=nullptr;texture_=nullptr;suppressed_=0;historical_=false;
         api_=api;ctx_=ctx;camera_=camera;controller_=controller;epoch_=epoch;job_=job;request_=request;
         property_=property;origin_=pinned_original_return;parent_=current_;current_=this;active_=true;
-        authorized_=api.thread&&api.current&&api.owned_request&&api.current_capture&&api.private_capture&&api.source_program
+        authorized_=api.thread&&api.issued&&api.publication_origin&&api.current&&api.owned_request&&api.current_capture&&api.private_capture&&api.source_program
             &&ctx&&camera&&controller&&epoch&&job&&request&&origin_;
+        for(auto*p=parent_;p;p=p->parent_)if(p->active_&&p->historical_&&p->controller_==controller
+            &&p->epoch_==epoch&&p->job_==job&&p->request_==request)authorized_=false;
+        if(authorized_)try{historical_=api.thread()&&api.issued(ctx,camera,controller,epoch,job,request);}catch(...){historical_=false;}
+        authorized_=authorized_&&historical_;
         valid_=authorized_;
         if(authorized_&&!current())valid_=false;
         return valid_;
@@ -2808,21 +2829,25 @@ public:
     // or current MV UI state grants authority to suppress a call.
     static bool suppress(int32_t property,void*managed_texture,uintptr_t actual_original_return){
         Request*scope=current_;
-        if(!scope||!scope->active_||!scope->authorized_||property!=scope->property_||actual_original_return!=scope->origin_)return false;
-        if(!scope->current()||scope->suppressed_){scope->valid_=false;return false;}
+        if(!scope||!scope->active_||!scope->historical_||property!=scope->property_||actual_original_return!=scope->origin_)return false;
+        try{if(!scope->api_.publication_origin(scope->ctx_,scope->controller_,scope->request_))return false;}catch(...){return false;}
+        // This exact publication belongs to the already-issued export even
+        // after live ownership withdraws. Omit it, but grant no frame/resource
+        // ownership. Forwarding here would overwrite the protected baseline.
+        if(!scope->current()||scope->suppressed_){scope->valid_=false;if(scope->suppressed_!=~uint32_t(0))++scope->suppressed_;return true;}
         void*wrapper=nullptr;void*texture=nullptr;
         try{if(!scope->api_.current_capture(scope->ctx_,scope->controller_,&wrapper,&texture)
                 ||!wrapper||!texture||managed_texture!=texture
                 ||!scope->api_.private_capture(scope->ctx_,scope->controller_,wrapper,texture)
                 ||!scope->current()){
-            scope->valid_=false;return false;
-        }}catch(...){scope->valid_=false;return false;}
+            scope->valid_=false;++scope->suppressed_;return true;
+        }}catch(...){scope->valid_=false;++scope->suppressed_;return true;}
         scope->wrapper_=wrapper;scope->texture_=texture;++scope->suppressed_;return true;
     }
     Receipt finish(){
         Receipt receipt{};
         if(!active_||current_!=this)return receipt;
-        receipt={epoch_,job_,request_,controller_,wrapper_,texture_,suppressed_,current()};
+        receipt={epoch_,job_,request_,controller_,wrapper_,texture_,suppressed_,current(),historical_};
         current_=parent_;active_=false;return receipt;
     }
 };
@@ -2832,9 +2857,9 @@ public:
 // BEGIN_MP4_CAPTURE_PUBLICATION_PROFILE
 namespace idoly_mp4_capture_publication {
 using Binding=idoly_mp4_capture_global_native::Binding;
-struct Profile {Binding native_entry;uintptr_t original_return,icall_slot;Binding update,wrapper,shader_string,wrapper_ctor,texture_ctor,descriptor_dynamic_scale;uintptr_t wrapper_return,texture_return;};
-inline constexpr Profile android_profile={{0x45b670,{0xff,0x3,0x1,0xd1,0xfe,0x57,0x2,0xa9,0xf4,0x4f,0x3,0xa9,0xf5,0x7f,0x0,0xd0}},0x923d4e4,0xa077c20,{0x923d228,{0xff,0x3,0x6,0xd1,0xfd,0x7b,0x15,0xa9,0xf6,0x57,0x16,0xa9,0xf4,0x4f,0x17,0xa9}},{0x9236624,{0xfe,0x4f,0xbf,0xa9,0xf3,0x3,0x0,0xaa,0x0,0x20,0x40,0xf9,0xe1,0x3,0x1f,0xaa}},{0x8f526c4,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0x35,0x89,0x0,0xb0,0xa8,0xea,0x45,0xf9}},{0x92364fc,{0xff,0x83,0x2,0xd1,0xfe,0x5f,0x7,0xa9,0xf6,0x57,0x8,0xa9,0xf4,0x4f,0x9,0xa9}},{0x8f69e7c,{0xff,0xc3,0x2,0xd1,0xfe,0x43,0x0,0xf9,0xf6,0x57,0x9,0xa9,0xf4,0x4f,0xa,0xa9}},{0x8f6b458,{0x8,0x2c,0x40,0xb9,0x3f,0x0,0x0,0x72,0x9,0x80,0x80,0x52,0x29,0x11,0x9f,0x1a}},0x923d380,0x9236580};
-inline constexpr Profile ios_profile={{0xb04424,{0xff,0x3,0x1,0xd1,0xf4,0x4f,0x2,0xa9,0xfd,0x7b,0x3,0xa9,0xfd,0xc3,0x0,0x91}},0x7bcb81c,0xa91b680,{0x7bcb2f8,{0xff,0x3,0x4,0xd1,0xf8,0x5f,0xc,0xa9,0xf6,0x57,0xd,0xa9,0xf4,0x4f,0xe,0xa9}},{0,{}},{0x7811830,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x7bc3348,{0xff,0x3,0x2,0xd1,0xf8,0x5f,0x4,0xa9,0xf6,0x57,0x5,0xa9,0xf4,0x4f,0x6,0xa9}},{0x7830f20,{0xff,0xc3,0x1,0xd1,0xf6,0x57,0x4,0xa9,0xf4,0x4f,0x5,0xa9,0xfd,0x7b,0x6,0xa9}},{0x7832eb0,{0x8,0x2c,0x40,0xb9,0x8,0x79,0x15,0x12,0x3f,0x0,0x0,0x71,0x9,0x80,0x80,0x52}},0x7bcb6b4,0x7bc33d4};
+struct Profile {Binding native_entry;uintptr_t original_return,icall_slot;Binding update,wrapper,shader_string,wrapper_ctor,texture_ctor,descriptor_dynamic_scale;uintptr_t update_return,wrapper_return,texture_return;};
+inline constexpr Profile android_profile={{0x45b670,{0xff,0x3,0x1,0xd1,0xfe,0x57,0x2,0xa9,0xf4,0x4f,0x3,0xa9,0xf5,0x7f,0x0,0xd0}},0x923d4e4,0xa077c20,{0x923d228,{0xff,0x3,0x6,0xd1,0xfd,0x7b,0x15,0xa9,0xf6,0x57,0x16,0xa9,0xf4,0x4f,0x17,0xa9}},{0x9236624,{0xfe,0x4f,0xbf,0xa9,0xf3,0x3,0x0,0xaa,0x0,0x20,0x40,0xf9,0xe1,0x3,0x1f,0xaa}},{0x8f526c4,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0x35,0x89,0x0,0xb0,0xa8,0xea,0x45,0xf9}},{0x92364fc,{0xff,0x83,0x2,0xd1,0xfe,0x5f,0x7,0xa9,0xf6,0x57,0x8,0xa9,0xf4,0x4f,0x9,0xa9}},{0x8f69e7c,{0xff,0xc3,0x2,0xd1,0xfe,0x43,0x0,0xf9,0xf6,0x57,0x9,0xa9,0xf4,0x4f,0xa,0xa9}},{0x8f6b458,{0x8,0x2c,0x40,0xb9,0x3f,0x0,0x0,0x72,0x9,0x80,0x80,0x52,0x29,0x11,0x9f,0x1a}},0x923d50c,0x923d380,0x9236580};
+inline constexpr Profile ios_profile={{0xb04424,{0xff,0x3,0x1,0xd1,0xf4,0x4f,0x2,0xa9,0xfd,0x7b,0x3,0xa9,0xfd,0xc3,0x0,0x91}},0x7bcb81c,0xa91b680,{0x7bcb2f8,{0xff,0x3,0x4,0xd1,0xf8,0x5f,0xc,0xa9,0xf6,0x57,0xd,0xa9,0xf4,0x4f,0xe,0xa9}},{0,{}},{0x7811830,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}},{0x7bc3348,{0xff,0x3,0x2,0xd1,0xf8,0x5f,0x4,0xa9,0xf6,0x57,0x5,0xa9,0xf4,0x4f,0x6,0xa9}},{0x7830f20,{0xff,0xc3,0x1,0xd1,0xf6,0x57,0x4,0xa9,0xf4,0x4f,0x5,0xa9,0xfd,0x7b,0x6,0xa9}},{0x7832eb0,{0x8,0x2c,0x40,0xb9,0x8,0x79,0x15,0x12,0x3f,0x0,0x0,0x71,0x9,0x80,0x80,0x52}},0x7bcb850,0x7bcb6b4,0x7bc33d4};
 } // namespace idoly_mp4_capture_publication
 // END_MP4_CAPTURE_PUBLICATION_PROFILE
 
@@ -2844,7 +2869,9 @@ struct Descriptor {int32_t fields[13]{};};
 static_assert(sizeof(Descriptor)==52,"original indirect RenderTextureDescriptor ABI");
 struct Api {
  bool(*thread)()=nullptr;bool(*current)(void*,uint64_t,uint64_t)=nullptr;
+ bool(*assignment_current)(void*,uint64_t,uint64_t)=nullptr;
  bool(*owned_request)(void*,void*,uint64_t)=nullptr;
+ bool(*owned_origin)(void*,void*,uint64_t)=nullptr;
  bool(*descriptor)(void*,const Descriptor&)=nullptr;bool(*capture_name)(void*,void*)=nullptr;
  bool(*current_capture)(void*,void*,void**,void**)=nullptr;
  bool(*wrapper_texture)(void*,void**)=nullptr;bool(*texture_native)(void*,uintptr_t*)=nullptr;
@@ -2864,18 +2891,20 @@ class Bank {
  struct Row {Resource value{};bool transferred=false;};
  enum class Kind {update,wrapper,texture};
  struct Cursor {Bank*bank=nullptr;Cursor*parent=nullptr;Kind kind=Kind::update;
-  void*controller=nullptr;uint64_t request=0;uint32_t row=max_resources;bool authorized=false;};
+  void*controller=nullptr;uint64_t request=0;uint32_t row=max_resources;bool authorized=false,origin=false;};
  inline static thread_local Cursor*cursor_=nullptr;
  Api api_{};void*ctx_=nullptr,*controller_=nullptr;uint64_t epoch_=0,job_=0;
- uintptr_t wrapper_return_=0,texture_return_=0;Row rows_[max_resources]{};uint32_t count_=0;
+ uintptr_t update_return_=0,wrapper_return_=0,texture_return_=0;Row rows_[max_resources]{};uint32_t count_=0;
  bool configured_=false,invalid_=false;
  bool roots(const Resource&r)const{return r.wrapper_root&&api_.retained(r.wrapper_root)==r.wrapper
   &&(!r.texture||(r.texture_root&&api_.retained(r.texture_root)==r.texture));}
  bool current(uint64_t request)const noexcept{try{return configured_&&!invalid_&&api_.thread()
   &&api_.current(ctx_,epoch_,job_)&&api_.owned_request(ctx_,controller_,request);}catch(...){return false;}}
+ bool assignment_current(uint64_t request)const noexcept{try{return configured_&&api_.thread()
+  &&api_.assignment_current(ctx_,epoch_,job_)&&api_.owned_origin(ctx_,controller_,request);}catch(...){return false;}}
  bool shape(const Descriptor*a,const Descriptor*b)const{return a&&b&&!__builtin_memcmp(a,b,sizeof(*a));}
  bool observe_current(uint64_t request){
-  if(!current(request))return false;
+  if(!assignment_current(request))return false;
   void*wrapper=nullptr,*texture=nullptr;
   if(!api_.current_capture(ctx_,controller_,&wrapper,&texture))return false;
   return observe_assignment(controller_,request,wrapper,texture);
@@ -2889,34 +2918,51 @@ public:
    cursor_.bank=&bank;cursor_.kind=kind;
    cursor_.parent=Bank::cursor_;cursor_.request=request;cursor_.controller=object;
    const Cursor*parent=cursor_.parent;
-   try{if(kind==Kind::update){cursor_.authorized=object==bank.controller_&&bank.current(request);}
-   else if(parent&&parent->bank==&bank&&parent->authorized&&bank.current(parent->request)){
+   try{if(kind==Kind::update){
+    cursor_.origin=object==bank.controller_&&request&&caller==bank.update_return_
+     &&bank.api_.owned_origin(bank.ctx_,object,request);
+    cursor_.authorized=cursor_.origin&&bank.current(request);
+   }else if(parent&&parent->bank==&bank&&parent->origin){
     cursor_.request=parent->request;cursor_.controller=parent->controller;
-    if(kind==Kind::wrapper&&parent->kind==Kind::update&&caller==bank.wrapper_return_&&object&&descriptor
-      &&bank.api_.descriptor(bank.ctx_,*descriptor)&&bank.api_.capture_name(bank.ctx_,name)){
+    if(kind==Kind::wrapper&&parent->kind==Kind::update&&caller==bank.wrapper_return_){
+     cursor_.origin=true;
+     if(bank.current(parent->request)&&object&&descriptor&&bank.api_.descriptor(bank.ctx_,*descriptor)&&bank.api_.capture_name(bank.ctx_,name)){
      bool duplicate=false;for(uint32_t i=0;i<bank.count_;++i)duplicate|=bank.rows_[i].value.wrapper==object;
      if(bank.count_==max_resources||duplicate){bank.invalid_=true;}
      else{
       cursor_.row=bank.count_++;auto&r=bank.rows_[cursor_.row].value;
       r.epoch=bank.epoch_;r.job=bank.job_;r.request=parent->request;r.wrapper=object;r.descriptor=*descriptor;
       r.wrapper_root=bank.api_.retain(object);cursor_.authorized=bank.roots(r);
-      if(!cursor_.authorized)bank.invalid_=true;
+      if(!cursor_.authorized){
+       if(r.wrapper_root)bank.api_.release(r.wrapper_root);
+       bank.rows_[cursor_.row]={};bank.rows_[cursor_.row].transferred=true;cursor_.row=max_resources;
+      }
      }
-    }else if(kind==Kind::texture&&parent->kind==Kind::wrapper&&caller==bank.texture_return_&&object
-      &&parent->row<bank.count_){
+     }
+    }else if(kind==Kind::texture&&parent->kind==Kind::wrapper&&caller==bank.texture_return_){
+     cursor_.origin=true;
+     if(bank.current(parent->request)&&object&&parent->row<bank.count_){
      cursor_.row=parent->row;auto&r=bank.rows_[cursor_.row].value;
      if(!r.texture&&bank.shape(descriptor,&r.descriptor)&&bank.roots(r)){
       r.texture=object;r.texture_root=bank.api_.retain(object);cursor_.authorized=bank.roots(r);
-      if(!cursor_.authorized)bank.invalid_=true;
+      if(!cursor_.authorized){
+       if(r.texture_root)bank.api_.release(r.texture_root);
+       r.texture_root=0;r.texture=nullptr;cursor_.row=max_resources;
+      }
      }else bank.invalid_=true;
+     }
     }
-   }}catch(...){bank.invalid_=true;cursor_.authorized=false;}
+   }
+   if(cursor_.origin&&!cursor_.authorized)bank.invalid_=true;
+   }catch(...){bank.invalid_=true;cursor_.authorized=false;}
    Bank::cursor_=&cursor_;active_=true;
   }
  public:
   Scope(const Scope&)=delete;Scope&operator=(const Scope&)=delete;
   ~Scope(){if(active_)finish(false);}
   bool owned()const{return cursor_.authorized;}
+  bool owned_origin()const{return cursor_.origin;}
+  bool must_abort()const noexcept{return cursor_.origin&&(!cursor_.authorized||!bank_->current(cursor_.request));}
   // Always called after the exact original body, including its exceptional
   // path. Result describes origin/root processing, NOT original-body success;
   // the separate returned flags retain that truth. Failure drops no resource.
@@ -2935,44 +2981,48 @@ public:
       void*texture=nullptr;const bool read=bank.api_.wrapper_texture(r.wrapper,&texture);
       if(!read||(original_returned&&(!r.texture_returned||texture!=r.texture||!r.native_known||!r.native))){bank.invalid_=true;result=false;}
      }
-    }else if(cursor_.kind==Kind::update&&cursor_.authorized){
+    }else if(cursor_.kind==Kind::update&&cursor_.origin){
      // An Update body may throw AFTER assigning the new private A0. That
      // assignment is still real production, not a successful capture receipt.
-     if(bank.current(cursor_.request))bank.observe_current(cursor_.request);
+     if(bank.assignment_current(cursor_.request))bank.observe_current(cursor_.request);
     }
    }catch(...){bank.invalid_=true;result=false;}
    Bank::cursor_=cursor_.parent;active_=false;return result;
   }
  };
  bool bind(Api api,void*ctx,void*controller,uint64_t epoch,uint64_t job,
-           uintptr_t wrapper_return,uintptr_t texture_return){
-  if(configured_||count_||!ctx||!controller||!epoch||!job||!wrapper_return||!texture_return
-   ||!api.thread||!api.current||!api.owned_request||!api.descriptor||!api.capture_name||!api.current_capture
+           uintptr_t update_return,uintptr_t wrapper_return,uintptr_t texture_return){
+  if(configured_||count_||!ctx||!controller||!epoch||!job||!update_return||!wrapper_return||!texture_return
+   ||!api.thread||!api.current||!api.assignment_current||!api.owned_request||!api.owned_origin||!api.descriptor||!api.capture_name||!api.current_capture
    ||!api.wrapper_texture||!api.texture_native||!api.retain||!api.retained||!api.release)return false;
   api_=api;ctx_=ctx;controller_=controller;epoch_=epoch;job_=job;
-  wrapper_return_=wrapper_return;texture_return_=texture_return;configured_=true;
+  update_return_=update_return;wrapper_return_=wrapper_return;texture_return_=texture_return;configured_=true;
   try{if(api_.thread()&&api_.current(ctx_,epoch_,job_))return true;}catch(...){}
   invalid_=true;return false;
  }
  bool valid()const{return configured_&&!invalid_;}uint32_t count()const{return count_;}
+ bool publication_origin(void*controller,uint64_t request)const noexcept{
+  const auto*s=cursor_;return s&&s->bank==this&&s->kind==Kind::update&&s->origin
+   &&s->controller==controller&&s->request==request;
+ }
  bool transferred(uint32_t index)const{return index<count_&&rows_[index].transferred;}
  bool can_prepare()const noexcept{try{return valid()&&count_<max_resources&&api_.thread()
   &&api_.current(ctx_,epoch_,job_);}catch(...){return false;}}
- Scope update(void*controller,uint64_t request){return Scope(*this,Kind::update,controller,nullptr,nullptr,0,request);}
+ Scope update(void*controller,uint64_t request,uintptr_t caller){return Scope(*this,Kind::update,controller,nullptr,nullptr,caller,request);}
  Scope wrapper(void*object,const Descriptor*descriptor,void*name,uintptr_t caller){return Scope(*this,Kind::wrapper,object,descriptor,name,caller,0);}
  Scope texture(void*object,const Descriptor*descriptor,uintptr_t caller){return Scope(*this,Kind::texture,object,descriptor,nullptr,caller,0);}
  // May be called from the exact native publication guard AFTER its x30/id
  // match, before suppression, while Update's scope is still on the stack.
  bool observe_assignment(void*controller,uint64_t request,void*wrapper,void*texture){
   const Cursor*scope=cursor_;
-  if(!scope||scope->bank!=this||scope->kind!=Kind::update||!scope->authorized||controller!=controller_
-   ||scope->request!=request||!current(request))return false;
+  if(!scope||scope->bank!=this||scope->kind!=Kind::update||!scope->origin||controller!=controller_
+   ||scope->request!=request||!assignment_current(request))return false;
   for(uint32_t i=0;i<count_;++i){auto&r=rows_[i].value;
    if(!rows_[i].transferred&&r.wrapper==wrapper&&r.texture==texture&&r.wrapper_returned&&r.texture_returned
     &&r.native_known&&r.native&&roots(r)){
     void*actual_wrapper=nullptr,*actual_texture=nullptr;
     if(!api_.current_capture(ctx_,controller_,&actual_wrapper,&actual_texture)
-     ||actual_wrapper!=wrapper||actual_texture!=texture||!current(request))return false;
+     ||actual_wrapper!=wrapper||actual_texture!=texture||!assignment_current(request))return false;
     uintptr_t native=0;if(!api_.texture_native(texture,&native)||native!=r.native)return false;
     r.assigned=true;return true;
    }

@@ -37,7 +37,7 @@ Obj controller,camera,target,target_rt,original,private_wrapper,private_rt,name,
 std::unordered_map<void*,Obj*>objects;std::unordered_map<uint32_t,void*>roots;uint32_t root_serial=0;
 std::vector<uint32_t>sink_roots;mp4production::Descriptor descriptor{};
 bool thread_ok=true,current_ok=true,held=true,pending=true,adopt_ok=true,fail_root=false,fresh_maps=true;
-bool program_ok=true;
+bool program_ok=true,beginning=true;
 int refreshes=0,source_reads=0,setter_calls=0;uint64_t actual_request=13;
 void*ref(Obj&o){return o.bytes;}
 template<class T>void put(Obj&o,size_t at,T value){std::memcpy(o.bytes+at,&value,sizeof value);}
@@ -64,6 +64,8 @@ namespace idoly_mp4_runtime{
  struct Game{
   bool owned_capture_request(void*c,uint64_t r){return pending&&current_ok&&c==ref(controller)&&r==actual_request;}
   uint64_t owned_capture_request_serial(void*c){return owned_capture_request(c,actual_request)?actual_request:0;}
+  bool capture_operation_starting(void*c){return beginning&&current_ok&&pending&&c==ref(controller);}
+  uint64_t capture_request_origin_serial(void*c){return !beginning&&pending&&c==ref(controller)?actual_request:0;}
  }game;
 }
 mp4production::Descriptor get_descriptor(void*p,Method*){assert(p==ref(target_rt));return descriptor;}
@@ -71,7 +73,7 @@ void dynamic_scale(mp4production::Descriptor*d,bool on,Method*){assert(!on);++se
 uintptr_t image_base=16;
 namespace idoly_mp4_capture_publication{
  struct Binding{uintptr_t rva=0;uint8_t prefix[16]{};};
- struct Profile{Binding descriptor_dynamic_scale{};uintptr_t wrapper_return=0x1234,texture_return=0x5678,original_return=0x9998;};
+ struct Profile{Binding descriptor_dynamic_scale{};uintptr_t update_return=0x1110,wrapper_return=0x1234,texture_return=0x5678,original_return=0x9998;};
  Profile make_profile(){Profile p{};p.descriptor_dynamic_scale.rva=reinterpret_cast<uintptr_t>(dynamic_scale)-image_base;
   std::memcpy(p.descriptor_dynamic_scale.prefix,reinterpret_cast<void*>(dynamic_scale),16);return p;}
  const Profile android_profile=make_profile();
@@ -88,89 +90,123 @@ void setup(){for(auto pair:{std::pair<Obj*,const char*>{&controller,"VL.Renderin
 }
 '''+body+r'''
 int main(int argc,char**argv){assert(argc==2);setup();std::string mode=argv[1];Mp4CaptureProductionHost h;
- if(mode=="missing_frontend"){assert(!mp4_capture_production_bind(h,mp4_scene_host.source,9,&h,adopt,false)&&roots.empty());return 0;}
- if(mode=="missing_retirement"){assert(!mp4_capture_production_bind(h,mp4_scene_host.source,9,nullptr,adopt,true)&&roots.empty());return 0;}
+ if(mode=="missing_update_return"){assert(!mp4_capture_production_bind(h,mp4_scene_host.source,9,&h,adopt,true,0)&&roots.empty());return 0;}
+ if(mode=="missing_frontend"){assert(!mp4_capture_production_bind(h,mp4_scene_host.source,9,&h,adopt,false,image_base+0x1110)&&roots.empty());return 0;}
+ if(mode=="missing_retirement"){assert(!mp4_capture_production_bind(h,mp4_scene_host.source,9,nullptr,adopt,true,image_base+0x1110)&&roots.empty());return 0;}
  if(mode=="source_not_current")current_ok=false;
  if(mode=="root_failure")fail_root=true;
- const bool bound=mp4_capture_production_bind(h,mp4_scene_host.source,9,&h,adopt,true);
+ const bool bound=mp4_capture_production_bind(h,mp4_scene_host.source,9,&h,adopt,true,image_base+0x1110);
  if(mode=="source_not_current"||mode=="root_failure"){assert(!bound&&roots.empty()&&!mp4_capture_production_active_bank());return 0;}
  assert(bound&&roots.size()==4&&mp4_capture_production_active_bank()==&h.bank);
- assert(mp4_capture_production_request(ref(controller))==13&&mp4_capture_production_request(ref(foreign))==0);
+ assert(mp4_capture_production_request(ref(controller))==0&&mp4_capture_production_request(ref(foreign))==0);
  if(mode=="foreign_thread"){thread_ok=false;assert(!mp4_capture_production_active_bank());mp4_capture_production_foreign();thread_ok=true;
-  assert(mp4_capture_production_active_bank()==&h.bank&&!mp4_capture_production_current(&h,7,9)&&mp4_capture_production_request(ref(controller))==0);
+  assert(mp4_capture_production_active_bank()==&h.bank&&!mp4_capture_production_current(&h,7,9));
   assert(mp4_capture_production_transfer_all(h)&&mp4_capture_production_finish(h)&&roots.empty());return 0;}
- const bool publication=mode.rfind("publication_",0)==0;
- idoly_mp4_capture_publication::Request publication_scope;
- if(publication){
-  const bool missing=mode=="publication_missing_provider";
-  assert(mp4_capture_production_publication_bind(h,57,&program_ok,missing?nullptr:program,true)==!missing);
-  mp4_capture_publication_enter(publication_scope,ref(controller),13);
-  if(!missing)assert(!mp4_capture_production_transfer_all(h)&&!mp4_capture_production_finish(h));
+ const bool missing=mode=="publication_missing_provider";
+ assert(mp4_capture_production_publication_bind(h,57,&program_ok,missing?nullptr:program,true)==!missing);
+ if(!missing)assert(mp4_capture_production_issue(h,ref(controller),13));
+ else assert(!mp4_capture_production_issue(h,ref(controller),13));
+ beginning=false;
+ if(mode=="revoked_before_enter")current_ok=false;
+ idoly_mp4_capture_publication::Request request;
+ mp4_capture_publication_enter(request,ref(controller),13);
+ if(missing||mode=="revoked_before_enter"){
+  assert(request.must_abort()==!missing&&idoly_mp4_capture_publication::Request::historical_origin(ref(controller))==!missing);
+  if(missing)assert(!idoly_mp4_capture_publication::Request::suppress(57,ref(private_rt),image_base+0x9998));
+  const auto receipt=request.finish();mp4_capture_publication_complete(ref(controller),13,receipt,false);
+  assert(!mp4_capture_publication_completed(h,13)&&!h.bank.count());
+  assert(mp4_capture_production_transfer_all(h)&&mp4_capture_production_finish(h)&&roots.empty());return 0;
  }
+ assert(!request.must_abort()&&mp4_capture_production_request(ref(controller))==13);
+ assert(!mp4_capture_production_transfer_all(h)&&!mp4_capture_production_finish(h));
  auto d=descriptor;d.fields[11]&=~0x400;
  if(mode=="bad_descriptor")++d.fields[1];
  if(mode=="bad_name")put(name,20,uint16_t('x'));
  if(mode=="target_changed")put(controller,152,ref(original));
- {
-  auto update=h.bank.update(ref(controller),13);
+ int update_calls=0,wrapper_calls=0,texture_calls=0,global_writes=0;uintptr_t global_binding=1;bool returned=false;
+ try{
+  auto update=h.bank.update(ref(controller),mp4_capture_production_request(ref(controller)),image_base+0x1110);
+  if(update.must_abort())throw idoly_mp4_capture_publication::Request::Abort{};
+  ++update_calls;
+  if(mode=="withdraw_before_wrapper")mp4_capture_production_foreign();
+  if(mode=="wrapper_root_failure")fail_root=true;
   {
    auto wrapper=h.bank.wrapper(ref(private_wrapper),&d,ref(name),image_base+0x1234);
-   if(mode=="bad_descriptor"||mode=="bad_name"||mode=="target_changed"){
-    assert(!wrapper.owned()&&!h.bank.count());assert(!wrapper.finish(false));update.finish(false);
-    assert(mp4_capture_production_transfer_all(h)&&mp4_capture_production_finish(h)&&roots.empty());return 0;
-   }
-   assert(wrapper.owned()&&setter_calls);
+   if(wrapper.must_abort())throw idoly_mp4_capture_publication::Request::Abort{};
+   ++wrapper_calls;
+   if(mode=="texture_root_failure")fail_root=true;
    {
-    auto texture=h.bank.texture(ref(private_rt),&d,image_base+0x5678);assert(texture.owned());
+    auto texture=h.bank.texture(ref(private_rt),&d,image_base+0x5678);
+    if(texture.must_abort())throw idoly_mp4_capture_publication::Request::Abort{};
+    ++texture_calls;
     put(private_rt,16,mode=="partial_native_zero"?uintptr_t(0):uintptr_t(202));fresh_maps=false;
-    const int before=refreshes;assert(texture.finish(mode!="partial_ctor"&&mode!="partial_native_zero"));assert(refreshes==before+1&&fresh_maps);
+    if(mode=="partial_ctor"||mode=="partial_native_zero")throw std::runtime_error("original ctor");
+    if(mode=="withdraw_inside_texture")current_ok=false;
+    const int before=refreshes;assert(texture.finish(true)&&refreshes==before+1&&fresh_maps);
+    if(texture.must_abort())throw idoly_mp4_capture_publication::Request::Abort{};
    }
-   put(private_wrapper,16,ref(private_rt));assert(wrapper.finish(mode!="partial_ctor"&&mode!="partial_native_zero"));
+   put(private_wrapper,16,ref(private_rt));assert(wrapper.finish(true));
+   if(wrapper.must_abort())throw idoly_mp4_capture_publication::Request::Abort{};
   }
-  if(mode!="partial_ctor"&&mode!="partial_native_zero")put(controller,160,ref(private_wrapper));
-  if(publication&&mode=="publication_unowned_nested"){
+  put(controller,160,ref(private_wrapper));
+  if(mode=="publication_unowned_nested"){
    idoly_mp4_capture_publication::Request inner;mp4_capture_publication_enter(inner,ref(foreign),0);
    assert(!idoly_mp4_capture_publication::Request::suppress(57,ref(private_rt),image_base+0x9998));
+   ++global_writes;global_binding=77;
    const auto receipt=inner.finish();mp4_capture_publication_complete(ref(foreign),0,receipt,true);
   }
-  if(publication){
-   const bool expected=mode!="publication_missing_provider"&&mode!="publication_missing_native";
-   const bool suppressed=mode!="publication_missing_native"&&idoly_mp4_capture_publication::Request::suppress(57,ref(private_rt),image_base+0x9998);
-   assert(suppressed==expected);
+  if(mode=="nested_same_operation"){
+   idoly_mp4_capture_publication::Request inner;mp4_capture_publication_enter(inner,ref(controller),13);
+   assert(!inner.must_abort()&&!idoly_mp4_capture_publication::Request::historical_origin(ref(controller)));
+   auto ordinary=h.bank.update(ref(controller),mp4_capture_production_request(ref(controller)),image_base+0x1110);
+   assert(!ordinary.owned_origin()&&!ordinary.must_abort());
+   assert(!idoly_mp4_capture_publication::Request::suppress(57,ref(private_rt),image_base+0x9998));
+   ++global_writes;global_binding=77;ordinary.finish(true);
+   const auto receipt=inner.finish();mp4_capture_publication_complete(ref(controller),13,receipt,true);
   }
-  assert(update.finish(mode!="update_body_failure"));
+  if(mode=="semantic_withdrawal")program_ok=false;
+  if(mode=="foreign_after_assignment")mp4_capture_production_foreign();
+  const bool omitted=idoly_mp4_capture_publication::Request::suppress(57,ref(private_rt),image_base+0x9998);
+  assert(omitted); // exact issued publication, even after live withdrawal
+  if(!omitted){++global_writes;global_binding=202;}
+  if(mode=="update_body_failure"||mode=="publication_body_failure")throw std::runtime_error("original Update");
+  update.finish(true);
+  if(update.must_abort())throw idoly_mp4_capture_publication::Request::Abort{};
+  returned=true;
+ }catch(const idoly_mp4_capture_publication::Request::Abort&){}catch(const std::runtime_error&){}
+ if(mode=="publication_handoff")current_ok=false;
+ const int before=source_reads;const auto receipt=request.finish();mp4_capture_publication_complete(ref(controller),13,receipt,returned);
+ if(!current_ok)assert(source_reads==before);
+ assert(update_calls<=1&&wrapper_calls<=update_calls&&texture_calls<=wrapper_calls);
+ const bool pre_ctor=mode=="bad_descriptor"||mode=="bad_name"||mode=="target_changed"||mode=="wrapper_root_failure"||mode=="withdraw_before_wrapper";
+ if(pre_ctor)assert(!wrapper_calls&&!texture_calls);
+ if(mode=="texture_root_failure")assert(wrapper_calls==1&&!texture_calls);
+ if(mode=="withdraw_inside_texture"||mode=="partial_ctor"||mode=="partial_native_zero"){
+  void*assigned=nullptr;assert(mp4_actor_field(ref(private_wrapper),16,assigned)&&!assigned);
  }
- if(publication){
-  const auto receipt=publication_scope.finish();const bool returned=mode!="publication_body_failure";
-  if(mode=="publication_handoff")current_ok=false;
-  const int before=source_reads;
-  mp4_capture_publication_complete(ref(controller),13,receipt,returned);
-  if(mode=="publication_handoff")assert(source_reads==before);
-  const bool expected=returned&&mode!="publication_missing_provider"&&mode!="publication_missing_native"&&mode!="publication_handoff";
-  assert(mp4_capture_publication_completed(h,13)==expected&&!mp4_capture_publication_completed(h,14));
-  if(mode=="publication_reuse"){
-   actual_request=14;idoly_mp4_capture_publication::Request reuse;
-   mp4_capture_publication_enter(reuse,ref(controller),14);
-   {auto update=h.bank.update(ref(controller),14);assert(update.owned()&&update.finish(true));}
-   const auto reused=reuse.finish();assert(reused.valid&&!reused.suppressed);
-   mp4_capture_publication_complete(ref(controller),14,reused,true);
-   assert(mp4_capture_publication_completed(h,14)&&!mp4_capture_publication_completed(h,13));
-  }
- }
- const bool partial=mode=="partial_ctor"||mode=="partial_native_zero";
+ const bool partial=pre_ctor||mode=="texture_root_failure"||mode=="withdraw_inside_texture"||mode=="partial_ctor"||mode=="partial_native_zero";
  assert(mp4_capture_production_produced(&h,7,9,ref(private_wrapper),ref(private_rt),202)==!partial);
+ assert(global_writes==(mode=="publication_unowned_nested"||mode=="nested_same_operation"?1:0));
+ assert(global_binding==(global_writes?77u:1u));
+ if(mode=="semantic_withdrawal"||mode=="foreign_after_assignment"||mode=="nested_same_operation")assert(!returned&&!receipt.valid);
+ if(mode=="publication_reuse"){
+  beginning=true;actual_request=14;assert(mp4_capture_production_issue(h,ref(controller),14));beginning=false;
+  idoly_mp4_capture_publication::Request reuse;mp4_capture_publication_enter(reuse,ref(controller),14);assert(!reuse.must_abort());
+  {auto update=h.bank.update(ref(controller),mp4_capture_production_request(ref(controller)),image_base+0x1110);assert(update.owned()&&update.finish(true));}
+  const auto reused=reuse.finish();assert(reused.valid&&!reused.suppressed);mp4_capture_publication_complete(ref(controller),14,reused,true);
+  assert(mp4_capture_publication_completed(h,14)&&!mp4_capture_publication_completed(h,13));
+ }
  if(mode=="historical_root_lost"){
   mp4production::Resource resource{};assert(h.bank.historical(0,&resource));roots[resource.texture_root]=ref(foreign);
   assert(!mp4_capture_production_transfer_all(h)&&!mp4_capture_production_finish(h)&&roots.size()==6);return 0;
  }
- if(mode=="handoff"){current_ok=false;pending=false;put(controller,152,ref(original));const int reads=source_reads;
-  assert(mp4_capture_production_produced(&h,7,9,ref(private_wrapper),ref(private_rt),202));
-  assert(mp4_capture_production_transfer_all(h)&&source_reads==reads);
- }else{
-  if(mode=="retirement_wait"){adopt_ok=false;assert(!mp4_capture_production_transfer_all(h)&&roots.size()==6&&!mp4_capture_production_finish(h));adopt_ok=true;}
-  assert(mp4_capture_production_transfer_all(h));
- }
- assert(mp4_capture_production_transfer_all(h));assert(mp4_capture_production_finish(h)&&!mp4_capture_production_active_bank());
+ if(mode=="handoff"){current_ok=false;pending=false;put(controller,152,ref(original));}
+ fail_root=false;
+ if(mode=="retirement_wait"){adopt_ok=false;assert(!mp4_capture_production_transfer_all(h)&&roots.size()==6&&!mp4_capture_production_finish(h));adopt_ok=true;}
+ const int no_former_reads=source_reads;
+ assert(mp4_capture_production_transfer_all(h)&&mp4_capture_production_transfer_all(h));
+ if(!current_ok)assert(source_reads==no_former_reads);
+ assert(mp4_capture_production_finish(h)&&!mp4_capture_production_active_bank());
  for(auto root:sink_roots)weak_free(root);
  assert(roots.empty());
 }
@@ -180,11 +216,13 @@ int main(int argc,char**argv){assert(argc==2);setup();std::string mode=argv[1];M
     assert p.returncode==0,p.stdout+p.stderr
     return binary
 
-@pytest.mark.parametrize('mode',['normal','missing_frontend','missing_retirement','source_not_current','root_failure',
+@pytest.mark.parametrize('mode',['normal','missing_update_return','missing_frontend','missing_retirement','source_not_current','root_failure',
     'foreign_thread','bad_descriptor','bad_name','target_changed','partial_ctor','partial_native_zero',
     'update_body_failure','handoff','retirement_wait','publication_normal','publication_unowned_nested',
-    'publication_missing_provider','publication_missing_native','publication_body_failure',
-    'publication_handoff','publication_reuse','historical_root_lost'])
+    'publication_missing_provider','publication_body_failure',
+    'publication_handoff','publication_reuse','historical_root_lost','revoked_before_enter',
+    'wrapper_root_failure','texture_root_failure','withdraw_inside_texture','withdraw_before_wrapper',
+    'semantic_withdrawal','foreign_after_assignment','nested_same_operation'])
 def test_actual_production_host_receipts_and_cleanup(host,mode):
     p=subprocess.run([str(host),mode],capture_output=True,text=True,timeout=6)
     assert p.returncode==0,p.stdout+p.stderr

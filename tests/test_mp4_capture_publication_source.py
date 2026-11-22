@@ -25,6 +25,7 @@ def test_original_publication_caller_and_capture_destination():
         assert profile['all_writer_closure'] is False
         owned=profile['owned_publication']
         assert owned['original_return']=={'android':'0x923d4e4','ios':'0x7bcb81c'}[platform]
+        assert owned['update_return']=={'android':'0x923d50c','ios':'0x7bcb850'}[platform]
         assert owned['wrapper_return']=={'android':'0x923d380','ios':'0x7bcb6b4'}[platform]
         assert owned['texture_return']=={'android':'0x9236580','ios':'0x7bc33d4'}[platform]
         assert owned['aot']['wrapper_ctor']['rva']=={'android':'0x92364fc','ios':'0x7bc3348'}[platform]

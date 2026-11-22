@@ -84,13 +84,14 @@ int raw_captures=0,op_ends=0,op_failed_ends=0;uint64_t op_serial=0;
 bool op_observe_inflight=false,op_try_reenter=false;
 void capture(void*p,Method*){++raw_captures;
  if(op_observe_inflight){assert(clock_game&&clock_game->owned_capture_request(p,op_serial));
+  assert(clock_game->capture_request_origin_serial(p)==op_serial&&!clock_game->capture_operation_starting(p));
   assert(clock_game->owned_capture_request_serial(p)==op_serial&&clock_game->owned_capture_request_serial(ptr(bgm))==0);
   assert(!clock_game->owned_capture_request(ptr(bgm),op_serial)&&!clock_game->owned_capture_request(p,op_serial+1));
   if(op_try_reenter){const int before=raw_captures;assert(clock_game->request_capture()==Result::invalid&&raw_captures==before);}}
  if(op_throw)throw 37;
 }
-Result capture_begin(void*p,uint64_t*out){assert(p==ptr(camera_controller)&&!clock_game->owned_capture_request(p,op_serial)&&clock_game->owned_capture_request_serial(p)==0);*out=0;if(op_wait){if(op_wait_ticket)*out=1;return Result::waiting;}*out=op_zero?0:op_reuse?1:++op_serial;return Result::ok;}
-bool capture_end(void*p,uint64_t serial,bool returned){assert(p==ptr(camera_controller)&&serial);if(op_observe_inflight)assert(clock_game->owned_capture_request(p,serial)&&clock_game->owned_capture_request_serial(p)==serial);++op_ends;if(!returned)++op_failed_ends;if(op_handoff){take_over_scene();assert(clock_game->owned_capture_request_serial(p)==0);}return op_end_good;}
+Result capture_begin(void*p,uint64_t*out){assert(p==ptr(camera_controller)&&!clock_game->owned_capture_request(p,op_serial)&&clock_game->owned_capture_request_serial(p)==0&&clock_game->capture_operation_starting(p)&&clock_game->capture_request_origin_serial(p)==0);*out=0;if(op_wait){if(op_wait_ticket)*out=1;return Result::waiting;}*out=op_zero?0:op_reuse?1:++op_serial;return Result::ok;}
+bool capture_end(void*p,uint64_t serial,bool returned){assert(p==ptr(camera_controller)&&serial&&clock_game->capture_request_origin_serial(p)==serial&&!clock_game->capture_operation_starting(p));if(op_observe_inflight)assert(clock_game->owned_capture_request(p,serial)&&clock_game->owned_capture_request_serial(p)==serial);++op_ends;if(!returned)++op_failed_ends;if(op_handoff){take_over_scene();assert(clock_game->owned_capture_request_serial(p)==0&&clock_game->capture_request_origin_serial(p)==serial);}return op_end_good;}
 
 int32_t capture_width=16,capture_height=16,source_width=4096,source_height=2458;
 std::vector<std::array<int32_t,2>> geometry_calls;bool geometry_resize_good=true;
@@ -221,7 +222,8 @@ int main(){
     assert(a.request_capture()==Result::ok&&a.owned_pending_capture(ptr(wrapper))
         &&a.owned_pending_capture(ptr(camera),ptr(camera_controller),ptr(wrapper))
         &&!a.owned_pending_capture(ptr(bgm),ptr(camera_controller),ptr(wrapper)));
-    assert(!a.owned_capture_request(ptr(camera_controller),op_serial)&&a.owned_capture_request_serial(ptr(camera_controller))==0);
+    assert(!a.owned_capture_request(ptr(camera_controller),op_serial)&&a.owned_capture_request_serial(ptr(camera_controller))==0
+        &&a.capture_request_origin_serial(ptr(camera_controller))==0&&!a.capture_operation_starting(ptr(camera_controller)));
     a.discard_capture();assert(a.owned_pending_capture(ptr(wrapper)));
     before_capture_calls=raw_captures;op_reuse=true;assert(a.request_capture()==Result::failed&&raw_captures==before_capture_calls);op_reuse=false;
     a.reset_observations();assert(handles.empty()&&!a.owned_pending_capture(ptr(wrapper)));
