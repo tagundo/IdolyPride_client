@@ -29,8 +29,12 @@ bool mp4_source_verified=true,mp4_stage_source_verified=true;
 uint64_t fingerprints[2]{61,62};size_t old_graph_queries=0;uint32_t root_sequence=0;std::map<uint32_t,void*>roots;
 bool game_call(){return game;}
 bool mp4_particle_source_only_retire(){assert(game);return true;}
+bool pf_retire_allowed=true;
+bool mp4_proflare_admission_retire()noexcept{assert(game);return pf_retire_allowed;}
 bool mp4_scene_same_source(const Mp4SceneWitness&a,const Mp4SceneWitness&b){return a.generation&&a.generation==b.generation&&a.presenter==b.presenter&&a.player==b.player&&a.director==b.director&&a.controller==b.controller&&a.camera==b.camera&&a.brain==b.brain&&a.bgm==b.bgm&&a.voice==b.voice&&a.environment==b.environment&&a.camera_director==b.camera_director&&a.camera_asset==b.camera_asset&&a.camera_track==b.camera_track;}
 namespace idoly_mp4_runtime{struct Game{bool selected_scene_witness(Mp4SceneWitness&w){w=selected;return source_ok;}}game;}
+std::atomic<bool> pf_source_withdrawn{false};
+void mp4_proflare_source_withdraw()noexcept{pf_source_withdrawn.store(true,std::memory_order_release);}
 void mp4_stage_admission_withdraw() noexcept;
 uint32_t mp4_retain(void*p){if(withdraw_during_retain){withdraw_during_retain=false;mp4_stage_admission_withdraw();}if(!retain_ok)return 0;roots[++root_sequence]=p;return root_sequence;}
 void*weak_get(uint32_t h){auto i=roots.find(h);return roots_ok&&i!=roots.end()?i->second:nullptr;}
@@ -77,7 +81,8 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];setup();
  mp4_stage_host.owners[1]={&objects[1],&producer_equipment,2};mp4_stage_host.current_producers[1]=&producer_equipment;mp4_stage_host.producer_particles[1]=&objects[1];mp4_stage_host.director_count=1;
  }
  auto saved=mp4_stage_host;
- if(mode=="begin_source"){source_ok=false;assert(!mp4_stage_admission_begin(selected));}
+ if(mode=="begin_pf_retire_wait"){pf_retire_allowed=false;assert(!mp4_stage_admission_begin(selected)&&roots.empty());}
+ else if(mode=="begin_source"){source_ok=false;assert(!mp4_stage_admission_begin(selected));}
  else if(mode=="sequence_exhausted"){mp4_stage_admission_particle_sequence=~uint64_t(0);assert(!mp4_stage_admission_begin(selected));}
  else if(mode=="begin_withdraw_race"){withdraw_during_retain=true;assert(!mp4_stage_admission_begin(selected)&&roots.empty());}
  else if(mode=="begin_retain"){retain_ok=false;assert(!mp4_stage_admission_begin(selected)&&roots.empty());}

@@ -27,6 +27,9 @@ HARNESS = r'''
 #include <string>
 #include <stdexcept>
 namespace idoly_mp4_runtime {
+// Trace serialization has its own actual-body suite; this probe models only its scalar sink.
+inline void diagnostic_event(const char*,const char*,uint64_t=0,uint64_t=0,bool=false){}
+
 enum class Result {ok=0,waiting=1,unsupported=-1,invalid=-2};
 struct Snapshot {};
 struct FakeGame {

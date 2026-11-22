@@ -15,11 +15,11 @@ Mp4AudioOuterHost audio_bank;Mp4AudioOuterHost*mp4_audio_outer_storage=&audio_ba
 std::atomic<bool>mp4_audio_published{false},mp4_audio_foreign_dirty{false},mp4_animation_published{true};std::atomic<uint32_t>mp4_audio_native_readers{0};
 struct{bool animation_owned=true,invalidated=false;uint64_t epoch=7;}mp4_world_host;
 struct{uint64_t epoch=7,transaction=2;void*director=(void*)0x220;}mp4_rebuild_ledger;
-struct{bool hooks=true,current=true,roots=true,channel=true,throw_channel=false,change_call=false,begin_reader=false,change_phase=false,lose_root=false;uintptr_t root=0x330;unsigned channels=0;}audio_model;
+struct{bool hooks=true,current=true,roots=true,channel=true,throw_channel=false,change_call=false,begin_reader=false,change_phase=false,lose_root=false,lose_schedule=false;uintptr_t root=0x330;unsigned channels=0;}audio_model;
 bool mp4_audio_native_hooks_current(){return audio_model.hooks;}
 bool mp4_audio_outer_current(){return audio_model.current;}
 bool mp4_audio_outer_roots(){return audio_model.roots;}
 void*mp4_scene_root_asset_receipt(uint64_t e){return e==7?(void*)audio_model.root:nullptr;}
 struct Mp4AudioChannelImage{uintptr_t native=0;};
-bool mp4_audio_channel_image(void*s,const AudioPin*,size_t,Mp4AudioChannelImage&out){++audio_model.channels;if(audio_model.throw_channel)throw std::runtime_error("source image");if(audio_model.change_call)++mp4_child_module_operations.records[0].ticket;if(audio_model.begin_reader)mp4_audio_native_readers=1;if(audio_model.change_phase)audio_bank.phase=Mp4AudioOuterPhase::source_wait;if(audio_model.lose_root)audio_model.roots=false;out.native=s==(void*)0x500?0x700:0x800;return audio_model.channel;}
+bool mp4_audio_channel_image(void*s,const AudioPin*,size_t,Mp4AudioChannelImage&out){++audio_model.channels;if(audio_model.lose_schedule){audio_schedule_closed=audio_schedule_maintenance=false;}if(audio_model.throw_channel)throw std::runtime_error("source image");if(audio_model.change_call)++mp4_child_module_operations.records[0].ticket;if(audio_model.begin_reader)mp4_audio_native_readers=1;if(audio_model.change_phase)audio_bank.phase=Mp4AudioOuterPhase::source_wait;if(audio_model.lose_root)audio_model.roots=false;out.native=s==(void*)0x500?0x700:0x800;return audio_model.channel;}
 void*audio_direct_clip=nullptr;bool audio_clip_throws=false;void*audio_clip(void*){if(audio_clip_throws)throw std::runtime_error("clip getter");return audio_direct_clip;}void*(*mp4_audio_managed_clip)(void*)=audio_clip;

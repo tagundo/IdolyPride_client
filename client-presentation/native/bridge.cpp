@@ -2374,7 +2374,7 @@ constexpr size_t managed_source_count=15;
 // BEGIN_MP4_MANAGED_HOOK_RECEIPTS
 struct Mp4ManagedHookReceipt {
     uintptr_t base=0,rva=0;unsigned char original_prefix[16]{},patched_prefix[16]{};
-    void* stub=nullptr;void* trampoline=nullptr;void** original_location=nullptr;
+    void* stub=nullptr;void* replacement=nullptr;void* trampoline=nullptr;void** original_location=nullptr;
 };
 bool (*mp4_managed_hook_backend_current)(uintptr_t)=nullptr;
 bool mp4_managed_hook_requires_backend(uintptr_t rva){
@@ -2399,14 +2399,14 @@ bool mp4_early_observer_binding(const mp4game::Binding& binding){
         ||binding.rva==pin::mp4_animation_clips_factory.rva||binding.rva==pin::mp4_animation_infinite_factory.rva
         ||binding.rva==pin::mp4_animation_clip_factory.rva||binding.rva==pin::mp4_animation_interval_add.rva;
 }
-bool mp4_record_managed_hook(const pin::Entry* entry,void* stub,void** original){
+bool mp4_record_managed_hook(const pin::Entry* entry,void* stub,void** original,void* replacement){
     const size_t count=mp4_managed_hook_count.load(std::memory_order_relaxed);
-    if(!entry||!stub||!original||!*original||count>=mp4_managed_hook_capacity
+    if(!entry||!stub||!replacement||!original||!*original||count>=mp4_managed_hook_capacity
         ||!mp4_mapped(image_base+entry->rva,16,true))return false;
     if(mp4_managed_hook_requires_backend(entry->rva)
         &&(!mp4_managed_hook_backend_current||!mp4_managed_hook_backend_current(entry->rva)))return false;
     auto& receipt=mp4_managed_hook_receipts[count];
-    receipt.base=image_base;receipt.rva=entry->rva;receipt.stub=stub;receipt.trampoline=*original;receipt.original_location=original;
+    receipt.base=image_base;receipt.rva=entry->rva;receipt.stub=stub;receipt.replacement=replacement;receipt.trampoline=*original;receipt.original_location=original;
     std::memcpy(receipt.original_prefix,entry->bytes,16);
     std::memcpy(receipt.patched_prefix,reinterpret_cast<void*>(image_base+entry->rva),16);
     // Early AssetBundle observers can run while the remaining table installs.
@@ -2487,6 +2487,13 @@ bool mp4_hook_was_statically_verified(const mp4game::Binding &binding) {
     else if(binding.rva==pin::mp4_animation_interval_add.rva)entry=&pin::mp4_animation_interval_add;
     else if(binding.rva==pin::mp4_source_game_object_active.rva)entry=&pin::mp4_source_game_object_active;
     else if(binding.rva==pin::mp4_camera_manual_render.rva)entry=&pin::mp4_camera_manual_render;
+    else if(binding.rva==pin::mp4_proflare_start.rva)entry=&pin::mp4_proflare_start;
+    else if(binding.rva==pin::mp4_proflare_enable.rva)entry=&pin::mp4_proflare_enable;
+    else if(binding.rva==pin::mp4_proflare_disable.rva)entry=&pin::mp4_proflare_disable;
+    else if(binding.rva==pin::mp4_proflare_try.rva)entry=&pin::mp4_proflare_try;
+    else if(binding.rva==pin::mp4_proflare_initialize.rva)entry=&pin::mp4_proflare_initialize;
+    else if(binding.rva==pin::mp4_proflare_batch_late.rva)entry=&pin::mp4_proflare_batch_late;
+    else if(binding.rva==pin::mp4_proflare_batch_disable.rva)entry=&pin::mp4_proflare_batch_disable;
     else if(binding.rva==pin::mp4_source_timeline_factory.rva)entry=&pin::mp4_source_timeline_factory;
     else if(binding.rva==pin::mp4_scene_shader_load.rva)entry=&pin::mp4_scene_shader_load;
     else if(binding.rva==pin::mp4_scene_shader_loaded.rva)entry=&pin::mp4_scene_shader_loaded;
@@ -5029,6 +5036,16 @@ bool mp4_render_hold_gpu_checkpoint(uint64_t);
 bool mp4_render_hold_scope_checkpoint(uint64_t,uint64_t);
 Mp4SceneResult mp4_render_hold_retire(uint64_t);
 
+Mp4SceneResult mp4_proflare_capture();
+Mp4SceneResult mp4_proflare_capture_source_images();
+bool mp4_proflare_capture_current(uint64_t*);
+Mp4SceneResult mp4_proflare_release(bool);
+Mp4SceneResult mp4_proflare_prepare_first_render();
+Mp4SceneResult mp4_proflare_verify_source_restored();
+bool mp4_proflare_admission_retire()noexcept;
+void mp4_proflare_source_withdraw()noexcept;
+void mp4_bind_proflare_routes();
+bool mp4_proflare_equipment_source_plan(void*,void*,const Mp4SceneWitness&);
 void mp4_stage_admission_drop()noexcept;
 void mp4_stage_admission_withdraw()noexcept;
 bool mp4_stage_admission_source(const Mp4SceneWitness&);
@@ -5234,6 +5251,7 @@ enum class Mp4SceneOperation {capture,prepare,reset,restore};
 Mp4SceneResult mp4_root_capture_part(size_t,const Mp4ScenePart&);
 Mp4SceneResult mp4_gpu_initial_source_advance(uint64_t,uint64_t,uint64_t*);
 bool mp4_gpu_initial_source_fenced(uint64_t,uint64_t);
+bool mp4_gpu_initial_source_only_current(uint64_t,uint64_t);
 // BEGIN_MP4_SCENE_PROPERTY_RESTORE_INVOCATION
 // Procedural identity of the actual registered typed restore callback. This
 // is neither a synthetic Raw Call nor a worker/GPU/value-restoration proof.
@@ -5375,7 +5393,13 @@ Mp4SceneResult mp4_scene_run(Mp4SceneOperation operation){
         return mp4_scene_fail(Mp4SceneResult::invalid,"native_scene_capture_incomplete");
     if(operation==Mp4SceneOperation::reset&&host.prepared!=host.all)
         return mp4_scene_fail(Mp4SceneResult::invalid,"native_scene_prepare_incomplete");
-    if(operation==Mp4SceneOperation::prepare&&!mp4_gpu_initial_source_fenced(host.source.generation,idoly_mp4_runtime::job.generation))return Mp4SceneResult::waiting;
+    if(operation==Mp4SceneOperation::prepare){
+        if(!mp4_gpu_initial_source_fenced(host.source.generation,idoly_mp4_runtime::job.generation))return Mp4SceneResult::waiting;
+        // PF source GPU history is reset before Actor.prepare can issue its
+        // genuine prewarm draw. A WAIT retains the typed auxiliary upload.
+        const auto pf=mp4_proflare_prepare_first_render();
+        if(pf!=Mp4SceneResult::ok)return pf;
+    }
     // Source actor poses and stage/world state are restored before the saved
     // Cinemachine cache island. A camera restore followed by another owner's
     // transform/graph mutation would invalidate the restored camera history.
@@ -7085,7 +7109,8 @@ bool mp4_equipment_target_list(Mp4EquipmentTarget* out,size_t& count,bool root){
             // These separate renderer/coroutine histories need their own finite
             // source closure. Public beam/color fields alone cannot admit them.
             if(flares&&(!mp4_type_is(flares,"System.Array")||mp4_array_length(flares)>256))return false;
-            if(flares&&mp4_array_length(flares)){mp4_equipment_targets.error="stage_proflare_render_history_unsupported";return false;}
+            if(flares&&mp4_array_length(flares)&&!mp4_proflare_equipment_source_plan(value,flares,h.source)){
+                mp4_equipment_targets.error="stage_proflare_source_plan_unclosed";return false;}
             if(t.beam&&!mp4_stage_vlb_supported(t.beam))return false;
             if(t.renderer&&(!mp4_type_is(t.renderer,"UnityEngine.Renderer")||!mp4_alive(t.renderer)))return false;
             if(t.renderer&&!mp4_equipment_material_info(t.renderer,0)){mp4_equipment_targets.error="stage_equipment_material_not_ready";return false;}
@@ -8163,6 +8188,7 @@ Mp4SceneResult mp4_stage_quiesce(void*){
 Mp4SceneResult mp4_particle_native_capture();
 Mp4SceneResult mp4_particle_native_release(bool);
 Mp4SceneResult mp4_particle_native_verify_source_restored(void*);
+Mp4SceneResult mp4_stage_native_verify_source_restored(void*);
 Mp4SceneResult mp4_stage_activation_targets_restore();
 Mp4SceneResult mp4_stage_capture(void*){
     if(!mp4_stage_refresh_inventory()||!mp4_stage_refresh_controls())return Mp4SceneResult::stale;
@@ -8531,7 +8557,7 @@ bool mp4_equipment_graph_same_array(const mp4stage::EquipmentArrayView &a,
     part.prepare=mp4_stage_prepare;part.reset=mp4_stage_reset;part.restore=mp4_stage_restore;part.release=mp4_stage_release;part.error=mp4_stage_error;
     part.prepare_step=mp4_stage_prepare_step;part.grant=mp4_stage_grant;part.invalidate=mp4_stage_invalidate;
     part.admit=mp4_stage_admit;part.restoration_verified=mp4_stage_restoration_verified;
-    part.verify_source_restored=mp4_particle_native_verify_source_restored;
+    part.verify_source_restored=mp4_stage_native_verify_source_restored;
     part.revoke_grants=[](void*){mp4_stage_equipment.revoke_grants();mp4_stage_particles.revoke_grants();mp4_stage_psyllium.revoke_grants();};return part;
 }
 
@@ -20304,6 +20330,7 @@ uint64_t mp4_stage_admission_particle_sequence = 0;
 std::atomic<bool> mp4_stage_admission_withdrawn{true};
 std::atomic<uint64_t> mp4_stage_admission_withdraw_sequence{0};
 void mp4_stage_admission_withdraw() noexcept {
+  mp4_proflare_source_withdraw();
   mp4_stage_admission_withdrawn.store(true, std::memory_order_release);
   auto sequence =
       mp4_stage_admission_withdraw_sequence.load(std::memory_order_acquire);
@@ -20314,7 +20341,7 @@ void mp4_stage_admission_withdraw() noexcept {
 }
 
 void mp4_stage_admission_drop() noexcept {
-  if(game_call())(void)mp4_particle_source_only_retire();
+  if(game_call()){(void)mp4_particle_source_only_retire();(void)mp4_proflare_admission_retire();}
   if (!game_call()) {
     mp4_stage_admission_withdraw();
     return;
@@ -20384,6 +20411,9 @@ uint64_t mp4_stage_admission_begin(const Mp4SceneWitness &w) {
     mp4_stage_admission_withdraw();
     return 0;
   }
+  // A previous diagnostic/source plan is never adopted by a new attempt.
+  // Physical PF owners retain their independent cleanup duty instead.
+  if(!mp4_proflare_admission_retire())return 0;
   mp4_stage_admission_drop();
   Mp4SceneWitness now{};
   if (!game_call() || !w.generation || !w.presenter || !w.environment ||
@@ -23883,7 +23913,7 @@ using Mp4ProFlareDataCurrent = bool (*)(void *, const Mp4ProFlareDataImage &);
 using Mp4ProFlareDataQuiet = bool (*)(void *, const Mp4ProFlareDataImage &);
 bool mp4_proflare_data_pins() {
   if (!game_call() || !mp4_stage_source_verified || !mp4_source_verified ||
-      !mp4_timeline_pins_current() || !mp4_vlb_capi_ready())
+      !mp4_control_source_pins_ready() || !mp4_vlb_capi_ready())
     return false;
   const auto &p = mp4_proflare_pins;
   for (const auto *t : {&p.flare, &p.batch, &p.data, &p.element, &p.input,
@@ -32919,6 +32949,7 @@ void mp4_install_replay_runtime(){
         mp4_queue_snapshot_revision);
 }
 void mp4_bind_scene_post_restore();
+void mp4_publish_pipeline_diagnostics();
 bool mp4_renderer_source_program_closed();
 extern bool (*mp4_renderer_source_program_verified)();
 bool mp4_paused_copy_recipe_closed(uint64_t,uint64_t,uint64_t);
@@ -32927,6 +32958,7 @@ bool mp4_frame_capture_install_operations();
 bool mp4_prepare_runtime() {
     if(mp4_api_installed)return true;
     auto unavailable=[](const char* reason){
+        idoly_mp4_runtime::diagnostic_event("runtime_bindings",reason,0,0,true);
         pthread_mutex_lock(&idoly_mp4_runtime::control_mutex);
         idoly_mp4_runtime::published.ready=false;
         snprintf(idoly_mp4_runtime::readiness_error,sizeof(idoly_mp4_runtime::readiness_error),"%s",reason);
@@ -32981,6 +33013,7 @@ bool mp4_prepare_runtime() {
     mp4_gpu_paused_auxiliary_recipe_closed=mp4_paused_copy_recipe_closed;
     mp4_gpu_video_auxiliary_recipe_closed=mp4_video_texture_recipe_closed;
     mp4_bind_scene_post_restore();
+    mp4_bind_proflare_routes();
     if(mp4_camera_host.verified)mp4_audio_managed_clip=mp4_audio_source_clip;
     mp4_bind_native_output_routes();
     // Pure source observation (including an already paused MV) precedes
@@ -33001,7 +33034,7 @@ bool mp4_prepare_runtime() {
     if(!mp4_frame_capture_install_operations())return unavailable("capture_operation_install_failed");
     (void)idoly_mp4_runtime::install_native_scene_diagnostic_probe(&mp4_scene_host,mp4_scene_diagnostic_probe);
     mp4_install_replay_runtime();
-    mp4_api_installed=true;return true;
+    mp4_api_installed=true;mp4_publish_pipeline_diagnostics();return true;
 }
 // BEGIN_MP4_SELECTED_CONTROLLER
 void *mp4_selected_controller(void *presenter) {
@@ -35525,6 +35558,8 @@ struct Api {
 };
 }
 // END_MP4_TIMELINE_DEFAULT_IMAGE_TYPES
+
+
 static_assert(mp4_animation_defaults::max_rows==4096,"Bounded semantic Animation image rows");
 
 // BEGIN_MP4_TIMELINE_ANIMATOR_PHYSICAL_LEAF
@@ -36534,6 +36569,17 @@ bool mp4_animation_make_context(Mp4TimelineProofPhase phase,const Mp4SceneWitnes
  mp4_rebuilt_animation_output_closed=mp4_native_timeline_animation_output_closed;
 }
 // END_MP4_TIMELINE_ANIMATION_OUTPUT_ADAPTER
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -40312,6 +40358,8 @@ bool mp4_child_completed_output_context(const Mp4ChildFactoryContext&origin,mp4c
  mp4_director_birth::Receipt receipt{};return mp4_child_completed_output_context(origin,graph,output,native,native_graph,&receipt);
 }
 // END_MP4_CHILD_COMPLETED_OUTPUT_CONTEXT_HOST
+
+
 // BEGIN_MP4_ROOT_HISTORY_RETURNED_EVALUATE_HOST
 // Completed ORIGINAL Evaluate for this exact Director/Root, usable while its
 // actual AFTER remap duty is still outstanding. No Main-to-child borrowing,
@@ -43084,7 +43132,7 @@ struct Mp4SourceBootstrapJoins {
 }mp4_source_bootstrap_joins;
 struct Mp4SceneSourceBootstrap {
  mp4sb::Scope scope{};mp4sb::Key key{};
- uint64_t receipt[mp4sb::phases]{},producer_receipt=0,cohort_receipt=0;
+ uint64_t receipt[mp4sb::phases]{},producer_receipt=0,cohort_receipt=0,proflare_receipt=0;
  uint64_t sequence=0;unsigned retired=0,withdrawn=0;bool running=false,retiring=false,pre_released=false;
 }mp4_scene_source_bootstrap;
 bool mp4_scene_bootstrap_key(const mp4sb::Key&key){
@@ -43132,7 +43180,11 @@ mp4sb::Result mp4_scene_bootstrap_advance(void*opaque,const mp4sb::Key&key,uint6
   h.producer_receipt=actual;result=Mp4SceneResult::ok;break;}
  case mp4sb::Phase::source_baselines:
   result=mp4_srp_source_capture()&&mp4_camera_source_baselines_capture_or_verify()?Mp4SceneResult::ok:Mp4SceneResult::unsupported;break;
- case mp4sb::Phase::logical_images:result=mp4_root_capture_logical();break;
+ case mp4sb::Phase::logical_images:{
+  result=mp4_proflare_capture_source_images();if(result!=Mp4SceneResult::ok)break;
+  uint64_t actual=0;if(!mp4_proflare_capture_current(&actual)||!actual)return mp4sb::Result::stale;
+  h.proflare_receipt=actual;
+  result=mp4_root_capture_logical();break;}
  case mp4sb::Phase::before_root_images:
   if(!joins.context||!joins.provisional_roots.valid())return mp4sb::Result::unsupported;
   return joins.provisional_roots.advance(joins.context,key,out);
@@ -43171,8 +43223,9 @@ bool mp4_scene_bootstrap_current(void*opaque,const mp4sb::Key&key,uint64_t recei
  case mp4sb::Phase::early_barrier:return receipt==h.receipt[index]&&h.producer_receipt&&mp4_early_source_gates.current()
   &&joins.context&&joins.source_producers.current&&joins.source_producers.current(joins.context,key,h.producer_receipt);
  case mp4sb::Phase::source_baselines:return receipt==h.receipt[index]&&mp4_volume_assembly.captured&&mp4_srp_source_initial_current()&&mp4_camera_source_baselines_capture_or_verify();
- case mp4sb::Phase::logical_images:return receipt==h.receipt[index]&&mp4_stage_source_logical.completed==7u
-  &&mp4_control_assets.current()&&mp4_director_nodes.current()&&mp4_activation_nodes.current();
+ case mp4sb::Phase::logical_images:{uint64_t pf=0;
+  return receipt==h.receipt[index]&&h.proflare_receipt&&mp4_proflare_capture_current(&pf)&&pf==h.proflare_receipt
+   &&mp4_stage_source_logical.completed==7u&&mp4_control_assets.current()&&mp4_director_nodes.current()&&mp4_activation_nodes.current();}
  case mp4sb::Phase::before_root_images:return joins.context&&joins.provisional_roots.current&&joins.provisional_roots.current(joins.context,key,receipt);
  case mp4sb::Phase::child_source:return receipt==mp4_child_readonly_source.serial&&mp4_child_readonly_current();
  case mp4sb::Phase::full_world:return receipt==h.receipt[index]&&mp4_world_host.scope.active()
@@ -43207,7 +43260,9 @@ mp4sb::Result mp4_scene_bootstrap_release_phase(void*,const mp4sb::Key&key,size_
  case mp4sb::Phase::before_root_images:
   if(j.context&&j.provisional_roots.release)return j.provisional_roots.release(j.context,key);
   return mp4sb::Result::ok;
- case mp4sb::Phase::logical_images:return mp4_stage_source_logical_release()?mp4sb::Result::ok:mp4sb::Result::waiting;
+ case mp4sb::Phase::logical_images:
+  if(mp4_proflare_release(mp4_scene_host.release_owned)!=Mp4SceneResult::ok)return mp4sb::Result::waiting;
+  return mp4_stage_source_logical_release()?mp4sb::Result::ok:mp4sb::Result::waiting;
  case mp4sb::Phase::source_baselines:{
   const auto result=mp4_camera_source_baselines_release();
   if(result!=Mp4SceneResult::ok)return static_cast<mp4sb::Result>(static_cast<int>(result));
@@ -43291,7 +43346,7 @@ Mp4SceneResult mp4_scene_source_bootstrap_release(){
  // All physical/Root/Child/Node/Control/factory consumers have detached. Keep
  // the process sequence, but do not carry an old MV catalogue into a new job.
  mp4_birth_catalogue_clear();
- h.scope=mp4sb::Scope{};h.key={};for(auto&r:h.receipt)r=0;h.producer_receipt=h.cohort_receipt=0;
+ h.scope=mp4sb::Scope{};h.key={};for(auto&r:h.receipt)r=0;h.producer_receipt=h.cohort_receipt=h.proflare_receipt=0;
  h.retired=h.withdrawn=0;h.retiring=h.pre_released=false;
  mp4_root_history_initial_seal={};return Mp4SceneResult::ok;
 }
@@ -43308,6 +43363,15 @@ bool mp4_volume_source_snapshot_fenced(){
   &&j.source_producers.current(j.context,h.key,h.producer_receipt);
 }
 // END_MP4_VOLUME_SOURCE_EARLY_FENCE
+
+
+
+
+
+
+
+
+
 // BEGIN_MP4_SRP_SOURCE_BOOTSTRAP_HOST
 // INITIAL source controller state is a CPU/logical image. Its capture precedes
 // Camera source graphics baselines; it never asks Registry/Shader/pass images.
@@ -46787,6 +46851,7 @@ bool mp4_particle_renderer_descriptor_restore(Mp4ParticleRendererCacheImage&imag
 }
 // END_MP4_PARTICLE_NORMAL_RENDERER_PROGRAM
 
+bool mp4_stage_activation_physical_family(void*,uint32_t*,uint64_t*);
 // BEGIN_MP4_PARTICLE_NATIVE_COORDINATOR_HOST
 // Literal Stage callbacks own the capture/restore boundary. Config/source-plan
 // receipts identify programs; only this live synchronous boundary can authorize
@@ -47421,7 +47486,8 @@ Mp4SceneResult mp4_particle_native_release(bool owned) {
   if(!native_read)return Mp4SceneResult::waiting;
   if (!mp4_particle_native_cleanup_current())
     return Mp4SceneResult::waiting;
-  if(mp4_activation_additional_family==mp4_particle_activation_family)
+  if(mp4_activation_additional_family==mp4_particle_activation_family
+    ||mp4_activation_additional_family==mp4_stage_activation_physical_family)
     mp4_activation_additional_family=nullptr;
   for (size_t i = 0; i < h->count; ++i)
     if (!mp4_particle_renderer_presentation_clear(h->entries[i].presentation))
@@ -47923,6 +47989,4146 @@ bool current(const sb::Key&key,uint64_t receipt){
 }
 // END_MP4_CONCRETE_SOURCE_WORKERS
 
+// BEGIN_MP4_PROFLARE_CACHE_PINS
+struct Mp4ProFlareCachePins {mp4game::Binding awake, destroy;};
+[[maybe_unused]] constexpr Mp4ProFlareCachePins android_proflare_cache_pins={{0x877be1c,{0xfe,0x4f,0xbf,0xa9,0xe1,0x03,0x1f,0xaa,0xf3,0x03,0x00,0xaa,0x1f,0x00,0x02,0x79}},{0x877c844,{0xfe,0x0f,0x1d,0xf8,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xb4,0xc7,0x00,0x90}}};
+[[maybe_unused]] constexpr Mp4ProFlareCachePins ios_proflare_cache_pins={{0x6eb07b4,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xf3,0x03,0x00,0xaa}},{0x6eb1388,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}};
+#ifdef IDOLY_DARWIN_BRIDGE
+const auto& mp4_proflare_cache_pins=ios_proflare_cache_pins;
+#else
+const auto& mp4_proflare_cache_pins=android_proflare_cache_pins;
+#endif
+// END_MP4_PROFLARE_CACHE_PINS
+
+// PF logical registry/storage types are defined in mp4_stage_state.hpp.
+
+
+// PF logical registry/storage types are defined in mp4_stage_state.hpp.
+
+
+// BEGIN_MP4_PROFLARE_CACHE_HOST
+// Actual completed original Start (or the same original body under a finite
+// source-cache preparation receipt) is the birth authority. Directly calling
+// Start does not claim to set Unity's native Start-called bit. For sunMode=0
+// the retained reference writes are idempotent, so a later native Start is
+// valid.
+struct Mp4ProFlareCacheImage {
+  void *flare = nullptr, *klass = nullptr, *atlas = nullptr,
+       *elements = nullptr, *array = nullptr;
+  void *transform = nullptr, *go = nullptr, *batch = nullptr;
+  uintptr_t native = 0, transform_native = 0, go_native = 0, batch_native = 0;
+  int32_t instance = 0;
+  uint32_t count = 0, version = 0;
+  void *element[256]{};
+};
+struct Mp4ProFlareCacheBirth {
+  Mp4ProFlareCacheImage image{};
+  uint32_t weak[264]{};
+  size_t weak_count = 0;
+  uint64_t receipt = 0;
+};
+Mp4ProFlareCacheBirth *mp4_proflare_cache_births = nullptr;
+uint64_t mp4_proflare_cache_sequence = 0;
+std::atomic<bool> mp4_proflare_cache_foreign{false};
+// Root binds this to its exact source-cache preparation operation, not a held
+// clock/Stage epoch. The token stays current until the source semantic registry
+// and GO states are restored and promoted-storage baselines are captured.
+uint64_t (*mp4_proflare_cache_preparation)(void *) = nullptr;
+bool mp4_proflare_cache_source_pins() {
+  if (!game_call() || !mp4_source_verified || !font_method || !font_field ||
+      !font_field_type || !object_class || !font_class_type || !font_strong || !weak_new || !weak_get || !weak_free)
+    return false;
+  const auto &p = mp4_proflare_pins;
+  for (const auto *t : {&p.flare, &p.element, &p.batch})
+    if (!mp4_timeline_class(*t))
+      return false;
+  const mp4game::Binding *bindings[] = {&p.start,
+                                        &p.init,
+                                        &p.enable,
+                                        &p.disable,
+                                        &p.add,
+                                        &p.remove,
+                                        &mp4_proflare_cache_pins.awake,
+                                        &mp4_proflare_cache_pins.destroy};
+  for (const auto *b : bindings)
+    if (!mp4_prefix(*b) && !mp4_hook_was_statically_verified(*b))
+      return false;
+  mp4game::Binding component_go{};
+  component_go.rva = mp4_stage_profile.component_gameobject.rva;
+  ::memcpy(component_go.prefix, mp4_stage_profile.component_gameobject.prefix,
+           16);
+  if(!mp4_prefix(component_go)&&!mp4_hook_was_statically_verified(component_go))return false;
+  const auto verified=[](const auto&pin){mp4game::Binding b{};b.rva=pin.rva;::memcpy(b.prefix,pin.prefix,16);return mp4_prefix(b)||mp4_hook_was_statically_verified(b);};
+  return verified(mp4_actor_profile.field_offset)&&verified(mp4_cam_profile.field_flags);
+}
+bool mp4_proflare_cache_field(void *object, const char *name, size_t off,
+                              uint32_t kind) {
+  void *f = nullptr;
+  uint32_t bits = 0;
+  if (!mp4_root_track_field(object, name, off, &f))
+    return false;
+  const void *t = font_field_type(f);
+  return t && mp4_actor_field(const_cast<void *>(t), 8, bits) &&
+         ((bits >> 16) & 255u) == kind && !(bits & 16u);
+}
+bool mp4_proflare_cache_declared(void *object, const char *name, size_t offset,
+                                 void *value) {
+  void *field = nullptr;
+  return mp4_root_track_field(object, name, offset, &field) &&
+         font_class_type(font_field_type(field)) &&
+         (!value ||
+          font_class_type(font_field_type(field)) == object_class(value));
+}
+bool mp4_proflare_cache_callbacks(void *flare) {
+  const char *names[] = {"Awake", "Start", "OnEnable", "OnDisable",
+                         "OnDestroy"};
+  const mp4game::Binding *code[] = {
+      &mp4_proflare_cache_pins.awake, &mp4_proflare_pins.start,
+      &mp4_proflare_pins.enable, &mp4_proflare_pins.disable,
+      &mp4_proflare_cache_pins.destroy};
+  for (size_t i = 0; i < 5; ++i) {
+    const void *m = font_method(object_class(flare), names[i], 0);
+    uintptr_t entry = 0;
+    if (!m || !mp4_actor_field(const_cast<void *>(m), 0, entry) ||
+        entry != image_base + code[i]->rva)
+      return false;
+  }
+  return true;
+}
+bool mp4_proflare_cache_image(void *flare, Mp4ProFlareCacheImage *out,
+                              bool initialized) {
+  if (!out || !flare || !font_strong)
+    return false;
+  Mp4ActorTempRoot root(flare);
+  if (root.get() != flare || !mp4_proflare_cache_source_pins() ||
+      !mp4_timeline_exact(flare, mp4_proflare_pins.flare) ||
+      !mp4_alive(flare) || !mp4_proflare_cache_callbacks(flare))
+    return false;
+  struct F {
+    const char *name;
+    size_t off;
+    uint32_t kind;
+  };
+  const F fields[] = {{"_Atlas", 32, 18},
+                      {"Elements", 48, 21},
+                      {"thisTransform", 56, 18},
+                      {"thisGameObject", 64, 18},
+                      {"sunMode", 229, 2},
+                      {"sunModeTransformA", 232, 18},
+                      {"sunModeTransformB", 240, 18},
+                      {"flareBatchForSrp", 248, 18},
+                      {"Initialised", 256, 2},
+                      {"DisabledPlayMode", 257, 2}};
+  for (const auto &f : fields)
+    if (!mp4_proflare_cache_field(flare, f.name, f.off, f.kind))
+      return false;
+  *out = {};
+  out->flare = flare;
+  out->klass = object_class(flare);
+  uint8_t sun = 1;
+  void *a = nullptr, *b = nullptr;
+  if (!mp4_actor_field(flare, 16, out->native) || !out->native ||
+      !mp4_actor_field(reinterpret_cast<void *>(out->native), 8,
+                       out->instance) ||
+      !out->instance || !mp4_actor_field(flare, 32, out->atlas) ||
+      !mp4_alive(out->atlas) || !mp4_actor_field(flare, 229, sun) || sun ||
+      !mp4_actor_field(flare, 232, a) || a || !mp4_actor_field(flare, 240, b) ||
+      b || !mp4_actor_field(flare, 48, out->elements) || !out->elements ||
+      !mp4_actor_field(flare, 56, out->transform) ||
+      !mp4_type_is(out->transform, "UnityEngine.Transform") ||
+      !mp4_alive(out->transform) || !mp4_actor_field(flare, 64, out->go) ||
+      !mp4_type_is(out->go, "UnityEngine.GameObject") || !mp4_alive(out->go) ||
+      !mp4_actor_field(out->transform, 16, out->transform_native) ||
+      !out->transform_native || !mp4_actor_field(out->go, 16, out->go_native) ||
+      !out->go_native || !mp4_actor_field(flare, 248, out->batch))
+    return false;
+  if (!mp4_proflare_cache_declared(flare, "_Atlas", 32, out->atlas) ||
+      !mp4_proflare_cache_declared(flare, "Elements", 48, out->elements) ||
+      !mp4_proflare_cache_declared(flare, "thisTransform", 56,
+                                   out->transform) ||
+      !mp4_proflare_cache_declared(flare, "thisGameObject", 64, out->go) ||
+      !mp4_proflare_cache_declared(flare, "flareBatchForSrp", 248, out->batch))
+    return false;
+  Mp4ActorTempRoot atlas_root(out->atlas), elements_root(out->elements),
+      tr_root(out->transform), go_root(out->go), batch_root(out->batch);
+  if (atlas_root.get() != out->atlas || elements_root.get() != out->elements ||
+      tr_root.get() != out->transform || go_root.get() != out->go ||
+      (out->batch && batch_root.get() != out->batch))
+    return false;
+  if (initialized &&
+      (!mp4_timeline_exact(out->batch, mp4_proflare_pins.batch) ||
+       !mp4_alive(out->batch)))
+    return false;
+  if (out->batch && (!mp4_actor_field(out->batch, 16, out->batch_native) ||
+                     !out->batch_native))
+    return false;
+  using Get = void *(*)(void *, Method *);
+  if (mp4_equipment_call<Get>(mp4_stage_profile.component_gameobject)(
+          flare, nullptr) != out->go ||
+      mp4_equipment_call<Get>(mp4_stage_profile.component_gameobject)(
+          out->transform, nullptr) != out->go)
+    return false;
+  if (!mp4_actor_field(out->elements, 16, out->array) || !out->array ||
+      !mp4_actor_field(out->elements, 24, out->count) || out->count > 256 ||
+      !mp4_actor_field(out->elements, 28, out->version))
+    return false;
+  if (!mp4_proflare_cache_declared(out->elements, "_items", 16, out->array))
+    return false;
+  Mp4ActorTempRoot array_root(out->array);
+  void **items = nullptr;
+  size_t count = 0;
+  if (array_root.get() != out->array ||
+      !mp4_actor_list(out->elements, &items, &count, 256) ||
+      count != out->count)
+    return false;
+  for (size_t i = 0; i < count; ++i) {
+    void *element = items[i];
+    Mp4ActorTempRoot er(element);
+    void *owner = nullptr, *atlas = nullptr;
+    if (er.get() != element ||
+        !mp4_timeline_exact(element, mp4_proflare_pins.element) ||
+        !mp4_proflare_cache_field(element, "flare", 32, 18) ||
+        !mp4_proflare_cache_field(element, "flareAtlas", 40, 18) ||
+        !mp4_actor_field(element, 32, owner) ||
+        !mp4_actor_field(element, 40, atlas) ||
+        (initialized
+             ? (owner != flare || atlas != out->atlas)
+             : ((owner && owner != flare) || (atlas && atlas != out->atlas))))
+      return false;
+    for (size_t j = 0; j < i; ++j)
+      if (out->element[j] == element)
+        return false;
+    out->element[i] = element;
+  }
+  return true;
+}
+bool mp4_proflare_cache_same(const Mp4ProFlareCacheImage &a,
+                             const Mp4ProFlareCacheImage &b) {
+  if (a.flare != b.flare || a.klass != b.klass || a.native != b.native ||
+      a.instance != b.instance || a.atlas != b.atlas ||
+      a.elements != b.elements || a.array != b.array || a.count != b.count ||
+      a.version != b.version || a.transform != b.transform ||
+      a.transform_native != b.transform_native || a.go != b.go ||
+      a.go_native != b.go_native || a.batch != b.batch ||
+      a.batch_native != b.batch_native)
+    return false;
+  for (size_t i = 0; i < a.count; ++i)
+    if (a.element[i] != b.element[i])
+      return false;
+  return true;
+}
+void mp4_proflare_cache_drop(Mp4ProFlareCacheBirth &r) {
+  for (size_t i = 0; i < r.weak_count; ++i)
+    if (r.weak[i])
+      weak_free(r.weak[i]);
+  r = {};
+}
+bool mp4_proflare_cache_keep(Mp4ProFlareCacheBirth &r, void *object) {
+  if (!object)
+    return true;
+  if (r.weak_count == 264)
+    return false;
+  auto h = weak_new(object, false);
+  if (!h || weak_get(h) != object) {
+    if (h)
+      weak_free(h);
+    return false;
+  }
+  r.weak[r.weak_count++] = h;
+  return true;
+}
+struct Mp4ProFlareStartCompletion {
+  void *flare = nullptr;
+  bool completed = false;
+};
+thread_local Mp4ProFlareStartCompletion *mp4_proflare_start_completion =
+    nullptr;
+struct Mp4ProFlareStartReceiptGuard {
+  Mp4ProFlareStartCompletion value{};
+  Mp4ProFlareStartCompletion *previous = nullptr;
+  explicit Mp4ProFlareStartReceiptGuard(void *flare)
+      : value{flare, false}, previous(mp4_proflare_start_completion) {
+    mp4_proflare_start_completion = &value;
+  }
+  ~Mp4ProFlareStartReceiptGuard() { mp4_proflare_start_completion = previous; }
+};
+bool mp4_proflare_cache_weak_current(const Mp4ProFlareCacheBirth &r) {
+  if (!r.receipt || !r.weak_count)
+    return false;
+  void *refs[] = {r.image.flare, r.image.atlas,     r.image.elements,
+                  r.image.array, r.image.transform, r.image.go,
+                  r.image.batch};
+  size_t at = 0;
+  for (void *p : refs)
+    if (p && (at >= r.weak_count || weak_get(r.weak[at++]) != p))
+      return false;
+  for (size_t j = 0; j < r.image.count; ++j)
+    if (at >= r.weak_count || weak_get(r.weak[at++]) != r.image.element[j])
+      return false;
+  return at == r.weak_count;
+}
+uint64_t mp4_proflare_cache_observe_completed(void *flare) {
+  if (!mp4_proflare_start_completion ||
+      !mp4_proflare_start_completion->completed ||
+      mp4_proflare_start_completion->flare != flare)
+    return 0;
+
+  Mp4ProFlareCacheImage im{};
+  if (!mp4_proflare_cache_image(flare, &im, true) ||
+      mp4_proflare_cache_foreign.load(std::memory_order_acquire) ||
+      mp4_proflare_cache_sequence == ~uint64_t(0))
+    return 0;
+  if (!mp4_proflare_cache_births) {
+    void *p = ::malloc(sizeof(Mp4ProFlareCacheBirth) * 128);
+    if (!p)
+      return 0;
+    ::memset(p, 0, sizeof(Mp4ProFlareCacheBirth) * 128);
+    mp4_proflare_cache_births = static_cast<Mp4ProFlareCacheBirth *>(p);
+  }
+  size_t slot = 128;
+  for (size_t i = 0; i < 128; ++i) {
+    auto &r = mp4_proflare_cache_births[i];
+    void *o = r.weak_count ? weak_get(r.weak[0]) : nullptr;
+    if (o == flare) {
+      slot = i;
+      break;
+    }
+    if (!o && slot == 128)
+      slot = i;
+  }
+  if (slot == 128)
+    return 0;
+  auto &r = mp4_proflare_cache_births[slot];
+  if (mp4_proflare_cache_weak_current(r) &&
+      mp4_proflare_cache_same(r.image, im))
+    return r.receipt;
+  mp4_proflare_cache_drop(r);
+  r.image = im;
+  void *refs[] = {im.flare,     im.atlas, im.elements, im.array,
+                  im.transform, im.go,    im.batch};
+  for (void *p : refs)
+    if (!mp4_proflare_cache_keep(r, p)) {
+      mp4_proflare_cache_drop(r);
+      return 0;
+    }
+  for (size_t i = 0; i < im.count; ++i)
+    if (!mp4_proflare_cache_keep(r, im.element[i])) {
+      mp4_proflare_cache_drop(r);
+      return 0;
+    }
+  r.receipt = ++mp4_proflare_cache_sequence;
+  return r.receipt;
+}
+bool mp4_proflare_cache_current(void *flare, uint64_t *receipt) {
+  if (receipt)
+    *receipt = 0;
+  if (!receipt || !mp4_proflare_cache_births ||
+      mp4_proflare_cache_foreign.load(std::memory_order_acquire))
+    return false;
+  Mp4ProFlareCacheImage im{};
+  if (!mp4_proflare_cache_image(flare, &im, true))
+    return false;
+  for (size_t i = 0; i < 128; ++i) {
+    const auto &r = mp4_proflare_cache_births[i];
+    if (!r.receipt || !r.weak_count || weak_get(r.weak[0]) != flare)
+      continue;
+    void *refs[] = {r.image.flare, r.image.atlas,     r.image.elements,
+                    r.image.array, r.image.transform, r.image.go,
+                    r.image.batch};
+    size_t at = 0;
+    for (void *p : refs)
+      if (p && (at >= r.weak_count || weak_get(r.weak[at++]) != p))
+        return false;
+    for (size_t j = 0; j < r.image.count; ++j)
+      if (at >= r.weak_count || weak_get(r.weak[at++]) != r.image.element[j])
+        return false;
+    if (at != r.weak_count || !mp4_proflare_cache_same(r.image, im))
+      return false;
+    *receipt = r.receipt;
+    return true;
+  }
+  return false;
+}
+using Mp4ProFlareStart = void (*)(void *, Method *);
+Mp4ProFlareStart mp4_proflare_start_trampoline = nullptr;
+bool mp4_proflare_start_callable(Mp4ProFlareStart original) {
+  if (!original || !mp4_source_verified)
+    return false;
+  const auto &p = mp4_proflare_pins.start;
+  return (original == reinterpret_cast<Mp4ProFlareStart>(image_base + p.rva) &&
+          mp4_prefix(p)) ||
+         (original == mp4_proflare_start_trampoline &&
+          mp4_proflare_start_trampoline && mp4_hook_was_statically_verified(p));
+}
+uint64_t mp4_proflare_start_invoke(void *flare, Method *method,
+                                   Mp4ProFlareStart original) {
+  if (!original)
+    return 0;
+  if (!game_call()) {
+    mp4_proflare_cache_foreign.store(true, std::memory_order_release);
+    original(flare, method);
+    return 0;
+  }
+  const bool verified = mp4_proflare_start_callable(original);
+  Mp4ProFlareStartReceiptGuard receipt(flare);
+  original(flare, method); // A managed/source exception propagates unchanged.
+  receipt.value.completed = verified;
+  // Observer failure never changes completion/exception behavior of original.
+  try {
+    return mp4_proflare_cache_observe_completed(flare);
+  } catch (...) {
+    return 0;
+  }
+}
+// This is only the original CPU reference/cache promotion. The caller must
+// restore semantic registry/GO flags and take baselines after storage
+// promotion. It must not render/warm GPU history before paused-pixel/history
+// capture.
+bool mp4_proflare_cache_prepare(void *flare, Method *method,
+                                Mp4ProFlareStart original, uint64_t *receipt) {
+  if (receipt)
+    *receipt = 0;
+  Mp4ProFlareCacheImage before{};
+  if (!receipt || !mp4_proflare_start_callable(original) ||
+      !mp4_proflare_cache_preparation ||
+      !mp4_proflare_cache_image(flare, &before, false))
+    return false;
+  uint64_t token = mp4_proflare_cache_preparation(flare);
+  if (!token)
+    return false;
+  uint64_t confirmed = 0;
+  auto born = mp4_proflare_start_invoke(flare, method, original);
+  if (!born || mp4_proflare_cache_preparation(flare) != token ||
+      !mp4_proflare_cache_current(flare, &confirmed))
+    return false;
+  Mp4ProFlareCacheImage after{};
+  if (!mp4_proflare_cache_image(flare, &after, true))
+    return false;
+  // Init may fill a previously null batch cache; no other existing identity is
+  // replaced, and no sun helper/GO was born on this supported source branch.
+  if (before.batch) {
+    if (before.batch != after.batch ||
+        before.batch_native != after.batch_native)
+      return false;
+  }
+  before.batch = after.batch;
+  before.batch_native = after.batch_native;
+  if (!mp4_proflare_cache_same(before, after))
+    return false;
+  *receipt = confirmed;
+  return true;
+}
+// END_MP4_PROFLARE_CACHE_HOST
+
+// BEGIN_MP4_PROFLARE_REGISTRY_HOST
+// Actual source collection adapter. Caller binds the selected original renderer
+// batch/data owner and its retired-GPU fence before capturing this lease.
+namespace mp4pf = idoly_mp4_proflare_registry;
+struct Mp4ProFlareRegistryHost {
+  void *batch = nullptr;
+  uint64_t epoch = 0, owner = 0;
+  uint32_t root = 0;
+  bool restoring = false;
+  mp4pf::Flare flares[mp4pf::max_flares]{};
+  size_t count = 0;
+} mp4_proflare_registry_host;
+mp4pf::Scope mp4_proflare_registry_scope;
+bool (*mp4_proflare_registry_physical)(void *, uint64_t *) = nullptr;
+uint64_t (*mp4_proflare_registry_operation)(void *) = nullptr;
+bool (*mp4_proflare_registry_handoff)(void *, mp4pf::Result) = nullptr;
+uint64_t (*mp4_proflare_registry_data_origin)(void *, mp4pf::DataOperation,
+                                              void *, void *) = nullptr;
+bool (*mp4_proflare_registry_data_complete)(void *, mp4pf::DataOperation,
+                                            void *, void *, uint64_t) = nullptr;
+bool (*mp4_proflare_runtime_ready)(void *) = nullptr;
+
+bool mp4_proflare_registry_collection(void *owner, const char *name, size_t at,
+                                      void **value) {
+  void *f = nullptr;
+  if (!mp4_root_track_field(owner, name, at, &f) ||
+      !mp4_actor_field(owner, at, *value) || !*value)
+    return false;
+  return font_class_type(font_field_type(f)) == object_class(*value);
+}
+bool mp4_proflare_registry_array(void *owner, const char *field, size_t at,
+                                 size_t stride, void **array, void **rows,
+                                 size_t *capacity, void **element = nullptr) {
+  if (!mp4_proflare_registry_collection(owner, field, at, array) ||
+      !mp4_type_is(*array, "System.Array"))
+    return false;
+  void *bounds = nullptr;
+  using Size = int32_t (*)(void *);
+  using Elem = void *(*)(void *);
+  using Value = bool (*)(void *);
+  using Width = int32_t (*)(void *, uint32_t *);
+  void *k = object_class(*array);
+  if (!mp4_actor_field(*array, 16, bounds) || bounds ||
+      mp4_cam_call<Size>(mp4_cam_profile.class_rank)(k) != 1)
+    return false;
+  void *e = mp4_cam_call<Elem>(mp4_cam_profile.class_element)(k);
+  if (!e)
+    return false;
+  bool value = mp4_cam_call<Value>(mp4_cam_profile.class_value_type)(e);
+  uint32_t align = 0;
+  int32_t size =
+      value ? mp4_cam_call<Width>(mp4_cam_profile.class_value_size)(e, &align)
+            : static_cast<int32_t>(sizeof(void *));
+  if (size != static_cast<int32_t>(stride))
+    return false;
+  *capacity = mp4_array_length(*array);
+  *rows = mp4_array_data(*array);
+  if (element)
+    *element = e;
+  return *capacity <= mp4pf::max_rows &&
+         (!*capacity || mp4_actor_mapped(*rows, *capacity * stride, true));
+}
+bool mp4_proflare_registry_list(void *batch, const char *name, size_t offset,
+                                const Mp4TimelineTypePin &type,
+                                mp4pf::List *out) {
+  *out = {};
+  if (!mp4_proflare_registry_collection(batch, name, offset, &out->object))
+    return false;
+  for (const auto &f : {"_items", "_size", "_version", "_syncRoot"}) {
+    size_t at = !::strcmp(f, "_items")     ? 16
+                : !::strcmp(f, "_size")    ? 24
+                : !::strcmp(f, "_version") ? 28
+                                           : 32;
+    if (!mp4_root_track_field(out->object, f, at))
+      return false;
+  }
+  void *rows = nullptr, *element = nullptr;
+  if (!mp4_proflare_registry_array(out->object, "_items", 16, sizeof(void *),
+                                   &out->array, &rows, &out->capacity,
+                                   &element) ||
+      element != mp4_timeline_class(type) ||
+      !mp4_actor_field(out->object, 24, out->count) ||
+      out->count > out->capacity ||
+      !mp4_actor_field(out->object, 28, out->version) ||
+      !mp4_actor_field(out->object, 32, out->sync))
+    return false;
+  out->rows = static_cast<void **>(rows);
+  return true;
+}
+bool mp4_proflare_registry_int_class(void *k) {
+  return k && class_name(k) && class_namespace(k) &&
+         !::strcmp(class_name(k), "Int32") &&
+         !::strcmp(class_namespace(k), "System");
+}
+bool mp4_proflare_registry_read(void *ctx, mp4pf::Image *out) {
+  auto &h = *static_cast<Mp4ProFlareRegistryHost *>(ctx);
+  if (!out || !h.batch || !h.root || weak_get(h.root) != h.batch ||
+      !mp4_proflare_data_pins() ||
+      !mp4_timeline_exact(h.batch, mp4_proflare_pins.batch) ||
+      !mp4_alive(h.batch))
+    return false;
+  *out = {};
+  out->batch = h.batch;
+  void *f = nullptr;
+  if (!mp4_actor_field(h.batch, 16, out->native) || !out->native ||
+      !mp4_root_track_field(h.batch, "_atlas", 40, &f) ||
+      !mp4_actor_field(h.batch, 40, out->atlas) ||
+      !mp4_proflare_registry_list(h.batch, "FlaresList", 48,
+                                  mp4_proflare_pins.flare, &out->list) ||
+      !mp4_proflare_registry_list(h.batch, "_batchDatas", 80,
+                                  mp4_proflare_pins.data, &out->data))
+    return false;
+  auto &q = out->queue;
+  auto &d = out->dictionary;
+  if (!mp4_proflare_registry_collection(h.batch, "_flareEmptyQueue", 56,
+                                        &q.object) ||
+      !mp4_proflare_registry_collection(h.batch, "_flareInstanceIDTable", 64,
+                                        &d.object))
+    return false;
+  const char *qnames[] = {"_array", "_head",    "_tail",
+                          "_size",  "_version", "_syncRoot"};
+  size_t qat[] = {16, 24, 28, 32, 36, 40};
+  for (size_t i = 0; i < 6; ++i)
+    if (!mp4_root_track_field(q.object, qnames[i], qat[i]))
+      return false;
+  void *rows = nullptr, *element = nullptr;
+  if (!mp4_proflare_registry_array(q.object, "_array", 16, 4, &q.array, &rows,
+                                   &q.capacity, &element) ||
+      !mp4_proflare_registry_int_class(element) ||
+      !mp4_actor_field(q.object, 24, q.head) ||
+      !mp4_actor_field(q.object, 28, q.tail) ||
+      !mp4_actor_field(q.object, 32, q.count) ||
+      !mp4_actor_field(q.object, 36, q.version) ||
+      !mp4_actor_field(q.object, 40, q.sync))
+    return false;
+  q.rows = static_cast<int32_t *>(rows);
+  const char *dnames[] = {"_buckets",  "_entries",   "_count",    "_version",
+                          "_freeList", "_freeCount", "_comparer", "_keys",
+                          "_values",   "_syncRoot"};
+  size_t dat[] = {16, 24, 32, 36, 40, 44, 48, 56, 64, 72};
+  for (size_t i = 0; i < 10; ++i)
+    if (!mp4_root_track_field(d.object, dnames[i], dat[i]))
+      return false;
+  if (!mp4_proflare_registry_array(d.object, "_buckets", 16, 4, &d.buckets,
+                                   &rows, &d.bucket_capacity, &element) ||
+      !mp4_proflare_registry_int_class(element))
+    return false;
+  d.bucket_rows = static_cast<int32_t *>(rows);
+  if (!mp4_proflare_registry_array(d.object, "_entries", 24, 16, &d.entries,
+                                   &rows, &d.capacity, &element))
+    return false;
+  const char *enames[] = {"hashCode", "next", "key", "value"};
+  using Offset = size_t (*)(void *);
+  for (size_t i = 0; i < 4; ++i) {
+    void *field = font_field(element, enames[i]);
+    uint32_t bits = 0;
+    if (!field ||
+        mp4_cam_call<Offset>(mp4_cam_profile.field_offset)(field) !=
+            16 + i * 4 ||
+        !font_field_type(field) ||
+        !mp4_actor_field(const_cast<void *>(font_field_type(field)), 8, bits) ||
+        ((bits >> 16) & 255u) != 8 || (bits & 16u))
+      return false;
+  }
+  d.rows = static_cast<mp4pf::Entry *>(rows);
+  return mp4_actor_field(d.object, 32, d.count) &&
+         mp4_actor_field(d.object, 36, d.version) &&
+         mp4_actor_field(d.object, 40, d.free_list) &&
+         mp4_actor_field(d.object, 44, d.free_count) &&
+         mp4_actor_field(d.object, 48, d.comparer) &&
+         mp4_actor_field(d.object, 56, d.keys) &&
+         mp4_actor_field(d.object, 64, d.values) &&
+         mp4_actor_field(d.object, 72, d.sync);
+}
+bool mp4_proflare_registry_current(void *ctx, uint64_t epoch) {
+  auto &h = *static_cast<Mp4ProFlareRegistryHost *>(ctx);
+  uint64_t owner = 0;
+  return game_call() && h.epoch == epoch && h.root &&
+         weak_get(h.root) == h.batch &&
+         mp4_proflare_registry_physical &&
+         mp4_proflare_registry_physical(h.batch, &owner) && owner &&
+         owner == h.owner;
+}
+bool mp4_proflare_registry_flare(void *, const mp4pf::Flare &f) {
+  uint64_t receipt = 0;
+  Mp4ProFlareCacheImage im{};
+  return mp4_proflare_cache_current(f.object, &receipt) &&
+         receipt == f.initialized &&
+         mp4_proflare_cache_image(f.object, &im, true) &&
+         im.native == f.native && im.instance == f.instance &&
+         im.atlas == f.atlas && im.batch == mp4_proflare_registry_host.batch;
+}
+int32_t mp4_proflare_registry_instance(void *, void *object) {
+  uintptr_t native = 0;
+  int32_t instance = 0;
+  return mp4_type_is(object, "UnityEngine.Object") && mp4_alive(object) &&
+                 mp4_actor_field(object, 16, native) && native &&
+                 mp4_actor_field(reinterpret_cast<void *>(native), 8, instance)
+             ? instance
+             : 0;
+}
+uint64_t mp4_proflare_registry_origin(void *, void *flare,
+                                      mp4pf::Operation op) {
+  if (op == mp4pf::Operation::start && mp4_proflare_cache_preparation) {
+    auto token = mp4_proflare_cache_preparation(flare);
+    if (token)
+      return token;
+  }
+  if (!mp4_activation_targets.lifecycle_current(flare))
+    return 0;
+  auto token = mp4_activation_targets.restoring_receipt(flare);
+  if (token)
+    return token;
+  return mp4_activation_callback_execution(flare)
+             ? mp4_activation_origin->receipt
+             : 0;
+}
+bool mp4_proflare_registry_write(void *ctx, const mp4pf::Image &image,
+                                 void *const *list, const int32_t *queue,
+                                 const int32_t *buckets,
+                                 const mp4pf::Entry *entries,
+                                 void *const *data_rows) {
+  auto &h = *static_cast<Mp4ProFlareRegistryHost *>(ctx);
+  if (!h.restoring || !mp4_proflare_registry_operation ||
+      !mp4_proflare_registry_operation(h.batch) ||
+      !mp4_proflare_registry_current(ctx, h.epoch) ||
+      !mp4_stage_clock_held(nullptr))
+    return false;
+  for (size_t i = 0; i < image.list.capacity; ++i)
+    mp4_camera_barrier(image.list.array, &image.list.rows[i], list[i]);
+  if (image.queue.capacity)
+    ::memcpy(image.queue.rows, queue, image.queue.capacity * 4);
+  if (image.dictionary.bucket_capacity)
+    ::memcpy(image.dictionary.bucket_rows, buckets,
+             image.dictionary.bucket_capacity * 4);
+  if (image.dictionary.capacity)
+    ::memcpy(image.dictionary.rows, entries,
+             image.dictionary.capacity * sizeof(mp4pf::Entry));
+  for (size_t i = 0; i < image.data.capacity; ++i)
+    mp4_camera_barrier(image.data.array, &image.data.rows[i], data_rows[i]);
+  mp4_camera_barrier(
+      image.data.object,
+      reinterpret_cast<void **>(static_cast<uint8_t *>(image.data.object) + 16),
+      image.data.array);
+  mp4_camera_barrier(
+      h.batch, reinterpret_cast<void **>(static_cast<uint8_t *>(h.batch) + 40),
+      image.atlas);
+  return mp4_stage_store(image.data.object, 24, image.data.count) &&
+         mp4_stage_store(image.data.object, 28, image.data.version) &&
+         mp4_stage_store(image.list.object, 24, image.list.count) &&
+         mp4_stage_store(image.list.object, 28, image.list.version) &&
+         mp4_stage_store(image.queue.object, 24, image.queue.head) &&
+         mp4_stage_store(image.queue.object, 28, image.queue.tail) &&
+         mp4_stage_store(image.queue.object, 32, image.queue.count) &&
+         mp4_stage_store(image.queue.object, 36, image.queue.version) &&
+         mp4_stage_store(image.dictionary.object, 32, image.dictionary.count) &&
+         mp4_stage_store(image.dictionary.object, 36,
+                         image.dictionary.version) &&
+         mp4_stage_store(image.dictionary.object, 40,
+                         image.dictionary.free_list) &&
+         mp4_stage_store(image.dictionary.object, 44,
+                         image.dictionary.free_count);
+}
+mp4pf::Result mp4_proflare_registry_restore() {
+  auto &h = mp4_proflare_registry_host;
+  if (h.restoring)
+    return mp4pf::Result::invalid;
+  h.restoring = true;
+  const auto result = mp4_proflare_registry_scope.restore();
+  h.restoring = false;
+  return result;
+}
+void mp4_proflare_registry_release() {
+  mp4_proflare_registry_scope.release();
+  auto &h = mp4_proflare_registry_host;
+  if (h.root)
+    weak_free(h.root);
+  h = {};
+}
+mp4pf::Result mp4_proflare_registry_capture(void *batch, void *const *flares,
+                                            size_t count, uint64_t epoch) {
+  auto &h = mp4_proflare_registry_host;
+  if (h.epoch || !batch || !flares || !count || count > mp4pf::max_flares ||
+      !epoch || !mp4_proflare_registry_physical ||
+      !mp4_proflare_registry_operation || !mp4_proflare_registry_handoff)
+    return mp4pf::Result::invalid;
+  h.batch = batch;
+  h.epoch = epoch;
+  h.root = mp4_retain(batch);
+  if (!h.root || weak_get(h.root) != batch ||
+      !mp4_proflare_registry_physical(batch, &h.owner) || !h.owner)
+    return mp4pf::Result::unsupported;
+  for (size_t i = 0; i < count; ++i) {
+    Mp4ProFlareCacheImage im{};
+    uint64_t receipt = 0;
+    if (!mp4_proflare_cache_current(flares[i], &receipt) ||
+        !mp4_proflare_cache_image(flares[i], &im, true) || im.batch != batch)
+      return mp4pf::Result::unsupported;
+    h.flares[h.count++] = {flares[i], im.atlas, im.native, im.instance,
+                           receipt};
+  }
+  mp4pf::Api a{};
+  a.current = mp4_proflare_registry_current;
+  a.held = mp4_stage_clock_held;
+  a.read = mp4_proflare_registry_read;
+  a.flare = mp4_proflare_registry_flare;
+  a.instance = mp4_proflare_registry_instance;
+  a.origin = mp4_proflare_registry_origin;
+  a.data_origin = [](void *context, mp4pf::DataOperation op, void *camera,
+                     void *data) -> uint64_t {
+    return mp4_proflare_registry_data_origin
+               ? mp4_proflare_registry_data_origin(context, op, camera, data)
+               : 0;
+  };
+  a.data_complete = [](void *context, mp4pf::DataOperation op, void *camera,
+                       void *data, uint64_t receipt) {
+    return mp4_proflare_registry_data_complete &&
+           mp4_proflare_registry_data_complete(context, op, camera, data,
+                                               receipt);
+  };
+  a.write = mp4_proflare_registry_write;
+  a.retain = mp4_retain;
+  a.target = weak_get;
+  a.release = weak_free;
+  return mp4_proflare_registry_scope.capture(a, &h, epoch, h.flares, h.count);
+}
+bool mp4_proflare_activation_family(void *component, uint64_t *receipt) {
+  if (receipt)
+    *receipt = 0;
+  if (!receipt || !mp4_proflare_runtime_ready ||
+      !mp4_proflare_runtime_ready(mp4_proflare_registry_host.batch) ||
+      !mp4_proflare_registry_scope.owns(component) ||
+      !mp4_proflare_registry_scope.current())
+    return false;
+  uint64_t born = 0;
+  if (!mp4_proflare_cache_current(component, &born) || !born)
+    return false;
+  *receipt = born;
+  return true;
+}
+using Mp4ProFlareLifecycle = void (*)(void *, Method *);
+Mp4ProFlareLifecycle mp4_proflare_enable_trampoline = nullptr,
+                     mp4_proflare_disable_trampoline = nullptr;
+bool mp4_proflare_lifecycle_callable(mp4pf::Operation op,
+                                     Mp4ProFlareLifecycle original) {
+  if (op == mp4pf::Operation::start)
+    return mp4_proflare_start_callable(original);
+  const auto &p = op == mp4pf::Operation::enable ? mp4_proflare_pins.enable
+                                                 : mp4_proflare_pins.disable;
+  const auto trampoline = op == mp4pf::Operation::enable
+                              ? mp4_proflare_enable_trampoline
+                              : mp4_proflare_disable_trampoline;
+  return original && mp4_source_verified &&
+         ((original ==
+               reinterpret_cast<Mp4ProFlareLifecycle>(image_base + p.rva) &&
+           mp4_prefix(p)) ||
+          (original == trampoline && trampoline &&
+           mp4_hook_was_statically_verified(p)));
+}
+void mp4_proflare_forward_lifecycle(mp4pf::Operation op, void *flare,
+                                    Method *method,
+                                    Mp4ProFlareLifecycle original) {
+  if (op == mp4pf::Operation::start)
+    (void)mp4_proflare_start_invoke(flare, method, original);
+  else
+    original(flare, method);
+}
+void mp4_proflare_lifecycle_invoke(mp4pf::Operation op, void *flare,
+                                   Method *method,
+                                   Mp4ProFlareLifecycle original) {
+  if (!original)
+    return;
+  if (!game_call()) {
+    mp4_proflare_cache_foreign.store(true, std::memory_order_release);
+    original(flare, method);
+    return;
+  }
+  if (!mp4_proflare_registry_scope.active()) {
+    mp4_proflare_forward_lifecycle(op, flare, method, original);
+    return;
+  }
+  uint64_t receipt = 0;
+  auto result = mp4_proflare_lifecycle_callable(op, original)
+                    ? mp4_proflare_registry_scope.begin(flare, op, &receipt)
+                    : mp4pf::Result::unsupported;
+  if (result != mp4pf::Result::ok) {
+    if (mp4_proflare_registry_handoff &&
+        mp4_proflare_registry_handoff(flare, result)) {
+      mp4_proflare_forward_lifecycle(op, flare, method, original);
+      return;
+    }
+    mp4_stage_host.invalidated = true;
+    mp4_stage_host.error = "proflare_lifecycle_handoff_pending";
+    mp4_proflare_forward_lifecycle(op, flare, method, original);
+    return;
+  }
+  try {
+    mp4_proflare_forward_lifecycle(op, flare, method, original);
+  } catch (...) {
+    (void)mp4_proflare_registry_scope.end(receipt, false);
+    throw;
+  }
+  if (mp4_proflare_registry_scope.end(receipt, true) != mp4pf::Result::ok) {
+    mp4_stage_host.invalidated = true;
+    mp4_stage_host.error = mp4_proflare_registry_scope.error();
+  }
+}
+// END_MP4_PROFLARE_REGISTRY_HOST
+
+// BEGIN_MP4_PROFLARE_DATA_BIRTH_HOST
+// Actual typed Try -> inlined allocation -> Initialize -> Data-list append.
+// A draw ticket alone never grants ownership of an arbitrary Data or buffer.
+// Partial Data retirement and aggregate physical joins remain mandatory before
+// admission; this module alone grants neither renderer nor native lifetime.
+using Mp4ProFlareTry = bool (*)(void *, void *, void **, Method *);
+using Mp4ProFlareInitialize = void (*)(void *, int32_t, Method *);
+Mp4ProFlareTry mp4_proflare_try_trampoline = nullptr;
+Mp4ProFlareInitialize mp4_proflare_initialize_trampoline = nullptr;
+struct Mp4ProFlareDataBirth {
+  void *batch = nullptr, *camera = nullptr, *object = nullptr,
+       **output = nullptr;
+  uint64_t source = 0, job = 0, recipe = 0, existing = 0;
+  Mp4ProFlareDataBirth *previous = nullptr;
+  Mp4ProFlareGpuOwner gpu{};
+  uint32_t roots[3]{};
+  size_t root_count = 0;
+  int32_t maximum = 0;
+  bool active = false, initializing = false, initialized = false;
+  bool returned = false, threw = false, registered = false, disposed = false;
+  bool in_original = false, birth_proven = false, withdrawn = false;
+  bool scope_pending = false, retired = false, dispose_started = false,
+       retirement_pending = false, cleanup_checked = false,
+       cleanup_appended = false;
+  bool retiring = false, removed = false, failed = false;
+};
+Mp4ProFlareDataBirth mp4_proflare_data_births[32]{};
+size_t mp4_proflare_data_birth_count = 0;
+uint64_t mp4_proflare_data_birth_sequence = 0;
+Mp4ProFlareDataBirth *mp4_proflare_data_original_try = nullptr;
+bool (*mp4_proflare_try_withdrawal_ready)(void *, void *) = nullptr;
+// This sentinel is local to the exact owned typed outer Try. Pinned Android
+// EH CFI and iOS compact unwind both prove that original Try/Initialize have
+// no local personality/LSDA catch or finally handler. It never replaces an
+// ordinary authored exception and is not the CaptureRequest abort type.
+struct Mp4ProFlareWithdraw {
+  const Mp4ProFlareDataBirth *owner = nullptr;
+  uint64_t recipe = 0, source = 0, job = 0;
+  const char *error = nullptr;
+};
+[[noreturn]] void mp4_proflare_birth_withdraw(Mp4ProFlareDataBirth &b,
+                                              const char *error) {
+  throw Mp4ProFlareWithdraw{&b, b.recipe, b.source, b.job, error};
+}
+// BEGIN_MP4_PROFLARE_WITHDRAWAL_PINS
+// Generated from pinned original full Try/Init bodies and exact no-LSDA unwind records.
+[[maybe_unused]] constexpr mp4game::Binding android_proflare_withdrawal_pins[] = {
+ {0x3a83ef8,{0x24,0x0,0x0,0x0,0xac,0x8c,0xd0,0x0,0x60,0x69,0xcf,0x4,0x40,0x2,0x0,0x0}},
+ {0x2d7b250,{0x14,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x1,0x7a,0x52,0x0,0x1,0x7c,0x1e,0x1}},
+ {0x3a84628,{0x1c,0x0,0x0,0x0,0xdc,0x93,0xd0,0x0,0x7c,0xcf,0xcf,0x4,0x74,0x3,0x0,0x0}},
+};
+[[maybe_unused]] constexpr mp4game::Binding ios_proflare_withdrawal_pins[] = {
+ {0x94f5e40,{0x1,0x0,0x0,0x0,0x1c,0x0,0x0,0x0,0x76,0x0,0x0,0x0,0xf4,0x1,0x0,0x0}},
+ {0x96ac5d8,{0x3,0x0,0x0,0x0,0xc,0x0,0xfd,0x3,0x0,0x10,0x0,0x0,0x0,0x0,0x0,0x2}},
+ {0x96ac6ec,{0xf4,0x66,0x0,0x5,0x94,0x69,0x0,0x0,0xac,0x69,0x0,0x1,0x44,0x6a,0x0,0x18}},
+ {0x94f5e70,{0xf,0x0,0x0,0x4,0x1f,0x0,0x0,0x4,0x3,0x0,0x0,0x54,0x1,0x0,0x0,0x54}},
+ {0x96ac7a8,{0xb8,0xda,0x0,0x3,0x6c,0xde,0x0,0x2,0xac,0xde,0x0,0x7,0xd8,0xdf,0x0,0x1}},
+ {0x94f5e68,{0x7,0x0,0x0,0x4,0x0,0x0,0x0,0x4,0xf,0x0,0x0,0x4,0x1f,0x0,0x0,0x4}},
+};
+#if defined(IDOLY_DARWIN_BRIDGE)
+#define MP4_PROFLARE_WITHDRAWAL_PINS ios_proflare_withdrawal_pins
+#else
+#define MP4_PROFLARE_WITHDRAWAL_PINS android_proflare_withdrawal_pins
+#endif
+
+// END_MP4_PROFLARE_WITHDRAWAL_PINS
+bool mp4_proflare_try_withdrawal_source(void *batch, void *camera) {
+  if (!game_call() || !mp4_source_verified || !mp4_proflare_data_pins() ||
+      !batch || !camera || batch != mp4_proflare_registry_host.batch ||
+      camera != mp4_stage_host.source.camera)
+    return false;
+  for (const auto &pin : MP4_PROFLARE_WITHDRAWAL_PINS)
+    if (!mp4_prefix(pin, false))
+      return false;
+  return true;
+}
+#undef MP4_PROFLARE_WITHDRAWAL_PINS
+// These joins are exact saved-data image ownership and a Root restore
+// operation, respectively. The aggregate configures both before beginning an
+// export.
+bool (*mp4_proflare_existing_data_lease)(void *, void *, uint64_t *) = nullptr;
+uint64_t (*mp4_proflare_data_restore_operation)(void *) = nullptr;
+bool mp4_proflare_birth_current(const Mp4ProFlareDataBirth &b) {
+  if (!game_call() || !b.source || !b.job || !b.recipe || !b.batch ||
+      !b.camera || b.disposed || b.failed ||
+      b.source != mp4_stage_host.source.generation ||
+      b.job != idoly_mp4_runtime::job.generation ||
+      b.camera != mp4_stage_host.source.camera ||
+      b.batch != mp4_proflare_registry_host.batch ||
+      !mp4_proflare_registry_current(&mp4_proflare_registry_host, b.source))
+    return false;
+  if (b.root_count < 2 || weak_get(b.roots[0]) != b.batch ||
+      weak_get(b.roots[1]) != b.camera ||
+      (b.object && (b.root_count != 3 || weak_get(b.roots[2]) != b.object)))
+    return false;
+  return true;
+}
+bool mp4_proflare_birth_keep(Mp4ProFlareDataBirth &b, void *object) {
+  if (!object || b.root_count == 3)
+    return false;
+  const auto root = mp4_retain(object);
+  if (!root || weak_get(root) != object) {
+    if (root)
+      weak_free(root);
+    return false;
+  }
+  b.roots[b.root_count++] = root;
+  return true;
+}
+void mp4_proflare_birth_drop(Mp4ProFlareDataBirth &b) {
+  for (size_t i = 0; i < b.root_count; ++i)
+    if (b.roots[i])
+      weak_free(b.roots[i]);
+  b = {};
+}
+bool mp4_proflare_birth_object(const Mp4ProFlareDataBirth &b, void *object) {
+  void *batch = nullptr, *camera = nullptr;
+  return object && mp4_proflare_data_schema(object) &&
+         mp4_actor_field(object, 16, batch) && batch == b.batch &&
+         mp4_actor_field(object, 24, camera) && camera == b.camera;
+}
+bool mp4_proflare_birth_existing_current(const Mp4ProFlareDataBirth &b) {
+  if (!b.object || !b.existing || !mp4_proflare_birth_object(b, b.object))
+    return false;
+  if (b.previous)
+    return b.previous->registered && b.previous->initialized &&
+           b.previous->object == b.object && b.previous->camera == b.camera &&
+           b.previous->recipe == b.existing &&
+           mp4_proflare_birth_current(*b.previous);
+  uint64_t source = 0;
+  return mp4_proflare_existing_data_lease &&
+         mp4_proflare_existing_data_lease(b.object, b.camera, &source) &&
+         source == b.existing;
+}
+void mp4_proflare_birth_failure(const char *error) noexcept {
+  // Recognized owned failure revokes future work but preserves the exact
+  // retained Stage/registry authority needed to retire its own Data safely.
+  mp4_stage_host.error = error;
+  try {
+    idoly_mp4_runtime::terminal(error, false);
+  } catch (...) {
+    idoly_mp4_runtime::job.stage = idoly_mp4_runtime::Stage::retiring;
+  }
+}
+void mp4_proflare_birth_invalidate(const char *error) noexcept {
+  mp4_stage_host.invalidated = true;
+  mp4_proflare_birth_failure(error);
+}
+bool mp4_proflare_try_callable(Mp4ProFlareTry original) {
+  const auto &p = mp4_proflare_pins.try_update;
+  return original && mp4_source_verified &&
+         ((original == reinterpret_cast<Mp4ProFlareTry>(image_base + p.rva) &&
+           mp4_prefix(p)) ||
+          (original == mp4_proflare_try_trampoline &&
+           mp4_proflare_try_trampoline && mp4_hook_was_statically_verified(p)));
+}
+bool mp4_proflare_initialize_callable(Mp4ProFlareInitialize original) {
+  const auto &p = mp4_proflare_pins.data_initialize;
+  return original && mp4_source_verified &&
+         ((original ==
+               reinterpret_cast<Mp4ProFlareInitialize>(image_base + p.rva) &&
+           mp4_prefix(p)) ||
+          (original == mp4_proflare_initialize_trampoline &&
+           mp4_proflare_initialize_trampoline &&
+           mp4_hook_was_statically_verified(p)));
+}
+bool mp4_proflare_try_initialization_site(uintptr_t return_pc) {
+#if defined(IDOLY_DARWIN_BRIDGE)
+  constexpr uintptr_t site = 0x6eaf304;
+#else
+  constexpr uintptr_t site = 0x877aa08;
+#endif
+  return return_pc == image_base + site;
+}
+// Capture the real hook-entry return address before invoking this helper. It
+// must be the immutable Try callsite, never __builtin_return_address here.
+void mp4_proflare_initialize_invoke(void *object, int32_t maximum,
+                                    Method *method, uintptr_t return_pc,
+                                    Mp4ProFlareInitialize original) {
+  if (!original)
+    return;
+  if (!mp4_proflare_registry_scope.active()) {
+    original(object, maximum, method);
+    return;
+  }
+  auto *b = mp4_proflare_data_original_try;
+  if (!b || !b->active || !b->in_original) {
+    // Ordinary original calls retain their exact behavior. This is not a
+    // private birth grant: the aggregate must hand off its source ownership.
+    mp4_proflare_birth_invalidate("proflare_initialize_unowned_handoff");
+    original(object, maximum, method);
+    return;
+  }
+  if (b->initializing || b->object || b->existing ||
+      !mp4_proflare_birth_current(*b) || !mp4_proflare_gpu_current(b->gpu) ||
+      !mp4_proflare_initialize_callable(original) ||
+      !mp4_proflare_try_initialization_site(return_pc) || !b->output ||
+      *b->output != object || maximum <= 0 || maximum > 4096 ||
+      !mp4_proflare_birth_object(*b, object))
+    mp4_proflare_birth_withdraw(*b, "proflare_initialize_origin_unclosed");
+  int32_t actual_maximum = 0;
+  if (!mp4_actor_field(b->batch, 72, actual_maximum) ||
+      actual_maximum != maximum ||
+      !mp4_actor_mapped(static_cast<uint8_t *>(object) + 32, 136, true))
+    mp4_proflare_birth_withdraw(*b, "proflare_initialize_input_changed");
+  mp4pf::Image im{};
+  if (!mp4_proflare_registry_read(&mp4_proflare_registry_host, &im))
+    mp4_proflare_birth_withdraw(*b, "proflare_initialize_list_unavailable");
+  for (size_t i = 0; i < im.data.count; ++i)
+    if (im.data.rows[i] == object)
+      mp4_proflare_birth_withdraw(*b, "proflare_initialize_already_member");
+  if (!mp4_proflare_birth_keep(*b, object))
+    mp4_proflare_birth_withdraw(*b, "proflare_initialize_root_failed");
+  b->object = object;
+  b->maximum = maximum;
+  // Root the real allocation before inspecting zero resource state. An
+  // unexpected nonzero image is retained but never granted Dispose authority.
+  const uint8_t *bytes = static_cast<const uint8_t *>(object) + 32;
+  for (size_t i = 0; i < 136; ++i)
+    if (bytes[i])
+      mp4_proflare_birth_withdraw(*b, "proflare_initialize_not_fresh");
+  b->birth_proven = true;
+  if (!idoly_mp4_runtime::native_render_job_current())
+    mp4_proflare_birth_withdraw(*b, "proflare_initialize_cancelled");
+  b->initializing = true;
+  try {
+    original(object, maximum, method);
+  } catch (...) {
+    b->initializing = false;
+    b->threw = true;
+    throw;
+  }
+  b->initializing = false;
+  b->initialized =
+      mp4_proflare_birth_current(*b) && mp4_proflare_gpu_current(b->gpu) &&
+      mp4_proflare_birth_object(*b, object) && *b->output == object;
+  if (!b->initialized)
+    mp4_proflare_birth_withdraw(*b, "proflare_initialize_completion_changed");
+  if (!idoly_mp4_runtime::native_render_job_current())
+    mp4_proflare_birth_withdraw(*b, "proflare_initialize_cancelled");
+}
+// The actual Source Init has published each buffer into its Data field before
+// SetData. This exposes only the exact original-draw/upload provenance; callers
+// still verify the concrete typed buffer operation and hardware auxiliary
+// fence.
+[[maybe_unused]] bool mp4_proflare_birth_upload_owner(void *buffer, uint64_t source,
+                                     uint64_t job, uint64_t *recipe) {
+  if (recipe)
+    *recipe = 0;
+  auto *b = mp4_proflare_data_original_try;
+  if (!recipe || !buffer || !b || !b->active || !b->object ||
+      (!b->initializing && !b->initialized && !b->existing) ||
+      b->source != source || b->job != job || !mp4_proflare_birth_current(*b) ||
+      !mp4_proflare_gpu_current(b->gpu) ||
+      !mp4_proflare_birth_object(*b, b->object))
+    return false;
+  size_t matches = 0;
+  for (size_t offset : {size_t(40), size_t(64), size_t(120), size_t(144)}) {
+    void *actual = nullptr;
+    if (!mp4_actor_field(b->object, offset, actual))
+      return false;
+    matches += actual == buffer;
+  }
+  if (matches != 1)
+    return false;
+  *recipe = b->recipe;
+  return true;
+}
+uint64_t mp4_proflare_data_registry_origin(void *, mp4pf::DataOperation op,
+                                           void *camera, void *data) {
+  auto *b = mp4_proflare_data_original_try;
+  if (!b || !b->active || b->camera != camera ||
+      !mp4_proflare_birth_current(*b))
+    return 0;
+  if (op == mp4pf::DataOperation::update)
+    return !b->returned && !b->threw && mp4_proflare_gpu_current(b->gpu)
+               ? b->recipe
+               : 0;
+  return b->retiring && b->object == data &&
+                 mp4_proflare_data_restore_operation &&
+                 mp4_proflare_data_restore_operation(data) &&
+                 mp4_proflare_gpu_quiet(b->gpu)
+             ? b->recipe
+             : 0;
+}
+bool mp4_proflare_data_registry_complete(void *, mp4pf::DataOperation op,
+                                         void *camera, void *data,
+                                         uint64_t recipe) {
+  auto *b = mp4_proflare_data_original_try;
+  if (!b || !b->active || b->camera != camera || b->recipe != recipe)
+    return false;
+  if (op == mp4pf::DataOperation::abandon)
+    return b->retiring && b->scope_pending && (b->threw || b->withdrawn) &&
+           b->object == data && b->cleanup_checked &&
+           (!b->object || b->existing ||
+            (b->birth_proven && b->disposed &&
+             (!b->cleanup_appended || b->removed))) &&
+           mp4_proflare_gpu_quiet(b->gpu);
+  if (op == mp4pf::DataOperation::retire)
+    return b->retiring && b->object == data && b->disposed && b->removed &&
+           mp4_proflare_gpu_quiet(b->gpu);
+  if (!mp4_proflare_birth_current(*b) || !b->returned || b->threw ||
+      !mp4_proflare_gpu_current(b->gpu))
+    return false;
+  if (b->existing)
+    return b->object == data && mp4_proflare_birth_existing_current(*b);
+  return data ? b->object == data && b->initialized : !b->object;
+}
+bool mp4_proflare_try_invoke(void *batch, void *camera, void **output,
+                             Method *method, Mp4ProFlareTry original) {
+  if (!original)
+    return false;
+  if (!mp4_proflare_registry_scope.active())
+    return original(batch, camera, output, method);
+  if (mp4_proflare_data_original_try &&
+      mp4_proflare_data_original_try->active &&
+      mp4_proflare_data_original_try->in_original)
+    mp4_proflare_birth_withdraw(*mp4_proflare_data_original_try,
+                                "proflare_nested_try");
+  if (!mp4_proflare_try_withdrawal_ready ||
+      !mp4_proflare_try_withdrawal_ready(batch, camera) || !game_call() ||
+      !idoly_mp4_runtime::native_render_job_current() ||
+      mp4_proflare_data_original_try || !mp4_proflare_try_callable(original) ||
+      !output || !mp4_actor_mapped(output, sizeof(void *), true) ||
+      mp4_proflare_data_birth_count == 32 ||
+      mp4_proflare_data_birth_sequence == ~uint64_t(0) ||
+      !mp4_proflare_registry_scope.current() ||
+      batch != mp4_proflare_registry_host.batch ||
+      camera != mp4_stage_host.source.camera) {
+    mp4_proflare_birth_failure("proflare_try_origin_unclosed");
+    return false;
+  }
+  auto &b = mp4_proflare_data_births[mp4_proflare_data_birth_count];
+  b = {};
+  b.batch = batch;
+  b.camera = camera;
+  b.output = output;
+  b.source = mp4_stage_host.source.generation;
+  b.job = idoly_mp4_runtime::job.generation;
+  b.recipe = ++mp4_proflare_data_birth_sequence;
+  ++mp4_proflare_data_birth_count;
+  if (!mp4_proflare_gpu_origin(b.source, b.job, camera, &b.gpu) ||
+      !mp4_proflare_birth_keep(b, batch) ||
+      !mp4_proflare_birth_keep(b, camera)) {
+    b.failed = true;
+    mp4_proflare_birth_failure("proflare_try_draw_unowned");
+    return false;
+  }
+  // Failed partial allocations retain their actual CPU/GPU custody, too.
+  mp4pf::Image before{};
+  if (!mp4_proflare_registry_read(&mp4_proflare_registry_host, &before)) {
+    b.failed = true;
+    mp4_proflare_birth_failure("proflare_try_source_list_changed");
+    return false;
+  }
+  for (size_t i = 0; i < before.data.count; ++i) {
+    void *data = before.data.rows[i], *selected_camera = nullptr;
+    if (!data || !mp4_proflare_birth_object(b, data) ||
+        !mp4_actor_field(data, 24, selected_camera)) {
+      // Other-camera Data belongs to the original batch, but never to this
+      // selected-camera lease; inspect its type/parent separately below.
+      void *parent = nullptr;
+      if (!data || !mp4_proflare_data_schema(data) ||
+          !mp4_actor_field(data, 16, parent) || parent != batch ||
+          !mp4_actor_field(data, 24, selected_camera)) {
+        b.failed = true;
+        mp4_proflare_birth_failure("proflare_try_data_shape_changed");
+        return false;
+      }
+    }
+    if (selected_camera == camera) {
+      if (b.object) {
+        b.failed = true;
+        mp4_proflare_birth_failure("proflare_try_duplicate_camera");
+        return false;
+      }
+      uint64_t receipt = 0;
+      if (mp4_proflare_registry_scope.data_birth(data, camera, &receipt)) {
+        for (size_t j = 0; j + 1 < mp4_proflare_data_birth_count; ++j) {
+          auto &previous = mp4_proflare_data_births[j];
+          if (previous.registered && previous.object == data &&
+              previous.recipe == receipt)
+            b.previous = &previous;
+        }
+        b.existing = receipt;
+        if (!b.previous) {
+          b.failed = true;
+          mp4_proflare_birth_failure("proflare_try_birth_record_missing");
+          return false;
+        }
+      } else if (!mp4_proflare_existing_data_lease ||
+                 !mp4_proflare_existing_data_lease(data, camera, &b.existing) ||
+                 !b.existing) {
+        b.failed = true;
+        mp4_proflare_birth_failure("proflare_try_existing_image_unclosed");
+        return false;
+      }
+      b.object = data;
+      if (!mp4_proflare_birth_keep(b, data) ||
+          !mp4_proflare_birth_existing_current(b)) {
+        b.failed = true;
+        mp4_proflare_birth_failure("proflare_try_existing_image_changed");
+        return false;
+      }
+    }
+  }
+
+  b.active = true;
+  mp4_proflare_data_original_try = &b;
+  uint64_t token = 0;
+  if (mp4_proflare_registry_scope.begin_data(mp4pf::DataOperation::update,
+                                             camera, b.object,
+                                             &token) != mp4pf::Result::ok ||
+      token != b.recipe) {
+    b.active = false;
+    mp4_proflare_data_original_try = nullptr;
+    b.failed = true;
+    mp4_proflare_birth_failure("proflare_try_registry_unclosed");
+    return false;
+  }
+  b.scope_pending = true;
+  bool result = false;
+  b.in_original = true;
+  try {
+    result = original(batch, camera, output, method);
+  } catch (const Mp4ProFlareWithdraw &withdraw) {
+    if (withdraw.owner != &b || withdraw.recipe != b.recipe ||
+        withdraw.source != b.source || withdraw.job != b.job) {
+      b.in_original = false;
+      b.active = false;
+      b.output = nullptr;
+      b.threw = true;
+      mp4_proflare_data_original_try = nullptr;
+      mp4_proflare_birth_failure("proflare_withdrawal_owner_mismatch");
+      throw;
+    }
+    b.in_original = false;
+    b.active = false;
+    b.output = nullptr;
+    b.withdrawn = true;
+    mp4_proflare_data_original_try = nullptr;
+    mp4_proflare_birth_failure(withdraw.error ? withdraw.error
+                                              : "proflare_try_withdrawn");
+    return false;
+  } catch (...) {
+    b.in_original = false;
+    b.active = false;
+    b.output = nullptr;
+    b.threw = true;
+    mp4_proflare_data_original_try = nullptr;
+    // Preserve actual partial Data+GPU custody. No source-list adoption or
+    // release is permitted until the bounded failure cleanup joins retirement.
+    mp4_proflare_birth_failure("proflare_try_original_exception");
+    throw;
+  }
+  b.in_original = false;
+  b.returned = true;
+  const auto completed =
+      mp4_proflare_registry_scope.end_data(token, *output, true);
+  b.scope_pending = false;
+  b.registered = completed == mp4pf::Result::ok && b.object && !b.existing;
+  b.active = false;
+  b.output = nullptr;
+  mp4_proflare_data_original_try = nullptr;
+  if (completed != mp4pf::Result::ok) {
+    b.failed = true;
+    mp4_proflare_birth_failure("proflare_try_completion_unclosed");
+  } else if (b.existing || !b.object) {
+    // Only genuinely new Data consumes a persistent birth slot. Ordinary
+    // per-frame Try calls reuse an ephemeral exact call/receipt and roots.
+    mp4_proflare_birth_drop(b);
+    --mp4_proflare_data_birth_count;
+  }
+  return result;
+}
+// END_MP4_PROFLARE_DATA_BIRTH_HOST
+
+// BEGIN_MP4_PROFLARE_PASS_REFERENCE_HOST
+// Source-reference ownership is configured read-only BEFORE Actor Presentation
+// capture. It depends on selected original renderer metadata/registries, never
+// on Actor/Stage snapshots. Stage alone restores nullable pass Data through the
+// exact original SetProFlare; a changed Data requires an actual factory birth.
+struct Mp4ProFlareSetPins {
+  mp4game::Binding compute, render;
+};
+[[maybe_unused]] constexpr Mp4ProFlareSetPins mp4_pf_set_android = {
+    {0x877aaa0,
+     {0x01, 0x88, 0x08, 0xa9, 0xc0, 0x03, 0x5f, 0xd6, 0x01, 0x88, 0x08, 0xa9,
+      0xc0, 0x03, 0x5f, 0xd6}},
+    {0x877aaa8,
+     {0x01, 0x88, 0x08, 0xa9, 0xc0, 0x03, 0x5f, 0xd6, 0xe1, 0x03, 0x1f, 0xaa,
+      0xd4, 0xa7, 0x1a, 0x14}}};
+[[maybe_unused]] constexpr Mp4ProFlareSetPins mp4_pf_set_ios = {
+    {0x6eaf3b0,
+     {0x01, 0x88, 0x08, 0xa9, 0xc0, 0x03, 0x5f, 0xd6, 0x01, 0x88, 0x08, 0xa9,
+      0xc0, 0x03, 0x5f, 0xd6}},
+    {0x6eaf3b8,
+     {0x01, 0x88, 0x08, 0xa9, 0xc0, 0x03, 0x5f, 0xd6, 0x01, 0x00, 0x80, 0xd2,
+      0xc3, 0xdc, 0x1f, 0x14}}};
+#ifdef IDOLY_DARWIN_BRIDGE
+const auto &mp4_pf_set_pins = mp4_pf_set_ios;
+#else
+const auto &mp4_pf_set_pins = mp4_pf_set_android;
+#endif
+struct Mp4ProFlarePassReferences {
+  Mp4SceneWitness source{};
+  void *feature = nullptr, *batch = nullptr, *camera = nullptr;
+  void *passes[2]{}, *source_data = nullptr;
+  uint64_t receipts[2]{};
+  uint32_t roots[8]{};
+  void *root_objects[8]{};
+  size_t root_count = 0;
+  bool configured = false, restored = false;
+} mp4_proflare_pass_references;
+uint64_t mp4_proflare_pass_sequence = 0;
+bool (*mp4_proflare_pass_birth)(void *, void *, void *, void *, void *,
+                                uint64_t *) = nullptr;
+uint64_t (*mp4_proflare_pass_operation)(void *) = nullptr;
+bool (*mp4_proflare_pass_quiet)(void *, void *) = nullptr;
+// Exact captured logical-registry/scalar image for a source with no camera
+// Data yet. This is not a nullable/default permission or a future birth.
+bool (*mp4_proflare_empty_data_image_lease)(void *, void *, uint64_t *) = nullptr;
+bool mp4_proflare_pass_keep(void *object) {
+  if (!object)
+    return true;
+  auto &h = mp4_proflare_pass_references;
+  if (h.root_count == 8)
+    return false;
+  auto root = mp4_retain(object);
+  if (!root || weak_get(root) != object) {
+    if (root)
+      weak_free(root);
+    return false;
+  }
+  h.root_objects[h.root_count] = object;
+  h.roots[h.root_count++] = root;
+  return true;
+}
+bool mp4_proflare_pass_setter(void *pass, size_t index) {
+  if (!pass || index > 1)
+    return false;
+  const auto &pin = index ? mp4_pf_set_pins.render : mp4_pf_set_pins.compute;
+  if (!mp4_prefix(pin))
+    return false;
+  const void *m = font_method(object_class(pass), "SetProFlare", 2);
+  uintptr_t entry = 0;
+  return m && mp4_actor_field(const_cast<void *>(m), 0, entry) &&
+         entry == image_base + pin.rva;
+}
+bool mp4_proflare_pass_source_shape(void *camera, void *batch, void *data) {
+  if (!mp4_proflare_cache_source_pins() ||
+      !mp4_timeline_exact(batch, mp4_proflare_pins.batch) || !mp4_alive(batch))
+    return false;
+  const auto verified = [](const auto &pin) {
+    mp4game::Binding b{};
+    b.rva = pin.rva;
+    ::memcpy(b.prefix, pin.prefix, 16);
+    return mp4_prefix(b);
+  };
+  if (!verified(mp4_cam_profile.class_rank) ||
+      !verified(mp4_cam_profile.class_element) ||
+      !verified(mp4_cam_profile.class_value_type) ||
+      !verified(mp4_cam_profile.class_value_size))
+    return false;
+  mp4pf::List source_data{};
+  if (!mp4_proflare_registry_list(batch, "_batchDatas", 80,
+                                  mp4_proflare_pins.data, &source_data))
+    return false;
+  size_t matches = 0;
+  for (size_t i = 0; i < source_data.count; ++i) {
+    void *item = source_data.rows[i], *owner = nullptr, *target = nullptr;
+    if (!mp4_timeline_exact(item, mp4_proflare_pins.data) ||
+        !mp4_actor_field(item, 16, owner) || owner != batch ||
+        !mp4_actor_field(item, 24, target) ||
+        !mp4_type_is(target, "UnityEngine.Camera") || !mp4_alive(target))
+      return false;
+    if (!mp4_proflare_cache_declared(item, "flareBatchForSrp", 16, batch) ||
+        !mp4_proflare_cache_declared(item, "camera", 24, target))
+      return false;
+    for (size_t j = 0; j < i; ++j) {
+      void *previous = nullptr;
+      if (source_data.rows[j] == item ||
+          !mp4_actor_field(source_data.rows[j], 24, previous) ||
+          previous == target)
+        return false;
+    }
+    if (target == camera) {
+      if (data && item != data)
+        return false;
+      ++matches;
+    }
+  }
+  if (data)
+    return matches == 1;
+  if (matches) {
+    uint64_t image = 0;
+    for (size_t i = 0; i < source_data.count; ++i) {
+      void *target = nullptr;
+      if (!mp4_actor_field(source_data.rows[i], 24, target))
+        return false;
+      if (target == camera)
+        return matches == 1 && mp4_proflare_existing_data_lease &&
+               mp4_proflare_existing_data_lease(source_data.rows[i], camera,
+                                                &image) &&
+               image;
+    }
+    return false;
+  }
+  // A nonempty initial registry may precede its first ordinary camera Data.
+  // It needs the concrete captured source image, not a fabricated Data birth.
+  uint64_t image = 0;
+  if (mp4_proflare_empty_data_image_lease &&
+      mp4_proflare_empty_data_image_lease(batch, camera, &image) && image)
+    return true;
+  // The standalone source-shape helper also recognizes the truly empty form;
+  // successful export still needs the coordinator's real registry/image owner.
+  mp4pf::List flares{};
+  void *table = nullptr, *queue = nullptr;
+  uint32_t count = 0, free = 0, empty = 0;
+  if (!mp4_proflare_registry_list(batch, "FlaresList", 48,
+                                  mp4_proflare_pins.flare, &flares) ||
+      !mp4_proflare_registry_collection(batch, "_flareInstanceIDTable", 64,
+                                        &table) ||
+      !mp4_proflare_registry_collection(batch, "_flareEmptyQueue", 56,
+                                        &queue) ||
+      !mp4_root_track_field(table, "_count", 32) ||
+      !mp4_root_track_field(table, "_freeCount", 44) ||
+      !mp4_root_track_field(queue, "_size", 32) ||
+      !mp4_actor_field(table, 32, count) || !mp4_actor_field(table, 44, free) ||
+      free != count || !mp4_actor_field(queue, 32, empty) ||
+      empty != flares.count)
+    return false;
+  for (size_t i = 0; i < flares.count; ++i)
+    if (flares.rows[i])
+      return false;
+  return true;
+}
+bool mp4_proflare_pass_references_current() {
+  auto &h = mp4_proflare_pass_references;
+  Mp4SceneWitness now{};
+  if (!h.configured || !game_call() || !mp4_proflare_cache_source_pins() ||
+      !idoly_mp4_runtime::game.selected_scene_witness(now) ||
+      !mp4_scene_same_source(h.source, now))
+    return false;
+  for (size_t i = 0; i < h.root_count; ++i)
+    if (weak_get(h.roots[i]) != h.root_objects[i])
+      return false;
+  Mp4OriginalRendererSource renderer{};
+  if (!mp4_original_renderer_source_detail(renderer) ||
+      renderer.camera != h.camera ||
+      !mp4_scene_same_source(renderer.scene, h.source))
+    return false;
+  void **features = nullptr;
+  size_t count = 0, matches = 0;
+  if (!mp4_actor_list(renderer.features, &features, &count, 64))
+    return false;
+  for (size_t i = 0; i < count; ++i)
+    matches += features[i] == h.feature;
+  if (matches != 1)
+    return false;
+  void *c = nullptr, *r = nullptr, *b = nullptr;
+  if (!mp4_actor_field(h.feature, 48, c) || c != h.passes[0] ||
+      !mp4_actor_field(h.feature, 56, r) || r != h.passes[1] ||
+      !mp4_actor_field(h.feature, 80, b) || b != h.batch || !mp4_alive(h.batch))
+    return false;
+  for (size_t i = 0; i < 2; ++i) {
+    void *owner = nullptr;
+    if (!mp4_proflare_pass_setter(h.passes[i], i) ||
+        !mp4_actor_field(h.passes[i], 136, owner) || owner != h.batch)
+      return false;
+  }
+  return true;
+}
+bool mp4_proflare_pass_data_reference(void *pass, void *batch, void *current,
+                                      void **source, uint64_t *owner) {
+  if (source)
+    *source = nullptr;
+  if (owner)
+    *owner = 0;
+  auto &h = mp4_proflare_pass_references;
+  if (!source || !owner || !mp4_proflare_pass_references_current() ||
+      batch != h.batch)
+    return false;
+  size_t index = pass == h.passes[0] ? 0 : pass == h.passes[1] ? 1 : 2;
+  void *actual = nullptr;
+  if (index == 2 || !mp4_actor_field(pass, 144, actual) || actual != current)
+    return false;
+  if (current != h.source_data) {
+    uint64_t birth = 0;
+    if (!mp4_proflare_pass_birth ||
+        !mp4_proflare_pass_birth(pass, batch, h.camera, h.source_data, current,
+                                 &birth) ||
+        !birth)
+      return false;
+  }
+  *source = h.source_data;
+  *owner = h.receipts[index];
+  return *owner != 0;
+}
+bool mp4_proflare_pass_configure(const Mp4SceneWitness &w) {
+  auto &h = mp4_proflare_pass_references;
+  if (h.configured)
+    return mp4_scene_same_source(h.source, w) &&
+           mp4_proflare_pass_references_current();
+  if (h.root_count || !w.camera || !w.generation ||
+      !mp4_proflare_pass_operation || !mp4_proflare_pass_quiet)
+    return false;
+  struct Guard {
+    bool published = false;
+    ~Guard() {
+      if (published)
+        return;
+      auto &h = mp4_proflare_pass_references;
+      for (size_t i = 0; i < h.root_count; ++i)
+        if (h.roots[i])
+          weak_free(h.roots[i]);
+      h = {};
+    }
+  } guard;
+  void *feature = nullptr, *compute = nullptr, *render = nullptr,
+       *batch = nullptr, *data = nullptr;
+  if (!mp4_renderer_proflare_source(w.camera, &feature, &compute, &render,
+                                    &batch, &data))
+    return false;
+  if (!feature || (!compute && !render))
+    return true; // No live pass dependency.
+  if (!compute || !render || !batch || !mp4_proflare_pass_setter(compute, 0) ||
+      !mp4_proflare_pass_setter(render, 1) ||
+      !mp4_proflare_pass_source_shape(w.camera, batch, data) ||
+      mp4_proflare_pass_sequence > ~uint64_t(0) - 2)
+    return false;
+  h.source = w;
+  h.feature = feature;
+  h.passes[0] = compute;
+  h.passes[1] = render;
+  h.batch = batch;
+  h.camera = w.camera;
+  h.source_data = data;
+  for (void *p : {feature, compute, render, batch, data, w.camera})
+    if (!mp4_proflare_pass_keep(p))
+      return false;
+  h.receipts[0] = ++mp4_proflare_pass_sequence;
+  h.receipts[1] = ++mp4_proflare_pass_sequence;
+  h.configured = true;
+  if (!mp4_proflare_pass_references_current())
+    return false;
+  guard.published = true;
+  return true;
+}
+bool mp4_proflare_pass_restore_references() {
+  auto &h = mp4_proflare_pass_references;
+  if (!h.configured)
+    return h.root_count == 0;
+  if (!mp4_proflare_pass_references_current() || !mp4_stage_clock_held(nullptr))
+    return false;
+  using Set = void (*)(void *, void *, void *, Method *);
+  for (size_t i = 0; i < 2; ++i) {
+    void *data = nullptr, *source = nullptr;
+    uint64_t owner = 0;
+    if (!mp4_actor_field(h.passes[i], 144, data) ||
+        !mp4_proflare_pass_data_reference(h.passes[i], h.batch, data, &source,
+                                          &owner) ||
+        source != h.source_data)
+      return false;
+    if (data == source)
+      continue;
+    auto token = mp4_proflare_pass_operation(h.passes[i]);
+    if (!token || !mp4_proflare_pass_quiet(h.passes[i], data) ||
+        mp4_proflare_pass_operation(h.passes[i]) != token)
+      return false;
+    const auto &pin = i ? mp4_pf_set_pins.render : mp4_pf_set_pins.compute;
+    reinterpret_cast<Set>(image_base + pin.rva)(h.passes[i], h.batch, source,
+                                                nullptr);
+    void *after = nullptr, *batch = nullptr;
+    if (!mp4_actor_field(h.passes[i], 136, batch) || batch != h.batch ||
+        !mp4_actor_field(h.passes[i], 144, after) || after != source ||
+        mp4_proflare_pass_operation(h.passes[i]) != token)
+      return false;
+  }
+  h.restored = true;
+  return true;
+}
+bool mp4_proflare_pass_retained_without(void *batch, void *data) {
+  const auto &h = mp4_proflare_pass_references;
+  if (!h.configured || !h.restored || h.batch != batch || !data ||
+      data == h.source_data || !mp4_proflare_pass_references_current())
+    return false;
+  for (size_t i = 0; i < 2; ++i) {
+    void *actual = nullptr, *owner = nullptr;
+    if (!mp4_actor_field(h.passes[i], 136, owner) || owner != h.batch ||
+        !mp4_actor_field(h.passes[i], 144, actual) || actual != h.source_data ||
+        actual == data)
+      return false;
+  }
+  return true;
+}
+bool mp4_proflare_pass_release_references(bool owned) {
+  auto &h = mp4_proflare_pass_references;
+  if (owned && h.configured && !h.restored &&
+      !mp4_proflare_pass_restore_references())
+    return false;
+  if (!owned && h.configured) {
+    if (!mp4_proflare_pass_quiet)
+      return false;
+    for (size_t i = 0; i < 2; ++i) {
+      void *data = nullptr;
+      if (!mp4_actor_field(h.passes[i], 144, data) ||
+          !mp4_proflare_pass_quiet(h.passes[i], data))
+        return false;
+    }
+  }
+  for (size_t i = 0; i < h.root_count; ++i)
+    if (h.roots[i])
+      weak_free(h.roots[i]);
+  h = {};
+  return true;
+}
+// END_MP4_PROFLARE_PASS_REFERENCE_HOST
+
+// BEGIN_MP4_PROFLARE_DATA_RETIREMENT_HOST
+// Exact original Data.Dispose and typed Data-list.RemoveAt. This is not a
+// blanket native allocation/collection writer. The Try/Init receipt owns one
+// fresh Data; nullable pass references must be restored and real GPU uploads /
+// draws retired BEFORE completing CPU work and freeing any assigned resource.
+struct Mp4ProFlareRetirePins {
+  mp4game::Binding dispose, remove_at;
+};
+[[maybe_unused]] constexpr Mp4ProFlareRetirePins mp4_pf_retire_android = {
+    {0x8781a5c,
+     {0xfe, 0x57, 0xbe, 0xa9, 0xf4, 0x4f, 0x01, 0xa9, 0x74, 0xc7, 0x00, 0xf0,
+      0x88, 0xf2, 0x62, 0x39}},
+    {0x6adbbfc,
+     {0xfe, 0x0f, 0x1e, 0xf8, 0xf4, 0x4f, 0x01, 0xa9, 0x08, 0x18, 0x40, 0xb9,
+      0xf3, 0x03, 0x00, 0xaa}}};
+[[maybe_unused]] constexpr Mp4ProFlareRetirePins mp4_pf_retire_ios = {
+    {0x6eb69f4,
+     {0xf6, 0x57, 0xbd, 0xa9, 0xf4, 0x4f, 0x01, 0xa9, 0xfd, 0x7b, 0x02, 0xa9,
+      0xfd, 0x83, 0x00, 0x91}},
+    {0x493205c,
+     {0xf4, 0x4f, 0xbe, 0xa9, 0xfd, 0x7b, 0x01, 0xa9, 0xfd, 0x43, 0x00, 0x91,
+      0xf4, 0x03, 0x01, 0xaa}}};
+#ifdef IDOLY_DARWIN_BRIDGE
+const auto &mp4_pf_retire_pins = mp4_pf_retire_ios;
+#else
+const auto &mp4_pf_retire_pins = mp4_pf_retire_android;
+#endif
+// Source pass-ref lease implements this readonly absence proof, including its
+// retained feature/pass identities and actual original SetProFlare restoration.
+bool mp4_proflare_pass_retained_without(void *, void *);
+enum class Mp4ProFlareRetireResult : uint8_t { ok, waiting, invalid, failed };
+const void *mp4_proflare_retire_method(void *object, const char *name,
+                                       int count, const mp4game::Binding &pin) {
+  if (!object || !mp4_source_verified || !mp4_prefix(pin))
+    return nullptr;
+  const void *method = font_method(object_class(object), name, count);
+  uintptr_t entry = 0;
+  return method && mp4_actor_field(const_cast<void *>(method), 0, entry) &&
+                 entry == image_base + pin.rva
+             ? method
+             : nullptr;
+}
+template <class Fn> Fn mp4_proflare_retire_call(const mp4game::Binding &pin) {
+  mp4stage::Binding binding{};
+  binding.rva = pin.rva;
+  ::memcpy(binding.prefix, pin.prefix, 16);
+  return mp4_equipment_call<Fn>(binding);
+}
+bool mp4_proflare_birth_retire_custody(const Mp4ProFlareDataBirth &b) {
+  // No old graph CAPI and no native Start flag assumption. The retained real
+  // allocation and its original typed source-parent fields are the lifetime.
+  return game_call() && b.recipe && b.source && b.job && b.batch && b.camera &&
+         b.source == mp4_stage_host.source.generation &&
+         b.job == idoly_mp4_runtime::job.generation &&
+         b.batch == mp4_proflare_registry_host.batch &&
+         b.camera == mp4_stage_host.source.camera && b.root_count >= 2 &&
+         weak_get(b.roots[0]) == b.batch && weak_get(b.roots[1]) == b.camera &&
+         (!b.object ||
+          (b.root_count == 3 && weak_get(b.roots[2]) == b.object)) &&
+         mp4_proflare_registry_current(&mp4_proflare_registry_host, b.source);
+}
+Mp4ProFlareRetireResult mp4_proflare_birth_retire(size_t index) {
+  using R = Mp4ProFlareRetireResult;
+  if (index >= mp4_proflare_data_birth_count || mp4_proflare_data_original_try)
+    return R::invalid;
+  auto &b = mp4_proflare_data_births[index];
+  if (b.retired)
+    return R::ok;
+  if (b.active || b.in_original || b.initializing ||
+      !mp4_stage_clock_held(nullptr) || !mp4_proflare_birth_retire_custody(b) ||
+      !mp4_proflare_data_restore_operation)
+    return R::invalid;
+  if (!mp4_proflare_gpu_quiet(b.gpu))
+    return R::waiting;
+  const auto operation =
+      mp4_proflare_data_restore_operation(b.object ? b.object : b.batch);
+  if (!operation)
+    return R::invalid;
+  // A failed original call remains open in RegistryScope until its original
+  // Data/list cleanup is complete. A successful Try has a separately recorded
+  // registered birth and starts a fresh exact retirement transaction.
+  const bool abandon = b.scope_pending;
+  if (!abandon && !b.registered)
+    return R::invalid;
+  if (b.object && !b.existing && !b.birth_proven)
+    return R::invalid;
+  mp4pf::Image before{};
+  if (!mp4_proflare_registry_read(&mp4_proflare_registry_host, &before))
+    return R::invalid;
+  void *before_rows[mp4pf::max_rows]{};
+  for (size_t i = 0; i < before.data.capacity; ++i)
+    before_rows[i] = before.data.rows[i];
+  size_t found = before.data.count, matches = 0;
+  for (size_t i = 0; i < before.data.count; ++i)
+    if (before.data.rows[i] == b.object) {
+      found = i;
+      ++matches;
+    }
+  if (matches > 1 || (!abandon && matches != 1) ||
+      (b.existing && matches != 1) ||
+      (!b.existing && matches && found + 1 != before.data.count))
+    return R::invalid;
+  // The actual Try only appends. An unreturned partial Data is either that
+  // exact final append or absent; no arbitrary historical list member can be
+  // removed.
+  if (b.object && !b.existing &&
+      !mp4_proflare_pass_retained_without(b.batch, b.object))
+    return R::waiting;
+  const void *dispose = nullptr, *remove = nullptr;
+  if (b.object && !b.existing) {
+    if (!mp4_proflare_birth_object(b, b.object))
+      return R::invalid;
+    dispose = mp4_proflare_retire_method(b.object, "Dispose", 0,
+                                         mp4_pf_retire_pins.dispose);
+    if (!dispose)
+      return R::invalid;
+  }
+  if (!b.existing && matches) {
+    remove = mp4_proflare_retire_method(before.data.object, "RemoveAt", 1,
+                                        mp4_pf_retire_pins.remove_at);
+    if (!remove)
+      return R::invalid;
+  }
+  mp4game::Binding complete{};
+  complete.rva = mp4_stage_profile.equipment_job_complete.rva;
+  ::memcpy(complete.prefix, mp4_stage_profile.equipment_job_complete.prefix,
+           16);
+  if (b.object && !mp4_prefix(complete))
+    return R::invalid;
+  b.active = true;
+  b.retiring = true;
+  mp4_proflare_data_original_try = &b;
+  struct Exit {
+    Mp4ProFlareDataBirth &b;
+    ~Exit() {
+      b.active = false;
+      b.retiring = false;
+      mp4_proflare_data_original_try = nullptr;
+    }
+  } exit{b};
+  uint64_t token = b.recipe;
+  if (!abandon && !b.retirement_pending &&
+      mp4_proflare_registry_scope.begin_data(mp4pf::DataOperation::retire,
+                                             b.camera, b.object,
+                                             &token) != mp4pf::Result::ok)
+    return R::invalid;
+  if (token != b.recipe)
+    return R::invalid;
+  if (!abandon)
+    b.retirement_pending = true;
+  if (b.object) {
+    void *job = static_cast<uint8_t *>(b.object) + 104;
+    uintptr_t group = ~uintptr_t(0);
+    if (!mp4_actor_mapped(job, 16, true))
+      return R::invalid;
+    mp4_proflare_retire_call<void (*)(void *, Method *)>(complete)(job,
+                                                                   nullptr);
+    if (!mp4_actor_field(job, 0, group) || group)
+      return R::waiting;
+  }
+  if (!mp4_proflare_gpu_quiet(b.gpu) ||
+      mp4_proflare_data_restore_operation(b.object ? b.object : b.batch) !=
+          operation)
+    return R::waiting;
+  b.cleanup_checked = true;
+  b.cleanup_appended = !b.existing && matches == 1;
+  if (b.object && !b.existing) {
+    if (b.dispose_started)
+      return R::failed;
+    b.dispose_started = true;
+    try {
+      mp4_proflare_retire_call<void (*)(void *, Method *)>(
+          mp4_pf_retire_pins.dispose)(
+          b.object,
+          const_cast<Method *>(reinterpret_cast<const Method *>(dispose)));
+    } catch (...) {
+      b.failed = true;
+      mp4_proflare_birth_failure("proflare_data_dispose_exception");
+      throw;
+    }
+    b.disposed = true;
+    // Do not query a disposed Data, its freed arrays or GPU buffer headers.
+    // Source Dispose never mutates its batch/list; verify the retained list
+    // only.
+    mp4pf::Image after{};
+    if (!mp4_proflare_registry_read(&mp4_proflare_registry_host, &after) ||
+        after.data.object != before.data.object ||
+        after.data.array != before.data.array ||
+        after.data.rows != before.data.rows ||
+        after.data.count != before.data.count ||
+        after.data.version != before.data.version)
+      return R::failed;
+    for (size_t i = 0; i < before.data.count; ++i)
+      if (after.data.rows[i] != before_rows[i])
+        return R::failed;
+    if (matches) {
+      mp4_proflare_retire_call<void (*)(void *, int32_t, Method *)>(
+          mp4_pf_retire_pins.remove_at)(
+          before.data.object, static_cast<int32_t>(found),
+          const_cast<Method *>(reinterpret_cast<const Method *>(remove)));
+      b.removed = true;
+    }
+  }
+  const auto done =
+      abandon ? mp4_proflare_registry_scope.abandon_data(b.recipe, b.object)
+              : mp4_proflare_registry_scope.end_data(b.recipe, b.object, true);
+  if (done != mp4pf::Result::ok)
+    return R::failed;
+  b.scope_pending = false;
+  b.retirement_pending = false;
+  b.registered = false;
+  b.retired = true;
+  return R::ok;
+}
+// Drop only after exact resource/list retirement. Failure/quiet WAIT preserves
+// the actual GC/GPU custody; aggregate release cannot discard its born Data.
+bool mp4_proflare_birth_release() {
+  if (!game_call() || mp4_proflare_data_original_try)
+    return false;
+  for (size_t i = 0; i < mp4_proflare_data_birth_count; ++i)
+    if (!mp4_proflare_data_births[i].retired)
+      return false;
+  for (size_t i = 0; i < mp4_proflare_data_birth_count; ++i)
+    mp4_proflare_birth_drop(mp4_proflare_data_births[i]);
+  mp4_proflare_data_birth_count = 0;
+  return true;
+}
+// END_MP4_PROFLARE_DATA_RETIREMENT_HOST
+
+// BEGIN_MP4_PROFLARE_SOURCE_SCHEMA_HOST
+// Metadata/code preflight only. No constructed Data object, Timeline/output
+// image, future native lifetime or captured flag is needed to state this finite
+// backend programme. Actual instances/images and their quiet fences are later.
+bool mp4_proflare_source_schema() {
+  if (!game_call() || !mp4_proflare_cache_source_pins() ||
+      !mp4_proflare_data_pins() || !font_field || !font_field_type ||
+      !font_class_type)
+    return false;
+  const auto verified = [](const auto &p) {
+    mp4game::Binding b{};
+    b.rva = p.rva;
+    ::memcpy(b.prefix, p.prefix, 16);
+    return mp4_prefix(b) || mp4_hook_was_statically_verified(b);
+  };
+  if (!verified(mp4_actor_profile.field_offset) ||
+      !verified(mp4_cam_profile.class_value_size) ||
+      !verified(mp4_stage_profile.equipment_job_complete))
+    return false;
+  void *klass = mp4_timeline_class(mp4_proflare_pins.data);
+  if (!klass)
+    return false;
+  struct Field {
+    const char *name;
+    size_t offset;
+    uint32_t kind;
+  };
+  const Field fields[] = {{"flareBatchForSrp", 16, 18},
+                          {"camera", 24, 18},
+                          {"useDirectWrite", 32, 2},
+                          {"_indexBuffer", 40, 18},
+                          {"_uvData", 48, 21},
+                          {"_flareElementsBuffer", 64, 18},
+                          {"_flareElementsData", 72, 21},
+                          {"_flareUpdateElementData", 88, 21},
+                          {"_jobHandle", 104, 17},
+                          {"_inputBuffer", 120, 18},
+                          {"_inputData", 128, 21},
+                          {"_processBuffer", 144, 18},
+                          {"_flareCount", 152, 8},
+                          {"_flareElementCount", 156, 8},
+                          {"_visibleFlareElementCount", 160, 8},
+                          {"_unusedFrameCount", 164, 8}};
+  using Offset = size_t (*)(const void *);
+  using Size = int32_t (*)(void *, uint32_t *);
+  for (const auto &expected : fields) {
+    void *f = font_field(klass, expected.name);
+    const void *t = f ? font_field_type(f) : nullptr;
+    uint32_t bits = 0;
+    if (!f || !t ||
+        reinterpret_cast<Offset>(image_base +
+                                 mp4_actor_profile.field_offset.rva)(f) !=
+            expected.offset ||
+        !mp4_actor_field(const_cast<void *>(t), 8, bits) || (bits & 16u) ||
+        ((bits >> 16) & 255u) != expected.kind)
+      return false;
+    if (expected.kind == 21) {
+      void *k = font_class_type(t);
+      uint32_t align = 0;
+      if (!k || !class_name(k) || !class_namespace(k) ||
+          ::strcmp(class_name(k), "NativeArray`1") ||
+          ::strcmp(class_namespace(k), "Unity.Collections") ||
+          mp4_cam_call<Size>(mp4_cam_profile.class_value_size)(k, &align) != 16)
+        return false;
+    }
+  }
+  const Mp4TimelineTypePin *types[] = {
+      &mp4_proflare_pins.input, &mp4_proflare_pins.process,
+      &mp4_proflare_pins.element_data, &mp4_proflare_pins.update_data};
+  const int32_t sizes[] = {24, 8, 48, 124};
+  for (size_t i = 0; i < 4; ++i) {
+    uint32_t align = 0;
+    void *k = mp4_timeline_class(*types[i]);
+    if (!k || mp4_cam_call<Size>(mp4_cam_profile.class_value_size)(k, &align) !=
+                  sizes[i])
+      return false;
+  }
+  return mp4_control_source_pins_ready();
+}
+// END_MP4_PROFLARE_SOURCE_SCHEMA_HOST
+
+// BEGIN_MP4_PROFLARE_SOURCE_PLAN_HOST
+// Actual selected PF source resource PLAN. SourceControl supplies the exact
+// authored/runtime/factory target subtree; this helper retains its concrete
+// flare/class/GO/atlas/elements and actual original renderer
+// feature/pass/batch. No Data image, native Start-called flag, private callback
+// or GPU fence grant.
+struct Mp4ProFlareSourceRetained {
+  Mp4ProFlareCacheImage image{};
+  uint32_t roots[264]{};
+  void *objects[264]{};
+  size_t count = 0;
+};
+struct Mp4ProFlareSourcePlan {
+  static void *operator new(size_t, void *p) noexcept { return p; }
+  static void operator delete(void *, void *) noexcept {}
+  Mp4SceneWitness source{};
+  Mp4ProFlareSourceRetained retained{};
+  void *feature = nullptr, *compute = nullptr, *render = nullptr,
+       *batch = nullptr;
+  uint32_t feature_root = 0, compute_root = 0, render_root = 0, batch_root = 0;
+  uint64_t serial = 0, initialized = 0;
+};
+Mp4ProFlareSourcePlan *mp4_proflare_source_plans = nullptr;
+size_t mp4_proflare_source_plan_count = 0;
+uint64_t mp4_proflare_source_plan_sequence = 0;
+bool mp4_proflare_source_plan_keep(Mp4ProFlareSourceRetained &r, void *object) {
+  if (!object)
+    return true;
+  for (size_t i = 0; i < r.count; ++i)
+    if (r.objects[i] == object)
+      return weak_get(r.roots[i]) == object;
+  if (r.count == 264)
+    return false;
+  auto root = mp4_retain(object);
+  if (!root || weak_get(root) != object) {
+    if (root)
+      weak_free(root);
+    return false;
+  }
+  r.objects[r.count] = object;
+  r.roots[r.count++] = root;
+  return true;
+}
+bool mp4_proflare_source_plan_roots(const Mp4ProFlareSourceRetained &r) {
+  if (!r.count)
+    return false;
+  for (size_t i = 0; i < r.count; ++i)
+    if (!r.roots[i] || weak_get(r.roots[i]) != r.objects[i])
+      return false;
+  return true;
+}
+bool mp4_proflare_source_plan_current(const Mp4ProFlareSourcePlan &p) {
+  if (!game_call() || !p.serial || !mp4_proflare_source_schema() ||
+      (!p.initialized && !mp4_stage_admission_source(p.source)) ||
+      (p.initialized &&
+       (!mp4_scene_same_source(p.source, mp4_stage_host.source) ||
+        !mp4_control_source_current(nullptr, p.source.generation))) ||
+      !mp4_proflare_source_plan_roots(p.retained) ||
+      weak_get(p.feature_root) != p.feature ||
+      weak_get(p.compute_root) != p.compute ||
+      weak_get(p.render_root) != p.render || weak_get(p.batch_root) != p.batch)
+    return false;
+  void *feature = nullptr, *compute = nullptr, *render = nullptr,
+       *batch = nullptr, *data = nullptr;
+  if (!mp4_renderer_proflare_source(p.source.camera, &feature, &compute,
+                                    &render, &batch, &data) ||
+      feature != p.feature || compute != p.compute || render != p.render ||
+      batch != p.batch || !mp4_proflare_pass_setter(compute, 0) ||
+      !mp4_proflare_pass_setter(render, 1))
+    return false;
+  Mp4ProFlareCacheImage now{};
+  if (!mp4_proflare_cache_image(p.retained.image.flare, &now,
+                                p.initialized != 0))
+    return false;
+  auto source = p.retained.image;
+  if (p.initialized) {
+    uint64_t actual = 0;
+    if (!mp4_proflare_cache_current(now.flare, &actual) ||
+        actual != p.initialized || now.batch != p.batch)
+      return false;
+    // Only the actual completed original CPU preparation may promote NULL
+    // cache.
+    if (!source.batch) {
+      source.batch = now.batch;
+      source.batch_native = now.batch_native;
+    }
+  }
+  return mp4_proflare_cache_same(source, now);
+}
+const Mp4ProFlareSourcePlan *mp4_proflare_source_plan_find(void *flare) {
+  if (!game_call())
+    return nullptr;
+  for (size_t i = 0; i < mp4_proflare_source_plan_count; ++i)
+    if (mp4_proflare_source_plans[i].retained.image.flare == flare)
+      return &mp4_proflare_source_plans[i];
+  return nullptr;
+}
+void mp4_proflare_source_plan_drop(Mp4ProFlareSourcePlan &p) {
+  for (size_t i = 0; i < p.retained.count; ++i)
+    if (p.retained.roots[i])
+      weak_free(p.retained.roots[i]);
+  p.retained = {};
+  for (auto *r :
+       {&p.feature_root, &p.compute_root, &p.render_root, &p.batch_root}) {
+    if (*r)
+      weak_free(*r);
+    *r = 0;
+  }
+  p = {};
+}
+bool mp4_proflare_source_component_plan_unlocked(const Mp4TimelineContext &c,
+                                                 void *flare, void *go) {
+  if (!game_call() || !mp4_timeline_source_plan_phase(c.phase) ||
+      !mp4_stage_admission_source(c.witness) || !mp4_proflare_source_schema() ||
+      !mp4_timeline_exact(flare, mp4_proflare_pins.flare))
+    return false;
+  if (const auto *p = mp4_proflare_source_plan_find(flare))
+    return mp4_scene_same_source(p->source, c.witness) &&
+           p->retained.image.go == go && mp4_proflare_source_plan_current(*p);
+  if (mp4_proflare_source_plan_count == 128 ||
+      mp4_proflare_source_plan_sequence == ~uint64_t(0))
+    return false;
+  if (!mp4_proflare_source_plans) {
+    auto *p = static_cast<Mp4ProFlareSourcePlan *>(
+        ::malloc(sizeof(Mp4ProFlareSourcePlan) * 128));
+    if (!p)
+      return false;
+    for (size_t i = 0; i < 128; ++i)
+      new (&p[i]) Mp4ProFlareSourcePlan{};
+    mp4_proflare_source_plans = p;
+  }
+  auto &p = mp4_proflare_source_plans[mp4_proflare_source_plan_count];
+  auto fail = [&]() {
+    mp4_proflare_source_plan_drop(p);
+    return false;
+  };
+  p.source = c.witness;
+  Mp4ProFlareCacheImage cache{};
+  void *camera_data = nullptr;
+  if (!mp4_proflare_cache_image(flare, &cache, false) || cache.go != go ||
+      !mp4_renderer_proflare_source(c.witness.camera, &p.feature, &p.compute,
+                                    &p.render, &p.batch, &camera_data))
+    return fail();
+  p.retained.image = cache;
+  if (!p.feature || !p.compute || !p.render || !p.batch ||
+      !mp4_alive(p.batch) || (cache.batch && cache.batch != p.batch) ||
+      !mp4_proflare_pass_setter(p.compute, 0) ||
+      !mp4_proflare_pass_setter(p.render, 1))
+    return fail();
+  void *values[] = {cache.flare,     cache.atlas, cache.elements, cache.array,
+                    cache.transform, cache.go,    cache.batch};
+  for (void *v : values)
+    if (v && !mp4_proflare_source_plan_keep(p.retained, v))
+      return fail();
+  for (size_t i = 0; i < cache.count; ++i)
+    if (!mp4_proflare_source_plan_keep(p.retained, cache.element[i]))
+      return fail();
+  void *objects[] = {p.feature, p.compute, p.render, p.batch};
+  uint32_t *roots[] = {&p.feature_root, &p.compute_root, &p.render_root,
+                       &p.batch_root};
+  for (size_t i = 0; i < 4; ++i) {
+    *roots[i] = mp4_retain(objects[i]);
+    if (!*roots[i] || weak_get(*roots[i]) != objects[i])
+      return fail();
+  }
+  p.serial = ++mp4_proflare_source_plan_sequence;
+  ++mp4_proflare_source_plan_count;
+  if (!mp4_proflare_source_plan_current(p)) {
+    --mp4_proflare_source_plan_count;
+    return fail();
+  }
+  return true;
+}
+bool mp4_proflare_source_plans_retire() {
+  if (!game_call())
+    return false;
+  for (size_t i = 0; i < mp4_proflare_source_plan_count; ++i)
+    mp4_proflare_source_plan_drop(mp4_proflare_source_plans[i]);
+  mp4_proflare_source_plan_count = 0;
+  return true;
+}
+// Retained construction/resource identity for original GPU Data cleanup. No
+// selected Scene/graph/output observer or original-renderer factory query is
+// made after source handles may have retired. This grants no future draw.
+bool mp4_proflare_source_plan_retained(const Mp4ProFlareSourcePlan &p) {
+  if (!game_call() || !p.serial || !p.initialized ||
+      !mp4_proflare_source_schema() ||
+      !mp4_proflare_source_plan_roots(p.retained) ||
+      weak_get(p.feature_root) != p.feature ||
+      weak_get(p.compute_root) != p.compute ||
+      weak_get(p.render_root) != p.render || weak_get(p.batch_root) != p.batch)
+    return false;
+  void *c = nullptr, *r = nullptr, *b = nullptr, *cb = nullptr, *rb = nullptr;
+  if (!mp4_actor_field(p.feature, 48, c) || c != p.compute ||
+      !mp4_actor_field(p.feature, 56, r) || r != p.render ||
+      !mp4_actor_field(p.feature, 80, b) || b != p.batch ||
+      !mp4_actor_field(c, 136, cb) || cb != p.batch ||
+      !mp4_actor_field(r, 136, rb) || rb != p.batch ||
+      !mp4_proflare_pass_setter(c, 0) || !mp4_proflare_pass_setter(r, 1))
+    return false;
+  uint64_t cache = 0;
+  Mp4ProFlareCacheImage now{};
+  if (!mp4_proflare_cache_current(p.retained.image.flare, &cache) ||
+      cache != p.initialized ||
+      !mp4_proflare_cache_image(p.retained.image.flare, &now, true) ||
+      now.batch != p.batch)
+    return false;
+  auto source = p.retained.image;
+  if (!source.batch) {
+    source.batch = now.batch;
+    source.batch_native = now.batch_native;
+  }
+  return mp4_proflare_cache_same(source, now);
+}
+// END_MP4_PROFLARE_SOURCE_PLAN_HOST
+
+// BEGIN_MP4_PROFLARE_ACCESS_HOST
+// Serialize exact PF collection/resource writers and bounded snapshot/restore
+// native calls. No full MV simulation/render, GUI, or GPU poll is held here.
+// The accepted Data job and GetData/Dispose/Initialize native leaves invoke no
+// managed PF frontend; a nested exact Try->Initialize remains same-thread.
+pthread_mutex_t mp4_proflare_access_mutex = PTHREAD_MUTEX_INITIALIZER;
+thread_local uint32_t mp4_proflare_access_depth = 0;
+alignas(8) uint64_t mp4_proflare_access_readers = 0;
+std::atomic<bool> mp4_proflare_access_published{false},
+    mp4_proflare_access_withdrawn{false};
+struct Mp4ProFlareAccess {
+  bool locked = false;
+  explicit Mp4ProFlareAccess(bool original = false) noexcept {
+    if (original && !game_call() &&
+        mp4_proflare_access_published.load(std::memory_order_acquire))
+      mp4_proflare_access_withdrawn.store(true, std::memory_order_release);
+    if (!mp4_proflare_access_depth)
+      pthread_mutex_lock(&mp4_proflare_access_mutex);
+    // Publication may occur while this ordinary writer waits for the source
+    // capture lock. Recheck after acquisition, before its first object access.
+    if (original && !game_call() &&
+        mp4_proflare_access_published.load(std::memory_order_acquire))
+      mp4_proflare_access_withdrawn.store(true, std::memory_order_release);
+    ++mp4_proflare_access_depth;
+    __atomic_add_fetch(&mp4_proflare_access_readers, uint64_t(1),
+                       __ATOMIC_SEQ_CST);
+    locked = true;
+  }
+  ~Mp4ProFlareAccess() {
+    if (!locked)
+      return;
+    __atomic_sub_fetch(&mp4_proflare_access_readers, uint64_t(1),
+                       __ATOMIC_SEQ_CST);
+    if (!--mp4_proflare_access_depth)
+      pthread_mutex_unlock(&mp4_proflare_access_mutex);
+  }
+  Mp4ProFlareAccess(const Mp4ProFlareAccess &) = delete;
+  Mp4ProFlareAccess &operator=(const Mp4ProFlareAccess &) = delete;
+};
+bool mp4_proflare_access_current() {
+  return game_call() && mp4_proflare_access_depth &&
+         !mp4_proflare_access_withdrawn.load(std::memory_order_acquire);
+}
+[[maybe_unused]] bool mp4_proflare_access_idle() {
+  return !__atomic_load_n(&mp4_proflare_access_readers, __ATOMIC_SEQ_CST);
+}
+// Hardware polling/retirement never holds the PF collection lock. Only a
+// top-level physical operation may suspend its single read window; nested
+// original Try/Init/lifecycle frames cannot use this escape. The scope always
+// reacquires before any PF managed/native pointer is inspected again. A foreign
+// writer may run meanwhile, but its pre-original withdrawal makes resumed
+// physical validation fail while retaining cleanup custody.
+struct Mp4ProFlareAccessPause {
+  bool paused = false;
+  explicit Mp4ProFlareAccessPause() noexcept {
+    if (!game_call() || mp4_proflare_access_depth != 1)
+      return;
+    mp4_proflare_access_depth = 0;
+    __atomic_sub_fetch(&mp4_proflare_access_readers, uint64_t(1),
+                       __ATOMIC_SEQ_CST);
+    pthread_mutex_unlock(&mp4_proflare_access_mutex);
+    paused = true;
+  }
+  ~Mp4ProFlareAccessPause() {
+    if (!paused)
+      return;
+    pthread_mutex_lock(&mp4_proflare_access_mutex);
+    mp4_proflare_access_depth = 1;
+    __atomic_add_fetch(&mp4_proflare_access_readers, uint64_t(1),
+                       __ATOMIC_SEQ_CST);
+  }
+  explicit operator bool() const { return paused; }
+  Mp4ProFlareAccessPause(const Mp4ProFlareAccessPause &) = delete;
+  Mp4ProFlareAccessPause &operator=(const Mp4ProFlareAccessPause &) = delete;
+};
+// END_MP4_PROFLARE_ACCESS_HOST
+
+// BEGIN_MP4_PROFLARE_CACHE_ROUTE_PINS
+struct Mp4ProFlareCacheRoute{mp4game::Binding main,get;};
+[[maybe_unused]] constexpr Mp4ProFlareCacheRoute mp4_pf_route_android={{0x8f3eac0,{0xfe,0x4f,0xbf,0xa9,0xd3,0x89,0x0,0x90,0x60,0x66,0x47,0xf9,0xa0,0x0,0x0,0xb5}},{0x8f7c604,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0xf5,0x87,0x0,0x90,0xa8,0xe6,0x47,0xf9}}};
+[[maybe_unused]] constexpr Mp4ProFlareCacheRoute mp4_pf_route_ios={{0x77f5a0c,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x1,0xa9,0xfd,0x43,0x0,0x91,0x33,0x89,0x1,0xd0}},{0x7849ac4,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}}};
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto&mp4_pf_route=mp4_pf_route_ios;
+#else
+constexpr const auto&mp4_pf_route=mp4_pf_route_android;
+#endif
+// END_MP4_PROFLARE_CACHE_ROUTE_PINS
+
+// BEGIN_MP4_PROFLARE_BATCH_DISABLE_PINS
+[[maybe_unused]] constexpr mp4game::Binding mp4_pf_batch_disable_android={0x8781920,{0xff,0x3,0x1,0xd1,0xfe,0x13,0x0,0xf9,0xf4,0x4f,0x3,0xa9,0x74,0xc7,0x0,0xf0}};
+[[maybe_unused]] constexpr mp4game::Binding mp4_pf_batch_disable_ios={0x6eb68c8,{0xff,0x83,0x1,0xd1,0xf6,0x57,0x3,0xa9,0xf4,0x4f,0x4,0xa9,0xfd,0x7b,0x5,0xa9}};
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto&mp4_pf_batch_disable_pin=mp4_pf_batch_disable_ios;
+#else
+constexpr const auto&mp4_pf_batch_disable_pin=mp4_pf_batch_disable_android;
+#endif
+// END_MP4_PROFLARE_BATCH_DISABLE_PINS
+
+// BEGIN_MP4_PROFLARE_CACHE_ROUTE_HOST
+// Original Init obtains Camera.main and the existing Batch component when its
+// cache is unset. Prove that SAME existing component before invoking Start;
+// a completed-afterwards identity check alone cannot authorize another batch.
+bool mp4_proflare_cache_route_current(const Mp4ProFlareSourcePlan &p) {
+  if (!mp4_proflare_access_current() || !mp4_type_get_object ||
+      !mp4_prefix(mp4_pf_route.main) || !mp4_prefix(mp4_pf_route.get))
+    return false;
+  Mp4ProFlareCacheImage image{};
+  if (!mp4_proflare_cache_image(p.retained.image.flare, &image, false))
+    return false;
+  if (image.batch)
+    return image.batch == p.batch &&
+           image.batch_native == p.retained.image.batch_native;
+  using Main = void *(*)(Method *);
+  using Get = void *(*)(void *, void *, Method *);
+  auto *camera =
+      reinterpret_cast<Main>(image_base + mp4_pf_route.main.rva)(nullptr);
+  if (camera != p.source.camera || !mp4_alive(camera))
+    return false;
+  Mp4ActorTempRoot type(mp4_type_get_object(reinterpret_cast<const void *>(
+      image_base + mp4_proflare_pins.batch.binding.rva)));
+  return type.get() && reinterpret_cast<Get>(image_base + mp4_pf_route.get.rva)(
+                           camera, type.get(), nullptr) == p.batch;
+}
+// END_MP4_PROFLARE_CACHE_ROUTE_HOST
+
+// BEGIN_MP4_PROFLARE_SCALAR_SCHEMA_PINS
+// Exact accepted source managed scalar/reference field schemas.
+struct Mp4ProFlareScalarField{const char*name;uint16_t offset,width;uint8_t kind;bool reference;};
+[[maybe_unused]] constexpr Mp4TimelineTypePin mp4_pf_sub_android={".SubElement",{0x9df5720,{0x30,0x7c,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x12,0x0,0x0,0x0,0x0,0x0}}};
+[[maybe_unused]] constexpr Mp4TimelineTypePin mp4_pf_sub_ios={".SubElement",{0xa55f240,{0x9d,0x7c,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x12,0x0,0x0,0x0,0x0,0x0}}};
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto&mp4_pf_sub_pin=mp4_pf_sub_ios;
+#else
+constexpr const auto&mp4_pf_sub_pin=mp4_pf_sub_android;
+#endif
+constexpr Mp4ProFlareScalarField mp4_pf_flare_fields[]={
+{"_Atlas",32,8,18,true},
+{"EditingAtlas",40,1,2,false},
+{"isVisible",41,1,2,false},
+{"Elements",48,8,21,true},
+{"thisTransform",56,8,18,true},
+{"thisGameObject",64,8,18,true},
+{"LensPosition",72,12,17,false},
+{"EditGlobals",84,1,2,false},
+{"GlobalScale",88,4,12,false},
+{"MultiplyScaleByTransformScale",92,1,2,false},
+{"GlobalBrightness",96,4,12,false},
+{"GlobalTintColor",100,16,17,false},
+{"useMaxDistance",116,1,2,false},
+{"useDistanceScale",117,1,2,false},
+{"useDistanceFade",118,1,2,false},
+{"GlobalMaxDistance",120,4,12,false},
+{"UseAngleLimit",124,1,2,false},
+{"maxAngle",128,4,12,false},
+{"UseAngleScale",132,1,2,false},
+{"UseAngleBrightness",133,1,2,false},
+{"UseAngleCurve",134,1,2,false},
+{"AngleCurve",136,8,18,true},
+{"mask",144,4,17,false},
+{"RaycastPhysics",148,1,2,false},
+{"Occluded",149,1,2,false},
+{"OccludeScale",152,4,12,false},
+{"pixelBasedOcclusion",156,1,2,false},
+{"pixelLayerMask",160,4,17,false},
+{"occlusionScaleSpeed",164,4,12,false},
+{"occlusionBrightnessSpeed",168,4,12,false},
+{"OffScreenFadeDist",172,4,12,false},
+{"useDynamicEdgeBoost",176,1,2,false},
+{"DynamicEdgeBoost",180,4,12,false},
+{"DynamicEdgeBrightness",184,4,12,false},
+{"DynamicEdgeRange",188,4,12,false},
+{"DynamicEdgeBias",192,4,12,false},
+{"DynamicEdgeCurve",200,8,18,true},
+{"useDynamicCenterBoost",208,1,2,false},
+{"DynamicCenterBoost",212,4,12,false},
+{"DynamicCenterBrightness",216,4,12,false},
+{"DynamicCenterRange",220,4,12,false},
+{"DynamicCenterBias",224,4,12,false},
+{"neverCull",228,1,2,false},
+{"sunMode",229,1,2,false},
+{"sunModeTransformA",232,8,18,true},
+{"sunModeTransformB",240,8,18,true},
+{"flareBatchForSrp",248,8,18,true},
+{"Initialised",256,1,2,false},
+{"DisabledPlayMode",257,1,2,false},
+};
+constexpr Mp4ProFlareScalarField mp4_pf_element_fields[]={
+{"Editing",16,1,2,false},
+{"Visible",17,1,2,false},
+{"elementTextureID",20,4,8,false},
+{"SpriteName",24,8,14,true},
+{"flare",32,8,18,true},
+{"flareAtlas",40,8,18,true},
+{"Brightness",48,4,12,false},
+{"Scale",52,4,12,false},
+{"ScaleRandom",56,4,12,false},
+{"ScaleFinal",60,4,12,false},
+{"RandomColorAmount",64,16,17,false},
+{"position",80,4,12,false},
+{"useRangeOffset",84,1,2,false},
+{"SubElementPositionRange_Min",88,4,12,false},
+{"SubElementPositionRange_Max",92,4,12,false},
+{"SubElementAngleRange_Min",96,4,12,false},
+{"SubElementAngleRange_Max",100,4,12,false},
+{"OffsetPosition",104,12,17,false},
+{"Anamorphic",116,12,17,false},
+{"OffsetPostion",128,12,17,false},
+{"angle",140,4,12,false},
+{"FinalAngle",144,4,12,false},
+{"useRandomAngle",148,1,2,false},
+{"useStarRotation",149,1,2,false},
+{"AngleRandom_Min",152,4,12,false},
+{"AngleRandom_Max",156,4,12,false},
+{"OrientToSource",160,1,2,false},
+{"rotateToFlare",161,1,2,false},
+{"rotationSpeed",164,4,12,false},
+{"rotationOverTime",168,4,12,false},
+{"useColorRange",172,1,2,false},
+{"ElementFinalColor",176,16,17,false},
+{"ElementTint",192,16,17,false},
+{"SubElementColor_Start",208,16,17,false},
+{"SubElementColor_End",224,16,17,false},
+{"useScaleCurve",240,1,2,false},
+{"ScaleCurve",248,8,18,true},
+{"OverrideDynamicEdgeBoost",256,1,2,false},
+{"DynamicEdgeBoostOverride",260,4,12,false},
+{"OverrideDynamicCenterBoost",264,1,2,false},
+{"DynamicCenterBoostOverride",268,4,12,false},
+{"OverrideDynamicEdgeBrightness",272,1,2,false},
+{"DynamicEdgeBrightnessOverride",276,4,12,false},
+{"OverrideDynamicCenterBrightness",280,1,2,false},
+{"DynamicCenterBrightnessOverride",284,4,12,false},
+{"subElements",288,8,21,true},
+{"size",296,8,17,false},
+{"type",304,4,17,false},
+};
+constexpr Mp4ProFlareScalarField mp4_pf_sub_fields[]={
+{"color",16,16,17,false},
+{"colorFinal",32,16,17,false},
+{"position",48,4,12,false},
+{"offset",52,12,17,false},
+{"angle",64,4,12,false},
+{"scale",68,4,12,false},
+{"random",72,4,12,false},
+{"random2",76,4,12,false},
+{"RandomScaleSeed",80,4,12,false},
+{"RandomColorSeedR",84,4,12,false},
+{"RandomColorSeedG",88,4,12,false},
+{"RandomColorSeedB",92,4,12,false},
+{"RandomColorSeedA",96,4,12,false},
+};
+// END_MP4_PROFLARE_SCALAR_SCHEMA_PINS
+
+// BEGIN_MP4_PROFLARE_SCALAR_IMAGE_HOST
+// Only actual metadata-declared scalar bytes are restored. Managed references
+// are strong retained and revalidated; cache promotion owns flare/batch refs.
+struct Mp4ProFlareScalarImage {
+  static void *operator new(size_t, void *p) noexcept { return p; }
+  static void operator delete(void *, void *) noexcept {}
+  void *object = nullptr;
+  uint8_t bytes[320]{};
+  void *refs[12]{};
+  uint32_t roots[12]{};
+  size_t count = 0;
+  uint8_t element = 0;
+  bool captured = false;
+  uint32_t object_root = 0;
+};
+bool mp4_proflare_scalar_schema(void *object, uint8_t element) {
+  if (!object ||
+      !mp4_timeline_exact(object, element == 2
+                                      ? mp4_pf_sub_pin
+                                      : (element ? mp4_proflare_pins.element
+                                                 : mp4_proflare_pins.flare)))
+    return false;
+  const auto *fields =
+      element == 2 ? mp4_pf_sub_fields
+                   : (element ? mp4_pf_element_fields : mp4_pf_flare_fields);
+  const size_t n =
+      element == 2 ? sizeof(mp4_pf_sub_fields) / sizeof(*fields)
+                   : (element ? sizeof(mp4_pf_element_fields) / sizeof(*fields)
+                              : sizeof(mp4_pf_flare_fields) / sizeof(*fields));
+  for (size_t i = 0; i < n; ++i) {
+    const auto &f = fields[i];
+    if (!mp4_proflare_cache_field(object, f.name, f.offset, f.kind) ||
+        f.offset + f.width > 320)
+      return false;
+    if (!f.reference && f.kind == 17) {
+      void *field = nullptr;
+      uint32_t align = 0;
+      if (!mp4_root_track_field(object, f.name, f.offset, &field) || !field)
+        return false;
+      using Size = int32_t (*)(void *, uint32_t *);
+      void *k = font_class_type(font_field_type(field));
+      if (!k || mp4_cam_call<Size>(mp4_cam_profile.class_value_size)(
+                    k, &align) != f.width)
+        return false;
+    }
+  }
+  return true;
+}
+void mp4_proflare_scalar_release(Mp4ProFlareScalarImage &s) {
+  for (size_t i = 0; i < s.count; ++i)
+    if (s.roots[i])
+      weak_free(s.roots[i]);
+  if (s.object_root)
+    weak_free(s.object_root);
+  s = {};
+}
+bool mp4_proflare_scalar_current(const Mp4ProFlareScalarImage &s) {
+  if (!s.captured || !s.object_root || weak_get(s.object_root) != s.object ||
+      !mp4_proflare_scalar_schema(s.object, s.element))
+    return false;
+  const auto *fields = s.element == 2 ? mp4_pf_sub_fields
+                                      : (s.element ? mp4_pf_element_fields
+                                                   : mp4_pf_flare_fields);
+  const size_t n =
+      s.element == 2
+          ? sizeof(mp4_pf_sub_fields) / sizeof(*fields)
+          : (s.element ? sizeof(mp4_pf_element_fields) / sizeof(*fields)
+                       : sizeof(mp4_pf_flare_fields) / sizeof(*fields));
+  size_t at = 0;
+  for (size_t i = 0; i < n; ++i) {
+    const auto &f = fields[i];
+    if (!f.reference)
+      continue;
+    void *p = nullptr;
+    if (at >= s.count || !mp4_actor_field(s.object, f.offset, p) ||
+        p != s.refs[at] || (p && weak_get(s.roots[at]) != p))
+      return false;
+    ++at;
+  }
+  return at == s.count;
+}
+bool mp4_proflare_scalar_capture(Mp4ProFlareScalarImage &s, void *object,
+                                 uint8_t element) {
+  if (s.object || !mp4_proflare_access_current() ||
+      !mp4_proflare_scalar_schema(object, element))
+    return false;
+  s.object = object;
+  s.element = element;
+  s.object_root = mp4_retain(object);
+  if (!s.object_root || weak_get(s.object_root) != object)
+    return false;
+  const auto *fields =
+      element == 2 ? mp4_pf_sub_fields
+                   : (element ? mp4_pf_element_fields : mp4_pf_flare_fields);
+  const size_t n =
+      element == 2 ? sizeof(mp4_pf_sub_fields) / sizeof(*fields)
+                   : (element ? sizeof(mp4_pf_element_fields) / sizeof(*fields)
+                              : sizeof(mp4_pf_flare_fields) / sizeof(*fields));
+  for (size_t i = 0; i < n; ++i) {
+    const auto &f = fields[i];
+    if (f.reference) {
+      if (s.count == 12)
+        return false;
+      void *p = nullptr;
+      if (!mp4_actor_field(object, f.offset, p))
+        return false;
+      auto r = p ? mp4_retain(p) : 0;
+      if (p && (!r || weak_get(r) != p)) {
+        if (r)
+          weak_free(r);
+        return false;
+      }
+      s.refs[s.count] = p;
+      s.roots[s.count++] = r;
+    } else {
+      const auto *src = static_cast<uint8_t *>(object) + f.offset;
+      if (!mp4_actor_mapped(src, f.width, false))
+        return false;
+      ::memcpy(s.bytes + f.offset, src, f.width);
+    }
+  }
+  s.captured = true;
+  return mp4_proflare_scalar_current(s);
+}
+bool mp4_proflare_scalar_restore(Mp4ProFlareScalarImage &s) {
+  if (!mp4_proflare_access_current() || !mp4_proflare_scalar_current(s))
+    return false;
+  const auto *fields = s.element == 2 ? mp4_pf_sub_fields
+                                      : (s.element ? mp4_pf_element_fields
+                                                   : mp4_pf_flare_fields);
+  const size_t n =
+      s.element == 2
+          ? sizeof(mp4_pf_sub_fields) / sizeof(*fields)
+          : (s.element ? sizeof(mp4_pf_element_fields) / sizeof(*fields)
+                       : sizeof(mp4_pf_flare_fields) / sizeof(*fields));
+  for (size_t i = 0; i < n; ++i) {
+    const auto &f = fields[i];
+    if (f.reference)
+      continue;
+    auto *dst = static_cast<uint8_t *>(s.object) + f.offset;
+    if (!mp4_actor_mapped(dst, f.width, true))
+      return false;
+    ::memcpy(dst, s.bytes + f.offset, f.width);
+  }
+  return mp4_proflare_scalar_current(s);
+}
+
+bool mp4_proflare_scalar_verified(const Mp4ProFlareScalarImage &s) {
+  if (!mp4_proflare_scalar_current(s))
+    return false;
+  const auto *fields = s.element == 2 ? mp4_pf_sub_fields
+                                      : (s.element ? mp4_pf_element_fields
+                                                   : mp4_pf_flare_fields);
+  const size_t n =
+      s.element == 2
+          ? sizeof(mp4_pf_sub_fields) / sizeof(*fields)
+          : (s.element ? sizeof(mp4_pf_element_fields) / sizeof(*fields)
+                       : sizeof(mp4_pf_flare_fields) / sizeof(*fields));
+  for (size_t i = 0; i < n; ++i) {
+    const auto &f = fields[i];
+    if (f.reference)
+      continue;
+    const auto *src = static_cast<uint8_t *>(s.object) + f.offset;
+    if (!mp4_actor_mapped(src, f.width, false) ||
+        ::memcmp(src, s.bytes + f.offset, f.width))
+      return false;
+  }
+  return true;
+}
+// END_MP4_PROFLARE_SCALAR_IMAGE_HOST
+
+// BEGIN_MP4_PROFLARE_SUB_ELEMENT_IMAGE_HOST
+struct Mp4ProFlareSubImage {
+  void *list = nullptr, *array = nullptr;
+  uint32_t roots[2]{};
+  uint32_t version = 0;
+  Mp4ProFlareScalarImage *rows = nullptr;
+  size_t count = 0;
+};
+bool mp4_proflare_sub_current(const Mp4ProFlareSubImage &s) {
+  if (!s.list)
+    return !s.array && !s.rows && !s.count;
+  void *array = nullptr;
+  uint32_t version = 0;
+  void **items = nullptr;
+  size_t count = 0;
+  if (weak_get(s.roots[0]) != s.list || weak_get(s.roots[1]) != s.array ||
+      !mp4_actor_field(s.list, 16, array) || array != s.array ||
+      !mp4_actor_field(s.list, 28, version) || version != s.version ||
+      !mp4_actor_list(s.list, &items, &count, 256) || count != s.count)
+    return false;
+  for (size_t i = 0; i < count; ++i)
+    if (items[i] != s.rows[i].object || !mp4_proflare_scalar_current(s.rows[i]))
+      return false;
+  return true;
+}
+void mp4_proflare_sub_release(Mp4ProFlareSubImage &s) {
+  for (size_t i = 0; i < s.count; ++i)
+    mp4_proflare_scalar_release(s.rows[i]);
+  ::free(s.rows);
+  for (auto r : s.roots)
+    if (r)
+      weak_free(r);
+  s = {};
+}
+bool mp4_proflare_sub_capture(Mp4ProFlareSubImage &s, void *element,
+                              size_t *budget) {
+  if (s.list || !budget || !mp4_proflare_access_current() ||
+      !mp4_actor_field(element, 288, s.list))
+    return false;
+  if (!s.list)
+    return true;
+  void **items = nullptr;
+  size_t count = 0;
+  if (!mp4_proflare_cache_declared(element, "subElements", 288, s.list) ||
+      !mp4_actor_list(s.list, &items, &count, 256) || count > *budget ||
+      !mp4_actor_field(s.list, 16, s.array) || !s.array ||
+      !mp4_actor_field(s.list, 28, s.version))
+    return false;
+  s.roots[0] = mp4_retain(s.list);
+  s.roots[1] = mp4_retain(s.array);
+  if (weak_get(s.roots[0]) != s.list || weak_get(s.roots[1]) != s.array)
+    return false;
+  if (count) {
+    s.rows = static_cast<Mp4ProFlareScalarImage *>(
+        ::malloc(sizeof(Mp4ProFlareScalarImage) * count));
+    if (!s.rows)
+      return false;
+    for (size_t i = 0; i < count; ++i)
+      new (&s.rows[i]) Mp4ProFlareScalarImage{};
+  }
+  s.count = count;
+  *budget -= count;
+  for (size_t i = 0; i < count; ++i)
+    if (!mp4_proflare_scalar_capture(s.rows[i], items[i], 2))
+      return false;
+  return mp4_proflare_sub_current(s);
+}
+bool mp4_proflare_sub_restore(Mp4ProFlareSubImage &s) {
+  if (!mp4_proflare_sub_current(s))
+    return false;
+  for (size_t i = 0; i < s.count; ++i)
+    if (!mp4_proflare_scalar_restore(s.rows[i]) ||
+        !mp4_proflare_scalar_verified(s.rows[i]))
+      return false;
+  return mp4_proflare_sub_current(s);
+}
+// END_MP4_PROFLARE_SUB_ELEMENT_IMAGE_HOST
+
+Mp4SceneResult mp4_proflare_capture_empty_source();
+bool mp4_proflare_empty_capture_current(uint64_t*);
+bool mp4_proflare_empty_capture_release();
+
+// BEGIN_MP4_PROFLARE_COORDINATOR_HOST
+// Finite PF owner: source plan -> CPU-only cache promotion -> source registry /
+// nullable pass references + existing Data images -> owned original births ->
+// original pass restoration + real GPU retirement + original Data disposal.
+struct Mp4ProFlareOwnedElement {
+  static void *operator new(size_t, void *p) noexcept { return p; }
+  static void operator delete(void *, void *) noexcept {}
+  Mp4ProFlareScalarImage scalar{};
+  Mp4ProFlareSubImage sub{};
+};
+struct Mp4ProFlareOwnedFlare {
+  const Mp4ProFlareSourcePlan *plan = nullptr;
+  Mp4ProFlareScalarImage scalar{};
+  Mp4ProFlareOwnedElement *elements = nullptr;
+  size_t count = 0;
+  uint8_t flags[2]{};
+  bool flags_saved = false;
+};
+struct Mp4ProFlareCoordinator {
+  static void *operator new(size_t, void *p) noexcept { return p; }
+  static void operator delete(void *, void *) noexcept {}
+  Mp4SceneWitness source{};
+  uint64_t job = 0, serial = 0, preparation = 0, operation = 0, aux_recipe = 0,
+           aux_ticket = 0;
+  void *batch = nullptr;
+  Mp4ProFlareOwnedFlare flares[128]{};
+  size_t count = 0;
+  Mp4ProFlareDataImage existing{};
+  uint64_t existing_serial = 0;
+  bool started = false, prepared = false, captured = false, reset = false,
+       resetting = false, restoring = false, uploaded = false, restored = false;
+  uint8_t aux_mode = 0;
+} *mp4_proflare_coordinator = nullptr;
+uint64_t mp4_proflare_coordinator_sequence = 0,
+         mp4_proflare_coordinator_operation_sequence = 0;
+bool mp4_proflare_owner_identity() {
+  const auto *h = mp4_proflare_coordinator;
+  if (!game_call() || !h || !h->started || !h->serial ||
+      !h->source.generation || !h->job || !h->batch ||
+      h->job != idoly_mp4_runtime::job.generation ||
+      !mp4_scene_same_source(h->source, mp4_stage_host.source) ||
+      !mp4_scene_same_source(h->source, mp4_scene_host.source) ||
+      !mp4_proflare_source_schema() ||
+      mp4_proflare_access_withdrawn.load(std::memory_order_acquire))
+    return false;
+  for (size_t i = 0; i < h->count; ++i) {
+    const auto *p = h->flares[i].plan;
+    if (!p || p->batch != h->batch ||
+        !mp4_scene_same_source(p->source, h->source) ||
+        !(h->prepared ? mp4_proflare_source_plan_retained(*p)
+                      : mp4_proflare_source_plan_current(*p)))
+      return false;
+  }
+  return true;
+}
+bool mp4_proflare_source_boundary() {
+  const auto &h = mp4sourceworkers::host;
+  return game_call() && h.started && h.published && h.watch &&
+         mp4_source_workers_current(nullptr, h.key, h.watch) &&
+         mp4_stage_clock_held(nullptr);
+}
+bool mp4_proflare_physical(void *batch, uint64_t *out) {
+  if (out)
+    *out = 0;
+  const auto *h = mp4_proflare_coordinator;
+  if (!out || !mp4_proflare_access_current() ||
+      !mp4_proflare_owner_identity() || h->batch != batch ||
+      (!h->captured && !mp4_proflare_source_boundary()))
+    return false;
+  *out = h->serial;
+  return true;
+}
+uint64_t mp4_proflare_preparation(void *flare) {
+  const auto *h = mp4_proflare_coordinator;
+  if (!h || !h->preparation || h->captured || !mp4_proflare_access_current() ||
+      !mp4_proflare_source_boundary())
+    return 0;
+  for (size_t i = 0; i < h->count; ++i)
+    if (h->flares[i].plan->retained.image.flare == flare)
+      return h->preparation;
+  return 0;
+}
+uint64_t mp4_proflare_operation(void *object) {
+  const auto *h = mp4_proflare_coordinator;
+  if (!h || !mp4_proflare_access_current() || !mp4_proflare_owner_identity())
+    return 0;
+  if (h->preparation && object == h->batch && mp4_proflare_source_boundary())
+    return h->preparation;
+  if (!h->captured || !h->restoring || !h->operation ||
+      !mp4_stage_clock_held(nullptr))
+    return 0;
+  if (object == h->batch || object == h->existing.object)
+    return h->operation;
+  const auto &p = mp4_proflare_pass_references;
+  if (object == p.passes[0] || object == p.passes[1])
+    return h->operation;
+  for (size_t i = 0; i < mp4_proflare_data_birth_count; ++i)
+    if (mp4_proflare_data_births[i].object == object)
+      return h->operation;
+  return 0;
+}
+bool mp4_proflare_existing_current(void *, const Mp4ProFlareDataImage &s) {
+  const auto *h = mp4_proflare_coordinator;
+  uint64_t owner = 0;
+  if (!h || s.object != h->existing.object || s.batch != h->batch ||
+      s.camera != h->source.camera ||
+      !mp4_proflare_physical(h->batch, &owner) || owner != h->serial)
+    return false;
+  mp4pf::List list{};
+  if (!mp4_proflare_registry_list(h->batch, "_batchDatas", 80,
+                                  mp4_proflare_pins.data, &list))
+    return false;
+  size_t hits = 0;
+  for (size_t i = 0; i < list.count; ++i)
+    hits += list.rows[i] == s.object;
+  return hits == 1;
+}
+bool mp4_proflare_existing_lease(void *object, void *camera, uint64_t *out) {
+  if (out)
+    *out = 0;
+  const auto *h = mp4_proflare_coordinator;
+  if (!out || !h || !h->prepared || !h->existing.captured ||
+      !h->existing_serial || h->existing.object != object ||
+      h->source.camera != camera ||
+      !mp4_proflare_existing_current(nullptr, h->existing) ||
+      !mp4_proflare_data_image_current(h->existing))
+    return false;
+  *out = h->existing_serial;
+  return true;
+}
+bool mp4_proflare_empty_data_lease(void *batch, void *camera, uint64_t *out) {
+  if (out)
+    *out = 0;
+  const auto *h = mp4_proflare_coordinator;
+  uint64_t owner = 0;
+  if (!out || !h || !h->prepared || h->batch != batch ||
+      h->source.camera != camera || h->existing.object ||
+      !mp4_proflare_physical(batch, &owner) || owner != h->serial ||
+      !mp4_proflare_registry_scope.active() ||
+      !mp4_proflare_registry_scope.current())
+    return false;
+  for (size_t i = 0; i < h->count; ++i) {
+    const auto &e = h->flares[i];
+    if (!e.scalar.captured || !mp4_proflare_scalar_current(e.scalar))
+      return false;
+    for (size_t j = 0; j < e.count; ++j)
+      if (!mp4_proflare_scalar_current(e.elements[j].scalar) ||
+          !mp4_proflare_sub_current(e.elements[j].sub))
+        return false;
+  }
+  mp4pf::List datas{};
+  if (!mp4_proflare_registry_list(batch, "_batchDatas", 80,
+                                  mp4_proflare_pins.data, &datas))
+    return false;
+  for (size_t i = 0; i < datas.count; ++i) {
+    void *target = nullptr;
+    if (!mp4_actor_field(datas.rows[i], 24, target) || target == camera)
+      return false;
+  }
+  *out = h->serial;
+  return true;
+}
+bool mp4_proflare_quiet() {
+  const auto *h = mp4_proflare_coordinator;
+  if (!h || !mp4_proflare_access_current() || mp4_owned_render_depth ||
+      mp4_unowned_render_depth || mp4_owned_render_ticket_active)
+    return false;
+  for (const auto *g : {&mp4_gpu_fence_host, &mp4_gpu_auxiliary_host}) {
+    if (g->draw ||
+        (g->configured && (g->source != h->source.generation ||
+                           g->epoch != h->job || g->retired != g->sequence)))
+      return false;
+  }
+  return true;
+}
+bool mp4_proflare_existing_quiet(void *, const Mp4ProFlareDataImage &s) {
+  return mp4_proflare_existing_current(nullptr, s) && mp4_proflare_quiet();
+}
+bool mp4_proflare_pass_quiet_current(void *pass, void *) {
+  const auto &p = mp4_proflare_pass_references;
+  return (pass == p.passes[0] || pass == p.passes[1]) && mp4_proflare_quiet();
+}
+bool mp4_proflare_pass_born(void *pass, void *batch, void *camera,
+                            void *baseline, void *current, uint64_t *out) {
+  if (out)
+    *out = 0;
+  auto *h = mp4_proflare_coordinator;
+  const auto &p = mp4_proflare_pass_references;
+  if (!out || !h || !h->captured || !mp4_proflare_owner_identity() ||
+      batch != h->batch || camera != h->source.camera ||
+      baseline != p.source_data || (pass != p.passes[0] && pass != p.passes[1]))
+    return false;
+  // A nullable source pass may later name its already-owned original camera
+  // Data. This is an existing image lease, never a fabricated factory birth.
+  if (current && current == h->existing.object && h->existing.captured) {
+    uint64_t receipt = 0;
+    if (!mp4_proflare_existing_lease(current, camera, &receipt))
+      return false;
+    *out = receipt;
+    return true;
+  }
+  for (size_t i = 0; i < mp4_proflare_data_birth_count; ++i) {
+    const auto &b = mp4_proflare_data_births[i];
+    if (b.object == current && b.batch == batch && b.camera == camera &&
+        b.registered && b.initialized && !b.disposed && !b.retired &&
+        mp4_proflare_birth_current(b)) {
+      *out = b.recipe;
+      return *out != 0;
+    }
+  }
+  return false;
+}
+bool mp4_proflare_ready(void *batch) {
+  const auto *h = mp4_proflare_coordinator;
+  uint64_t owner = 0;
+  if (!h || !h->captured || !mp4_proflare_physical(batch, &owner) ||
+      owner != h->serial || !mp4_proflare_registry_scope.active() ||
+      !mp4_proflare_registry_scope.current() ||
+      !mp4_proflare_pass_references_current())
+    return false;
+  for (size_t i = 0; i < h->count; ++i) {
+    const auto &e = h->flares[i];
+    if (!e.scalar.captured || !mp4_proflare_scalar_current(e.scalar))
+      return false;
+    for (size_t j = 0; j < e.count; ++j)
+      if ((!mp4_proflare_scalar_current(e.elements[j].scalar) ||
+           !mp4_proflare_sub_current(e.elements[j].sub)))
+        return false;
+  }
+  return !h->existing.object ||
+         (h->existing.captured && h->existing_serial &&
+          mp4_proflare_existing_current(nullptr, h->existing));
+}
+bool mp4_proflare_handoff(void *, mp4pf::Result) {
+  mp4_proflare_access_withdrawn.store(true, std::memory_order_release);
+  if (game_call())
+    try {
+      idoly_mp4_runtime::observe_source_will_change(
+          mp4_stage_host.source.player);
+    } catch (...) {
+    }
+  // Caller forwards the ordinary original exactly once; withdrawal grants no
+  // Source restore or Data retirement. Cleanup retains duties until real quiet.
+  return false;
+}
+bool mp4_proflare_auxiliary_recipe(uint64_t source, uint64_t job,
+                                   uint64_t recipe) {
+  const auto *h = mp4_proflare_coordinator;
+  return h && h->captured && h->restoring && h->operation &&
+         h->aux_recipe == recipe && recipe && source == h->source.generation &&
+         job == h->job && mp4_proflare_ready(h->batch);
+}
+void mp4_proflare_bind() {
+  mp4_proflare_cache_preparation = mp4_proflare_preparation;
+  mp4_proflare_registry_physical = mp4_proflare_physical;
+  mp4_proflare_registry_operation = mp4_proflare_operation;
+  mp4_proflare_registry_handoff = mp4_proflare_handoff;
+  mp4_proflare_runtime_ready = mp4_proflare_ready;
+  mp4_proflare_registry_data_origin = mp4_proflare_data_registry_origin;
+  mp4_proflare_registry_data_complete = mp4_proflare_data_registry_complete;
+  mp4_proflare_existing_data_lease = mp4_proflare_existing_lease;
+  mp4_proflare_data_restore_operation = mp4_proflare_operation;
+  mp4_proflare_try_withdrawal_ready = mp4_proflare_try_withdrawal_source;
+  mp4_proflare_pass_birth = mp4_proflare_pass_born;
+  mp4_proflare_pass_operation = mp4_proflare_operation;
+  mp4_proflare_pass_quiet = mp4_proflare_pass_quiet_current;
+  mp4_proflare_empty_data_image_lease = mp4_proflare_empty_data_lease;
+}
+// Source plans already retain the exact authored/factory-selected flare set.
+// A source renderer with no selected controlled PF has no PF physical owner.
+Mp4SceneResult mp4_proflare_capture() {
+  Mp4ProFlareAccess access;
+  auto *h = mp4_proflare_coordinator;
+  if (h && h->captured)
+    return mp4_proflare_ready(h->batch) ? Mp4SceneResult::ok
+                                        : Mp4SceneResult::stale;
+  if (!mp4_proflare_source_boundary() || !mp4_proflare_source_schema())
+    return Mp4SceneResult::waiting;
+  if (!mp4_proflare_source_plan_count)
+    return mp4_proflare_capture_empty_source();
+  if (h || mp4_proflare_source_plan_count > 128 ||
+      mp4_proflare_coordinator_sequence >= ((uint64_t(1) << 48) - 1))
+    return Mp4SceneResult::stale;
+  auto *storage = static_cast<Mp4ProFlareCoordinator *>(
+      ::malloc(sizeof(Mp4ProFlareCoordinator)));
+  if (!storage)
+    return Mp4SceneResult::failed;
+  h = new (storage) Mp4ProFlareCoordinator{};
+  mp4_proflare_coordinator = h;
+  h->source = mp4_stage_host.source;
+  h->job = idoly_mp4_runtime::job.generation;
+  h->serial = ++mp4_proflare_coordinator_sequence;
+  h->started = true;
+  h->count = mp4_proflare_source_plan_count;
+  h->batch = mp4_proflare_source_plans[0].batch;
+  mp4_proflare_bind();
+  for (size_t i = 0; i < h->count; ++i) {
+    h->flares[i].plan = &mp4_proflare_source_plans[i];
+    if (!mp4_scene_same_source(h->flares[i].plan->source, h->source) ||
+        h->flares[i].plan->batch != h->batch ||
+        !mp4_proflare_source_plan_current(*h->flares[i].plan))
+      return Mp4SceneResult::unsupported;
+  }
+  // Publish exact retained-batch gate BEFORE reading any source Data/native
+  // job/image. Ordinary late retirement must not free these resources midway.
+  mp4_proflare_access_withdrawn.store(false, std::memory_order_release);
+  mp4_proflare_access_published.store(true, std::memory_order_release);
+  auto &registry = mp4_proflare_registry_host;
+  if (registry.epoch || registry.root || mp4_proflare_registry_scope.active())
+    return Mp4SceneResult::stale;
+  registry.batch = h->batch;
+  registry.epoch = h->source.generation;
+  registry.owner = h->serial;
+  registry.root = mp4_retain(h->batch);
+  if (!registry.root || weak_get(registry.root) != h->batch)
+    return Mp4SceneResult::failed;
+  mp4pf::Image before{};
+  mp4pf::LogicalImage logical;
+  if (!mp4_proflare_registry_read(&registry, &before) ||
+      !logical.capture(before) || (!before.atlas && before.data.count) ||
+      (before.atlas && before.atlas != h->flares[0].plan->retained.image.atlas))
+    return Mp4SceneResult::unsupported;
+  // The finite controlled programme snapshots every flare whose mutable
+  // Element/SubElement data the original selected batch may read or update.
+  // An unrelated live batch member is not covered by subset/ancestry alone.
+  for (size_t i = 0; i < before.list.count; ++i) {
+    if (!before.list.rows[i])
+      continue;
+    size_t matches = 0;
+    for (size_t j = 0; j < h->count; ++j)
+      matches += before.list.rows[i] == h->flares[j].plan->retained.image.flare;
+    if (matches != 1)
+      return Mp4SceneResult::unsupported;
+  }
+  // Retain the ORIGINAL source arrays/list/Data members across original
+  // managed allocation. The original CPU Start may grow CURRENT storage only.
+  void *objects[1024]{};
+  uint32_t roots[1024]{};
+  size_t root_count = 0;
+  struct TempRoots {
+    uint32_t *roots;
+    size_t *count;
+    ~TempRoots() {
+      for (size_t i = 0; i < *count; ++i)
+        if (roots[i])
+          weak_free(roots[i]);
+    }
+  } keep{roots, &root_count};
+  const auto retain = [&](void *p) {
+    if (!p)
+      return true;
+    for (size_t i = 0; i < root_count; ++i)
+      if (objects[i] == p)
+        return weak_get(roots[i]) == p;
+    if (root_count == 1024)
+      return false;
+    auto r = mp4_retain(p);
+    if (!r || weak_get(r) != p) {
+      if (r)
+        weak_free(r);
+      return false;
+    }
+    objects[root_count] = p;
+    roots[root_count++] = r;
+    return true;
+  };
+  void *anchors[] = {before.batch,
+                     before.atlas,
+                     before.list.object,
+                     before.list.array,
+                     before.queue.object,
+                     before.queue.array,
+                     before.dictionary.object,
+                     before.dictionary.buckets,
+                     before.dictionary.entries,
+                     before.dictionary.comparer,
+                     before.dictionary.keys,
+                     before.dictionary.values,
+                     before.data.object,
+                     before.data.array};
+  for (auto *p : anchors)
+    if (!retain(p))
+      return Mp4SceneResult::failed;
+  for (size_t i = 0; i < before.list.capacity; ++i)
+    if (!retain(before.list.rows[i]))
+      return Mp4SceneResult::failed;
+  for (size_t i = 0; i < before.data.capacity; ++i)
+    if (!retain(before.data.rows[i]))
+      return Mp4SceneResult::failed;
+  if (mp4_proflare_coordinator_operation_sequence == ~uint64_t(0))
+    return Mp4SceneResult::unsupported;
+  h->preparation = ++mp4_proflare_coordinator_operation_sequence;
+  bool prepared = true;
+  try {
+    for (size_t i = 0; i < h->count; ++i) {
+      auto &e = h->flares[i];
+      void *f = e.plan->retained.image.flare;
+      if (!mp4_actor_field(f, 256, e.flags) || e.flags[0] > 1 ||
+          e.flags[1] > 1) {
+        prepared = false;
+        break;
+      }
+      e.flags_saved = true;
+      uint64_t cache = 0;
+      const auto method = font_method(object_class(f), "Start", 0);
+      auto original = mp4_proflare_start_trampoline
+                          ? mp4_proflare_start_trampoline
+                          : reinterpret_cast<Mp4ProFlareStart>(
+                                image_base + mp4_proflare_pins.start.rva);
+      if (!mp4_proflare_cache_route_current(*e.plan) || !method ||
+          !mp4_proflare_cache_prepare(
+              f, const_cast<Method *>(static_cast<const Method *>(method)),
+              original, &cache) ||
+          !cache) {
+        prepared = false;
+        break;
+      }
+      const_cast<Mp4ProFlareSourcePlan *>(e.plan)->initialized = cache;
+    }
+  } catch (...) {
+    prepared = false;
+  }
+  // Restore logical source occupancy and semantic flags even when a completed
+  // original Start could not be admitted. Capacity/cache refs remain promoted.
+  for (size_t i = 0; i < h->count; ++i) {
+    auto &e = h->flares[i];
+    if (!e.flags_saved)
+      continue;
+    if (!mp4_stage_store(e.plan->retained.image.flare, 256, e.flags))
+      prepared = false;
+  }
+  mp4pf::Image storage_image{};
+  mp4pf::PromotedImage promoted{};
+  registry.restoring = true;
+  const bool remapped =
+      mp4_proflare_registry_read(&registry, &storage_image) &&
+      logical.restore_image(storage_image, &promoted) &&
+      mp4_proflare_registry_write(&registry, promoted.image, promoted.list,
+                                  promoted.queue, promoted.buckets,
+                                  promoted.entries, promoted.data);
+  registry.restoring = false;
+  h->preparation = 0;
+  if (!prepared || !remapped)
+    return Mp4SceneResult::unsupported;
+  mp4_proflare_registry_release();
+  h->prepared = true;
+  void *flares[128]{};
+  for (size_t i = 0; i < h->count; ++i)
+    flares[i] = h->flares[i].plan->retained.image.flare;
+  if (mp4_proflare_registry_capture(h->batch, flares, h->count,
+                                    h->source.generation) != mp4pf::Result::ok)
+    return Mp4SceneResult::unsupported;
+  size_t sub_budget = 8192;
+  for (size_t i = 0; i < h->count; ++i) {
+    auto &e = h->flares[i];
+    const auto &plan = e.plan->retained.image;
+    e.count = plan.count;
+    if (!mp4_proflare_scalar_capture(e.scalar, plan.flare, 0))
+      return Mp4SceneResult::unsupported;
+    if (e.count) {
+      e.elements = static_cast<Mp4ProFlareOwnedElement *>(
+          ::malloc(sizeof(Mp4ProFlareOwnedElement) * e.count));
+      if (!e.elements)
+        return Mp4SceneResult::failed;
+      for (size_t j = 0; j < e.count; ++j)
+        new (&e.elements[j]) Mp4ProFlareOwnedElement{};
+    }
+    for (size_t j = 0; j < e.count; ++j)
+      if (!mp4_proflare_scalar_capture(e.elements[j].scalar, plan.element[j],
+                                       1) ||
+          !mp4_proflare_sub_capture(e.elements[j].sub, plan.element[j],
+                                    &sub_budget))
+        return Mp4SceneResult::unsupported;
+  }
+  mp4pf::List datas{};
+  if (!mp4_proflare_registry_list(h->batch, "_batchDatas", 80,
+                                  mp4_proflare_pins.data, &datas))
+    return Mp4SceneResult::unsupported;
+  void *source_data = nullptr;
+  for (size_t i = 0; i < datas.count; ++i) {
+    void *camera = nullptr;
+    if (!mp4_actor_field(datas.rows[i], 24, camera))
+      return Mp4SceneResult::unsupported;
+    if (camera == h->source.camera) {
+      if (source_data)
+        return Mp4SceneResult::unsupported;
+      source_data = datas.rows[i];
+    }
+  }
+  if (source_data) {
+    if (!mp4_proflare_data_capture(
+            h->existing, source_data, h->batch, h->source.camera,
+            mp4_proflare_existing_current, nullptr, 128u * 1024u * 1024u))
+      return Mp4SceneResult::unsupported;
+    if (mp4_proflare_coordinator_operation_sequence == ~uint64_t(0))
+      return Mp4SceneResult::unsupported;
+    h->existing_serial = ++mp4_proflare_coordinator_operation_sequence;
+  }
+  if (!mp4_proflare_pass_configure(h->source))
+    return Mp4SceneResult::unsupported;
+  h->captured = true;
+  return mp4_proflare_ready(h->batch) ? Mp4SceneResult::ok
+                                      : Mp4SceneResult::stale;
+}
+Mp4SceneResult mp4_proflare_retire_gpu() {
+  const auto *h = mp4_proflare_coordinator;
+  if (!h || !mp4_proflare_access_current())
+    return Mp4SceneResult::stale;
+  if (mp4_owned_render_depth || mp4_unowned_render_depth ||
+      mp4_owned_render_ticket_active)
+    return Mp4SceneResult::waiting;
+  for (auto *g : {&mp4_gpu_fence_host, &mp4_gpu_auxiliary_host}) {
+    if (g->draw)
+      return Mp4SceneResult::waiting;
+    if (!g->configured)
+      continue;
+    if (g->source != h->source.generation || g->epoch != h->job)
+      return Mp4SceneResult::stale;
+    if (g->retired == g->sequence)
+      continue;
+    mp4_gpu_fence::Result r{};
+    bool retired = false;
+    {
+      Mp4ProFlareAccessPause pause;
+      if (!pause)
+        return Mp4SceneResult::waiting;
+      r = g->ledger.poll(h->job, g->sequence);
+      if (r == mp4_gpu_fence::Result::ready)
+        retired = g->ledger.retire_sequence(h->job, g->sequence);
+    }
+    if (!mp4_proflare_access_current() || mp4_proflare_coordinator != h)
+      return Mp4SceneResult::stale;
+    if (r == mp4_gpu_fence::Result::waiting)
+      return Mp4SceneResult::waiting;
+    if (r != mp4_gpu_fence::Result::ready || !retired)
+      return Mp4SceneResult::stale;
+    g->retired = g->sequence;
+  }
+  return mp4_proflare_quiet() ? Mp4SceneResult::ok : Mp4SceneResult::waiting;
+}
+// The ledger is a hardware owner, not PF collection memory. Poll/retire
+// outside the PF read window and revalidate its lifetime before continuing.
+Mp4SceneResult mp4_proflare_auxiliary_wait(uint64_t ticket) {
+  const auto *h = mp4_proflare_coordinator;
+  Mp4SceneResult result = Mp4SceneResult::waiting;
+  bool retired = false;
+  {
+    Mp4ProFlareAccessPause pause;
+    if (!pause)
+      return Mp4SceneResult::waiting;
+    result = mp4_gpu_auxiliary_poll(ticket);
+    if (result == Mp4SceneResult::ok)
+      retired = mp4_gpu_auxiliary_retire(ticket);
+  }
+  if (!mp4_proflare_access_current() || mp4_proflare_coordinator != h)
+    return Mp4SceneResult::stale;
+  if (result != Mp4SceneResult::ok)
+    return result;
+  return retired ? Mp4SceneResult::ok : Mp4SceneResult::waiting;
+}
+Mp4SceneResult mp4_proflare_upload_existing(bool reset) {
+  auto *h = mp4_proflare_coordinator;
+  if (!h || !h->captured || !h->restoring || !h->operation)
+    return Mp4SceneResult::stale;
+  if (!h->existing.object)
+    return Mp4SceneResult::ok;
+  if (!h->aux_recipe)
+    h->aux_recipe = (uint64_t(0x5354) << 48) | h->serial;
+  if (h->aux_ticket && h->aux_mode != (reset ? 1 : 2)) {
+    const auto r = mp4_proflare_auxiliary_wait(h->aux_ticket);
+    if (r != Mp4SceneResult::ok)
+      return r;
+    h->aux_ticket = 0;
+    h->aux_mode = 0;
+    return Mp4SceneResult::waiting;
+  }
+  if (!h->aux_ticket) {
+    const auto r = mp4_gpu_auxiliary_begin(h->source.generation, h->job,
+                                           h->aux_recipe, &h->aux_ticket);
+    if (r != Mp4SceneResult::ok)
+      return r;
+    h->aux_mode = reset ? 1 : 2;
+    bool returned = false;
+    try {
+      returned = mp4_proflare_data_upload(
+          h->existing, reset, mp4_proflare_existing_current, nullptr,
+          h->aux_ticket, h->source.generation, h->job, h->aux_recipe);
+    } catch (...) {
+      (void)mp4_gpu_auxiliary_complete(h->aux_ticket, false);
+      throw;
+    }
+    const auto r2 = mp4_gpu_auxiliary_complete(h->aux_ticket, returned);
+    if (!returned || r2 == Mp4SceneResult::stale)
+      return Mp4SceneResult::stale;
+  }
+  const auto ready = mp4_proflare_auxiliary_wait(h->aux_ticket);
+  if (ready != Mp4SceneResult::ok)
+    return ready;
+  h->aux_ticket = 0;
+  h->aux_mode = 0;
+  return Mp4SceneResult::ok;
+}
+// Bridge invokes only from the actual aggregate pre-first-render preparation
+// callback. Full captured cohort + actual absence of any private render are
+// prerequisites; there is no public UI or scene-epoch setter permission.
+// Exact replacement for first-render preparation only. The actual Source
+// queue barrier may have consumed main sequence1; its receipt, not zero, proves
+// that no private prewarm/production draw has run yet.
+Mp4SceneResult mp4_proflare_prepare_first_render() {
+  Mp4ProFlareAccess access;
+  auto *h = mp4_proflare_coordinator;
+  if (!h) {
+    uint64_t actual = 0;
+    return mp4_proflare_empty_capture_current(&actual) ? Mp4SceneResult::ok
+                                                       : Mp4SceneResult::stale;
+  }
+  if (h->reset)
+    return mp4_proflare_ready(h->batch) ? Mp4SceneResult::ok
+                                        : Mp4SceneResult::stale;
+  if (!mp4_proflare_ready(h->batch) || !mp4_stage_clock_held(nullptr) ||
+      !mp4_scene_host.active || mp4_scene_host.captured != mp4_scene_host.all ||
+      mp4_scene_host.restored ||
+      !mp4_gpu_initial_source_only_current(h->source.generation, h->job))
+    return Mp4SceneResult::stale;
+  if (!h->restoring) {
+    if (mp4_proflare_coordinator_operation_sequence == ~uint64_t(0))
+      return Mp4SceneResult::unsupported;
+    h->operation = ++mp4_proflare_coordinator_operation_sequence;
+    h->restoring = true;
+    h->resetting = true;
+  }
+  const auto r = mp4_proflare_upload_existing(true);
+  if (r != Mp4SceneResult::ok)
+    return r;
+  h->restoring = false;
+  h->resetting = false;
+  h->operation = 0;
+  h->reset = true;
+  h->uploaded = false;
+  return Mp4SceneResult::ok;
+}
+// Actual final aggregate Source restore verification calls this after every
+// saved Source graph/evaluation/activation repair returned, before GPU ledgers
+// are released or ordinary LateUpdate can run again.
+Mp4SceneResult mp4_proflare_verify_source_restored() {
+  Mp4ProFlareAccess access;
+  auto *h = mp4_proflare_coordinator;
+  if (!h) {
+    uint64_t actual=0;
+    return mp4_proflare_empty_capture_current(&actual)?Mp4SceneResult::ok:Mp4SceneResult::stale;
+  }
+  if (h->restored)
+    return mp4_proflare_ready(h->batch) ? Mp4SceneResult::ok
+                                        : Mp4SceneResult::stale;
+  if (!mp4_proflare_ready(h->batch) || !mp4_stage_clock_held(nullptr) ||
+      !mp4_stage_host.restored || !mp4_scene_host.active ||
+      mp4_scene_host.restored != mp4_scene_host.all)
+    return Mp4SceneResult::stale;
+  auto quiet = mp4_proflare_retire_gpu();
+  if (quiet != Mp4SceneResult::ok)
+    return quiet;
+  if (h->resetting) {
+    h->aux_ticket = 0;
+    h->aux_mode = 0;
+    h->restoring = false;
+    h->resetting = false;
+    h->operation = 0;
+  }
+  if (!h->restoring) {
+    if (mp4_proflare_coordinator_operation_sequence == ~uint64_t(0))
+      return Mp4SceneResult::unsupported;
+    h->operation = ++mp4_proflare_coordinator_operation_sequence;
+    h->restoring = true;
+  }
+  if (!mp4_proflare_pass_restore_references())
+    return Mp4SceneResult::stale;
+  for (size_t i = mp4_proflare_data_birth_count; i; --i) {
+    const auto r = mp4_proflare_birth_retire(i - 1);
+    if (r == Mp4ProFlareRetireResult::waiting)
+      return Mp4SceneResult::waiting;
+    if (r != Mp4ProFlareRetireResult::ok)
+      return Mp4SceneResult::stale;
+  }
+  if (!h->uploaded) {
+    const auto r = mp4_proflare_upload_existing(false);
+    if (r != Mp4SceneResult::ok)
+      return r;
+    h->uploaded = true;
+  }
+  quiet = mp4_proflare_retire_gpu();
+  if (quiet != Mp4SceneResult::ok)
+    return quiet;
+  if (h->existing.object &&
+      !mp4_proflare_data_restore_cpu(h->existing, mp4_proflare_existing_current,
+                                     nullptr, mp4_proflare_existing_quiet))
+    return Mp4SceneResult::stale;
+  if (mp4_proflare_registry_restore() != mp4pf::Result::ok)
+    return Mp4SceneResult::stale;
+  for (size_t i = 0; i < h->count; ++i) {
+    auto &e = h->flares[i];
+    if (!mp4_proflare_scalar_restore(e.scalar) ||
+        !mp4_proflare_scalar_verified(e.scalar))
+      return Mp4SceneResult::stale;
+    for (size_t j = 0; j < e.count; ++j)
+      if (!mp4_proflare_scalar_restore(e.elements[j].scalar) ||
+          !mp4_proflare_scalar_verified(e.elements[j].scalar) ||
+          !mp4_proflare_sub_restore(e.elements[j].sub))
+        return Mp4SceneResult::stale;
+  }
+  h->existing.gpu_touched = false;
+  h->restoring = false;
+  h->operation = 0;
+  h->restored = true;
+  return mp4_proflare_ready(h->batch) ? Mp4SceneResult::ok
+                                      : Mp4SceneResult::stale;
+}
+bool mp4_proflare_renderer_data_reference(void *pass, void *batch,
+                                          void *current, void **source,
+                                          uint64_t *owner) {
+  Mp4ProFlareAccess access;
+  return mp4_proflare_ready(batch) &&
+         mp4_proflare_pass_data_reference(pass, batch, current, source, owner);
+}
+bool mp4_proflare_component_family(void *component, uint64_t *receipt) {
+  if (receipt)
+    *receipt = 0;
+  Mp4ProFlareAccess access;
+  uint64_t cache = 0;
+  const auto *h = mp4_proflare_coordinator;
+  if (!receipt || !h || !h->captured || !h->serial ||
+      !mp4_proflare_activation_family(component, &cache) || !cache)
+    return false;
+  // Name this actual export image lifetime, not the persistent CPU Start cache.
+  *receipt = h->serial;
+  return true;
+}
+bool mp4_stage_graphics_proflare_current(uint64_t source, uint64_t job) {
+  Mp4ProFlareAccess access;
+  const auto *h = mp4_proflare_coordinator;
+  return h && h->captured && h->source.generation == source && h->job == job &&
+         mp4_proflare_ready(h->batch);
+}
+using Mp4ProFlareBatchLate = void (*)(void *, Method *);
+Mp4ProFlareBatchLate mp4_proflare_batch_late_trampoline = nullptr;
+Mp4ProFlareBatchLate mp4_proflare_batch_disable_trampoline = nullptr;
+void mp4_proflare_batch_late_invoke(void *batch, Method *method,
+                                    Mp4ProFlareBatchLate original) {
+  if (!original)
+    return;
+  Mp4ProFlareAccess access(true);
+  const auto *h = mp4_proflare_coordinator;
+  if (mp4_proflare_access_published.load(std::memory_order_acquire)) {
+    if (game_call() && h && h->started && h->serial && batch == h->batch &&
+        !mp4_proflare_access_withdrawn.load(std::memory_order_acquire) &&
+        h->job == idoly_mp4_runtime::job.generation &&
+        idoly_mp4_runtime::native_clock_scope().active())
+      return;
+    (void)mp4_proflare_handoff(batch, mp4pf::Result::unowned);
+  }
+  original(batch, method); // every ordinary/unowned original forwards once
+}
+
+bool mp4_proflare_backend_hooks() {
+  return mp4_proflare_start_trampoline && mp4_proflare_enable_trampoline &&
+         mp4_proflare_disable_trampoline && mp4_proflare_try_trampoline &&
+         mp4_proflare_initialize_trampoline &&
+         mp4_proflare_batch_late_trampoline &&
+         mp4_proflare_batch_disable_trampoline &&
+         mp4_proflare_start_callable(mp4_proflare_start_trampoline) &&
+         mp4_proflare_lifecycle_callable(mp4pf::Operation::enable,
+                                         mp4_proflare_enable_trampoline) &&
+         mp4_proflare_lifecycle_callable(mp4pf::Operation::disable,
+                                         mp4_proflare_disable_trampoline) &&
+         mp4_proflare_try_callable(mp4_proflare_try_trampoline) &&
+         mp4_proflare_initialize_callable(mp4_proflare_initialize_trampoline) &&
+         mp4_hook_was_statically_verified(mp4_proflare_pins.batch_late) &&
+         mp4_hook_was_statically_verified(mp4_pf_batch_disable_pin);
+}
+bool mp4_proflare_source_component_plan(const Mp4TimelineContext &c,
+                                        void *flare, void *go) {
+  Mp4ProFlareAccess access;
+  return mp4_proflare_backend_hooks() &&
+         mp4_proflare_source_component_plan_unlocked(c, flare, go);
+}
+bool mp4_proflare_discard_quiet(void *, const Mp4ProFlareDataImage &) {
+  return mp4_proflare_quiet();
+}
+Mp4SceneResult mp4_proflare_release(bool owned) {
+  if (!game_call())
+    return Mp4SceneResult::waiting;
+  if (owned && mp4_proflare_coordinator && mp4_proflare_coordinator->captured &&
+      !mp4_proflare_coordinator->restored) {
+    const auto r = mp4_proflare_verify_source_restored();
+    if (r != Mp4SceneResult::ok)
+      return r;
+  }
+  Mp4ProFlareAccess access;
+  auto *h = mp4_proflare_coordinator;
+  if (!h){
+    if(mp4_activation_additional_family==mp4_stage_activation_physical_family)
+      mp4_activation_additional_family=nullptr;
+    return mp4_proflare_empty_capture_release()&&mp4_proflare_source_plans_retire()?Mp4SceneResult::ok:Mp4SceneResult::waiting;
+  }
+  if (mp4_proflare_data_original_try)
+    return Mp4SceneResult::waiting;
+  // An unexplained ordinary writer cannot turn partial buffers into restored /
+  // retired Source resources. Preserve custody for explicit quarantine/handoff.
+  if (mp4_proflare_access_withdrawn.load(std::memory_order_acquire) &&
+      mp4_proflare_data_birth_count)
+    return Mp4SceneResult::stale;
+  if (!h->restored) {
+    const auto q = mp4_proflare_retire_gpu();
+    if (q != Mp4SceneResult::ok)
+      return q;
+    if (mp4_proflare_data_birth_count) {
+      if (!h->restoring) {
+        if (mp4_proflare_coordinator_operation_sequence == ~uint64_t(0))
+          return Mp4SceneResult::stale;
+        h->operation = ++mp4_proflare_coordinator_operation_sequence;
+        h->restoring = true;
+      }
+      if (!mp4_proflare_pass_restore_references())
+        return Mp4SceneResult::stale;
+      for (size_t i = mp4_proflare_data_birth_count; i; --i) {
+        const auto r = mp4_proflare_birth_retire(i - 1);
+        if (r == Mp4ProFlareRetireResult::waiting)
+          return Mp4SceneResult::waiting;
+        if (r != Mp4ProFlareRetireResult::ok)
+          return Mp4SceneResult::stale;
+      }
+    }
+  }
+  if(mp4_activation_additional_family==mp4_stage_activation_physical_family)
+    mp4_activation_additional_family=nullptr;
+  if (!mp4_proflare_birth_release())
+    return Mp4SceneResult::waiting;
+  if (!mp4_proflare_data_release(h->existing, mp4_proflare_discard_quiet,
+                                 nullptr))
+    return Mp4SceneResult::waiting;
+  if (!mp4_proflare_pass_release_references(owned && h->captured))
+    return Mp4SceneResult::waiting;
+  mp4_proflare_registry_release();
+  for (size_t i = 0; i < h->count; ++i) {
+    auto &e = h->flares[i];
+    if (e.elements)
+      for (size_t j = 0; j < e.count; ++j) {
+        mp4_proflare_sub_release(e.elements[j].sub);
+        mp4_proflare_scalar_release(e.elements[j].scalar);
+      }
+    ::free(e.elements);
+    mp4_proflare_scalar_release(e.scalar);
+  }
+  // Initial/final calls retire every native duty before the aggregate resets
+  // hardware ledgers. This later logical release drops ordinary GC images only.
+  mp4_proflare_access_published.store(false, std::memory_order_release);
+  ::free(h);
+  mp4_proflare_coordinator = nullptr;
+  return mp4_proflare_source_plans_retire() ? Mp4SceneResult::ok
+                                            : Mp4SceneResult::waiting;
+}
+
+void mp4_proflare_batch_disable_invoke(void *batch, Method *method,
+                                       Mp4ProFlareBatchLate original) {
+  if (!original)
+    return;
+  Mp4ProFlareAccess access(true);
+  if (mp4_proflare_access_published.load(std::memory_order_acquire))
+    (void)mp4_proflare_handoff(batch, mp4pf::Result::unowned);
+  // No controlled target in this finite source plan owns the camera/batch GO.
+  // A real ordinary disable remains ordinary and forwards once. Its cleanup
+  // does not mint a successful owned retirement/fence or Source restore proof.
+  original(batch, method);
+}
+// END_MP4_PROFLARE_COORDINATOR_HOST
+
+// BEGIN_MP4_PROFLARE_CAPTURE_WITNESS_HOST
+// A zero PF plan count is not source evidence. This witness is published only
+// by the real capture invocation after traversing the selected original
+// renderer and proving either no PF feature, or its exact inactive/uncreated
+// form. An active feature/pass/batch/Data is never accepted by this zero path.
+struct Mp4ProFlareEmptyCapture {
+  Mp4SceneWitness source{};
+  uint64_t job = 0, serial = 0, worker_watch = 0;
+  void *feature = nullptr;
+  uintptr_t camera_native = 0, feature_native = 0;
+  int32_t camera_id = 0, feature_id = 0;
+  uint32_t roots[2]{};
+  bool captured = false;
+} mp4_proflare_empty_capture;
+uint64_t mp4_proflare_empty_capture_sequence = 0;
+bool mp4_proflare_empty_shape(const Mp4SceneWitness &source, void **feature) {
+  if (feature)
+    *feature = nullptr;
+  void *f = nullptr, *compute = nullptr, *render = nullptr, *batch = nullptr,
+       *data = nullptr;
+  if (!feature || !game_call() ||
+      !mp4_renderer_proflare_source(source.camera, &f, &compute, &render,
+                                   &batch, &data) ||
+      compute || render || batch || data)
+    return false;
+  if (f) {
+    bool active = true;
+    if (!mp4_actor_field(f, 24, active) || active)
+      return false;
+  }
+  *feature = f;
+  return true;
+}
+bool mp4_proflare_empty_identity(void *object, uintptr_t &native, int32_t &id) {
+  return object && mp4_alive(object) && mp4_actor_field(object, 16, native) &&
+         native && mp4_actor_field(reinterpret_cast<void *>(native), 8, id) && id;
+}
+bool mp4_proflare_empty_capture_current(uint64_t *out) {
+  if (out)
+    *out = 0;
+  const auto &e = mp4_proflare_empty_capture;
+  if (!out || !game_call() || !e.captured || !e.serial || !e.worker_watch ||
+      !e.job || mp4_proflare_coordinator || mp4_proflare_source_plan_count ||
+      e.job != idoly_mp4_runtime::job.generation ||
+      !mp4_scene_same_source(e.source, mp4_stage_host.source) ||
+      !mp4_scene_same_source(e.source, mp4_scene_host.source) ||
+      !e.roots[0] || weak_get(e.roots[0]) != e.source.camera ||
+      (e.feature && (!e.roots[1] || weak_get(e.roots[1]) != e.feature)))
+    return false;
+  uintptr_t camera_native = 0, feature_native = 0;
+  int32_t camera_id = 0, feature_id = 0;
+  void *feature = nullptr;
+  if (!mp4_proflare_empty_identity(e.source.camera, camera_native, camera_id) ||
+      camera_native != e.camera_native || camera_id != e.camera_id ||
+      !mp4_proflare_empty_shape(e.source, &feature) || feature != e.feature ||
+      (feature &&
+       (!mp4_proflare_empty_identity(feature, feature_native, feature_id) ||
+        feature_native != e.feature_native || feature_id != e.feature_id)))
+    return false;
+  *out = e.serial;
+  return true;
+}
+bool mp4_proflare_empty_capture_release() {
+  if (!game_call())
+    return false;
+  for (auto root : mp4_proflare_empty_capture.roots)
+    if (root)
+      weak_free(root);
+  mp4_proflare_empty_capture = {};
+  return true;
+}
+Mp4SceneResult mp4_proflare_capture_empty_source() {
+  if (!game_call())
+    return Mp4SceneResult::waiting;
+  uint64_t current = 0;
+  if (mp4_proflare_empty_capture.captured)
+    return mp4_proflare_empty_capture_current(&current) ? Mp4SceneResult::ok
+                                                       : Mp4SceneResult::stale;
+  if (!mp4_proflare_source_boundary() || mp4_proflare_coordinator ||
+      mp4_proflare_source_plan_count ||
+      mp4_proflare_empty_capture_sequence == ~uint64_t(0))
+    return Mp4SceneResult::unsupported;
+  Mp4ProFlareEmptyCapture e{};
+  e.source = mp4_stage_host.source;
+  e.job = idoly_mp4_runtime::job.generation;
+  e.worker_watch = mp4sourceworkers::host.watch;
+  if (!e.worker_watch || !mp4_proflare_empty_shape(e.source, &e.feature) ||
+      !mp4_proflare_empty_identity(e.source.camera, e.camera_native, e.camera_id) ||
+      (e.feature && !mp4_proflare_empty_identity(e.feature, e.feature_native,
+                                                e.feature_id)))
+    return Mp4SceneResult::unsupported;
+  e.roots[0] = mp4_retain(e.source.camera);
+  if (e.feature)
+    e.roots[1] = mp4_retain(e.feature);
+  if (!e.roots[0] || weak_get(e.roots[0]) != e.source.camera ||
+      (e.feature && (!e.roots[1] || weak_get(e.roots[1]) != e.feature))) {
+    for (auto root : e.roots)
+      if (root)
+        weak_free(root);
+    return Mp4SceneResult::failed;
+  }
+  e.serial = ++mp4_proflare_empty_capture_sequence;
+  e.captured = true;
+  mp4_proflare_empty_capture = e;
+  if (!mp4_proflare_empty_capture_current(&current) ||
+      !mp4_proflare_source_boundary()) {
+    (void)mp4_proflare_empty_capture_release();
+    return Mp4SceneResult::stale;
+  }
+  return Mp4SceneResult::ok;
+}
+bool mp4_proflare_capture_current(uint64_t *out) {
+  if (out)
+    *out = 0;
+  if (!out || !game_call())
+    return false;
+  Mp4ProFlareAccess access;
+  const auto *h = mp4_proflare_coordinator;
+  if (!h)
+    return mp4_proflare_empty_capture_current(out);
+  if (!h->captured || !h->serial || !mp4_proflare_ready(h->batch))
+    return false;
+  *out = h->serial;
+  return true;
+}
+// END_MP4_PROFLARE_CAPTURE_WITNESS_HOST
+
+// BEGIN_MP4_PROFLARE_FRONTENDS_HOST
+// Whole typed originals enter the PF exclusion window before any receiver,
+// collection, resource or source-owner lookup. Aliases refer to the exact same
+// saved original used by the source callable/installation receipt predicates.
+auto &mp4_proflare_start_original = mp4_proflare_start_trampoline;
+auto &mp4_proflare_enable_original = mp4_proflare_enable_trampoline;
+auto &mp4_proflare_disable_original = mp4_proflare_disable_trampoline;
+auto &mp4_proflare_try_original = mp4_proflare_try_trampoline;
+auto &mp4_proflare_initialize_original = mp4_proflare_initialize_trampoline;
+auto &mp4_proflare_batch_late_original = mp4_proflare_batch_late_trampoline;
+auto &mp4_proflare_batch_disable_original =
+    mp4_proflare_batch_disable_trampoline;
+void mp4_proflare_start_hook(void *self, Method *method) {
+  Mp4ProFlareAccess access(true);
+  (void)mp4_proflare_start_invoke(self, method, mp4_proflare_start_original);
+}
+void mp4_proflare_enable_hook(void *self, Method *method) {
+  Mp4ProFlareAccess access(true);
+  mp4_proflare_lifecycle_invoke(mp4pf::Operation::enable, self, method,
+                                mp4_proflare_enable_original);
+}
+void mp4_proflare_disable_hook(void *self, Method *method) {
+  Mp4ProFlareAccess access(true);
+  mp4_proflare_lifecycle_invoke(mp4pf::Operation::disable, self, method,
+                                mp4_proflare_disable_original);
+}
+bool mp4_proflare_try_hook(void *self, void *camera, void **output,
+                           Method *method) {
+  Mp4ProFlareAccess access(true);
+  if (!mp4_proflare_try_original)
+    return false;
+  // An ordinary/unowned original remains ordinary even while snapshots are
+  // retained. This is deliberately separate from the owned Try journal: only
+  // its actual draw owner and typed Initialize callsite may mint Data custody.
+  // Cancellation inside an already owned draw still reaches that journal and
+  // its finite failure path; it never becomes an ordinary forwarding grant.
+  const bool private_frame = game_call() && mp4_owned_render_ticket_active &&
+                             mp4_owned_render_depth == 1 &&
+                             !mp4_unowned_render_depth;
+  if (mp4_proflare_registry_scope.active() && !private_frame) {
+    (void)mp4_proflare_handoff(self, mp4pf::Result::unowned);
+    return mp4_proflare_try_original(self, camera, output, method);
+  }
+  return mp4_proflare_try_invoke(self, camera, output, method,
+                                 mp4_proflare_try_original);
+}
+void mp4_proflare_initialize_hook(void *self, int32_t maximum, Method *method) {
+  // Must be captured at the genuine hook entry, before any helper changes LR.
+  const auto return_pc =
+      reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  Mp4ProFlareAccess access(true);
+  mp4_proflare_initialize_invoke(self, maximum, method, return_pc,
+                                 mp4_proflare_initialize_original);
+}
+void mp4_proflare_batch_late_hook(void *self, Method *method) {
+  mp4_proflare_batch_late_invoke(self, method,
+                                 mp4_proflare_batch_late_original);
+}
+void mp4_proflare_batch_disable_hook(void *self, Method *method) {
+  mp4_proflare_batch_disable_invoke(self, method,
+                                    mp4_proflare_batch_disable_original);
+}
+// END_MP4_PROFLARE_FRONTENDS_HOST
+
+// BEGIN_MP4_STAGE_ACTIVATION_PHYSICAL_FAMILY
+// One physical dispatcher preserves the genuine PS image owner and adds only
+// exact captured PF registry/scalar/cache images. Source plans cannot call it
+// to acquire lifecycle permission. Publish after the corresponding source
+// images complete; retire this pointer before either backend destroys images.
+bool mp4_stage_activation_physical_family(void *component, uint32_t *family,
+                                          uint64_t *receipt) {
+  if (family)
+    *family = 0;
+  if (receipt)
+    *receipt = 0;
+  if (!family || !receipt || !component || !game_call())
+    return false;
+  if (mp4_particle_activation_family(component, family, receipt))
+    return true;
+  uint64_t captured = 0;
+  if (!mp4_proflare_component_family(component, &captured) || !captured)
+    return false;
+  *family = 0x5046u;
+  *receipt = captured;
+  return true;
+}
+// END_MP4_STAGE_ACTIVATION_PHYSICAL_FAMILY
+
+// BEGIN_MP4_PROFLARE_EQUIPMENT_SOURCE_PLAN_HOST
+// Read-only membership/resource-plan join for LiveLightBasic.flares. The actual
+// Equipment source collector supplies this exact field receiver/array; this
+// does not fabricate a Timeline RuntimeClip, graph or lifecycle grant. Before
+// images it records finite resource plans; afterward it checks retained exact
+// image membership without consulting a retired source graph.
+bool mp4_proflare_equipment_source_plan(void *equipment, void *array,
+                                         const Mp4SceneWitness &source) {
+  if (!game_call() || !equipment || !array ||
+      !mp4_exact_type(equipment,
+                      "Solis.Live.Equipment.Environment.LiveLightBasic") ||
+      !mp4_proflare_backend_hooks() ||
+      !mp4_root_track_field(equipment, "flares", 72))
+    return false;
+  Mp4ProFlareAccess access;
+  Mp4ActorTempRoot receiver_root(equipment), array_root(array);
+  void *actual = nullptr;
+  void **rows = nullptr;
+  size_t count = 0;
+  if (receiver_root.get() != equipment || array_root.get() != array ||
+      !mp4_actor_field(equipment, 72, actual) || actual != array ||
+      !mp4_stage_array(array, &rows, &count, 128))
+    return false;
+  for (size_t i = 0; i < count; ++i) {
+    void *flare = rows[i];
+    if (!flare)
+      return false;
+    for (size_t j = 0; j < i; ++j)
+      if (rows[j] == flare)
+        return false;
+    Mp4ActorTempRoot flare_root(flare);
+    using Get = void *(*)(void *, Method *);
+    void *go = mp4_equipment_call<Get>(mp4_stage_profile.component_gameobject)(
+        flare, nullptr);
+    if (flare_root.get() != flare || !go)
+      return false;
+    const auto *h = mp4_proflare_coordinator;
+    if (h && h->captured) {
+      const auto *p = mp4_proflare_source_plan_find(flare);
+      uint64_t image = 0;
+      if (!p || !mp4_scene_same_source(p->source, source) ||
+          p->retained.image.go != go || !mp4_proflare_source_plan_retained(*p) ||
+          !mp4_proflare_component_family(flare, &image) || image != h->serial)
+        return false;
+    } else {
+      Mp4TimelineContext resource_plan{};
+      resource_plan.phase = Mp4TimelineProofPhase::admission;
+      resource_plan.witness = source;
+      if (!mp4_proflare_source_component_plan(resource_plan, flare, go))
+        return false;
+    }
+    if (flare_root.get() != flare || receiver_root.get() != equipment ||
+        array_root.get() != array ||
+        !mp4_actor_field(equipment, 72, actual) || actual != array)
+      return false;
+  }
+  return receiver_root.get() == equipment && array_root.get() == array;
+}
+// END_MP4_PROFLARE_EQUIPMENT_SOURCE_PLAN_HOST
+
+// Immutable programme bytes live with the Stage source image types. Keeping
+// them in the existing header preserves the locked native-input inventory.
+using Mp4PsyProgramCode=idoly_mp4_stage::source_program::Mp4PsyProgramCode;
+constexpr const auto&mp4_psy_program_code=idoly_mp4_stage::source_program::mp4_psy_program_code;
+
+// BEGIN_MP4_PSYLLIUM_PROGRAM_HOST
+// Custom managed Psyllium programme membership, never a CPU/GPU completion.
+// The shared renderer predicate supplies the finite default-queue API, exact
+// pass virtual slots/field metadata and current original-renderer callbacks.
+// This adds full custom method bytes and actual captured Stage resource owner.
+bool mp4_stage_graphics_psyllium_current(uint64_t source,uint64_t job){
+ if(!game_call()||!source||!job||source!=mp4_stage_host.source.generation
+  ||job!=idoly_mp4_runtime::job.generation||!mp4_stage_owner(nullptr)
+  ||!mp4_stage_psyllium.source_quiescent()||!mp4_stage_psy_state.captured
+  ||!mp4_stage_host.psyllium||!mp4_stage_psy_state_current(mp4_stage_host.psyllium)
+  ||!mp4_renderer_source_program_closed())return false;
+ for(const auto&pin:mp4_psy_program_code){
+  const auto*body=reinterpret_cast<const uint8_t*>(image_base+pin.rva);
+  mp4game::Binding entry{};entry.rva=pin.rva;::memcpy(entry.prefix,pin.body,16);
+  // These existing managed hooks own at most the recorded entry prefix. Their
+  // real installation receipt must still match; the rest of every custom body
+  // remains byte-exact. A hook receipt does not authorize a changed tail.
+  if(!pin.rva||pin.bytes<16||pin.bytes>sizeof(pin.body)||!mp4_actor_mapped(body,pin.bytes,false)
+   ||(!mp4_prefix(entry)&&!mp4_hook_was_statically_verified(entry))
+   ||::memcmp(body+16,pin.body+16,pin.bytes-16))return false;
+ }
+ Mp4OriginalRendererSource renderer{};
+ if(!mp4_original_renderer_source_detail(renderer)||renderer.camera!=mp4_stage_host.source.camera
+  ||!mp4_scene_same_source(renderer.scene,mp4_stage_host.source))return false;
+ const auto&feature_schema=mp4_reuse_features[11];
+ const auto&compute_schema=mp4_reuse_passes[14];const auto&render_schema=mp4_reuse_passes[15];
+ void*feature_class=mp4_resolved_type_class(feature_schema.type.code,feature_schema.type.space,feature_schema.type.name);
+ void*compute_class=mp4_resolved_type_class(compute_schema.type.code,compute_schema.type.space,compute_schema.type.name);
+ void*render_class=mp4_resolved_type_class(render_schema.type.code,render_schema.type.space,render_schema.type.name);
+ if(!feature_class||!compute_class||!render_class)return false;
+ void**features=nullptr;size_t count=0;void*feature=nullptr;
+ if(!mp4_actor_list(renderer.features,&features,&count,64))return false;
+ for(size_t i=0;i<count;++i){if(!features[i])return false;
+  if(object_class(features[i])==feature_class){if(feature)return false;feature=features[i];}}
+ if(!feature||!mp4_alive(feature))return false;
+ void*compute=nullptr,*render=nullptr,*compute_owner=nullptr,*render_owner=nullptr;
+ if(!mp4_actor_field(feature,56,compute)||!compute||object_class(compute)!=compute_class
+  ||!mp4_actor_field(feature,64,render)||!render||object_class(render)!=render_class
+  ||!mp4_actor_field(compute,160,compute_owner)||compute_owner!=mp4_stage_host.psyllium
+  ||!mp4_actor_field(render,136,render_owner)||render_owner!=compute_owner
+  ||!mp4_stage_psy_source(nullptr,render_owner,render,renderer.camera))return false;
+ // Exact metadata field values close the programme receiver, not mutable
+ // authored time/colour/palette or per-pass GPU culling result byte equality.
+ void*feature_after=nullptr,*compute_after=nullptr,*render_after=nullptr;
+ bool same=false;
+ for(size_t i=0;i<count;++i)if(features[i]==feature)same=!same;
+ return same&&mp4_actor_field(feature,56,compute_after)&&compute_after==compute
+  &&mp4_actor_field(feature,64,render_after)&&render_after==render
+  &&mp4_actor_field(render,136,feature_after)&&feature_after==render_owner
+  &&mp4_stage_psy_state_current(render_owner)&&mp4_stage_owner(nullptr);
+}
+// END_MP4_PSYLLIUM_PROGRAM_HOST
+
+// BEGIN_MP4_STAGE_GRAPHICS_PROGRAM_HOST
+// Stage producer RECIPE only. No job/fence completion, old-source byte replay,
+// future GPU fence or private callback permission follows from this predicate.
+// PF supplies its concrete retained registry/pass/Data programme after capture.
+bool (*mp4_stage_graphics_proflare_program_current)(uint64_t,uint64_t)=nullptr;
+bool mp4_stage_graphics_psyllium_current(uint64_t,uint64_t);
+bool (*mp4_stage_graphics_psyllium_program_current)(uint64_t,uint64_t)=mp4_stage_graphics_psyllium_current;
+[[maybe_unused]] bool mp4_stage_graphics_program_current(uint64_t source,uint64_t job){
+ if(!source||!job||!game_call()||source!=mp4_stage_host.source.generation
+  ||source!=mp4_scene_host.source.generation||job!=idoly_mp4_runtime::job.generation
+  ||!mp4_stage_host.configured||mp4_stage_host.admitting||!mp4_stage_owner(nullptr)
+  ||!mp4_stage_equipment.active()||!mp4_stage_equipment.source_quiescent()
+  ||!mp4_equipment_targets.started||!mp4_equipment_targets.captured||mp4_equipment_targets.count>256
+  ||mp4_stage_host.count>256||!mp4_equipment_pins_current())return false;
+ bool beam=false,psyllium=false;
+ for(size_t i=0;i<mp4_equipment_targets.count;++i){const auto&t=mp4_equipment_targets.targets[i];
+  if(!t.object||!t.kind||t.kind>6)return false;
+  // Laser native Mesh upload programme has no independent queue proof here.
+  // A CPU/native target image is not that GPU programme.
+  if(t.kind==4)return false;
+  beam|=t.kind==3&&t.beam;psyllium|=t.kind==6;
+ }
+ if(beam&&(!mp4_vlb_state.started||!mp4_vlb_state.captured||mp4_vlb_state.failed
+   ||mp4_vlb_state.in_flight||!mp4_stage_vlb_current()||!mp4_vlb_capi_ready()))return false;
+ if(psyllium&&(!mp4_stage_psyllium.source_quiescent()||!mp4_stage_graphics_psyllium_program_current
+   ||!mp4_stage_graphics_psyllium_program_current(source,job)))return false;
+ if(mp4_stage_host.count){const auto*h=mp4_particle_native_host;
+  if(!h||!h->captured||!h->serial||h->source.generation!=source||h->job!=job
+    ||h->count!=mp4_stage_host.count||!mp4_stage_particles.active()
+    ||!mp4_particle_renderer_normal_program_bindings()||!mp4_particle_renderer_descriptor_bindings())return false;
+  Mp4ParticleRetainedWorkerOwner owners[256]{};size_t count=0;
+  if(!mp4_particle_native_retained_worker_inventory(source,job,h->serial,owners,256,&count)||count!=h->count)return false;
+  for(size_t i=0;i<count;++i){const auto*p=mp4_particle_source_program_find(owners[i].owner.managed);
+    if(!p||!p->serial||!p->plan||!mp4_particle_source_program_current(*p)
+      ||p->pair.renderer!=owners[i].renderer||p->pair.renderer_native!=owners[i].renderer_native
+      ||p->pair.renderer_id!=owners[i].renderer_id)return false;
+  }
+ }
+ void*feature=nullptr,*compute=nullptr,*render=nullptr,*batch=nullptr,*data=nullptr;
+ if(!mp4_renderer_proflare_source(mp4_stage_host.source.camera,&feature,&compute,&render,&batch,&data))return false;
+ if(feature){bool active=true;
+  if(!mp4_actor_field(feature,24,active))return false;
+  if(active&&(!mp4_stage_graphics_proflare_program_current
+    ||!mp4_stage_graphics_proflare_program_current(source,job)))return false;
+ }
+ return game_call()&&mp4_stage_owner(nullptr);
+}
+// END_MP4_STAGE_GRAPHICS_PROGRAM_HOST
+// BEGIN_MP4_PROFLARE_LIFECYCLE_BINDINGS
+Mp4SceneResult mp4_proflare_capture_source_images(){
+ const auto captured=mp4_proflare_capture();
+ if(captured!=Mp4SceneResult::ok)return captured;
+ uint64_t receipt=0;
+ if(!mp4_proflare_capture_current(&receipt)||!receipt||!mp4_particle_native_host
+  ||!mp4_particle_native_host->captured)return Mp4SceneResult::stale;
+ mp4_activation_additional_family=mp4_stage_activation_physical_family;
+ return Mp4SceneResult::ok;
+}
+void mp4_proflare_source_withdraw()noexcept{
+ mp4_proflare_access_withdrawn.store(true,std::memory_order_release);
+}
+bool mp4_proflare_admission_retire()noexcept{
+ if(!game_call()||mp4_proflare_coordinator)return false;
+ try{
+  if(mp4_proflare_release(false)!=Mp4SceneResult::ok)return false;
+  Mp4ProFlareAccess access;
+  if(mp4_proflare_coordinator||mp4_proflare_source_plan_count)return false;
+  mp4_proflare_access_withdrawn.store(false,std::memory_order_release);
+  return true;
+ }catch(...){return false;}
+}
+Mp4SceneResult mp4_stage_native_verify_source_restored(void*context){
+ const auto particles=mp4_particle_native_verify_source_restored(context);
+ if(particles!=Mp4SceneResult::ok)return particles;
+ return mp4_proflare_verify_source_restored();
+}
+void mp4_bind_proflare_routes(){
+ mp4_proflare_bind();
+ mp4_renderer_proflare_data_reference=mp4_proflare_renderer_data_reference;
+ mp4_gpu_stage_auxiliary_recipe_closed=mp4_proflare_auxiliary_recipe;
+ mp4_stage_graphics_proflare_program_current=mp4_stage_graphics_proflare_current;
+}
+// END_MP4_PROFLARE_LIFECYCLE_BINDINGS
+
+// BEGIN_MP4_ACTIVATION_SOURCE_PLAN_HOST
+// Source-only Activation subtree capability. The authored/runtime/factory
+// recipe remains the caller's separate proof. This helper enumerates every
+// actual component (including inactive descendants), retains it before another
+// managed call, and selects only implemented finite restoration programmes.
+// It reads immutable native PS configuration; jobs/State/RNG/cache/event arrays
+// are deferred to the genuine held native/public capture before any Rebuild.
+bool mp4_particle_renderer_source_cache_ready();
+bool mp4_world_volume_source_capability(void*,void*);
+bool mp4_activation_source_plan_pins(){
+  if(!game_call()||!mp4_control_source_pins()
+    ||!mp4_timeline_class(mp4_activation_target_pins.component)
+    ||!mp4_timeline_class(mp4_activation_target_pins.transform))return false;
+  const auto verified=[](const auto&p){mp4game::Binding b{};b.rva=p.rva;::memcpy(b.prefix,p.prefix,16);return mp4_prefix(b)||mp4_hook_was_statically_verified(b);};
+  for(const auto*p:{&mp4_activation_target_pins.active_self,&mp4_activation_target_pins.set_active,
+      &mp4_activation_target_pins.dirty_get,&mp4_activation_target_pins.dirty_set})if(!verified(*p))return false;
+  return verified(mp4_stage_profile.components_internal)&&verified(mp4_stage_profile.component_gameobject)
+    &&verified(mp4_stage_profile.equipment_transform)&&verified(mp4_actor_profile.parent)
+    &&verified(mp4_cam_profile.game_object_transform);
+}
+bool mp4_activation_source_particle_plan(const Mp4TimelineContext&c,void*component,void*go){
+  if(!mp4_particle_renderer_source_cache_ready()||!mp4_particle_native_capability())return false;
+  const auto&bank=mp4_stage_admission_particles;
+  if(!bank.committed||!bank.receipt||!mp4_stage_admission_source(c.witness))return false;
+  size_t matches=0;
+  for(size_t i=0;i<bank.count;++i){const auto&e=bank.particles[i];
+    if(e.particle_go!=go||e.owner.producer_kind!=1)continue;
+    if(component!=e.owner.particle&&!mp4_timeline_exact(component,mp4_particle_policy_pins.renderer))continue;
+    Mp4TimelineContext particle_context{};particle_context.witness=c.witness;particle_context.phase=c.phase;
+    particle_context.director=e.director;particle_context.asset=e.asset;particle_context.graph=e.graph;
+    Mp4ControlSourceLeaf particle_leaf{};particle_leaf.role=Mp4ControlSourceRole::particle;
+    particle_leaf.node=e.node;particle_leaf.script=e.owner.producer;particle_leaf.target=e.owner.particle;particle_leaf.seed=e.seed;
+    uint64_t serial=0;
+    if(!mp4_stage_admission_identity(e)||!mp4_particle_source_program_create(particle_context,particle_leaf,&serial)||!serial)return false;
+    const auto*p=mp4_particle_source_program_find(e.owner.particle);
+    if(!p||p->serial!=serial||!mp4_particle_source_program_current(*p)
+      ||p->pair.game_object!=go||(component!=p->pair.owner.managed&&component!=p->pair.renderer))continue;
+    if(++matches!=1)return false;
+  }
+  return matches==1&&mp4_stage_admission_source(c.witness);
+}
+struct Mp4ActivationSourceAnimatorOwner{
+ const Mp4TimelineContext*context=nullptr;void*component=nullptr,*go=nullptr;
+ uint32_t component_root=0,go_root=0;uintptr_t native=0,go_native=0;int32_t id=0,go_id=0;
+};
+bool mp4_activation_source_animator_current(void*ctx,void*component,void*go){
+ if(!ctx||!game_call())return false;
+ const auto&o=*static_cast<Mp4ActivationSourceAnimatorOwner*>(ctx);
+ uintptr_t native=0,go_native=0;int32_t id=0,go_id=0;
+ using Get=void*(*)(void*,Method*);
+ return o.context&&mp4_timeline_source_plan_phase(o.context->phase)
+   &&mp4_stage_admission_particles.committed&&mp4_stage_admission_particles.receipt
+   &&mp4_stage_admission_source(o.context->witness)
+   &&o.component==component&&o.go==go&&weak_get(o.component_root)==component&&weak_get(o.go_root)==go
+   &&mp4_exact_type(component,"UnityEngine.Animator")&&mp4_exact_type(go,"UnityEngine.GameObject")
+   &&mp4_alive(component)&&mp4_alive(go)
+   &&mp4_actor_field(component,16,native)&&native==o.native
+   &&mp4_actor_field(go,16,go_native)&&go_native==o.go_native
+   &&mp4_actor_field(reinterpret_cast<void*>(native),8,id)&&id==o.id
+   &&mp4_actor_field(reinterpret_cast<void*>(go_native),8,go_id)&&go_id==o.go_id
+   &&mp4_equipment_call<Get>(mp4_stage_profile.component_gameobject)(component,nullptr)==go;
+}
+bool mp4_activation_source_animator_recognize(const Mp4TimelineContext&c,void*component,void*go){
+ Mp4ActorTempRoot component_root(component),go_root(go);
+ // These process-local strong handles attest only this actual inventory tuple.
+ // The native reader supplies all zero-graph/controller/avatar/job invariants;
+ // neither this source plan nor its temporary image grants SetActive.
+ Mp4ActivationSourceAnimatorOwner owner{};owner.context=&c;owner.component=component;owner.go=go;
+ owner.component_root=mp4_retain(component);owner.go_root=mp4_retain(go);
+ struct Drop{Mp4ActivationSourceAnimatorOwner&o;~Drop(){if(o.component_root)weak_free(o.component_root);if(o.go_root)weak_free(o.go_root);}}drop{owner};
+ if(!owner.component_root||!owner.go_root||!mp4_dormant_animator_available()
+   ||!mp4_actor_field(component,16,owner.native)||!owner.native
+   ||!mp4_actor_field(go,16,owner.go_native)||!owner.go_native
+   ||!mp4_actor_field(reinterpret_cast<void*>(owner.native),8,owner.id)||!owner.id
+   ||!mp4_actor_field(reinterpret_cast<void*>(owner.go_native),8,owner.go_id)||!owner.go_id)return false;
+ Mp4DormantAnimatorImage image{};
+ return component_root.get()==component&&go_root.get()==go
+   &&mp4_dormant_animator_read(&owner,mp4_activation_source_animator_current,component,go,&image)
+   &&image.component==component&&image.game_object==go&&image.native==owner.native
+   &&mp4_activation_source_animator_current(&owner,component,go);
+}
+bool mp4_activation_source_component_plan(const Mp4TimelineContext&c,void*component,void*go){
+  uintptr_t callbacks[5]{};
+  if(!mp4_activation_callback_table(component,callbacks))return false;
+  if(mp4_timeline_exact(component,mp4_activation_target_pins.transform)){
+    for(auto callback:callbacks)if(callback)return false;
+    return true;
+  }
+  if(mp4_type_is(component,"UnityEngine.ParticleSystem")
+    ||mp4_timeline_exact(component,mp4_particle_policy_pins.renderer)){
+    // Native exact types only. No managed subclass callback grant.
+    const char*expected=mp4_type_is(component,"UnityEngine.ParticleSystem")?
+      "UnityEngine.ParticleSystem":"UnityEngine.ParticleSystemRenderer";
+    if(!mp4_exact_type(component,expected))return false;
+    for(auto callback:callbacks)if(callback)return false;
+    return mp4_activation_source_particle_plan(c,component,go);
+  }
+  if(mp4_exact_type(component,"UnityEngine.Animator")){
+    for(auto callback:callbacks)if(callback)return false;
+    // Recognition is useful source diagnostics, but no native manager/order
+    // restoration programme has yet been established for this lifecycle.
+    // A measured empty graph is not an implemented SetActive capability.
+    if(!mp4_activation_source_animator_recognize(c,component,go))return false;
+    return false;
+  }
+  if(mp4_timeline_exact(component,mp4_proflare_pins.flare))
+    return mp4_proflare_source_component_plan(c,component,go);
+  return mp4_world_volume_source_capability(component,go);
+}
+bool mp4_source_control_activation_plan(const Mp4TimelineContext&c,
+    const Mp4ControlPassiveImage&,const Mp4ControlSourceLeaf&leaf){
+  if(!mp4_timeline_source_plan_phase(c.phase)||leaf.role!=Mp4ControlSourceRole::activation
+    ||!leaf.target||!leaf.script||!mp4_activation_source_plan_pins()
+    ||!mp4_type_is(leaf.target,"UnityEngine.GameObject")||!mp4_alive(leaf.target))return false;
+  Mp4ActorTempRoot target_root(leaf.target);
+  using Get=void*(*)(void*,Method*);
+  using Components=void*(*)(void*,void*,bool,bool,bool,bool,void*,Method*);
+  void*type=mp4_type_get_object(reinterpret_cast<void*>(image_base+mp4_activation_target_pins.component.binding.rva));
+  Mp4ActorTempRoot type_root(type);
+  if(!type||target_root.get()!=leaf.target||type_root.get()!=type)return false;
+  Mp4ActorTempRoot array(mp4_equipment_call<Components>(mp4_stage_profile.components_internal)(
+    leaf.target,type,true,true,true,false,nullptr,nullptr));
+  void**values=nullptr;size_t count=0;
+  if(!array.get()||!mp4_stage_array(array.get(),&values,&count,8192)||!count)return false;
+  auto*roots=static_cast<uint32_t*>(::malloc(count*sizeof(uint32_t)));
+  if(!roots)return false;
+  ::memset(roots,0,count*sizeof(uint32_t));
+  struct Drop{uint32_t*p;size_t n;~Drop(){for(size_t i=0;i<n;++i)if(p[i])weak_free(p[i]);::free(p);}}drop{roots,count};
+  for(size_t i=0;i<count;++i){if(!values[i])return false;for(size_t j=0;j<i;++j)if(values[j]==values[i])return false;
+    roots[i]=mp4_retain(values[i]);if(!roots[i]||weak_get(roots[i])!=values[i])return false;}
+  Mp4ActorTempRoot root(mp4_cam_call<Get>(mp4_cam_profile.game_object_transform)(leaf.target,nullptr));
+  if(!root.get()||!mp4_alive(root.get()))return false;
+  bool root_seen=false;
+  for(size_t i=0;i<count;++i){void*component=weak_get(roots[i]);
+    if(component!=values[i]||!mp4_alive(component)||!mp4_type_is(component,"UnityEngine.Component"))return false;
+    Mp4ActorTempRoot go(mp4_equipment_call<Get>(mp4_stage_profile.component_gameobject)(component,nullptr));
+    Mp4ActorTempRoot transform(mp4_equipment_call<Get>(mp4_stage_profile.equipment_transform)(component,nullptr));
+    uintptr_t native=0;int32_t id=0;
+    if(!go.get()||!transform.get()||!mp4_alive(go.get())||!mp4_alive(transform.get())
+      ||!mp4_actor_field(component,16,native)||!native||!mp4_actor_field(reinterpret_cast<void*>(native),8,id)||!id)return false;
+    void*at=transform.get();bool member=false;
+    uint32_t ancestry[256]{};
+    struct Ancestors{uint32_t*p;~Ancestors(){for(size_t j=0;j<256;++j)if(p[j])weak_free(p[j]);}}ancestors{ancestry};
+    for(size_t depth=0;at&&depth<256;++depth){ancestry[depth]=mp4_retain(at);
+      if(!ancestry[depth]||weak_get(ancestry[depth])!=at)return false;
+      if(at==root.get()){member=true;break;}at=mp4_actor_state_api().transform_parent(at,nullptr);}
+    if(!member||!mp4_activation_source_component_plan(c,component,go.get()))return false;
+    if(component==root.get()&&mp4_timeline_exact(component,mp4_activation_target_pins.transform))root_seen=true;
+    uintptr_t after=0;int32_t after_id=0;
+    if(weak_get(roots[i])!=component||!mp4_actor_field(component,16,after)||after!=native
+      ||!mp4_actor_field(reinterpret_cast<void*>(native),8,after_id)||after_id!=id)return false;
+  }
+  return root_seen&&target_root.get()==leaf.target&&mp4_activation_source_plan_pins();
+}
+
+// END_MP4_ACTIVATION_SOURCE_PLAN_HOST
+
 // BEGIN_MP4_SOURCE_CONTROL_PS_PLAN
 bool mp4_particle_renderer_source_cache_ready();
 [[maybe_unused]] bool mp4_source_control_particle_plan(const Mp4TimelineContext &c,
@@ -47932,6 +52138,8 @@ bool mp4_particle_renderer_source_cache_ready();
     return false;
   if (leaf.role == Mp4ControlSourceRole::director)
     return mp4_source_control_director_plan(c, raw, leaf);
+  if (leaf.role == Mp4ControlSourceRole::activation)
+    return mp4_source_control_activation_plan(c, raw, leaf);
   if (leaf.role != Mp4ControlSourceRole::particle)
     return false;
   uint64_t actual = 0;
@@ -48837,6 +53045,17 @@ bool mp4_audio_active_phase(const Mp4AudioOuterHost&h){
  default:return false;
  }
 }
+bool mp4_audio_active_schedule_current(const mp4_director_maintenance::Call&call,const Mp4AudioActiveCallOrigin&origin){
+ namespace dm=mp4_director_maintenance;
+ if(call.kind==dm::Kind::native_phase){uint64_t tick=0;uint8_t phase=0;
+  return mp4_animation_gate.granted_phase(call.epoch,&tick,&phase)&&tick==origin.tick&&phase==origin.phase;
+ }
+ // The exact Deferred Call is planned while closed, executes only the real
+ // phase5 inside maintenance(), then is closed again for post-consumption.
+ // No other Raw kind may borrow this maintenance-only native stack.
+ return mp4_animation_gate.closed(call.epoch)
+  ||(call.kind==dm::Kind::maintenance&&mp4_animation_gate.maintenance_inflight(call.epoch));
+}
 [[maybe_unused]] bool mp4_audio_active_call_source_quiet(const mp4_director_maintenance::Call&call)noexcept{
  try{
   if(!game_call()||!call.epoch||!call.serial||!call.original_receipt||!mp4_audio_outer_storage)return false;
@@ -48847,10 +53066,7 @@ bool mp4_audio_active_phase(const Mp4AudioOuterHost&h){
   const auto&w=mp4_world_host;
   if(!w.animation_owned||w.invalidated||w.epoch!=call.epoch||!mp4_animation_published.load(std::memory_order_acquire)
    ||reinterpret_cast<uintptr_t>(mp4_scene_root_asset_receipt(call.epoch))!=call.source_asset)return false;
-  if(call.kind==mp4_director_maintenance::Kind::native_phase){
-   uint64_t tick=0;uint8_t phase=0;
-   if(!mp4_animation_gate.granted_phase(call.epoch,&tick,&phase)||tick!=origin.tick||phase!=origin.phase)return false;
-  }else if(!mp4_animation_gate.closed(call.epoch))return false;
+  if(!mp4_audio_active_schedule_current(call,origin))return false;
   auto*bank=mp4_audio_outer_storage;const auto&h=*bank;
   if(h.epoch!=call.epoch||h.failed||h.canonical_readers||h.source_readers||h.pending_canonical
    ||mp4_audio_native_readers.load(std::memory_order_acquire)
@@ -48881,7 +53097,9 @@ bool mp4_audio_active_phase(const Mp4AudioOuterHost&h){
    &&!mp4_audio_native_readers.load(std::memory_order_acquire)
    &&!mp4_audio_foreign_dirty.load(std::memory_order_acquire)
    &&mp4_audio_outer_current()&&mp4_audio_outer_roots()&&mp4_audio_active_phase(h)
-   &&mp4_audio_active_call_origin(call,after)&&mp4_audio_active_same_origin(origin,after);
+   &&w.animation_owned&&!w.invalidated&&w.epoch==call.epoch&&mp4_animation_published.load(std::memory_order_acquire)
+   &&reinterpret_cast<uintptr_t>(mp4_scene_root_asset_receipt(call.epoch))==call.source_asset
+   &&mp4_audio_active_call_origin(call,after)&&mp4_audio_active_same_origin(origin,after)&&mp4_audio_active_schedule_current(call,after);
  }catch(...){return false;}
 }
 // END_MP4_AUDIO_ACTIVE_CALL_SOURCE_QUIET
@@ -50400,6 +54618,13 @@ void *install(void *) {
         HOOK(mp4_actor_derived_late_ref,mp4_actor_derived_late_ref_hook,mp4_actor_derived_late_ref_original),
         HOOK(mp4_actor_derived_late_shared,mp4_actor_derived_late_shared_hook,mp4_actor_derived_late_shared_original),
         HOOK(mp4_particle_control_simulate,mp4_particle_control_simulate_hook,mp4_particle_control_simulate_original),
+        HOOK(mp4_proflare_start,mp4_proflare_start_hook,mp4_proflare_start_original),
+        HOOK(mp4_proflare_enable,mp4_proflare_enable_hook,mp4_proflare_enable_original),
+        HOOK(mp4_proflare_disable,mp4_proflare_disable_hook,mp4_proflare_disable_original),
+        HOOK(mp4_proflare_try,mp4_proflare_try_hook,mp4_proflare_try_original),
+        HOOK(mp4_proflare_initialize,mp4_proflare_initialize_hook,mp4_proflare_initialize_original),
+        HOOK(mp4_proflare_batch_late,mp4_proflare_batch_late_hook,mp4_proflare_batch_late_original),
+        HOOK(mp4_proflare_batch_disable,mp4_proflare_batch_disable_hook,mp4_proflare_batch_disable_original),
         HOOK(mp4_equipment_late,mp4_equipment_late_hook,mp4_equipment_late_original),
         HOOK(mp4_photography_is_end,mp4_photography_is_end_hook,mp4_photography_is_end_original),
         HOOK(mp4_player_is_end,mp4_player_is_end_hook,mp4_player_is_end_original),
@@ -50457,7 +54682,7 @@ void *install(void *) {
             for (size_t j = i; j > 0; --j) shadowhook_unhook(hooks[j - 1].stub);
             set_state("init_failed"); return nullptr;
         }
-        if(!mp4_record_managed_hook(hooks[i].entry,hooks[i].stub,hooks[i].original)){
+        if(!mp4_record_managed_hook(hooks[i].entry,hooks[i].stub,hooks[i].original,hooks[i].replacement)){
             mp4_shader_bootstrap_receipts_open.store(false,std::memory_order_release);
             for(size_t j=i+1;j>0;--j)shadowhook_unhook(hooks[j-1].stub);
             set_state("init_failed");return nullptr;
@@ -50593,6 +54818,11 @@ bool mp4_gpu_initial_source_fenced(uint64_t source,uint64_t job){
  return game_call()&&source&&job&&r.source==source&&r.job==job&&r.serial&&r.issued&&r.dispatched&&r.completed
   &&h.configured&&h.source==source&&h.epoch==job&&r.sequence&&r.sequence<=h.sequence
   &&h.ledger.draw_fenced(job,r.sequence);
+}
+bool mp4_gpu_initial_source_only_current(uint64_t source,uint64_t job){
+ const auto&r=mp4_initial_source_gpu_fence;const auto&h=mp4_gpu_fence_host;
+ return game_call()&&mp4_gpu_initial_source_fenced(source,job)&&r.sequence==h.sequence
+  &&!h.draw&&!h.sealed&&!h.active_token&&!h.last_token;
 }
 bool mp4_gpu_initial_source_window(uint64_t source,uint64_t job){
  const auto&b=mp4_scene_source_bootstrap;const auto&j=mp4_source_bootstrap_joins;
@@ -50739,7 +54969,7 @@ bool mp4_render_hold_frontends(){
   bool found=false;const auto count=mp4_managed_hook_count.load(std::memory_order_acquire);
   if(count>mp4_managed_hook_capacity)return false;
   for(size_t j=0;j<count;++j){const auto&r=mp4_managed_hook_receipts[j];if(r.rva==entries[i]->rva){
-   if(found||r.stub!=reinterpret_cast<void*>(hooks[i])||r.original_location!=locations[i]||r.trampoline!=*locations[i])return false;found=true;}}
+   if(found||!r.stub||r.replacement!=reinterpret_cast<void*>(hooks[i])||r.original_location!=locations[i]||r.trampoline!=*locations[i])return false;found=true;}}
   if(!found)return false;
 #endif
  }
@@ -50915,6 +55145,40 @@ void mp4_render_hold_manual(VoidMethod original,void*camera,Method*method){
   &&__atomic_load_n(&h.published,__ATOMIC_SEQ_CST)==scope.watch&&!h.retiring;
 }
 // END_MP4_RENDER_HOLD_HOST
+
+// BEGIN_MP4_EXPORT_PIPELINE_DIAGNOSTICS
+// These cached bits report bindings/completed receipts, never enable a route.
+void mp4_publish_pipeline_diagnostics(){
+ using idoly_mp4_runtime::diagnostic_module;
+ diagnostic_module(0,idoly_mp4_runtime::native_scene_installed,"native_scene_control_unbound");
+ diagnostic_module(1,mp4_scene_host.registered,"scene_parts_unregistered");
+ diagnostic_module(2,mp4_scene_playback_handoff.valid(),"final_playback_handoff_unbound");
+ diagnostic_module(3,mp4native7::host_configured.load(std::memory_order_acquire),"pending_journal_unbound");
+ diagnostic_module(4,mp4_frame_capture_host.api.valid(),"frame_coordinator_unbound");
+ diagnostic_module(5,false,"animation_defaults_unbound");
+ diagnostic_module(6,false,"monitor_ui_coordinator_unbound");
+ diagnostic_module(7,false,"video_coordinator_unbound");
+ diagnostic_module(8,mp4_renderer_proflare_data_reference==mp4_proflare_renderer_data_reference
+  &&mp4_gpu_stage_auxiliary_recipe_closed==mp4_proflare_auxiliary_recipe,"proflare_source_routes_unbound");
+ diagnostic_module(9,mp4_particle_renderer_normal_program_bindings()&&mp4_particle_renderer_descriptor_bindings(),"particle_renderer_source_unverified");
+ diagnostic_module(10,mp4_gpu_graphics_producers_closed!=nullptr,"graphics_program_unbound");
+ diagnostic_module(11,mp4_srp_source_mutations.context&&mp4_srp_source_mutations.current&&mp4_srp_source_mutations.fenced
+  &&mp4_srp_source_mutations.root_add&&mp4_srp_source_mutations.source_retired,"srp_mutations_unbound");
+ diagnostic_module(12,mp4_audio_native_hook_ready&&mp4_audio_process_hook_ready,"audio_frontends_unbound");
+#ifdef IDOLY_DARWIN_BRIDGE
+ diagnostic_module(13,ready.load(std::memory_order_acquire),"managed_observers_unpublished");
+#else
+ diagnostic_module(13,mp4_managed_hook_receipts_ready.load(std::memory_order_acquire),"managed_observers_unpublished");
+#endif
+ diagnostic_module(14,mp4_child_native_hooks_current(),"native_director_gateway_unverified");
+ diagnostic_module(15,mp4_capture_queue_frontends_current(),"capture_queue_frontends_unbound");
+ diagnostic_module(16,mp4_initial_source_gpu_fence.completed,"initial_source_gpu_fence_not_completed");
+ diagnostic_module(17,mp4_render_hold_frontends(),"camera_render_interception_unverified");
+ diagnostic_module(18,idoly_mp4_runtime::native_clock_available(),"native_clock_unbound");
+ diagnostic_module(19,mp4_api_installed,"game_api_unbound");
+}
+// END_MP4_EXPORT_PIPELINE_DIAGNOSTICS
+
 
 // BEGIN_MP4_RENDER_HOLD_RETIREMENT
 // Called at the actual abandon-globals edge: no future old-source write is

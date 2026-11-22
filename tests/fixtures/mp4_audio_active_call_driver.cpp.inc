@@ -58,5 +58,9 @@ int main(int argc,char**argv){assert(argc==2);int n=atoi(argv[1]);Call c=init();
   if(n>=53){audio_bank.phase=Mp4AudioOuterPhase::restore_ready;audio_bank.transaction=2;audio_bank.restoring=audio_bank.evaluated=true;audio_bank.programs[0].fresh=true;}
   if(n==54){mp4_audio_published=true;want=true;}
  }
+ if(n>=55&&n<=59){audio_schedule_closed=false;audio_schedule_maintenance=n!=56;
+  if(n!=57){c.kind=Kind::maintenance;c.method=0x814;mp4_raw_original_operation.kind=6;mp4_raw_original_operation.method=c.method;mp4_child_pending_host.j.value=c;}
+  if(n==55)want=true;if(n==58)audio_model.lose_schedule=true;if(n==59)deferred_origin=false;
+ }
  assert(mp4_audio_active_call_source_quiet(c)==want);puts("actual active Audio Call composition passed");
 }

@@ -343,6 +343,68 @@ struct Job {
     bool pcm_owned=false,bundle_owned=false,pending_broker=false,audible_energy=false,captured=false,terminal_success=false,terminal_cancel=false;
 };
 static Job job;
+// BEGIN_MP4_EXPORT_FAILURE_TRACE
+// Bounded scalar diagnostics only. Readers never invoke Unity or providers.
+static constexpr size_t trace_capacity=16,trace_modules=20;
+struct ExportTraceEvent{uint64_t sequence=0,frame=0,tick=0;char stage[96]{},code[96]{};};
+struct ExportTrace{ExportTraceEvent events[trace_capacity]{};size_t count=0,next=0;uint64_t sequence=0;
+ char current_stage[96]="not_started",last_error[96]="none";uint8_t modules[trace_modules]{};};
+static pthread_mutex_t trace_mutex=PTHREAD_MUTEX_INITIALIZER;
+static ExportTrace export_trace;
+inline void trace_code(char*out,size_t size,const char*value){
+ if(!out||!size)return;
+ size_t i=0;for(;value&&value[i]&&i+1<size;++i){const unsigned char c=static_cast<unsigned char>(value[i]);
+  out[i]=((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')?static_cast<char>(c):'_';}
+ out[i]=0;if(!i)snprintf(out,size,"unknown");
+}
+inline const char* trace_stage(Stage stage){
+ switch(stage){case Stage::idle:return "idle";case Stage::begin:return "begin";case Stage::scene_acquire:return "scene_acquire";
+ case Stage::audio_setup:return "audio_setup";case Stage::render_setup:return "render_setup";case Stage::audio_request:return "audio_request";
+ case Stage::audio_response:return "audio_response";case Stage::audio_load:return "audio_load";case Stage::audio_mix:return "audio_mix";
+ case Stage::audio_finalize:return "audio_finalize";case Stage::frame_request:return "frame_request";case Stage::frame_wait:return "frame_readback";
+ case Stage::frame_submit:return "encoder_append";case Stage::finishing:return "encoder_finish_save";case Stage::retiring:return "restore_retire";}
+ return "unknown";
+}
+inline void diagnostic_event(const char*stage,const char*code,uint64_t frame=0,uint64_t tick=0,bool failure=false){
+ char safe_stage[96]{},safe_code[96]{};trace_code(safe_stage,sizeof safe_stage,stage);trace_code(safe_code,sizeof safe_code,code);
+ pthread_mutex_lock(&trace_mutex);auto&t=export_trace;
+ snprintf(t.current_stage,sizeof t.current_stage,"%s",safe_stage);
+ if(failure)snprintf(t.last_error,sizeof t.last_error,"%s",safe_code);
+ if(t.count){const auto&last=t.events[(t.next+trace_capacity-1)%trace_capacity];
+  if(!strcmp(last.stage,safe_stage)&&!strcmp(last.code,safe_code)&&last.frame==frame&&last.tick==tick){pthread_mutex_unlock(&trace_mutex);return;}}
+ if(t.sequence<9007199254740991ULL){auto&e=t.events[t.next];e={};e.sequence=++t.sequence;e.frame=frame>9007199254740991ULL?9007199254740991ULL:frame;e.tick=tick>9007199254740991ULL?9007199254740991ULL:tick;
+  snprintf(e.stage,sizeof e.stage,"%s",safe_stage);snprintf(e.code,sizeof e.code,"%s",safe_code);
+  t.next=(t.next+1)%trace_capacity;if(t.count<trace_capacity)++t.count;}
+ pthread_mutex_unlock(&trace_mutex);
+}
+inline void diagnostic_job_event(const char*code,bool failure=false){
+ diagnostic_event(trace_stage(job.stage),code,job.frame,job.schedule.next_tick()?job.schedule.next_tick()-1:0,failure);
+}
+inline void diagnostic_module(size_t index,bool bound,const char*missing){
+ if(index>=trace_modules)return;
+ pthread_mutex_lock(&trace_mutex);const uint8_t value=bound?2:1;const bool changed=export_trace.modules[index]!=value;
+ export_trace.modules[index]=value;pthread_mutex_unlock(&trace_mutex);
+ if(changed&&!bound)diagnostic_event("bindings",missing,0,0,true);
+}
+inline size_t diagnostics(char*out,size_t capacity){
+ if(!out||!capacity)return 0;
+ ExportTrace t{};pthread_mutex_lock(&trace_mutex);t=export_trace;pthread_mutex_unlock(&trace_mutex);
+ int n=snprintf(out,capacity,"{\"export_trace\":{\"schema\":1,\"current_stage\":\"%s\",\"last_error\":\"%s\",\"events\":[",t.current_stage,t.last_error);
+ if(n<=0||static_cast<size_t>(n)>=capacity){out[0]=0;return 0;}size_t at=static_cast<size_t>(n);
+ for(size_t i=0;i<t.count;++i){const auto&e=t.events[(t.next+trace_capacity-t.count+i)%trace_capacity];
+  n=snprintf(out+at,capacity-at,"%s{\"sequence\":%llu,\"stage\":\"%s\",\"code\":\"%s\",\"frame\":%llu,\"tick\":%llu}",i?",":"",
+   static_cast<unsigned long long>(e.sequence),e.stage,e.code,static_cast<unsigned long long>(e.frame),static_cast<unsigned long long>(e.tick));
+  if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}at+=static_cast<size_t>(n);}
+ static constexpr const char*names[trace_modules]={"native_scene_control","scene_parts","final_playback_handoff","pending_journal","frame_coordinator",
+ "default_images","monitor_ui","video_coordinator","proflare_source","particle_renderer","graphics_program","srp_mutations","audio_frontends",
+ "managed_observers","native_director_gateway","capture_queue","initial_gpu_fence","render_hold","native_clock","game_api"};
+ n=snprintf(out+at,capacity-at,"],\"modules\":{");if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}at+=static_cast<size_t>(n);
+ for(size_t i=0;i<trace_modules;++i){n=snprintf(out+at,capacity-at,"%s\"%s\":%s",i?",":"",names[i],t.modules[i]==2?"true":"false");
+  if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}at+=static_cast<size_t>(n);}
+ n=snprintf(out+at,capacity-at,"}}}");if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}return at+static_cast<size_t>(n);
+}
+// END_MP4_EXPORT_FAILURE_TRACE
+
 static uint64_t next_job_generation=1;
 struct NativeObservation {
     uint64_t loop=0,identity=0,tick=0,accepted=0,acquired_identity=0;
@@ -397,7 +459,10 @@ inline void refresh_native_diagnostics(bool source_valid,uint64_t identity,bool 
         part.error[sizeof(part.error)-1]=0;
         for(char* c=part.error;*c;++c)if(!((*c>='a'&&*c<='z')||(*c>='A'&&*c<='Z')||(*c>='0'&&*c<='9')||*c=='_'))*c='_';
     }
-    pthread_mutex_lock(&control_mutex);native_diagnostics=next;pthread_mutex_unlock(&control_mutex);
+    pthread_mutex_lock(&control_mutex);const NativeSceneDiagnostics previous=native_diagnostics;native_diagnostics=next;pthread_mutex_unlock(&control_mutex);
+    static constexpr const char*providers[]={"actor_admission","camera_admission","stage_admission","world_admission"};
+    for(size_t i=0;i<4;++i)if(next.parts[i].result!=previous.parts[i].result||strcmp(next.parts[i].error,previous.parts[i].error))
+        diagnostic_event(providers[i],next.parts[i].error,0,0,next.parts[i].result!=0);
     sampled=true;sampled_source_valid=source_valid;sampled_at=now;sampled_identity=identity;sampled_generation=generation;
 }
 static bool last_admission_verified=false;
@@ -423,10 +488,10 @@ inline void refresh_native_observation(bool rendered=false){
     pthread_mutex_lock(&control_mutex);native_observation=next;pthread_mutex_unlock(&control_mutex);
 }
 inline bool busy_stage(){return job.stage!=Stage::idle;}
-inline void publish(){pthread_mutex_lock(&control_mutex);const bool ready=published.ready;published=job.status;published.ready=ready;published.pausable=job.stage!=Stage::idle&&job.stage!=Stage::finishing&&job.stage!=Stage::retiring;pthread_mutex_unlock(&control_mutex);}
+inline void publish(){static Stage previous=Stage::idle;if(previous!=job.stage){previous=job.stage;diagnostic_job_event("stage_entered");}pthread_mutex_lock(&control_mutex);const bool ready=published.ready;published=job.status;published.ready=ready;published.pausable=job.stage!=Stage::idle&&job.stage!=Stage::finishing&&job.stage!=Stage::retiring;pthread_mutex_unlock(&control_mutex);}
 inline void progress(){job.activity=milliseconds();}
 inline void phase(const char* value){snprintf(job.status.phase,sizeof(job.status.phase),"%s",value);progress();publish();}
-inline void stable_error(const char* value){size_t at=0;for(;value&&value[at]&&at<sizeof(job.status.error)-1;++at){char c=value[at];job.status.error[at]=((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')?c:'_';}job.status.error[at]=0;if(!at)snprintf(job.status.error,sizeof(job.status.error),"export_failed");}
+inline void stable_error(const char* value){size_t at=0;for(;value&&value[at]&&at<sizeof(job.status.error)-1;++at){char c=value[at];job.status.error[at]=((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')?c:'_';}job.status.error[at]=0;if(!at)snprintf(job.status.error,sizeof(job.status.error),"export_failed");diagnostic_job_event(job.status.error,true);}
 inline void terminal(const char*,bool);
 inline void export_observer_failed(){
     if(!busy_stage()){
@@ -523,6 +588,7 @@ inline Result probe_readiness(Snapshot& snapshot,bool force_native_admission=tru
     if(result!=Result::ok)admission_known=false;
     if(result==Result::ok&&native_scene_required&&!native_scene_installed){
         result=Result::unsupported;error="offline_pipeline_not_verified";
+        diagnostic_event("pipeline","native_scene_control_unbound",0,0,true);
     }
     if(result==Result::ok&&native_scene_installed){
         pthread_mutex_lock(&control_mutex);
@@ -572,7 +638,7 @@ inline bool configure(const char* broker,uint64_t epoch,const char*cap,const cha
     if(replaced)invalidate_queue_selection_locked("server_configuration_changed");
     pthread_mutex_unlock(&control_mutex);return true;
 }
-inline bool start(Options options,bool queued=false){pthread_mutex_lock(&control_mutex);bool ok=configured_valid&&!control_busy&&!start_pending&&(queued||!queue_scene_owned)&&published.ready&&valid_options(options);if(ok){if(!queued){pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;pending_queue_width=pending_queue_height=0;}pending_options=options;start_pending=true;start_wait_started=0;cancel_pending=false;control_busy=true;published.pausable=true;pause_acknowledged=false;snprintf(published.phase,sizeof(published.phase),"preparing_audio");snprintf(published.error,sizeof(published.error),"none");}pthread_mutex_unlock(&control_mutex);return ok;}
+inline bool start(Options options,bool queued=false){pthread_mutex_lock(&control_mutex);bool ok=configured_valid&&!control_busy&&!start_pending&&(queued||!queue_scene_owned)&&published.ready&&valid_options(options);if(ok){if(!queued){pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;pending_queue_width=pending_queue_height=0;}diagnostic_event("start","accepted");pending_options=options;start_pending=true;start_wait_started=0;cancel_pending=false;control_busy=true;published.pausable=true;pause_acknowledged=false;snprintf(published.phase,sizeof(published.phase),"preparing_audio");snprintf(published.error,sizeof(published.error),"none");}else diagnostic_event("start",!configured_valid?"session_not_configured":control_busy||start_pending?"export_already_owned":!published.ready?readiness_error:"invalid_export_options",0,0,true);pthread_mutex_unlock(&control_mutex);return ok;}
 inline void cancel(){pthread_mutex_lock(&control_mutex);if(control_busy)cancel_pending=true;pthread_mutex_unlock(&control_mutex);}
 inline void suspend(int reason){
     if(reason<IDMP4_PAUSE_LIFECYCLE_BACKGROUND||reason>IDMP4_PAUSE_USER)return;
@@ -885,6 +951,7 @@ inline void service_deferred_encoder_cancel(){
     job.cancel_encoder_pending=false;
 }
 inline void restoration_failure(const char* reason){
+    diagnostic_event("source_restore",reason,job.frame,job.schedule.next_tick()?job.schedule.next_tick()-1:0,true);
     job.terminal_success=false;
     if(!job.status.restoration_error[0]||!strcmp(job.status.restoration_error,"none")){
         size_t at=0;
@@ -1432,6 +1499,7 @@ extern "C" IDMP4_SESSION_API int IDMP4SessionConfigure(const char*b,uint64_t e,c
 extern "C" IDMP4_SESSION_API int IDMP4SessionStart(uint32_t n,uint32_t d,uint32_t c,uint32_t v,uint32_t a){return idoly_mp4_runtime::start({n,d,c,v,a})?0:-1;}
 extern "C" IDMP4_SESSION_API int IDMP4SessionStartV2(uint32_t n,uint32_t d,uint32_t c,uint32_t v,uint32_t a,uint32_t w,uint32_t h){return idoly_mp4_runtime::start({n,d,c,v,a,w,h})?0:-1;}
 extern "C" IDMP4_SESSION_API size_t IDMP4SessionStatus(char*b,size_t c){return idoly_mp4_runtime::status(b,c);}
+extern "C" IDMP4_SESSION_API size_t IDMP4SessionDiagnostics(char*b,size_t c){return idoly_mp4_runtime::diagnostics(b,c);}
 extern "C" IDMP4_SESSION_API void IDMP4SessionCancel(){idoly_mp4_runtime::cancel();}
 extern "C" IDMP4_SESSION_API void IDMP4SessionSuspend(int reason){idoly_mp4_runtime::suspend(reason);}
 extern "C" IDMP4_SESSION_API void IDMP4SessionResume(){idoly_mp4_runtime::resume();}

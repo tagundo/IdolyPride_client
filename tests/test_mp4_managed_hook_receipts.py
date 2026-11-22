@@ -40,23 +40,24 @@ int main(int argc,char** argv){
         entry=entries[index];image_base=reinterpret_cast<uintptr_t>(image)+32-entry.rva;
     }
     mp4game::Binding binding{};binding.rva=entry.rva;memcpy(binding.prefix,entry.bytes,16);
-    memset(image+32,0x88,16);void* trampoline=reinterpret_cast<void*>(0x1234);void* stub=reinterpret_cast<void*>(0x5678);
-    if(mode=="missing_original"){void* empty=nullptr;assert(!mp4_record_managed_hook(&entry,stub,&empty));return 0;}
-    if(mode=="missing_stub"){assert(!mp4_record_managed_hook(&entry,nullptr,&trampoline));return 0;}
-    if(mode=="unmapped_record"){mapped=false;assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;}
+    memset(image+32,0x88,16);void* trampoline=reinterpret_cast<void*>(0x1234);void* stub=reinterpret_cast<void*>(0x5678);void* replacement=reinterpret_cast<void*>(0xabcdef);
+    if(mode=="missing_original"){void* empty=nullptr;assert(!mp4_record_managed_hook(&entry,stub,&empty,replacement));return 0;}
+    if(mode=="missing_stub"){assert(!mp4_record_managed_hook(&entry,nullptr,&trampoline,replacement));return 0;}
+    if(mode=="missing_replacement"){assert(!mp4_record_managed_hook(&entry,stub,&trampoline,nullptr));return 0;}
+    if(mode=="unmapped_record"){mapped=false;assert(!mp4_record_managed_hook(&entry,stub,&trampoline,replacement));return 0;}
     if(mode=="bootstrap_missing_backend"||mode=="bootstrap_rejected_backend"){
         if(mode=="bootstrap_missing_backend")mp4_managed_hook_backend_current=nullptr;else backend_valid=false;
-        assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;
+        assert(!mp4_record_managed_hook(&entry,stub,&trampoline,replacement));return 0;
     }
     if(mode=="last_slot"){
         static_assert(mp4_managed_hook_capacity==160,"actual finite bank bound");
         mp4_managed_hook_count.store(mp4_managed_hook_capacity-1);
-        assert(mp4_record_managed_hook(&entry,stub,&trampoline));
+        assert(mp4_record_managed_hook(&entry,stub,&trampoline,replacement));
         assert(mp4_managed_hook_count.load()==mp4_managed_hook_capacity);
         mp4_managed_hook_receipts_ready.store(true);assert(mp4_managed_hook_verified(binding));
-        assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;
+        assert(!mp4_record_managed_hook(&entry,stub,&trampoline,replacement));return 0;
     }
-    assert(mp4_record_managed_hook(&entry,stub,&trampoline));assert(!mp4_managed_hook_verified(binding));
+    assert(mp4_record_managed_hook(&entry,stub,&trampoline,replacement));assert(!mp4_managed_hook_verified(binding));
     if(mode.rfind("bootstrap_",0)==0){
         mp4_shader_bootstrap_receipts_open.store(true);
         if(mode=="bootstrap_unpublished")mp4_managed_hook_count.store(0);
@@ -69,11 +70,11 @@ int main(int argc,char** argv){
         return 0;
     }
     if(mode=="ordinary_bootstrap"){mp4_shader_bootstrap_receipts_open.store(true);assert(!mp4_managed_hook_verified(binding));return 0;}
-    if(mode=="capacity"||mode=="over_capacity"){mp4_managed_hook_count.store(mp4_managed_hook_capacity+(mode=="over_capacity"?1:0));assert(!mp4_record_managed_hook(&entry,stub,&trampoline));return 0;}
+    if(mode=="capacity"||mode=="over_capacity"){mp4_managed_hook_count.store(mp4_managed_hook_capacity+(mode=="over_capacity"?1:0));assert(!mp4_record_managed_hook(&entry,stub,&trampoline,replacement));return 0;}
     mp4_managed_hook_receipts_ready.store(true);
     assert(mp4_managed_hook_verified(binding));
     if(mode=="published_over_capacity"){mp4_managed_hook_count.store(mp4_managed_hook_capacity+1);assert(!mp4_managed_hook_verified(binding));return 0;}
-    if(mode=="valid")return 0;
+    if(mode=="valid"){assert(mp4_managed_hook_receipts[0].replacement==replacement);assert(stub!=replacement);return 0;}
     if(mode=="foreign_code")image[32]^=1;
     else if(mode=="foreign_original_prefix")binding.prefix[0]^=1;
     else if(mode=="foreign_rva")binding.rva=48;
@@ -93,7 +94,7 @@ int main(int argc,char** argv){
     return binary
 
 
-@pytest.mark.parametrize('mode', ['missing_original', 'missing_stub', 'unmapped_record', 'valid', 'foreign_code',
+@pytest.mark.parametrize('mode', ['missing_original', 'missing_stub', 'missing_replacement', 'unmapped_record', 'valid', 'foreign_code',
     'foreign_original_prefix', 'foreign_rva', 'foreign_base', 'changed_trampoline', 'rollback', 'unmapped_check', 'bootstrap_sync', 'bootstrap_async', 'bootstrap_file',
     'bootstrap_result', 'bootstrap_control', 'bootstrap_animation_root', 'bootstrap_animation_clips', 'bootstrap_animation_infinite', 'bootstrap_animation_clip', 'bootstrap_animation_add', 'bootstrap_unpublished', 'bootstrap_foreign_prefix', 'bootstrap_foreign_code', 'bootstrap_revoked',
     'ordinary_bootstrap', 'last_slot', 'capacity', 'over_capacity', 'published_over_capacity', 'bootstrap_missing_backend',

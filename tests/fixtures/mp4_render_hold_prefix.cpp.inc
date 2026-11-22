@@ -21,7 +21,7 @@ namespace pin{struct Entry{uint64_t rva=0;uint8_t bytes[16]{};};Entry mp4_render
 bool frontends_ok=true;
 bool mp4_hook_was_statically_verified(const mp4game::Binding&b){return frontends_ok&&b.rva>=1&&b.rva<=3;}
 bool mp4_capture_static_frontend(const pin::Entry&,uintptr_t,uintptr_t original){return frontends_ok&&original;}
-struct Receipt{uintptr_t rva=0;void*stub=nullptr,*trampoline=nullptr;void**original_location=nullptr;};
+struct Receipt{uintptr_t rva=0;void*stub=nullptr,*trampoline=nullptr;void**original_location=nullptr;void*replacement=nullptr;};
 Receipt mp4_managed_hook_receipts[3];std::atomic<size_t>mp4_managed_hook_count{3};constexpr size_t mp4_managed_hook_capacity=3;
 struct Source{uint64_t generation=4;void*player=reinterpret_cast<void*>(0x100),*presenter=reinterpret_cast<void*>(0x101),*camera=reinterpret_cast<void*>(0x200);};
 struct{Source source{};unsigned started=15,released=0;bool logical_checkpoint=false,release_owned=true,releasing=false;}mp4_scene_host;
@@ -84,9 +84,9 @@ void mp4_render_stack_hook(Mp4RenderContext context,void*camera,Method*method){m
 void mp4_render_camera_hook(Mp4RenderContext context,void*camera,Method*method){mp4_render_hold_automatic(Mp4RenderHoldKind::single,mp4_render_camera_original,context,camera,method);}
 bool monitor_origin(void*camera,Mp4MonitorCameraOrigin*out){if(!monitor_allowed)return false;*out={4,9,7,61,62,63,reinterpret_cast<void*>(0x111),camera,reinterpret_cast<void*>(0x444),0x555};if(direct_monitor){Mp4RenderHoldFrameOrigin frame{};if(!mp4_render_hold_frame_current(&frame))return false;out->route=Mp4MonitorCameraRoute::urp_direct;out->frame_serial=frame.serial+(bad_frame?1:0);out->context=bad_context?reinterpret_cast<void*>(0x999):frame.context.pointer;}return true;}
 void setup(){mp4_render_stack_original=mp4_render_camera_original=automatic_original;mp4_camera_manual_render_original=manual_original;
- mp4_managed_hook_receipts[0]={1,reinterpret_cast<void*>(mp4_render_stack_hook),reinterpret_cast<void*>(automatic_original),reinterpret_cast<void**>(&mp4_render_stack_original)};
- mp4_managed_hook_receipts[1]={2,reinterpret_cast<void*>(mp4_render_camera_hook),reinterpret_cast<void*>(automatic_original),reinterpret_cast<void**>(&mp4_render_camera_original)};
- mp4_managed_hook_receipts[2]={3,reinterpret_cast<void*>(mp4_camera_manual_render_hook),reinterpret_cast<void*>(manual_original),reinterpret_cast<void**>(&mp4_camera_manual_render_original)};
+ mp4_managed_hook_receipts[0]={1,reinterpret_cast<void*>(0x501),reinterpret_cast<void*>(automatic_original),reinterpret_cast<void**>(&mp4_render_stack_original),reinterpret_cast<void*>(mp4_render_stack_hook)};
+ mp4_managed_hook_receipts[1]={2,reinterpret_cast<void*>(0x502),reinterpret_cast<void*>(automatic_original),reinterpret_cast<void**>(&mp4_render_camera_original),reinterpret_cast<void*>(mp4_render_camera_hook)};
+ mp4_managed_hook_receipts[2]={3,reinterpret_cast<void*>(0x503),reinterpret_cast<void*>(manual_original),reinterpret_cast<void**>(&mp4_camera_manual_render_original),reinterpret_cast<void*>(mp4_camera_manual_render_hook)};
 }
 void acquire(){assert(mp4_render_hold_acquire(4,9)==Mp4SceneResult::ok);assert(mp4_render_hold_job_quiet(4,9));}
 void auto_call(void*camera=nullptr){mp4_render_stack_hook({srp.native_context},camera?camera:mp4_scene_host.source.camera,nullptr);}

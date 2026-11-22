@@ -1,9 +1,16 @@
 int main(int argc,char**argv){assert(argc==2);setup();std::string mode=argv[1];
  if(mode=="ordinary"){auto_call();mp4_render_camera_hook({srp.native_context},mp4_scene_host.source.camera,nullptr);mp4_camera_manual_render_hook(mp4_scene_host.source.camera,nullptr);assert(automatic_originals==2&&manual_originals==1&&mp4_render_hold_readers_idle());}
  else if(mode=="missing_manual"){mp4_camera_manual_render_original=nullptr;assert(mp4_render_hold_acquire(4,9)==Mp4SceneResult::stale&&!mp4_render_hold_state.active);}
- else if(mode=="frontend_wrong_stub"){
+ else if(mode=="frontend_wrong_replacement"){
 #ifndef IDOLY_DARWIN_BRIDGE
- mp4_managed_hook_receipts[2].stub=reinterpret_cast<void*>(automatic_original);
+ mp4_managed_hook_receipts[2].replacement=reinterpret_cast<void*>(automatic_original);
+#else
+ frontends_ok=false;
+#endif
+ assert(mp4_render_hold_acquire(4,9)==Mp4SceneResult::stale&&!mp4_render_hold_state.active);}
+ else if(mode=="frontend_missing_stub"){
+#ifndef IDOLY_DARWIN_BRIDGE
+ mp4_managed_hook_receipts[2].stub=nullptr;
 #else
  frontends_ok=false;
 #endif

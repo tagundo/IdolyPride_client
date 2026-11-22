@@ -34,6 +34,8 @@ IDMP4_SESSION_API int IDMP4SessionStartV2(uint32_t fps_num, uint32_t fps_den,
     uint32_t codec, uint32_t video_bitrate, uint32_t audio_bitrate,
     uint32_t output_width, uint32_t output_height);
 IDMP4_SESSION_API size_t IDMP4SessionStatus(char *buffer, size_t capacity);
+// Bounded scalar trace; use a 16KiB buffer. Reads never invoke game providers.
+IDMP4_SESSION_API size_t IDMP4SessionDiagnostics(char *buffer, size_t capacity);
 IDMP4_SESSION_API void IDMP4SessionCancel(void);
 IDMP4_SESSION_API int IDMP4SessionReady(void);
 
