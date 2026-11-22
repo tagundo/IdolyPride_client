@@ -1502,6 +1502,7 @@ class Scope {
     void* context_ = nullptr;
     uint64_t epoch_ = 0, serial_ = 0, simulation_serial_ = 0, prepared_serial_ = 0, checked_simulation_serial_ = 0;
     uint32_t expected_jobs_=0,completed_jobs_=0;bool step_failed_=false;
+    uint32_t simulation_hz_=60;
     bool configured_ = false, published_ = false, reset_started_ = false,
         reset_done_ = false, changed_native_ = false, restored_ = false,
         zero_pose_prepared_ = false, witness_captured_ = false;
@@ -1664,6 +1665,12 @@ class Scope {
                 }
             } else actor.buffers[i] = found;
         }
+        // Both original managed and Burst dynamic/breast solvers integrate
+        // their authored 0.01667 step even when stream delta is 1/120 (or 0).
+        // A 120 Hz clock/encoder does not authorize twice as many solver steps.
+        // Reject before publishing a grant or changing/resetting source state.
+        if (simulation_hz_==120 && (actor.buffers[0].length || actor.buffers[2].length))
+            return fail(Result::unsupported, "actor_state_fixed_step_120hz_unsupported");
         if (initial) { actor.live_job = job; actor.key = key; }
         return Result::ok;
     }
@@ -1876,6 +1883,7 @@ class Scope {
         count_ = bytes_ = warmed_ = 0; context_ = nullptr; presentation_ = nullptr;
         epoch_ = serial_ = simulation_serial_ = prepared_serial_ = checked_simulation_serial_ = 0;
         expected_jobs_=completed_jobs_=0;step_failed_=false;
+        simulation_hz_=60;
         configured_ = published_ = reset_started_ = reset_done_ = changed_native_ = restored_
             = zero_pose_prepared_ = witness_captured_ = false;
     }
@@ -1904,11 +1912,12 @@ public:
         if(presentation_)presentation_->revoke_grants();
     }
     bool configure(StateApi api, WorkerGate* gate, const Owner* owners, size_t count,
-            void* context, uint64_t epoch, StateLayout layout = {}) {
+            void* context, uint64_t epoch, StateLayout layout = {}, uint32_t simulation_hz=60) {
         if (configured_ || !gate || !owners || !count || count > max_owned_jobs || !context || !epoch) return false;
+        if (simulation_hz!=60 && simulation_hz!=120) { error_="actor_state_simulation_hz_unsupported";return false; }
         api_ = api; layout_ = layout;
         if (!complete_api()) { error_ = "actor_state_api_unavailable"; return false; }
-        gate_ = gate; context_ = context; epoch_ = epoch; count_ = count;
+        gate_ = gate; context_ = context; epoch_ = epoch; count_ = count;simulation_hz_=simulation_hz;
         for (size_t i = 0; i < count; ++i) actors_[i].source = owners[i];
         configured_ = true; error_ = "none"; return true;
     }

@@ -189,7 +189,24 @@ int main(int argc,char** argv){
         assert(!scope.configure(a,&f->gate,&f->owner,0,f,17));assert(!scope.configure(a,&f->gate,&f->owner,1,nullptr,17));
         assert(!scope.configure(a,&f->gate,&f->owner,1,f,0));return 0;
     }
-    assert(scope.configure(a,&f->gate,&f->owner,1,f,17));
+    if(s=="hz_invalid"){
+        assert(!scope.configure(a,&f->gate,&f->owner,1,f,17,{},30));
+        assert(std::string(scope.error())=="actor_state_simulation_hz_unsupported");
+        assert(!scope.active()&&f->roots.empty()&&!f->completions);return 0;
+    }
+    const bool hz120=s.rfind("hz120_",0)==0;
+    assert(scope.configure(a,&f->gate,&f->owner,1,f,17,{},hz120?120:60));
+    if(hz120){
+        if(s!="hz120_dynamic")f->lists[0].length=0;
+        if(s!="hz120_breast")f->lists[2].length=0;
+        const auto before=f->buffers[0];const auto clock=f->get<float>(f->job,actor_job_time);
+        const bool empty=s=="hz120_empty";
+        assert(scope.quiesce()==(empty?Result::ok:Result::unsupported));
+        if(!empty)assert(std::string(scope.error())=="actor_state_fixed_step_120hz_unsupported");
+        assert(f->body_calls==0&&f->resets==0&&f->evals==0&&f->graph_mode==2
+            &&f->buffers[0]==before&&f->get<float>(f->job,actor_job_time)==clock);
+        assert(scope.release(false)==Result::ok&&f->roots.empty());return 0;
+    }
     if(s=="clock_not_held"){f->held=false;assert(scope.quiesce()==Result::waiting);assert(f->roots.empty()&&f->graph_mode==2);assert(scope.release(false)==Result::ok);return 0;}
     if(s=="routes_not_ready"){f->routes=false;assert(scope.quiesce()==Result::waiting);assert(f->roots.empty());assert(scope.release(false)==Result::ok);return 0;}
     if(s=="wrong_actor_type")f->actor->type="System.Object";
@@ -369,6 +386,7 @@ def state_binary(tmp_path_factory):
 
 
 @pytest.mark.parametrize("scenario", [
+    "hz_invalid", "hz120_dynamic", "hz120_breast", "hz120_empty",
     "complete_restore", "grant", "hold_regrant_keeps_game_time", "external_mode_change", "missing_api", "missing_clock_witness", "invalid_configure", "clock_not_held",
     "two_phase_grant", "two_phase_f8_retry", "two_phase_hold_revokes", "two_phase_idempotent_prepare",
     "two_phase_source_changed", "two_phase_fence_changed", "two_phase_mode_changed", "two_phase_buffer_changed", "two_phase_clock_revoked",
@@ -386,3 +404,21 @@ def state_binary(tmp_path_factory):
 def test_selected_actor_deep_state_and_restore(state_binary, scenario):
     ran = subprocess.run([str(state_binary), scenario], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 0, ran.stdout + ran.stderr
+
+
+def test_original_managed_and_burst_fixed_step_cannot_become_120hz_by_clock_alone():
+    import importlib.util
+    import sys
+    originals = Path('/workspace/shared/idoly-sdk-cache-analysis')
+    if not (originals/'mp4-android-analysis/lib_burst_generated.so').is_file():
+        pytest.skip('Pinned original source images unavailable')
+    sys.path.insert(0, str(ROOT/'tools'))
+    spec = importlib.util.spec_from_file_location('actor_cadence_audit', ROOT/'tools/audit_mp4_actor_cadence.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    proof = module.audit(originals)
+    assert proof['fixed_step_bits'] == '0x3c888f86'
+    assert set(proof['sources']) == {'android_managed', 'ios_managed', 'android_burst', 'ios_burst'}
+    assert proof['prewarm_one_half_step_seconds'] != proof['exact_120_step_seconds']
+    assert proof['prewarm_is_general_delta_override'] is False
+    assert proof['runtime_120_verified'] is False
