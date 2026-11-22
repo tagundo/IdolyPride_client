@@ -211,6 +211,10 @@ def test_component_factory_cold_restore_uses_plain_activity_and_calls_base_super
         pytest.skip("JDK required for actual component-factory fixture")
     sources = {
         "android/os/Bundle.java": "package android.os; public class Bundle {}",
+        "android/util/Log.java": '''package android.util; public class Log {
+          public static final java.util.List<String> rows=new java.util.ArrayList<>();
+          public static int i(String tag,String value){rows.add(tag+":"+value);return 0;}
+        }''',
         "android/app/Activity.java": '''package android.app; public class Activity {
           public int supers, finishes; public android.content.Intent incoming, started;
           public android.os.Bundle restored;
@@ -251,7 +255,7 @@ def test_component_factory_cold_restore_uses_plain_activity_and_calls_base_super
     sources[package + "ServerService.java"] = '''package game.qualiarts.idolypride.localserver;
       final class ServerService { static boolean running; static boolean resourceServerRunning(){return running;} }'''
     sources[package + "MainActivity.java"] = '''package game.qualiarts.idolypride.localserver;
-      public class MainActivity extends android.app.Activity {}'''
+      public class MainActivity extends android.app.Activity { static RuntimeException failure; public MainActivity(){if(failure!=null)throw failure;} }'''
     sources[package + "FakeGameActivity.java"] = '''package game.qualiarts.idolypride.localserver;
       public class FakeGameActivity extends android.app.Activity { static int constructed;
         public FakeGameActivity(){constructed++;} }'''
@@ -278,6 +282,14 @@ def test_component_factory_cold_restore_uses_plain_activity_and_calls_base_super
           need(FakeGameActivity.constructed==1);
           need(factory.instantiateActivity(loader,MainActivity.class.getName(),incoming) instanceof MainActivity);
           need(factory.calls==5);
+          need(android.util.Log.rows.size()==2 && android.util.Log.rows.get(0).endsWith("launcher_constructor_begin")
+              && android.util.Log.rows.get(1).endsWith("launcher_constructor_returned"));
+          RuntimeException failure=new IllegalStateException("password=never-print-intent-or-message");
+          MainActivity.failure=failure;
+          try{factory.instantiateActivity(loader,MainActivity.class.getName(),incoming);throw new AssertionError();}
+          catch(RuntimeException caught){need(caught==failure);}
+          need(factory.calls==6 && android.util.Log.rows.get(3).endsWith("launcher_constructor_failed:java.lang.IllegalStateException"));
+          for(String row:android.util.Log.rows)need(!row.contains("password")&&!row.contains("notification"));
         }
       }'''
     repo = Path(__file__).resolve().parents[1]
@@ -305,6 +317,10 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
         "android/content/res/Configuration.java": "package android.content.res; public class Configuration {}",
         "android/view/Display.java": "package android.view; public class Display {public static final int INVALID_DISPLAY=-1;public int getDisplayId(){return 0;}}",
         "android/os/Bundle.java": "package android.os; public class Bundle {}",
+        "android/util/Log.java": '''package android.util; public class Log {
+          public static final java.util.List<String> rows=new java.util.ArrayList<>();
+          public static int i(String tag,String value){rows.add(tag+":"+value);return 0;}
+        }''',
         "android/os/Looper.java": "package android.os; public class Looper { public static Looper getMainLooper(){return null;} }",
         "android/os/SystemClock.java": "package android.os; public class SystemClock { public static long now; public static long uptimeMillis(){return now;} }",
         "android/os/Handler.java": '''package android.os; import java.util.*;
@@ -369,7 +385,7 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
       final class UnifiedGameAssets {static String freeze(android.content.Context c,String l)throws java.io.IOException{return "data.zip";} }'''
     sources[package + "UnifiedWindowing.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedWindowing {static void update(boolean mode){} }'''
-    sources[package + "MainActivity.java"] = "package game.qualiarts.idolypride.localserver; public class MainActivity extends android.app.Activity {}"
+    sources[package + "MainActivity.java"] = "package game.qualiarts.idolypride.localserver; public class MainActivity extends android.app.Activity { static RuntimeException failure; public MainActivity(){if(failure!=null)throw failure;} }"
     sources[package + "UnifiedMP4Export.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedMP4Export {static void restoreState(android.content.Context c,android.os.Bundle b){}
         static void attachGame(android.app.Activity a){}static void geometryChanged(android.app.Activity a){}

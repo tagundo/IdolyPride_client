@@ -478,6 +478,10 @@ class ActualRun:
         (self.proof / "launcher-start.txt").write_text(started[:16384])
         verified_activity_start(started)
         self.record("unified_launcher_start_accepted")
+        factory = self.device.adb("logcat", "-d", "-t", "128", "-v", "brief", "-s", "IdolyLauncher", check=False)
+        (self.proof / "launcher-constructor.txt").write_text(factory[-16384:])
+        starts = self.device.adb("logcat", "-b", "system", "-d", "-t", "5000", "-v", "brief", "-s", "ActivityTaskManager", check=False)
+        (self.proof / "initial-own-activity-launch-log.txt").write_text("\n".join(line for line in starts.splitlines() if PACKAGE in line)[-65536:])
         # The exact launcher control is source-localized; no startup RPC is injected.
         def launcher_control():
             tree = self.device.android()
