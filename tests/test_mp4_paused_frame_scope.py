@@ -97,7 +97,9 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
  if(mode=="changed_after_restore_copy")image.target.native=999;
  if(mode=="changed_wrapper_after_copy")image.target_wrapper=ptr(90);
  if(mode=="changed_after_restore_copy"||mode=="changed_wrapper_after_copy"){assert(s.restore()==Result::stale&&!s.restored());s.abandon();assert(s.release()==Result::ok);return 0;}
- assert(s.restore()==Result::ok&&s.restored()&&retired==2);
+ assert(s.restore()==Result::ok&&s.restored()&&retired==2&&s.verify_held()==Result::ok);
+ if(mode=="final_checkpoint_image_change"){image.target.native=999;assert(s.verify_held()==Result::stale&&copies==2&&slot_writes==2);s.abandon();assert(s.release()==Result::ok);return 0;}
+ if(mode=="final_checkpoint_slot_change"){image.captured_wrapper=ptr(90);assert(s.verify_held()==Result::stale&&copies==2&&slot_writes==2);s.abandon();assert(s.release()==Result::ok);return 0;}
  // Successful logical restoration is historical once ordinary callbacks resume.
  live=false;held=false;assert(s.restore()==Result::ok);
  if(mode=="external_identical_alias"){external_alias=true;assert(s.release()==Result::waiting&&!destroyed_capture&&!destroyed_rt);external_alias=false;}
@@ -113,7 +115,7 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
     assert proc.returncode==0,proc.stdout+proc.stderr
     return binary
 
-@pytest.mark.parametrize('mode',['normal','missing_api','msaa','memoryless','pending_capture','root_failure','before_prepare_cancel','allocation_failure','shape_changed','copy_throws','start_wait','source_lost_copying','source_lost_ready','restore_owed','foreign_capture','restore_shape','restore_start_wait','changed_after_restore_copy','changed_wrapper_after_copy','bad_begin_ticket','complete_wait','second_job','external_identical_alias','preserve_detached_wait'])
+@pytest.mark.parametrize('mode',['normal','missing_api','msaa','memoryless','pending_capture','root_failure','before_prepare_cancel','allocation_failure','shape_changed','copy_throws','start_wait','source_lost_copying','source_lost_ready','restore_owed','foreign_capture','restore_shape','restore_start_wait','changed_after_restore_copy','changed_wrapper_after_copy','bad_begin_ticket','complete_wait','second_job','external_identical_alias','preserve_detached_wait','final_checkpoint_image_change','final_checkpoint_slot_change'])
 def test_shipping_paused_frame_copy_protocol(paused_frame,mode):
     result=subprocess.run([str(paused_frame),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

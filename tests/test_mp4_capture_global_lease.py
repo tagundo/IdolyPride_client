@@ -64,7 +64,9 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];Lease s;a
  if(mode=="setter_wrong_value")wrong_set=true;
  if(mode=="setter_exception"||mode=="setter_source_handoff"||mode=="setter_wrong_value"){
   assert(s.restore()==Result::failed&&!s.restored());assert(s.restore()==Result::stale);assert(setters==(mode=="setter_source_handoff"?0:1));assert(s.release()==Result::ok&&roots.empty());return 0;}
- assert(s.restore()==Result::ok&&s.restored()&&setters==1);
+ assert(s.restore()==Result::ok&&s.restored()&&setters==1&&s.verify_held()==Result::ok);
+ if(mode=="final_checkpoint_write"){++sequence;assert(s.verify_held()==Result::stale&&setters==1);s.abandon();assert(s.release()==Result::ok&&roots.empty());return 0;}
+ if(mode=="final_checkpoint_lifetime"){lifetime=false;assert(s.verify_held()==Result::stale&&setters==1);s.abandon();assert(s.release()==Result::ok&&roots.empty());return 0;}
  assert(global.object==(mode=="null_baseline"?nullptr:ptr(1)));
  live=false;assert(s.restore()==Result::ok);assert(s.release()==Result::ok&&roots.empty());
  if(mode=="second_job"){live=true;assert(s.capture(a,ptr(10),7,9,55)==Result::ok&&!s.restored());assert(s.restore()==Result::ok&&!roots.empty());assert(s.release()==Result::ok&&roots.empty());}
@@ -74,7 +76,7 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];Lease s;a
     p=subprocess.run([compiler,'-std=c++17','-O1','-g','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie',str(src),'-o',str(binary)],capture_output=True,text=True,timeout=30)
     assert p.returncode==0,p.stdout+p.stderr
     return binary
-@pytest.mark.parametrize('mode',['normal','null_baseline','missing_api','unsafe_lifetime','capture_race','zero_serial','root_failure','unchanged','release_owed','external_identical','two_writes','external_after_capture','gpu_wait','held_wait','source_retired','source_lost','setter_exception','setter_source_handoff','setter_wrong_value','second_job','capture_during_tick'])
+@pytest.mark.parametrize('mode',['normal','null_baseline','missing_api','unsafe_lifetime','capture_race','zero_serial','root_failure','unchanged','release_owed','external_identical','two_writes','external_after_capture','gpu_wait','held_wait','source_retired','source_lost','setter_exception','setter_source_handoff','setter_wrong_value','second_job','capture_during_tick','final_checkpoint_write','final_checkpoint_lifetime'])
 def test_actual_capture_property_lease(capture_global,mode):
     p=subprocess.run([str(capture_global),mode],capture_output=True,text=True,timeout=5)
     assert p.returncode==0,p.stdout+p.stderr

@@ -19,7 +19,7 @@ SOURCE = r'''
 #include <stdexcept>
 #include <memory>
 using namespace idoly_mp4_actor;
-struct Obj {alignas(16) uint8_t bytes[512]{};std::string type;bool live=true;std::vector<float> data;std::map<int,float> properties;std::string keywords;int queue=0;void* shader=nullptr;Bounds bounds{};};
+struct Obj {alignas(16) uint8_t bytes[512]{};std::string type;bool live=true;std::vector<float> data;std::map<int,float> properties;std::string keywords;int queue=0;void* shader=nullptr;Bounds bounds{};Bounds skin_bounds{};bool explicit_bounds=true,offscreen=false,bounds_dirty=false;uintptr_t bounds_native=0;};
 struct Fixture {
  MonoGate gate;PresentationScope scope;Obj node,array,material,renderer,mesh,other,shader,block,actor,foot,fft;
  std::vector<std::unique_ptr<Obj>> extra;std::map<int,std::map<int,float>> blocks;std::vector<uint8_t> native[5];int completed=0,destroyed=0,block_sets=0,block_gets=0,throw_block_set=0,throw_block_get=0;
@@ -83,12 +83,17 @@ bool block_empty(void* p,Method*){return f->object(p)->properties.empty();}
 void block_get(void* renderer,void* block,int32_t i,Method*){assert(renderer==f->renderer.bytes);if(++f->block_gets==f->throw_block_get)throw std::runtime_error("block get");f->object(block)->properties=f->blocks[i];}
 void block_set(void* renderer,void* block,int32_t i,Method*){assert(renderer==f->renderer.bytes);++f->writes;if(++f->block_sets==f->throw_block_set)throw std::runtime_error("block set");f->blocks[i]=block?f->object(block)->properties:std::map<int,float>{};}
 void bounds_get(void* p,Bounds* out,Method*){*out=f->object(p)->bounds;}
-void bounds_set(void* p,const Bounds* v,Method*){++f->writes;f->object(p)->bounds=*v;}
+void bounds_set(void* p,const Bounds* v,Method*){++f->writes;auto*o=f->object(p);o->bounds=*v;o->skin_bounds=*v;o->explicit_bounds=true;o->bounds_dirty=false;}
+bool bounds_capture(void*p,RendererBoundsImage*out){auto*o=f->object(p);if(!o||o->bounds_dirty)return false;
+ *out={o->bounds_native?o->bounds_native:reinterpret_cast<uintptr_t>(o),1,17,o->bounds,o->skin_bounds,o->type=="UnityEngine.SkinnedMeshRenderer",o->explicit_bounds,o->offscreen};return true;}
+bool bounds_current(void*p,const RendererBoundsImage*saved){auto*o=f->object(p);return o&&o->live&&saved&&(o->bounds_native?o->bounds_native:reinterpret_cast<uintptr_t>(o))==saved->native&&o->offscreen==saved->offscreen;}
+bool bounds_restore(void*p,const RendererBoundsImage*saved){if(!bounds_current(p,saved))return false;auto*o=f->object(p);++f->writes;if(f->drop_restore)return true;o->bounds=saved->base;o->skin_bounds=saved->skin;o->explicit_bounds=saved->explicit_local;o->bounds_dirty=false;return true;}
+bool bounds_verify(void*p,const RendererBoundsImage*saved){auto*o=f->object(p);return bounds_current(p,saved)&&o->explicit_bounds==saved->explicit_local&&!o->bounds_dirty&&!std::memcmp(&o->bounds,&saved->base,sizeof(Bounds))&&!std::memcmp(&o->skin_bounds,&saved->skin,sizeof(Bounds));}
 void* vertices_get(void* p,Method*){auto* a=f->make("UnityEngine.Vector3[]");a->data=f->object(p)->data;return a->bytes;}
 void vertices_set(void* p,void* v,Method*){++f->writes;f->object(p)->data=f->object(v)->data;}
 void dispose_block(void* p,Method*){f->object(p)->live=false;}
 void complete_aux(void* p,Method*){++f->completed;std::memset(p,0,16);}
-NativeImagesApi image_api(){return {shader_get,material_new,material_copy,material_destroy,block_new,block_valid,block_empty,block_get,block_set,bounds_get,bounds_set,bounds_get,bounds_set,vertices_get,vertices_set,dispose_block};}
+NativeImagesApi image_api(){return {shader_get,material_new,material_copy,material_destroy,block_new,block_valid,block_empty,block_get,block_set,bounds_get,bounds_set,bounds_get,bounds_set,vertices_get,vertices_set,dispose_block,bounds_capture,bounds_current,bounds_restore,bounds_verify};}
 void header(void* owner,size_t at,std::vector<uint8_t>& data,size_t size){void* p=data.data();int32_t length=1,allocator=1;assert(data.size()==size);std::memcpy(static_cast<uint8_t*>(owner)+at,&p,8);std::memcpy(static_cast<uint8_t*>(owner)+at+8,&length,4);std::memcpy(static_cast<uint8_t*>(owner)+at+12,&allocator,4);}
 void build_native(){
  f->inventory.full_materials[0]=f->material.bytes;f->inventory.full_material_count=1;
@@ -151,6 +156,10 @@ int main(int argc,char** argv){assert(argc==2);Fixture fixture;f=&fixture;std::s
    f->inventory.nodes[1]={f->fft.bytes,&android_presentation_schemas[3]};f->inventory.node_count=2;
    if(c=="native_fft_source"){void* p=f->other.bytes;std::memcpy(f->fft.bytes+80,&p,8);assert(!f->scope.configure(a,&f->gate,f,11)&&f->roots.empty());return 0;}
   }
+  if(c=="native_bounds_missing_current"){a.images.renderer_bounds_current=nullptr;assert(!f->scope.configure(a,&f->gate,f,11)&&f->roots.empty());return 0;}
+  if(c=="native_bounds_missing_restore"){a.images.renderer_bounds_restore=nullptr;assert(!f->scope.configure(a,&f->gate,f,11)&&f->roots.empty());return 0;}
+  if(c=="native_bounds_automatic")f->renderer.explicit_bounds=false;
+  if(c=="native_bounds_dirty_capture")f->renderer.bounds_dirty=true;
   if(c=="native_cpu_scratch")f->block.properties[99]=.6f;
   assert(f->scope.configure(a,&f->gate,f,11));assert(f->scope.hold()==Result::ok);
   if(c=="native_partial_capture_failure"||c=="native_rollback_retry"){
@@ -158,6 +167,7 @@ int main(int argc,char** argv){assert(argc==2);Fixture fixture;f=&fixture;std::s
    try{f->scope.capture();assert(false);}catch(const std::runtime_error&){}
    f->throw_block_set=0;assert(f->scope.release(true)==Result::ok&&f->roots.empty()&&f->destroyed==1);assert(f->blocks[2][30]==.4f);return 0;
   }
+  if(c=="native_bounds_dirty_capture"){assert(f->scope.capture()==Result::unsupported);assert(f->scope.release(false)==Result::ok&&f->roots.empty());return 0;}
   assert(f->scope.capture()==Result::ok);f->writes=0;
   if(c=="native_material"){f->material.properties={{10,9}};f->material.keywords="C D";f->material.queue=0;assert(f->scope.restore()==Result::ok);assert(f->material.properties[10]==.5f&&f->material.properties[20]==.8f&&f->material.keywords=="A B"&&f->material.queue==2450);}
   else if(c=="native_shader_changed"){f->material.shader=f->other.bytes;assert(f->scope.restore()==Result::stale&&!f->writes);}
@@ -166,6 +176,12 @@ int main(int argc,char** argv){assert(argc==2);Fixture fixture;f=&fixture;std::s
   else if(c=="native_cpu_scratch"){f->block.properties={{88,8}};f->blocks[2]={{77,7}};assert(f->scope.restore()==Result::ok);assert(f->block.properties[99]==.6f&&!f->blocks[2].count(99)&&f->blocks[2][30]==.4f&&!f->block.properties.count(88));}
   else if(c=="native_restore_cpu_exception"){f->block.properties={{88,8}};f->blocks[2]={{77,7}};f->throw_block_get=f->block_gets+1;try{f->scope.restore();assert(false);}catch(const std::runtime_error&){}assert(f->blocks[2][30]==.4f);f->throw_block_get=0;assert(f->scope.restore()==Result::ok&&f->block.properties[30]==.4f);}
   else if(c=="native_block_destroyed"){f->block.live=false;assert(f->scope.restore()==Result::stale&&!f->writes);}
+  else if(c=="native_bounds_automatic"){f->renderer.explicit_bounds=true;assert(f->scope.restore()==Result::ok&&!f->renderer.explicit_bounds);}
+  else if(c=="native_bounds_replaced"){f->renderer.bounds_native=1234;assert(f->scope.restore()==Result::stale&&!f->writes);}
+  else if(c=="native_bounds_offscreen_changed"){f->renderer.offscreen=true;assert(f->scope.restore()==Result::stale&&!f->writes);}
+  else if(c=="native_bounds_dirty_current"){f->renderer.bounds_dirty=true;f->renderer.bounds={};assert(f->scope.restore()==Result::ok&&!f->renderer.bounds_dirty&&f->renderer.bounds.center.x==1);}
+  else if(c=="native_bounds_two_caches"){f->renderer.bounds={};f->renderer.skin_bounds={{88,99,100},{1,2,3}};assert(f->scope.restore()==Result::ok&&f->renderer.bounds.center.x==1&&f->renderer.skin_bounds.center.x==0);}
+  else if(c=="native_bounds_verify_failure"){f->renderer.bounds={};f->drop_restore=true;assert(f->scope.restore()==Result::failed);}
   else if(c=="native_bounds_mesh"){f->renderer.bounds={};f->mesh.bounds={};f->mesh.data={8,8,8};assert(f->scope.restore()==Result::ok);assert(f->renderer.bounds.center.x==1&&f->mesh.bounds.center.x==7&&f->mesh.data.size()==6&&f->mesh.data[0]==1);}
   else if(c=="native_aux_buffers"){f->native[0][200]=0x55;f->native[1][2]=0x56;assert(f->scope.restore()==Result::ok);assert(f->native[0][200]==0x31&&f->native[1][2]==0x32&&f->completed>=3);}
   else if(c=="native_aux_header_changed"){int32_t v=2;std::memcpy(f->actor.bytes+152,&v,4);assert(f->scope.restore()==Result::stale&&!f->writes);}
@@ -203,7 +219,7 @@ int main(int argc,char** argv){assert(argc==2);Fixture fixture;f=&fixture;std::s
  assert(f->scope.release(false)==Result::ok&&f->roots.empty());return 0;
 }
 '''
-CASES = ["gate_rng_suspend_unbalanced", "gate_rng_suspend_exception", "gate_rng_suspend", "gate_render_rng_suspend", "gate_rng_suspend_noop", "gate_rng_suspend_handoff", "gate_rng_suspend_abandon", "gate_rng_suspend_order", "gate_abandon_rng_handoff","gate_derived_two","gate_preview_rng", "gate_render_rng", "gate_render_keys", "gate_render_nested", "gate_scene_rng_handoff", "gate_render_scene_rng_handoff", "face_reset", "talk_reset", "native_fft_source", "native_fft_binds", "native_cpu_scratch", "native_partial_capture_failure", "native_rollback_retry", "native_restore_cpu_exception", "native_material", "native_shader_changed", "native_block", "native_block_destroyed", "native_bounds_mesh", "native_aux_buffers", "native_aux_header_changed", "native_abandon", "gate_no_registry", "gate_derived", "gate_held", "gate_unowned", "gate_wrong_phase", "gate_bad_serial", "gate_once", "gate_ambient_rng", "gate_exception_rng", "gate_nested_rng", "gate_source_loss", "gate_release_forwards", "gate_wrong_thread", "gate_hold_revoke", "bad_schema", "missing_leaf", "complete_restore", "init_once", "held_callbacks", "grant_callbacks", "identity_changed", "mesh_changed", "material_destroyed", "inventory_changed", "array_reallocated", "source_lost", "clock_unheld", "leaf_restore_rejected", "abandon"]
+CASES = ["gate_rng_suspend_unbalanced", "gate_rng_suspend_exception", "gate_rng_suspend", "gate_render_rng_suspend", "gate_rng_suspend_noop", "gate_rng_suspend_handoff", "gate_rng_suspend_abandon", "gate_rng_suspend_order", "gate_abandon_rng_handoff","gate_derived_two","gate_preview_rng", "gate_render_rng", "gate_render_keys", "gate_render_nested", "gate_scene_rng_handoff", "gate_render_scene_rng_handoff", "face_reset", "talk_reset", "native_fft_source", "native_fft_binds", "native_cpu_scratch", "native_partial_capture_failure", "native_rollback_retry", "native_restore_cpu_exception", "native_material", "native_shader_changed", "native_block", "native_block_destroyed", "native_bounds_mesh","native_bounds_automatic","native_bounds_missing_current","native_bounds_missing_restore","native_bounds_dirty_capture","native_bounds_replaced","native_bounds_offscreen_changed","native_bounds_dirty_current","native_bounds_two_caches","native_bounds_verify_failure", "native_aux_buffers", "native_aux_header_changed", "native_abandon", "gate_no_registry", "gate_derived", "gate_held", "gate_unowned", "gate_wrong_phase", "gate_bad_serial", "gate_once", "gate_ambient_rng", "gate_exception_rng", "gate_nested_rng", "gate_source_loss", "gate_release_forwards", "gate_wrong_thread", "gate_hold_revoke", "bad_schema", "missing_leaf", "complete_restore", "init_once", "held_callbacks", "grant_callbacks", "identity_changed", "mesh_changed", "material_destroyed", "inventory_changed", "array_reallocated", "source_lost", "clock_unheld", "leaf_restore_rejected", "abandon"]
 
 
 @pytest.fixture(scope="module")

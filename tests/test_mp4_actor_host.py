@@ -35,6 +35,7 @@ def host_binary(tmp_path_factory):
         'template<class T> bool mp4_actor_field(', 'bool mp4_actor_list(',
         'bool mp4_actor_owner(', 'void* mp4_actor_transforms(',
         'bool mp4_actor_graph_mode(mp4actor::Handle* handle',
+        'void mp4_actor_withdraw_interception() noexcept',
         'void mp4_actor_scene_will_change(', 'void mp4_actor_process_hook(', 'void mp4_actor_burst_hook(',
         '[[maybe_unused]] mp4actor::Result mp4_actor_grant(']
     actual = '\n'.join(function(bridge, signature) for signature in selected)

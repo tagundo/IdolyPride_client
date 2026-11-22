@@ -7,6 +7,8 @@
 #include <cstring>
 #include <cmath>
 #include <initializer_list>
+#include <atomic>
+#include <pthread.h>
 #endif
 namespace idoly_mp4_game {
 // Receiver and Type must come from the already verified timeline camera and
@@ -2379,6 +2381,7 @@ class Scope {
  }
 public:
  const char*error()const{return error_;}bool restored()const{return restored_;}bool ready()const{return backup_valid_&&slot_detached_&&!abandoned_;}
+ bool released()const{return !captured_&&!root_count_&&!backup_.object&&!ticket_;}
  Result capture(Api api,void*ctx,uint64_t epoch,uint64_t job){
   if(captured_||root_count_||!ctx||!epoch||!job)return fail(Result::invalid,"paused_frame_capture_state");
   api_=api;ctx_=ctx;epoch_=epoch;job_=job;
@@ -2450,6 +2453,20 @@ public:
  // Independent source loss drops no old scene flags/fields. Owned GPU objects
  // and roots still retire only through their actual completion receipt.
  void abandon()noexcept{abandoned_=true;}
+ // Final held checkpoint is distinct from the historical restore receipt:
+ // later module restoration must not replace the image we just restored.
+ Result verify_held(){
+  if(!restored_)return fail(Result::invalid,"paused_frame_not_restored");
+  if(!current())return fail(Result::stale,"paused_frame_source_changed");
+  if(!api_.held(ctx_))return Result::waiting;
+  Image now{};if(!source_image(now))return fail(Result::stale,"paused_frame_checkpoint_source");
+  const auto&expected=restore_started_?restored_target_:saved_.target;
+  void*wrapper=restore_started_?restored_wrapper_:saved_.target_wrapper;
+  if(ticket_||now.target_wrapper!=wrapper||now.target.object!=expected.object||now.target.native!=expected.native
+   ||!same_descriptor(now.target.descriptor,expected.descriptor)||now.captured_wrapper!=saved_.captured_wrapper)
+   return fail(Result::stale,"paused_frame_checkpoint_image");
+  return Result::ok;
+ }
  Result release(){
   if(!captured_&&!root_count_&&!backup_.object&&!ticket_)return Result::ok;
   if(!api_.thread())return Result::invalid;
@@ -2469,6 +2486,334 @@ public:
 };
 } // namespace idoly_mp4_paused_frame
 // END_MP4_PAUSED_FRAME_SCOPE
+
+// BEGIN_MP4_CAPTURE_GLOBAL_NATIVE
+// Native ShaderPropertySheet publication observer, not a managed Shader hook.
+// Bind only after the source-program admission has closed EVERY write route to
+// the exact global sheet. The pinned leaf alone is deliberately insufficient:
+// copying one texture property / the whole sheet and clearing a retired texture
+// write records directly. They must use mutation() below or reject admission.
+#ifdef IDOLY_DARWIN_BRIDGE
+extern "C" int pthread_mutex_trylock(pthread_mutex_t*);
+#endif
+namespace idoly_mp4_capture_global_native {
+// Public pthread ABI also supported by the SDK-free Darwin builder. Reentry is
+// limited to this same CPU publication thread (e.g. an ordinary native log callback).
+class Gate {
+    pthread_mutex_t mutex_=PTHREAD_MUTEX_INITIALIZER;
+    std::atomic<uintptr_t> owner_{0};uint32_t depth_=0;
+    inline static thread_local char identity_=0;
+    static uintptr_t token(){return reinterpret_cast<uintptr_t>(&identity_);}
+public:
+    void lock(){const uintptr_t id=token();if(owner_.load(std::memory_order_acquire)==id){++depth_;return;}
+        pthread_mutex_lock(&mutex_);depth_=1;owner_.store(id,std::memory_order_release);}
+    bool try_lock(){const uintptr_t id=token();if(owner_.load(std::memory_order_acquire)==id){++depth_;return true;}
+        if(pthread_mutex_trylock(&mutex_))return false;
+        depth_=1;owner_.store(id,std::memory_order_release);return true;}
+    void unlock(){if(--depth_)return;owner_.store(0,std::memory_order_release);pthread_mutex_unlock(&mutex_);}
+};
+class Lock {
+    Gate*gate_=nullptr;
+public:
+    explicit Lock(Gate&gate,bool try_only=false){if(try_only){if(gate.try_lock())gate_=&gate;}else{gate.lock();gate_=&gate;}}
+    ~Lock(){if(gate_)gate_->unlock();}bool owns_lock()const{return gate_!=nullptr;}
+    Lock(const Lock&)=delete;Lock&operator=(const Lock&)=delete;
+};
+struct Key { int32_t property; int32_t auxiliary[3]; };
+static_assert(sizeof(Key)==16,"original native property key ABI");
+
+class Observer {
+    // This gate is NEVER held across the Texture virtual helpers in the core
+    // setter, camera rendering, a fence, or a GPU readback. It protects only the
+    // final native CPU publication / bounded sheet mutation / stable getter.
+    mutable Gate gate_;
+    uint32_t busy_=0;
+    std::atomic<uint64_t> serial_{1};
+    std::atomic<bool> lost_{true};
+    void* sheet_=nullptr;
+    int32_t property_=0;
+    struct Origin {
+        Observer* observer=nullptr; Origin* parent=nullptr;
+        bool matching=false; bool owned=false; uint64_t expected=0;
+        uint32_t publications=0; uint64_t after=0; bool rejected=false;
+    };
+    inline static thread_local Origin* origin_=nullptr;
+    void finish_write() noexcept {
+        const uint64_t before=serial_.load(std::memory_order_acquire);
+        if(before==~uint64_t(0))lost_.store(true,std::memory_order_release);
+        else serial_.store(before+1,std::memory_order_release);
+    }
+    struct Busy {
+        Observer& observer;
+        explicit Busy(Observer& x):observer(x){__atomic_fetch_add(&observer.busy_,1,__ATOMIC_ACQ_REL);}
+        ~Busy(){__atomic_fetch_sub(&observer.busy_,1,__ATOMIC_ACQ_REL);}
+    };
+public:
+    Observer()=default; Observer(const Observer&)=delete; Observer&operator=(const Observer&)=delete;
+    // source_closed is the actual finite source-program result, not a default
+    // assertion that Unity APIs are main-thread-only. Caller pins/install receipts
+    // include both native texture cores AND direct-copy/clear/retirement routes.
+    bool bind(void* sheet,int32_t property,bool source_closed) {
+        Lock lock(gate_);
+        if(__atomic_load_n(&busy_,__ATOMIC_ACQUIRE)||!sheet||!source_closed){invalidate();return false;}
+        sheet_=sheet; property_=property;serial_.store(1,std::memory_order_release);
+        lost_.store(false,std::memory_order_release);return true;
+    }
+    void invalidate() noexcept {lost_.store(true,std::memory_order_release);}
+    bool matches(void* sheet,const Key* key)const noexcept {
+        return sheet==sheet_&&key&&key->property==property_;
+    }
+    uint64_t serial()const noexcept {
+        if(lost_.load(std::memory_order_acquire)||__atomic_load_n(&busy_,__ATOMIC_ACQUIRE))return 0;
+        const uint64_t result=serial_.load(std::memory_order_acquire);
+        return lost_.load(std::memory_order_acquire)||__atomic_load_n(&busy_,__ATOMIC_ACQUIRE)?0:result;
+    }
+    // Surround BOTH original core bodies. No lock is held while they resolve
+    // Texture data/dimensions. Native CB execution enters the same cores and is
+    // observed even when its value equals the current value.
+    template<class Original> void core(void* sheet,const Key* key,Original&& original) {
+        const bool matching=matches(sheet,key);
+        const bool sheet_matching=sheet==sheet_;
+        Origin scope{};scope.observer=this;scope.parent=origin_;scope.matching=matching;
+        // An owned request is transferred only into its first actual core on
+        // this thread. Nested ordinary calls never inherit owned authorization.
+        if(matching&&origin_&&origin_->observer==this&&origin_->owned&&!origin_->matching){
+            scope.owned=true;scope.expected=origin_->expected;
+        }
+        if(sheet_matching)__atomic_fetch_add(&busy_,1,__ATOMIC_ACQ_REL);
+        origin_=&scope;
+        try {static_cast<Original&&>(original)();}
+        catch(...){origin_=scope.parent;if(sheet_matching)__atomic_fetch_sub(&busy_,1,__ATOMIC_ACQ_REL);invalidate();throw;}
+        origin_=scope.parent;
+        if(scope.owned&&scope.parent){scope.parent->publications+=scope.publications;
+            scope.parent->after=scope.after;scope.parent->rejected|=scope.rejected;}
+        if(sheet_matching)__atomic_fetch_sub(&busy_,1,__ATOMIC_ACQ_REL);
+    }
+    // Hook the actual record publication leaf. `original` receives every exact
+    // original argument. Only OUR failed expected-serial restore is suppressed;
+    // every ordinary call is forwarded exactly once, including unknown keys.
+    template<class Original> bool publish(const Key* key,Original&& original) {
+        Origin* scope=origin_;
+        if(!key||key->property!=property_||!scope||scope->observer!=this||!scope->matching){
+            // A matching property with no sheet provenance may be an unobserved
+            // writer. Preserve its normal behavior, but end our restoration duty.
+            if(key&&key->property==property_&&(!scope||scope->observer!=this))invalidate();
+            static_cast<Original&&>(original)();return true;
+        }
+        Lock lock(gate_);
+        if(scope->owned&&(lost_.load(std::memory_order_acquire)||scope->publications||
+                serial_.load(std::memory_order_acquire)!=scope->expected)){
+            scope->rejected=true;return false;
+        }
+        try {static_cast<Original&&>(original)();}
+        catch(...){finish_write();invalidate();throw;}
+        finish_write();++scope->publications;
+        scope->after=serial_.load(std::memory_order_acquire);return true;
+    }
+    // A source-pinned CPU-only direct copy/clear/retirement route. This guard
+    // excludes the stable getter and serializes it with publication. Conservatively
+    // count the route once even if a copy was identical or cleared no record.
+    template<class Original> void mutation(void* destination,Original&& original) {
+        if(destination!=sheet_){static_cast<Original&&>(original)();return;}
+        Busy busy(*this);Lock lock(gate_);
+        try {static_cast<Original&&>(original)();}
+        catch(...){finish_write();invalidate();throw;}
+        finish_write();
+    }
+    // GetIndex/record-storage growth may move the containing allocation while
+    // leaving this binding unchanged. Serialize that CPU-only layout work with
+    // reads/publications, without inventing an extra texture publication serial.
+    template<class Original> void layout(void* sheet,Original&& original) {
+        if(sheet!=sheet_){static_cast<Original&&>(original)();return;}
+        Busy busy(*this);Lock lock(gate_);
+        try {static_cast<Original&&>(original)();}
+        catch(...){invalidate();throw;}
+    }
+    // End the lease under the getter gate, then release it BEFORE native
+    // destruction (which may release textures or wait for render work).
+    template<class Original> void retire(Original&& original) {
+        {Lock lock(gate_);invalidate();}
+        static_cast<Original&&>(original)();
+    }
+    template<class Getter> bool read(uint64_t expected,Getter&& getter)const {
+        if(!expected||serial()!=expected)return false;
+        Lock lock(gate_,true);
+        if(!lock.owns_lock()||serial()!=expected)return false;
+        if(!static_cast<Getter&&>(getter)())return false;
+        return serial()==expected;
+    }
+    // The exact native static setter is called outside the publication gate.
+    // Expected-serial comparison happens INSIDE publish(), directly before the
+    // actual CPU store, so an intervening ordinary write cannot be overwritten.
+    template<class Setter> bool set_original(uint64_t expected,uint64_t* after,Setter&& setter) {
+        if(after)*after=0;
+        if(!after||!expected||serial()!=expected||origin_)return false;
+        Origin request{};request.observer=this;request.owned=true;request.expected=expected;
+        origin_=&request;
+        try {static_cast<Setter&&>(setter)();}
+        catch(...){origin_=nullptr;invalidate();throw;}
+        origin_=nullptr;
+        if(request.rejected||request.publications!=1||expected==~uint64_t(0)||
+                request.after!=expected+1||serial()!=request.after)return false;
+        *after=request.after;return true;
+    }
+};
+// Exact ABI adapters for the source-pinned native origins below. Bridge hooks
+// provide installed trampolines, never the detoured entrypoint itself. These
+// adapters keep ordinary arguments/return values and call count unchanged.
+struct Calls {
+    using Core=void(*)(void*,uint32_t,const Key*,void*,uint32_t);
+    using RawCore=void(*)(void*,const Key*,uint32_t,void*,uint32_t);
+    using Publish=void(*)(void*,uint32_t,uint32_t,uint32_t,uint32_t,const Key*);
+    using PropertyCopy=void(*)(void*,const Key*,const void*);
+    using SheetCopy=void(*)(void*,const void*);
+    using RetiredTexture=void(*)(void*,uint32_t);
+    using GetIndex=int32_t(*)(void*,const Key*,uint32_t);
+    Core core=nullptr;RawCore raw_core=nullptr;Publish publish=nullptr;
+    PropertyCopy property_copy=nullptr;SheetCopy sheet_copy=nullptr;
+    RetiredTexture retired_texture=nullptr;GetIndex get_index=nullptr;
+    void(*global_destroy)()=nullptr;
+    bool complete()const{return core&&raw_core&&publish&&property_copy&&sheet_copy&&retired_texture&&get_index&&global_destroy;}
+};
+class NativeHost {
+    Observer observer_;Calls calls_{};
+public:
+    Observer& observer(){return observer_;}
+    bool bind(void* sheet,int32_t property,const Calls& calls,bool actual_source_closed){
+        if(!calls.complete()){observer_.invalidate();return false;}
+        calls_=calls;return observer_.bind(sheet,property,actual_source_closed);
+    }
+    void core(void* sheet,uint32_t index,const Key* key,void* texture,uint32_t subelement){
+        observer_.core(sheet,key,[&]{calls_.core(sheet,index,key,texture,subelement);});}
+    void raw_core(void* sheet,const Key* key,uint32_t index,void* texture,uint32_t mip){
+        observer_.core(sheet,key,[&]{calls_.raw_core(sheet,key,index,texture,mip);});}
+    void publish(void* record,uint32_t id,uint32_t dimension,uint32_t subelement,uint32_t flags,const Key* key){
+        observer_.publish(key,[&]{calls_.publish(record,id,dimension,subelement,flags,key);});}
+    void property_copy(void* target,const Key* key,const void* source){
+        observer_.mutation(target,[&]{calls_.property_copy(target,key,source);});}
+    void sheet_copy(void* target,const void* source){
+        observer_.mutation(target,[&]{calls_.sheet_copy(target,source);});}
+    void retired_texture(void* sheet,uint32_t id){
+        observer_.mutation(sheet,[&]{calls_.retired_texture(sheet,id);});}
+    int32_t get_index(void* sheet,const Key* key,uint32_t kind){int32_t result=-1;
+        observer_.layout(sheet,[&]{result=calls_.get_index(sheet,key,kind);});return result;}
+    void global_destroy(){observer_.retire([&]{calls_.global_destroy();});}
+};
+} // namespace idoly_mp4_capture_global_native
+// END_MP4_CAPTURE_GLOBAL_NATIVE
+
+// BEGIN_MP4_CAPTURE_GLOBAL_NATIVE_PROFILE
+namespace idoly_mp4_capture_global_native {
+struct Binding {uintptr_t rva;uint8_t prefix[16];};
+struct Profile {uintptr_t global_sheet_cell;bool indirect_cell;Binding static_set,static_get,core,raw_core,publish,property_copy,sheet_copy,retired_texture,global_destroy,sheet_get,get_index;};
+inline constexpr Profile android_profile={0x1459088,true,
+ {0x5e5790,{0xff,0x83,0x00,0xd1,0xfe,0x0b,0x00,0xf9,0xa8,0x73,0x00,0x90,0x08,0x45,0x40,0xf9}}, // static_set
+ {0x5e59b4,{0xa8,0x73,0x00,0x90,0x08,0x45,0x40,0xf9,0xe1,0x03,0x00,0x2a,0x08,0x01,0x40,0xf9}}, // static_get
+ {0x685668,{0xea,0x0f,0x1a,0xfc,0xe9,0xa3,0x00,0x6d,0xfe,0x0f,0x00,0xf9,0xfa,0x67,0x02,0xa9}}, // core
+ {0x685890,{0xea,0x0f,0x1a,0xfc,0xe9,0xa3,0x00,0x6d,0xfe,0x0f,0x00,0xf9,0xfa,0x67,0x02,0xa9}}, // raw_core
+ {0x5f13b8,{0xff,0x83,0x03,0xd1,0xfe,0x67,0x0a,0xa9,0xf8,0x5f,0x0b,0xa9,0xf6,0x57,0x0c,0xa9}}, // publish
+ {0x684e08,{0xff,0x03,0x01,0xd1,0xfe,0x0b,0x00,0xf9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}}, // property_copy
+ {0x67906c,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x35,0x10,0x40,0xf9}}, // sheet_copy
+ {0x6868b0,{0x08,0x24,0x49,0xa9,0x29,0x01,0x08,0xcb,0x3f,0x05,0x00,0x71,0x8b,0x02,0x00,0x54}}, // retired_texture
+ {0x684a88,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0xd4,0x72,0x00,0xf0,0x93,0xfe,0x45,0xf9}}, // global_destroy
+ {0x686bfc,{0xfe,0x4f,0xbf,0xa9,0xe1,0x03,0x01,0x2a,0x82,0x00,0x80,0x52,0xf3,0x03,0x00,0xaa}}, // sheet_get
+ {0x6854e8,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0xf3,0x03,0x01,0xaa,0x21,0x00,0x40,0xb9}}, // get_index
+};
+inline constexpr Profile ios_profile={0xa93c518,false,
+ {0xc6ee5c,{0xff,0x83,0x00,0xd1,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xe2,0x03,0x01,0xaa}}, // static_set
+ {0xc6f0b8,{0xe1,0x03,0x00,0xaa,0x68,0xe6,0x04,0xb0,0x08,0x61,0x14,0x91,0x00,0x01,0x40,0xf9}}, // static_get
+ {0xd108cc,{0xeb,0x2b,0xb9,0x6d,0xe9,0x23,0x01,0x6d,0xfa,0x67,0x02,0xa9,0xf8,0x5f,0x03,0xa9}}, // core
+ {0xd10afc,{0xeb,0x2b,0xb9,0x6d,0xe9,0x23,0x01,0x6d,0xfa,0x67,0x02,0xa9,0xf8,0x5f,0x03,0xa9}}, // raw_core
+ {0xc778ac,{0xff,0x03,0x04,0xd1,0xf8,0x5f,0x0c,0xa9,0xf6,0x57,0x0d,0xa9,0xf4,0x4f,0x0e,0xa9}}, // publish
+ {0xd10138,{0xff,0x03,0x01,0xd1,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}}, // property_copy
+ {0xd04074,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}}, // sheet_copy
+ {0xd11b7c,{0x08,0x24,0x49,0xa9,0x29,0x01,0x08,0xcb,0x3f,0x05,0x00,0x71,0x8b,0x02,0x00,0x54}}, // retired_texture
+ {0xd0feb0,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0x74,0xe1,0x04,0xb0}}, // global_destroy
+ {0xd11dc0,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xf3,0x03,0x00,0xaa}}, // sheet_get
+ {0xd1072c,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}, // get_index
+};
+} // namespace idoly_mp4_capture_global_native
+// END_MP4_CAPTURE_GLOBAL_NATIVE_PROFILE
+
+// BEGIN_MP4_CAPTURE_PUBLICATION_GUARD
+// The owned capture pass consumes A0.identifier directly and the exporter reads
+// A0.texture directly. Preserve the paused display's shader binding by omitting
+// ONLY that owned request's exact UpdateCapturedTexture publication, before the
+// native Shader icall mutates a sheet. Ordinary shader writes remain unchanged.
+namespace idoly_mp4_capture_publication {
+struct Api {
+    bool(*thread)()=nullptr;
+    bool(*current)(void*,uint64_t,uint64_t)=nullptr;
+    bool(*owned_request)(void*,void* camera,void* controller,uint64_t request)=nullptr;
+    bool(*current_capture)(void*,void* controller,void** wrapper,void** texture)=nullptr;
+    bool(*private_capture)(void*,void* controller,void* wrapper,void* texture)=nullptr;
+    // Actual selected renderer/capture-pass consumer closure, not a default true.
+    bool(*source_program)(void*,uint64_t,uint64_t)=nullptr;
+};
+struct Receipt {
+    uint64_t epoch=0,job=0,request=0;void*controller=nullptr;void*wrapper=nullptr;void*texture=nullptr;
+    uint32_t suppressed=0;bool valid=false;
+};
+class Request {
+    Api api_{};void*ctx_=nullptr;void*camera_=nullptr;void*controller_=nullptr;
+    uint64_t epoch_=0,job_=0,request_=0;int32_t property_=0;uintptr_t origin_=0;
+    Request*parent_=nullptr;void*wrapper_=nullptr;void*texture_=nullptr;
+    uint32_t suppressed_=0;bool active_=false,authorized_=false,valid_=false;
+    inline static thread_local Request*current_=nullptr;
+    bool current()const noexcept{try{return authorized_&&valid_&&api_.thread()&&api_.current(ctx_,epoch_,job_)
+        &&api_.owned_request(ctx_,camera_,controller_,request_)&&api_.source_program(ctx_,epoch_,job_);}catch(...){return false;}}
+public:
+    Request()=default;Request(const Request&)=delete;Request&operator=(const Request&)=delete;
+    ~Request(){if(active_)finish();}
+    // Called for EVERY actual typed CaptureRequest invocation. An ordinary or
+    // nested unowned request still masks its parent, then forwards all writes.
+    bool enter(Api api,void*ctx,void*camera,void*controller,uint64_t epoch,uint64_t job,
+            uint64_t request,int32_t property,uintptr_t pinned_original_return){
+        if(active_)return false;
+        wrapper_=nullptr;texture_=nullptr;suppressed_=0;
+        api_=api;ctx_=ctx;camera_=camera;controller_=controller;epoch_=epoch;job_=job;request_=request;
+        property_=property;origin_=pinned_original_return;parent_=current_;current_=this;active_=true;
+        authorized_=api.thread&&api.current&&api.owned_request&&api.current_capture&&api.private_capture&&api.source_program
+            &&ctx&&camera&&controller&&epoch&&job&&request&&origin_;
+        valid_=authorized_;
+        if(authorized_&&!current())valid_=false;
+        return valid_;
+    }
+    // Called at native Shader.SetGlobalTextureImpl entry with its actual x30.
+    // The source-pinned managed wrappers tail-dispatch that icall, preserving
+    // UpdateCapturedTexture's return site on both platforms. No return-site guess
+    // or current MV UI state grants authority to suppress a call.
+    static bool suppress(int32_t property,void*managed_texture,uintptr_t actual_original_return){
+        Request*scope=current_;
+        if(!scope||!scope->active_||!scope->authorized_||property!=scope->property_||actual_original_return!=scope->origin_)return false;
+        if(!scope->current()||scope->suppressed_){scope->valid_=false;return false;}
+        void*wrapper=nullptr;void*texture=nullptr;
+        try{if(!scope->api_.current_capture(scope->ctx_,scope->controller_,&wrapper,&texture)
+                ||!wrapper||!texture||managed_texture!=texture
+                ||!scope->api_.private_capture(scope->ctx_,scope->controller_,wrapper,texture)
+                ||!scope->current()){
+            scope->valid_=false;return false;
+        }}catch(...){scope->valid_=false;return false;}
+        scope->wrapper_=wrapper;scope->texture_=texture;++scope->suppressed_;return true;
+    }
+    Receipt finish(){
+        Receipt receipt{};
+        if(!active_||current_!=this)return receipt;
+        receipt={epoch_,job_,request_,controller_,wrapper_,texture_,suppressed_,current()};
+        current_=parent_;active_=false;return receipt;
+    }
+};
+} // namespace idoly_mp4_capture_publication
+// END_MP4_CAPTURE_PUBLICATION_GUARD
+
+// BEGIN_MP4_CAPTURE_PUBLICATION_PROFILE
+namespace idoly_mp4_capture_publication {
+using Binding=idoly_mp4_capture_global_native::Binding;
+struct Profile {Binding native_entry;uintptr_t original_return,icall_slot;Binding update,wrapper,shader_string;};
+inline constexpr Profile android_profile={{0x45b670,{0xff,0x3,0x1,0xd1,0xfe,0x57,0x2,0xa9,0xf4,0x4f,0x3,0xa9,0xf5,0x7f,0x0,0xd0}},0x923d4e4,0xa077c20,{0x923d228,{0xff,0x3,0x6,0xd1,0xfd,0x7b,0x15,0xa9,0xf6,0x57,0x16,0xa9,0xf4,0x4f,0x17,0xa9}},{0x9236624,{0xfe,0x4f,0xbf,0xa9,0xf3,0x3,0x0,0xaa,0x0,0x20,0x40,0xf9,0xe1,0x3,0x1f,0xaa}},{0x8f526c4,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0x35,0x89,0x0,0xb0,0xa8,0xea,0x45,0xf9}}};
+inline constexpr Profile ios_profile={{0xb04424,{0xff,0x3,0x1,0xd1,0xf4,0x4f,0x2,0xa9,0xfd,0x7b,0x3,0xa9,0xfd,0xc3,0x0,0x91}},0x7bcb81c,0xa91b680,{0x7bcb2f8,{0xff,0x3,0x4,0xd1,0xf8,0x5f,0xc,0xa9,0xf6,0x57,0xd,0xa9,0xf4,0x4f,0xe,0xa9}},{0,{}},{0x7811830,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91}}};
+} // namespace idoly_mp4_capture_publication
+// END_MP4_CAPTURE_PUBLICATION_PROFILE
 
 // BEGIN_MP4_CAPTURE_GLOBAL_LEASE
 // One actual _VLCapturedTexture binding. The native sheet observer supplies a
@@ -2550,6 +2895,14 @@ public:
   serial_=after;duty_=false;restored_=true;return Result::ok;
  }
  void abandon()noexcept{abandoned_=true;duty_=false;}
+ Result verify_held(){
+  if(!restored_||!active_)return fail(Result::invalid,"capture_global_not_restored");
+  if(!current())return fail(Result::stale,"capture_global_source_changed");
+  if(!api_.held(ctx_)||!api_.quiet(ctx_))return Result::waiting;
+  Value value{};if(!read_stable(value,serial_)||!same(value,source_)||!api_.baseline_lifetime(ctx_,source_))
+   return fail(Result::stale,"capture_global_checkpoint_changed");
+  return Result::ok;
+ }
  Result release(){
   if((active_||source_root_||last_root_)&&(!api_.thread||!api_.thread()))return Result::invalid;
   if(inflight_)return Result::waiting;
@@ -2726,6 +3079,15 @@ struct Profile {
  Binding video_time;
  Binding video_set_time;
  Binding video_frame;
+ Binding video_set_frame;
+ Binding video_set_external_reference_time;
+ Binding video_texture_width;
+ Binding video_texture_height;
+ Binding video_texture_format;
+ Binding video_texture_dimension;
+ Binding video_texture_mips;
+ Binding video_copy_mip;
+ Binding video_descriptor_ctor;
  Binding video_texture;
  Binding video_pause;
  Binding video_stop;
@@ -2797,6 +3159,13 @@ struct ExtraLayout {
  static constexpr int32_t video_render_api=4;
  static constexpr int32_t video_source_clip=0;
  static constexpr int32_t private_hide_flags=61;
+ static constexpr int32_t video_copy_basic=1;
+ static constexpr int32_t video_copy_different_types=4;
+ static constexpr int32_t video_copy_texture_to_rt=8;
+ static constexpr int32_t video_rgba_unorm=8;
+ static constexpr int32_t video_rgba_srgb=4;
+ static constexpr int32_t video_bgra_unorm=59;
+ static constexpr int32_t video_bgra_srgb=57;
 };
 struct RenderLayout {
  static constexpr uint32_t video_image_player=0xf0;
@@ -3077,6 +3446,15 @@ inline constexpr Profile android_profile={
  {0x91fcc00,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x14,0x74,0x00,0xb0,0x81,0xce,0x47,0xf9}}, // video_time
  {0x91fcc3c,{0xe8,0x0f,0x1e,0xfc,0xfe,0x07,0x00,0xf9,0xf4,0x4f,0x01,0xa9,0x14,0x74,0x00,0xb0}}, // video_set_time
  {0x91fcc88,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x14,0x74,0x00,0xb0,0x81,0xd6,0x47,0xf9}}, // video_frame
+ {0x91fccc4,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x15,0x74,0x00,0xb0,0xa2,0xda,0x47,0xf9}}, // video_set_frame
+ {0x91fd078,{0xe8,0x0f,0x1e,0xfc,0xfe,0x07,0x00,0xf9,0xf4,0x4f,0x01,0xa9,0x14,0x74,0x00,0xb0}}, // video_set_external_reference_time
+ {0x8f61c44,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0xb4,0x88,0x00,0xf0,0x81,0x52,0x43,0xf9}}, // video_texture_width
+ {0x8f61cb8,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0xb4,0x88,0x00,0xf0,0x81,0x56,0x43,0xf9}}, // video_texture_height
+ {0x8f61b38,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0xb4,0x88,0x00,0xf0,0x95,0x54,0x00,0xb0}}, // video_texture_format
+ {0x8f61d2c,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0xb4,0x88,0x00,0xf0,0x81,0x5a,0x43,0xf9}}, // video_texture_dimension
+ {0x8f61afc,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0xb4,0x88,0x00,0xf0,0x81,0x4a,0x43,0xf9}}, // video_texture_mips
+ {0x8f4b0ec,{0xfe,0x0f,0x1b,0xf8,0xfa,0x67,0x01,0xa9,0xf8,0x5f,0x02,0xa9,0xf6,0x57,0x03,0xa9}}, // video_copy_mip
+ {0x8f6be70,{0xfe,0x0f,0x1d,0xf8,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x00,0xe4,0x00,0x6f}}, // video_descriptor_ctor
  {0x91fc8e4,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x14,0x74,0x00,0xb0,0x81,0x9a,0x47,0xf9}}, // video_texture
  {0x91fcad4,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x14,0x74,0x00,0xb0,0x81,0xba,0x47,0xf9}}, // video_pause
  {0x91fcb10,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x14,0x74,0x00,0xb0,0x81,0xbe,0x47,0xf9}}, // video_stop
@@ -3282,6 +3660,15 @@ inline constexpr Profile ios_profile={
  {0x7b74ec4,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0x73,0x6d,0x01,0xb0}}, // video_time
  {0x7b74f14,{0xe9,0x23,0xbd,0x6d,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}, // video_set_time
  {0x7b74f78,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0x73,0x6d,0x01,0xb0}}, // video_frame
+ {0x7b74fc8,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}, // video_set_frame
+ {0x7b754dc,{0xe9,0x23,0xbd,0x6d,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}, // video_set_external_reference_time
+ {0x7825a74,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb3,0x87,0x01,0xd0}}, // video_texture_width
+ {0x7825b04,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb3,0x87,0x01,0xd0}}, // video_texture_height
+ {0x78258fc,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}, // video_texture_format
+ {0x7825b94,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb3,0x87,0x01,0xd0}}, // video_texture_dimension
+ {0x78258ac,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb3,0x87,0x01,0xd0}}, // video_texture_mips
+ {0x780779c,{0xfa,0x67,0xbb,0xa9,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}}, // video_copy_mip
+ {0x78343cc,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}}, // video_descriptor_ctor
  {0x7b74a8c,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0x73,0x6d,0x01,0xb0}}, // video_texture
  {0x7b74d34,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0x73,0x6d,0x01,0xb0}}, // video_pause
  {0x7b74d84,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0x73,0x6d,0x01,0xb0}}, // video_stop
@@ -3369,6 +3756,8 @@ struct TypeNames {
  TypeName rect_transform;
  TypeName video_player;
  TypeName video_clip;
+ TypeName video_texture_2d;
+ TypeName video_backup_rt;
  TypeName video_image;
  TypeName video_track;
  TypeName video_mixer;
@@ -3414,6 +3803,8 @@ inline constexpr TypeNames type_names={
  {"UnityEngine","RectTransform"}, // rect_transform
  {"UnityEngine.Video","VideoPlayer"}, // video_player
  {"UnityEngine.Video","VideoClip"}, // video_clip
+ {"UnityEngine","Texture2D"}, // video_texture_2d
+ {"UnityEngine","RenderTexture"}, // video_backup_rt
  {"Solis.Common","VideoImage"}, // video_image
  {"Solis.Timeline","SolisVideoPlayerTrack"}, // video_track
  {"Solis.Timeline","SolisVideoPlayerTrackBehaviour"}, // video_mixer
@@ -3459,6 +3850,8 @@ struct Types {
  Binding rect_transform;
  Binding video_player;
  Binding video_clip;
+ Binding video_texture_2d;
+ Binding video_backup_rt;
  Binding video_image;
  Binding video_track;
  Binding video_mixer;
@@ -3504,6 +3897,8 @@ inline constexpr Types android_types={
  {0x9d8a870,{0x02,0x5e,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // rect_transform
  {0x9e024e0,{0xb4,0x81,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_player
  {0x9e023b0,{0xa7,0x81,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_clip
+ {0x9d8c170,{0x5b,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_texture_2d
+ {0x9d8ab10,{0x60,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_backup_rt
  {0x9e02420,{0x5b,0x5b,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_image
  {0x9df16f0,{0x1d,0x5a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_track
  {0x9df1700,{0x1c,0x5a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_mixer
@@ -3549,6 +3944,8 @@ inline constexpr Types ios_types={
  {0xa4f4450,{0x31,0x5e,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // rect_transform
  {0xa56c0c0,{0x23,0x82,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_player
  {0xa56bf90,{0x16,0x82,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_clip
+ {0xa4f5d50,{0x8b,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_texture_2d
+ {0xa4f46f0,{0x90,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_backup_rt
  {0xa56c000,{0x89,0x5b,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_image
  {0xa55b240,{0x4b,0x5a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_track
  {0xa55b250,{0x4a,0x5a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // video_mixer
@@ -4101,3 +4498,143 @@ inline constexpr Schema ios_values[]={
 };
 } // namespace idoly_mp4_camera_profile
 // END_ORIGINAL_CAMERA_STATE_PROFILE
+
+// BEGIN_MP4_VIDEO_FRAME
+// A private paused VideoPlayer receives exact frame requests. These receipts
+// describe the original Unity frame-ready/seek events, observed only after the
+// original native transfer's scripting-invocation drain has completed.
+namespace idoly_mp4_video_frame {
+enum class Result : int { ready=0, waiting=1, invalid=-1, stale=-2, failed=-3 };
+struct Identity {
+    void* player=nullptr; void* clip=nullptr;
+    uintptr_t player_native=0, clip_native=0;
+    uint64_t epoch=0, job=0;
+};
+inline bool same(const Identity& a,const Identity& b) noexcept {
+    return a.player==b.player&&a.clip==b.clip&&a.player_native==b.player_native
+        &&a.clip_native==b.clip_native&&a.epoch==b.epoch&&a.job==b.job;
+}
+inline bool valid(const Identity& a) noexcept {
+    return a.player&&a.clip&&a.player_native&&a.clip_native&&a.epoch&&a.job;
+}
+struct State {
+    Identity identity{};void* texture=nullptr;uintptr_t texture_native=0;
+    int64_t frame=-1;bool prepared=false,paused=false,playing=false,seek_pending=true;
+};
+struct Ops {
+    void* context=nullptr;
+    // Must also check the finite programme, source generation, private birth,
+    // retained native IDs and held engine clock. No source VP is admitted.
+    bool (*read)(void*,const Identity&,State*)=nullptr;
+    bool (*set_frame)(void*,const Identity&,int64_t)=nullptr;
+};
+inline bool frame_for_normalized_time(double time,double rate,uint64_t count,int64_t* out) noexcept {
+    // time is the value passed by unchanged SyncVideoToPlayable after its real
+    // fmod(clip.length). Never round clip.frameRate to an integral export FPS.
+    if(!out||!std::isfinite(time)||!std::isfinite(rate)||rate<=0||!count
+        ||count>(~uint64_t(0)>>1))return false;
+    const double frame=__builtin_floor(time*rate);
+    if(!std::isfinite(frame))return false;
+    if(frame<=0){*out=0;return true;}
+    // Inexact length/rate metadata may describe a position past the final
+    // decoded frame. The actual finite clip bounds are authoritative.
+    const int64_t last=static_cast<int64_t>(count)-1;
+    if(frame>=static_cast<double>(last)){*out=last;return true;}
+    *out=static_cast<int64_t>(frame);return true;
+}
+class Scope {
+    Ops ops_{};Identity identity_{};
+    bool bound_=false,inflight_=false,failed_=false,issuing_=false;
+    bool frame_event_=false,seek_event_=false,request_needs_seek_=false;
+    uint64_t event_serial_=0,request_start_=0,drained_=0,receipt_=0;
+    int64_t wanted_=-1,event_frame_=-1,accepted_frame_=-1;
+    void* accepted_texture_=nullptr;uintptr_t accepted_native_=0;
+    bool state(State& out) const {
+        return bound_&&ops_.read&&ops_.read(ops_.context,identity_,&out)&&same(out.identity,identity_);
+    }
+    static bool usable(const State& out) noexcept {
+        return out.prepared&&out.paused&&!out.playing&&out.texture&&out.texture_native;
+    }
+public:
+    bool bind(Ops ops,const Identity& identity) noexcept {
+        if(bound_||!valid(identity)||!ops.read||!ops.set_frame)return false;
+        ops_=ops;identity_=identity;bound_=true;return true;
+    }
+    const Identity& identity()const noexcept{return identity_;}
+    uint64_t receipt()const noexcept{return receipt_;}
+    int64_t accepted_frame()const noexcept{return accepted_frame_;}
+    bool inflight()const noexcept{return inflight_;}
+    bool current_receipt(State* out=nullptr) const {
+        if(!bound_||failed_||inflight_||!receipt_)return false;
+        State now{};
+        if(!state(now)||!usable(now)||now.seek_pending||now.frame!=accepted_frame_
+            ||now.texture!=accepted_texture_||now.texture_native!=accepted_native_)return false;
+        if(out)*out=now;
+        return true;
+    }
+    Result request(double normalized_time,double clip_rate,uint64_t clip_frames) {
+        if(!bound_||failed_)return Result::invalid;
+        int64_t frame=-1;if(!frame_for_normalized_time(normalized_time,clip_rate,clip_frames,&frame))return Result::invalid;
+        if(inflight_)return frame==wanted_?Result::waiting:Result::invalid;
+        State current{};if(!state(current)){failed_=true;return Result::stale;}
+        if(!usable(current))return Result::waiting;
+        // 120 Hz simulation can reuse a 30 Hz source frame only after a real
+        // prior receipt, with the same live texture and no outstanding seek.
+        if(receipt_&&frame==accepted_frame_&&!current.seek_pending&&current.frame==frame
+            &&current.texture==accepted_texture_&&current.texture_native==accepted_native_)return Result::ready;
+        wanted_=frame;request_start_=event_serial_;request_needs_seek_=true;
+        frame_event_=seek_event_=false;event_frame_=-1;inflight_=true;issuing_=true;
+        bool issued=false;
+        try{issued=ops_.set_frame(ops_.context,identity_,frame);}
+        catch(...){issuing_=false;failed_=true;throw;}
+        issuing_=false;
+        if(!issued){failed_=true;return Result::failed;}
+        return Result::waiting;
+    }
+    // Call from only the original native-backed static callback for this
+    // exact private player, before/after forwarding its original callback.
+    bool frame_ready(const Identity& identity,int64_t frame) noexcept {
+        if(!bound_||failed_||!same(identity,identity_)||frame<0)return false;
+        ++event_serial_;if(!event_serial_){failed_=true;return false;}
+        if(!inflight_||event_serial_>request_start_){frame_event_=true;event_frame_=frame;}
+        return true;
+    }
+    bool seek_completed(const Identity& identity) noexcept {
+        if(!bound_||failed_||!same(identity,identity_))return false;
+        ++event_serial_;if(!event_serial_){failed_=true;return false;}
+        if(inflight_&&event_serial_>request_start_)seek_event_=true;
+        return true;
+    }
+    // This is the actual post-transfer native invocation-drain boundary, not
+    // an Update count or a fabricated get_frame receipt. Reentrant setters
+    // cannot close their own asynchronous operation while still executing.
+    bool native_drain_completed(const Identity& identity) noexcept {
+        if(!bound_||failed_||issuing_||!same(identity,identity_))return false;
+        drained_=event_serial_;return true;
+    }
+    Result prepared_frame() {
+        // Initial Prepare can already have transferred frame zero. Adopt that
+        // genuine prepared receipt rather than seeking to the same frame and
+        // waiting for a new-frame event the original engine does not emit.
+        if(!bound_||failed_||inflight_)return Result::invalid;
+        State current{};if(!state(current)){failed_=true;return Result::stale;}
+        if(!usable(current)||current.seek_pending||!frame_event_||current.frame!=event_frame_
+            ||!drained_||drained_!=event_serial_)return Result::waiting;
+        accepted_frame_=current.frame;accepted_texture_=current.texture;accepted_native_=current.texture_native;
+        ++receipt_;if(!receipt_){failed_=true;return Result::failed;}
+        frame_event_=false;return Result::ready;
+    }
+    Result poll() {
+        if(!bound_||failed_)return Result::invalid;
+        if(!inflight_)return current_receipt()?Result::ready:Result::invalid;
+        State current{};if(!state(current)){failed_=true;return Result::stale;}
+        if(!usable(current)||current.seek_pending||!frame_event_||event_frame_!=wanted_||current.frame!=wanted_
+            ||(request_needs_seek_&&!seek_event_)||drained_!=event_serial_||drained_<=request_start_)return Result::waiting;
+        accepted_frame_=wanted_;accepted_texture_=current.texture;accepted_native_=current.texture_native;
+        ++receipt_;if(!receipt_){failed_=true;return Result::failed;}
+        inflight_=false;return Result::ready;
+    }
+    void abandon()noexcept{failed_=true;}
+};
+} // namespace idoly_mp4_video_frame
+// END_MP4_VIDEO_FRAME

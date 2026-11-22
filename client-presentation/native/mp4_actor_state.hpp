@@ -280,6 +280,12 @@ using MonoCallback = void (*)(void*, Method*);
 struct RandomState { uint32_t words[4]{}; };
 struct RandomSuspension { RandomState private_state{};uint64_t epoch=0;uint32_t depth=0;bool active=false; };
 struct MonoReceiver { void* object=nullptr; MonoPhase phase=MonoPhase::actor_update; };
+// Scalar evidence for a currently entered saved original; ambient RNG isolation
+// and a published receiver registry alone are not an invocation receipt.
+struct MonoInvocation {
+    uint64_t epoch=0,serial=0,invocation=0;void* receiver=nullptr;
+    MonoCallback callback=nullptr;MonoPhase phase=MonoPhase::actor_update;uint32_t random_depth=0;
+};
 constexpr size_t max_mono_receivers=512;
 constexpr size_t presentation_max_snapshot_bytes=64u*1024u*1024u;
 struct MonoApi {
@@ -297,8 +303,18 @@ class MonoGate {
     struct RenderRandom {uintptr_t key=0;uint64_t serial=0;RandomState seed{};};
     RenderRandom render_random_[8]{};size_t render_random_count_=0;
     void* active_receiver_=nullptr;MonoCallback active_callback_=nullptr;MonoPhase active_phase_=MonoPhase::actor_update;
+    uint64_t invocation_sequence_=0,active_invocation_=0;
     const char* error_="none";
 public:
+    // No current(), owner callback, Unity call, RNG access, or mutation. The host
+    // separately checks the owner thread before using this scalar observation.
+    bool invocation(MonoInvocation& value)const{
+        value={};
+        if(!epoch_||!serial_||serial_!=last_serial_||poisoned_||!active_invocation_
+            ||!active_receiver_||!active_callback_||!random_depth_||!rng_active_
+            ||rng_released_||rng_suspended_)return false;
+        value={epoch_,serial_,active_invocation_,active_receiver_,active_callback_,active_phase_,random_depth_};return true;
+    }
     bool publish(MonoApi api,void* context,uint64_t epoch,const MonoReceiver* values,size_t count) {
         if(epoch_||random_depth_||!context||!epoch||!values||!count||count>max_mono_receivers
             ||!api.current||!api.owner_thread||!api.random_get||!api.random_set
@@ -417,7 +433,11 @@ public:
         Entry* found=nullptr;
         if(epoch_)for(size_t i=0;i<count_;++i)
             if(entries_[i].receiver.object==receiver&&entries_[i].receiver.phase==phase){found=&entries_[i];break;}
-        if(!found){original(receiver,method);return;}
+        if(!found){
+            const uint64_t previous_invocation=active_invocation_;active_invocation_=0;
+            try{original(receiver,method);}catch(...){active_invocation_=previous_invocation;throw;}
+            active_invocation_=previous_invocation;return;
+        }
         if(!api_.owner_thread()||!api_.current(context_)){
             poisoned_=true;serial_=0;error_="actor_mono_owner_changed";return;
         }
@@ -428,16 +448,28 @@ public:
             // active root call; a later duplicate remains suppressed.
             if(random_depth_&&active_receiver_==receiver&&active_phase_==phase&&active_callback_!=original){
                 bool seen=false;for(size_t i=0;i<found->nested_count;++i)seen|=found->nested[i]==original;
-                if(!seen&&found->nested_count<3){found->nested[found->nested_count++]=original;original(receiver,method);}
+                if(!seen&&found->nested_count<3&&invocation_sequence_!=~uint64_t(0)){
+                    found->nested[found->nested_count++]=original;
+                    const auto previous_callback=active_callback_;const uint64_t previous_invocation=active_invocation_;
+                    active_callback_=original;active_invocation_=++invocation_sequence_;
+                    try{original(receiver,method);}catch(...){active_callback_=previous_callback;active_invocation_=previous_invocation;throw;}
+                    active_callback_=previous_callback;active_invocation_=previous_invocation;
+                }
             }
             return;
         }
         found->consumed=serial_;found->nested_count=0;
         void* previous_receiver=active_receiver_;const auto previous_callback=active_callback_;const auto previous_phase=active_phase_;
-        active_receiver_=receiver;active_callback_=original;active_phase_=phase;
-        try {isolate([&]{original(receiver,method);});}
-        catch(...){active_receiver_=previous_receiver;active_callback_=previous_callback;active_phase_=previous_phase;throw;}
-        active_receiver_=previous_receiver;active_callback_=previous_callback;active_phase_=previous_phase;
+        const uint64_t previous_invocation=active_invocation_;
+        active_receiver_=receiver;active_callback_=original;active_phase_=phase;active_invocation_=0;
+        try {isolate([&]{
+            if(invocation_sequence_==~uint64_t(0)){poisoned_=true;serial_=0;error_="actor_mono_invocation_limit";return;}
+            active_invocation_=++invocation_sequence_;
+            try{original(receiver,method);}catch(...){active_invocation_=0;throw;}
+            active_invocation_=0;
+        });}
+        catch(...){active_receiver_=previous_receiver;active_callback_=previous_callback;active_phase_=previous_phase;active_invocation_=previous_invocation;throw;}
+        active_receiver_=previous_receiver;active_callback_=previous_callback;active_phase_=previous_phase;active_invocation_=previous_invocation;
     }
 };
 
@@ -643,6 +675,13 @@ public:
 
 struct Vector2 {float x=0,y=0;};
 struct Bounds {Vector3 center{},extents{};};
+// Logical local-bounds authority and the two actual native caches. A Skinned
+// setter also changes its mesh cache/dirty flag; equal public Bounds alone do
+// not preserve automatic-vs-explicit authority.
+struct RendererBoundsImage {
+    uintptr_t native=0,vtable=0;int32_t instance_id=0;
+    Bounds base{},skin{};bool skinned=false,explicit_local=false,offscreen=false;
+};
 struct PropertyBlockOwner {void* renderer=nullptr;void* original=nullptr;int32_t index=-1;};
 struct NativeImagesApi {
     // The host uses exact original Material(Shader), then CopyProperties.
@@ -663,6 +702,10 @@ struct NativeImagesApi {
     void* (*mesh_vertices_get)(void*,Method*)=nullptr;
     void (*mesh_vertices_set)(void*,void*,Method*)=nullptr;
     void (*block_dispose)(void*,Method*)=nullptr;
+    bool (*renderer_bounds_capture)(void*,RendererBoundsImage*)=nullptr;
+    bool (*renderer_bounds_current)(void*,const RendererBoundsImage*)=nullptr;
+    bool (*renderer_bounds_restore)(void*,const RendererBoundsImage*)=nullptr;
+    bool (*renderer_bounds_verify)(void*,const RendererBoundsImage*)=nullptr;
 };
 
 struct PresentationNode {void* object=nullptr;const ActorPresentationSchema* schema=nullptr;};
@@ -719,7 +762,7 @@ class PresentationScope {
     FixedJobSnapshot fixed_[256]{};size_t fixed_count_=0;
     struct MaterialCopy {void* source=nullptr;void* shader=nullptr;void* snapshot=nullptr;uint32_t roots[3]{};};
     struct BlockCopy {PropertyBlockOwner source{};void* snapshot=nullptr;void* cpu_snapshot=nullptr;uint32_t roots[4]{};bool empty=true,slot_displaced=false;};
-    struct RendererBounds {void* object=nullptr;uint32_t root=0;Bounds bounds{};};
+    struct RendererBounds {void* object=nullptr;uint32_t root=0;RendererBoundsImage image{};};
     struct MeshImage {void* object=nullptr;void* vertices=nullptr;uint32_t roots[2]{};Bounds bounds{};size_t length=0;};
     MaterialCopy material_copies_[256]{};BlockCopy block_copies_[512]{};
     RendererBounds renderer_bounds_[256]{};MeshImage mesh_images_[32]{};
@@ -867,7 +910,8 @@ public:
         const auto& images=api_.images;
         if((inventory_.full_material_count&&(!images.material_shader||!images.material_new||!images.material_copy||!images.material_destroy))
             ||(inventory_.block_count&&(!images.block_new||!images.block_valid||!images.block_empty||!images.block_get||!images.block_set||!images.block_dispose))
-            ||(inventory_.bounds_renderer_count&&(!images.renderer_bounds_get||!images.renderer_bounds_set))
+            ||(inventory_.bounds_renderer_count&&(!images.renderer_bounds_capture||!images.renderer_bounds_current
+                ||!images.renderer_bounds_restore||!images.renderer_bounds_verify))
             ||(inventory_.shadow_mesh_count&&(!images.mesh_bounds_get||!images.mesh_bounds_set||!images.mesh_vertices_get||!images.mesh_vertices_set))){
             error_="actor_presentation_native_image_api_unavailable";release(false);return false;}
         if(!gate_->publish(api_.mono,context_,epoch_,inventory_.callbacks,inventory_.callback_count)){
@@ -961,7 +1005,7 @@ public:
         }
         for(size_t i=renderer_bounds_count_;i<inventory_.bounds_renderer_count;++i){auto& b=renderer_bounds_[renderer_bounds_count_++];b.object=inventory_.bounds_renderers[i];
             if(!api_.is_type(b.object,"UnityEngine.Renderer")||!api_.alive(b.object)||!(b.root=api_.retain(b.object)))return fail(Result::unsupported,"actor_renderer_bounds_invalid");
-            api_.images.renderer_bounds_get(b.object,&b.bounds,nullptr);
+            if(!api_.images.renderer_bounds_capture(b.object,&b.image))return fail(Result::unsupported,"actor_renderer_bounds_authority_unavailable");
         }
         for(size_t i=mesh_image_count_;i<inventory_.shadow_mesh_count;++i){auto& m=mesh_images_[mesh_image_count_++];m.object=inventory_.shadow_meshes[i];
             if(!api_.is_type(m.object,"UnityEngine.Mesh")||!api_.alive(m.object)||!(m.roots[0]=api_.retain(m.object))
@@ -1009,7 +1053,8 @@ public:
             if(!root_current(b.roots[0],b.source.renderer)||!root_current(b.roots[2],b.snapshot)||!api_.alive(b.source.renderer)||!api_.images.block_valid(b.snapshot)
                 ||(b.source.original&&(!root_current(b.roots[1],b.source.original)||!api_.images.block_valid(b.source.original)
                     ||!root_current(b.roots[3],b.cpu_snapshot)||!api_.images.block_valid(b.cpu_snapshot))))return fail(Result::stale,"actor_block_owner_changed");}
-        for(size_t i=0;i<renderer_bounds_count_;++i)if(!root_current(renderer_bounds_[i].root,renderer_bounds_[i].object)||!api_.alive(renderer_bounds_[i].object))return fail(Result::stale,"actor_renderer_bounds_changed");
+        for(size_t i=0;i<renderer_bounds_count_;++i)if(!root_current(renderer_bounds_[i].root,renderer_bounds_[i].object)||!api_.alive(renderer_bounds_[i].object)
+            ||!api_.images.renderer_bounds_current(renderer_bounds_[i].object,&renderer_bounds_[i].image))return fail(Result::stale,"actor_renderer_bounds_changed");
         for(size_t i=0;i<mesh_image_count_;++i){const auto& m=mesh_images_[i];
             if(!root_current(m.roots[0],m.object)||!root_current(m.roots[1],m.vertices)||!api_.alive(m.object)||api_.array_length(m.vertices)!=m.length)return fail(Result::stale,"actor_shadow_mesh_changed");}
         for(size_t i=0;i<talk_count_;++i){const Result result=talk_[i].validate();if(result!=Result::ok)return fail(result,talk_[i].error());}
@@ -1075,7 +1120,8 @@ public:
                 if(!copy_cpu_block(b,b.cpu_snapshot,b.source.original))return fail(Result::stale,"actor_cpu_block_owner_changed");
             }else api_.images.block_set(b.source.renderer,b.empty?nullptr:b.snapshot,b.source.index,nullptr);
         }
-        for(size_t i=0;i<renderer_bounds_count_;++i){const auto& b=renderer_bounds_[i];api_.images.renderer_bounds_set(b.object,&b.bounds,nullptr);}
+        for(size_t i=0;i<renderer_bounds_count_;++i){const auto& b=renderer_bounds_[i];
+            if(!api_.images.renderer_bounds_restore(b.object,&b.image))return fail(Result::stale,"actor_renderer_bounds_restore_interrupted");}
         for(size_t i=0;i<mesh_image_count_;++i){const auto& m=mesh_images_[i];api_.images.mesh_vertices_set(m.object,m.vertices,nullptr);api_.images.mesh_bounds_set(m.object,&m.bounds,nullptr);}
         for(size_t i=0;i<dirty_flag_count_;++i){const auto& d=dirty_flags_[i];*(static_cast<uint8_t*>(d.object)+d.offset)=d.value;}
         for(size_t i=0;i<fields_count_;++i){const auto& f=fields_[i];size_t at=0;
@@ -1086,6 +1132,8 @@ public:
         for(size_t i=0;i<materials_count_;++i){const auto& m=materials_[i];const auto offset=api_.material_offset_get(m.object,nullptr);
             if(api_.material_float_get(m.object)!=m.highlight||offset.x!=m.offset.x||offset.y!=m.offset.y)return fail(Result::failed,"actor_presentation_material_restore_failed");}
         for(size_t i=0;i<blends_count_;++i){const auto& b=blends_[i];for(int32_t j=0;j<b.count;++j)if(api_.blend_get(b.object,j,nullptr)!=b.weights[j])return fail(Result::failed,"actor_presentation_blend_restore_failed");}
+        for(size_t i=0;i<renderer_bounds_count_;++i){const auto& b=renderer_bounds_[i];
+            if(!api_.images.renderer_bounds_verify(b.object,&b.image))return fail(Result::failed,"actor_renderer_bounds_restore_failed");}
         restored_=true;error_="none";return Result::ok;
     }
     Result release(bool owned){
@@ -2175,3 +2223,205 @@ public:
     }
 };
 } // namespace idoly_mp4_actor
+
+// BEGIN_MP4_SRP_CONTROLLER_STATE
+
+// VLSRPCameraController's original common SRP subscriber owns a lazy List of
+// pre-cull actions and a first-camera flag. These are source state, even though
+// the delegate list is empty after most ordinary frames. This finite lease is
+// separate from renderer capability and from an owned GPU draw receipt.
+namespace idoly_mp4_srp {
+constexpr size_t max_actions=128,max_capacity=256,max_roots=512;
+struct Image {
+    void* controller=nullptr;void* camera=nullptr;void* queue=nullptr;void* array=nullptr;
+    uint32_t version=0;size_t count=0,capacity=0;bool first=false;
+    void* items[max_capacity]{};
+    // Two pipeline anchors followed by the six actual SRP delegate roots.
+    void* subscribers[8]{};
+};
+struct FramePlan {bool clears_first=false;size_t selected_invocations=0;};
+enum class Operation : uint8_t {add,invoke,frame};
+struct Token {uint64_t id=0;Operation operation=Operation::add;};
+struct Api {
+    bool (*current)(void*,void*,void*)=nullptr;
+    bool (*held_fenced)(void*)=nullptr;
+    bool (*read)(void*,Image&)=nullptr;
+    uint32_t (*retain)(void*)=nullptr;
+    void* (*target)(uint32_t)=nullptr;
+    void (*release)(uint32_t)=nullptr;
+    // This callback observes actual typed hook entry, not an ambient owner bit.
+    // Add requires the entered Actor original/Root operation; Invoke requires
+    // the entered selected Frame original. Frame additionally joins the actual
+    // SRP callback and pure current render intent before a draw ticket exists.
+    bool (*entered)(void*,Operation,void*,void*)=nullptr;
+    bool (*frame_plan)(void*,void*,FramePlan&)=nullptr;
+    bool (*action_owned)(void*,void*)=nullptr;
+    // Host uses verified original IL2CPP reference barriers plus exact scalar
+    // slots, after all current managed ranges/roots have been prevalidated.
+    bool (*restore_image)(void*,const Image&)=nullptr;
+};
+class ControllerLease {
+    Api api_{};void* context_=nullptr;Image saved_{},latest_{};
+    struct Root {void* object=nullptr;uint32_t handle=0;};Root roots_[max_roots]{};size_t root_count_=0;
+    uint64_t sequence_=0;Token frame_{},mutation_{};Image before_{};
+    FramePlan plan_{};size_t invoked_=0;void* addition_=nullptr;
+    bool captured_=false,poisoned_=false,restored_=false;const char* error_="none";
+    bool fail(const char* error){error_=error;poisoned_=true;return false;}
+    bool root(void* object){
+        if(!object)return true;
+        for(size_t i=0;i<root_count_;++i)if(roots_[i].object==object)return api_.target(roots_[i].handle)==object;
+        if(root_count_==max_roots)return false;
+        const uint32_t handle=api_.retain(object);if(!handle)return false;
+        if(api_.target(handle)!=object){api_.release(handle);return false;}
+        roots_[root_count_++]={object,handle};return true;
+    }
+    bool keep(const Image& value){
+        if(!root(value.controller)||!root(value.camera)||!root(value.queue)||!root(value.array))return false;
+        for(size_t i=0;i<value.count;++i)if(!root(value.items[i]))return false;
+        for(void* value_root:value.subscribers)if(!root(value_root))return false;
+        return true;
+    }
+    bool roots_current()const{for(size_t i=0;i<root_count_;++i)if(api_.target(roots_[i].handle)!=roots_[i].object)return false;return true;}
+    bool owner()const{return captured_&&!poisoned_&&api_.current(context_,saved_.controller,saved_.camera)&&roots_current();}
+    static bool valid(const Image& value){
+        if(!value.controller||!value.camera||value.count>max_actions||value.capacity>max_capacity||value.count>value.capacity)return false;
+        if(!value.queue)return !value.array&&!value.count&&!value.capacity&&!value.version;
+        if(!value.array)return false;
+        for(size_t i=0;i<value.capacity;++i)if((i<value.count)!=(value.items[i]!=nullptr))return false;
+        return true;
+    }
+    static bool same(const Image& a,const Image& b,bool first=true){
+        if(a.controller!=b.controller||a.camera!=b.camera||a.queue!=b.queue||a.array!=b.array
+            ||a.version!=b.version||a.count!=b.count||a.capacity!=b.capacity||(first&&a.first!=b.first))return false;
+        for(size_t i=0;i<a.capacity;++i)if(a.items[i]!=b.items[i])return false;
+        for(size_t i=0;i<8;++i)if(a.subscribers[i]!=b.subscribers[i])return false;
+        return true;
+    }
+    static bool same_subscribers(const Image& a,const Image& b){
+        for(size_t i=0;i<8;++i)if(a.subscribers[i]!=b.subscribers[i])return false;
+        return true;
+    }
+    bool read(Image& value){
+        value={};if(!owner()||!api_.read(context_,value)||!valid(value)
+            ||value.controller!=saved_.controller||value.camera!=saved_.camera||!owner())return false;
+        return true;
+    }
+    bool observe(Image& value,bool in_frame=false){
+        if(!read(value)||!same(value,latest_,!in_frame))return false;
+        // The original flag can only transition true -> false. While inside a
+        // typed Frame callback that transition may precede its nested Invoke.
+        if(in_frame&&value.first!=latest_.first&&(!latest_.first||value.first||!plan_.clears_first))return false;
+        latest_.first=value.first;return true;
+    }
+    bool next(Token& token,Operation operation){
+        if(sequence_==~uint64_t(0))return fail("srp_invocation_limit");
+        token={++sequence_,operation};return true;
+    }
+    bool finish_image(const Image& value){
+        if(!keep(value))return fail("srp_root_failed");
+        Image after{};if(!read(after)||!same(value,after))return fail("srp_mutation_changed");
+        latest_=value;return true;
+    }
+public:
+    ControllerLease()=default;ControllerLease(const ControllerLease&)=delete;ControllerLease&operator=(const ControllerLease&)=delete;
+    ~ControllerLease(){clear();}
+    bool captured()const{return captured_;}
+    bool poisoned()const{return poisoned_;}
+    bool open()const{return frame_.id||mutation_.id;}
+    const char* error()const{return error_;}
+    bool capture(Api api,void* context){
+        if(captured_||!context||!api.current||!api.held_fenced||!api.read||!api.retain||!api.target||!api.release
+            ||!api.entered||!api.frame_plan||!api.action_owned||!api.restore_image)return false;
+        clear();api_=api;context_=context;
+        if(!api_.held_fenced(context_)||!api_.read(context_,saved_)||!valid(saved_)
+            ||!api_.current(context_,saved_.controller,saved_.camera)||!keep(saved_)){clear();return false;}
+        captured_=true;Image after{};
+        if(!read(after)||!same(saved_,after)){clear();return false;}
+        latest_=saved_;return true;
+    }
+    bool begin_add(void* controller,void* action,Token& token){
+        token={};Image value{};
+        if(!captured_)return false;
+        if(open()||restored_||controller!=saved_.controller||!action||!observe(value)||value.count==max_actions
+            ||!api_.entered(context_,Operation::add,controller,action)||!api_.action_owned(context_,action)||!root(action))
+            return fail("srp_add_entry_unclosed");
+        before_=value;addition_=action;
+        if(!next(mutation_,Operation::add))return false;
+        token=mutation_;return true;
+    }
+    bool end_add(Token token){
+        if(!captured_||token.id!=mutation_.id||!token.id||token.operation!=Operation::add||mutation_.operation!=Operation::add)
+            return fail("srp_add_token_stale");
+        Image value{};if(!read(value))return fail("srp_add_result_unreadable");
+        const size_t expected_capacity=before_.count<before_.capacity?before_.capacity:(before_.capacity?before_.capacity*2:4);
+        if(!same_subscribers(value,before_)||value.first!=before_.first||!value.queue||(before_.queue&&value.queue!=before_.queue)
+            ||value.count!=before_.count+1||value.version!=before_.version+1u||value.capacity!=expected_capacity
+            ||(before_.count<before_.capacity?value.array!=before_.array:value.array==before_.array)
+            ||value.items[before_.count]!=addition_)return fail("srp_add_result_unclosed");
+        for(size_t i=0;i<before_.count;++i)if(value.items[i]!=before_.items[i])return fail("srp_add_prefix_changed");
+        if(!finish_image(value))return false;
+        mutation_={};addition_=nullptr;return true;
+    }
+    bool begin_frame(void* controller,void* cameras,Token& token){
+        token={};Image value{};
+        if(!captured_)return false;
+        if(open()||restored_||controller!=saved_.controller||!cameras||!observe(value)
+            ||!api_.entered(context_,Operation::frame,controller,cameras)||!api_.frame_plan(context_,cameras,plan_)
+            ||plan_.selected_invocations>1024)return fail("srp_frame_entry_unclosed");
+        before_=value;saved_frame_first_=value.first;invoked_=0;
+        if(!next(frame_,Operation::frame))return false;
+        token=frame_;return true;
+    }
+    bool begin_invoke(void* controller,Token& token){
+        token={};Image value{};
+        if(!captured_)return false;
+        if(!frame_.id||mutation_.id||controller!=saved_.controller||invoked_>=plan_.selected_invocations
+            ||!observe(value,true)||!api_.entered(context_,Operation::invoke,controller,nullptr))return fail("srp_invoke_entry_unclosed");
+        // Keep the frame's original first flag separately; this mutation owns
+        // only queue clear/version, never the enclosing first-camera change.
+        before_=value;
+        if(!next(mutation_,Operation::invoke))return false;
+        token=mutation_;return true;
+    }
+    bool end_invoke(Token token){
+        if(!captured_||token.id!=mutation_.id||!token.id||token.operation!=Operation::invoke||mutation_.operation!=Operation::invoke)
+            return fail("srp_invoke_token_stale");
+        Image value{};if(!read(value))return fail("srp_invoke_result_unreadable");
+        if(!same_subscribers(value,before_)||value.first!=before_.first||value.queue!=before_.queue||value.array!=before_.array||value.capacity!=before_.capacity
+            ||value.count||(before_.queue?value.version!=before_.version+1u:value.version!=before_.version))
+            return fail("srp_invoke_result_unclosed");
+        if(!finish_image(value))return false;
+        mutation_={};++invoked_;return true;
+    }
+    bool end_frame(Token token){
+        if(!captured_||token.id!=frame_.id||!token.id||token.operation!=Operation::frame||mutation_.id)
+            return fail("srp_frame_token_stale");
+        Image value{};
+        if(!observe(value,true)||invoked_!=plan_.selected_invocations||value.first!=(saved_frame_first_&&!plan_.clears_first))
+            return fail("srp_frame_result_unclosed");
+        latest_=value;frame_={};return true;
+    }
+    // Call on every exception or unknown mutation of the selected controller.
+    // Original ordinary playback is still forwarded by the host exactly once.
+    void reject(){if(captured_)fail("srp_original_callback_unclosed");}
+    bool restore(){
+        Image value{};
+        if(!captured_||open()||!api_.held_fenced(context_)||!observe(value)||!owner())return fail("srp_restore_unclosed");
+        if(restored_)return true;
+        if(!api_.restore_image(context_,saved_))return fail("srp_restore_write_failed");
+        Image restored{};
+        if(!read(restored)||!same(restored,saved_))return fail("srp_restore_verify_failed");
+        latest_=saved_;restored_=true;return true;
+    }
+    // Source replacement withdraws the lease; it never writes the old scene.
+    void clear(){
+        for(size_t i=0;i<root_count_;++i)if(roots_[i].handle&&api_.release)api_.release(roots_[i].handle);
+        root_count_=0;api_={};context_=nullptr;saved_={};latest_={};before_={};frame_={};mutation_={};
+        plan_={};invoked_=0;addition_=nullptr;captured_=poisoned_=restored_=false;saved_frame_first_=false;error_="none";
+    }
+private:
+    bool saved_frame_first_=false;
+};
+} // namespace idoly_mp4_srp
+
+// END_MP4_SRP_CONTROLLER_STATE

@@ -214,6 +214,10 @@ void *install(void *) {
         HOOK(mp4_fog_disable,mp4_fog_disable_hook,mp4_fog_disable_original),
         HOOK(mp4_fog_late,mp4_fog_late_hook,mp4_fog_late_original),
         HOOK(mp4_context_submit,mp4_context_submit_hook,mp4_context_submit_original),
+        HOOK(mp4_control_create,mp4_control_create_hook,mp4_control_create_original),
+        HOOK(mp4_srp_add_precull,mp4_srp_add_precull_hook,mp4_srp_add_precull_original),
+        HOOK(mp4_srp_invoke_precull,mp4_srp_invoke_precull_hook,mp4_srp_invoke_precull_original),
+        HOOK(mp4_srp_begin_frame,mp4_srp_begin_frame_hook,mp4_srp_begin_frame_original),
         HOOK(mp4_fixed_loop_condition,mp4_fixed_loop_condition_hook,mp4_fixed_loop_condition_original),
     };
 #undef HOOK
@@ -221,6 +225,7 @@ void *install(void *) {
         if (!hook.entry->gateway || !hook.entry->slot) { set_state("init_failed"); return nullptr; }
         *hook.original=reinterpret_cast<void *>(image_base+hook.entry->gateway+20);
     }
+    mp4_control_factory_hook_ready=mp4_control_create_original!=nullptr;
     if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready() || !sound_tracker.ready()) { set_state("init_failed"); return nullptr; }
     if(!mp4_install_native_clock_api()||!mp4_install_fixed_root()){set_state("init_failed");return nullptr;}
     // All originals are valid before the first replacement is visible. Any

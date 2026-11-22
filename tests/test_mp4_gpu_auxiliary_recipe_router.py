@@ -12,9 +12,10 @@ def test_shipping_auxiliary_recipe_families_are_explicit(tmp_path):
     actual=text.split('// BEGIN_MP4_GPU_AUXILIARY_RECIPE_ROUTER',1)[1].split('// END_MP4_GPU_AUXILIARY_RECIPE_ROUTER',1)[0]
     prefix='''#include <cassert>\n#include <cstdint>\n#include <stdexcept>\nbool thread=true;bool game_call(){return thread;}\n'''
     driver=r'''
-int pf=0,stage=0;bool retained=true;
+int pf=0,stage=0,video_calls=0;bool retained=true;
 bool paused(uint64_t source,uint64_t job,uint64_t recipe){++pf;return retained&&source==7&&job==9&&recipe==0x5046000000000001ULL;}
 bool equipment(uint64_t source,uint64_t job,uint64_t recipe){++stage;return source==7&&job==9&&recipe==0x5354000000000002ULL;}
+bool video(uint64_t source,uint64_t job,uint64_t recipe){++video_calls;return source==7&&job==9&&recipe==0x5650000000000003ULL;}
 bool throws(uint64_t,uint64_t,uint64_t){throw std::runtime_error("proof");}
 int main(){
  const uint64_t a=0x5046000000000001ULL,b=0x5354000000000002ULL;
@@ -30,6 +31,16 @@ int main(){
  retained=false;assert(!mp4_gpu_auxiliary_recipe_router(7,9,a)&&pf==3);
  mp4_gpu_paused_auxiliary_recipe_closed=throws;assert(!mp4_gpu_auxiliary_recipe_router(7,9,a)&&stage==1);
  assert(mp4_gpu_auxiliary_recipe_router(7,9,b)&&stage==2);
+ const uint64_t c=0x5650000000000003ULL;
+ assert(!mp4_gpu_auxiliary_recipe_router(7,9,c)&&!video_calls);
+ mp4_gpu_video_auxiliary_recipe_closed=video;
+ assert(mp4_gpu_auxiliary_recipe_router(7,9,c)&&video_calls==1&&pf==3&&stage==2);
+ assert(!mp4_gpu_auxiliary_recipe_router(8,9,c)&&video_calls==2);
+ assert(!mp4_gpu_auxiliary_recipe_router(7,9,0x5650000000000000ULL)&&video_calls==2);
+ mp4_gpu_video_auxiliary_recipe_closed=throws;
+ assert(!mp4_gpu_auxiliary_recipe_router(7,9,c)&&video_calls==2);
+ assert(mp4_gpu_auxiliary_recipe_router(7,9,b)&&stage==3);
+
 }
 '''
     source=tmp_path/'router.cpp';binary=tmp_path/'router';source.write_text(prefix+actual+driver)

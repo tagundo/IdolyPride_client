@@ -61,7 +61,8 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
  if(mode=="dimension_mismatch")bad_width=true;
  if(mode=="identity_swap")mutate_native=true;
  if(mode=="off_thread")thread=false;
- if(mode=="derived"||mode=="uncreated"||mode=="dimension_mismatch"||mode=="identity_swap"||mode=="off_thread"){
+ if(mode=="missing_format_api")mp4_api.texture_graphics_format=nullptr;
+ if(mode=="derived"||mode=="uncreated"||mode=="dimension_mismatch"||mode=="identity_swap"||mode=="off_thread"||mode=="missing_format_api"){
   mp4frame::Texture out{};assert(!mp4_paused_texture_read(&original,&out)&&!out.object&&!out.native);return 0;
  }
  Mp4PausedTextureStorage storage{};mp4frame::Texture backup{};
@@ -92,7 +93,7 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
     proc=subprocess.run([compiler,'-std=c++17','-O1','-g','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie',str(src),'-o',str(binary)],capture_output=True,text=True,timeout=30)
     assert proc.returncode==0,proc.stdout+proc.stderr
     return binary
-@pytest.mark.parametrize('mode',['normal','derived','uncreated','dimension_mismatch','identity_swap','off_thread','root_failure','create_failure','constructor_exception','missing_basic','format_mismatch','native_mismatch','foreign_private_native'])
+@pytest.mark.parametrize('mode',['normal','derived','uncreated','dimension_mismatch','identity_swap','off_thread','missing_format_api','root_failure','create_failure','constructor_exception','missing_basic','format_mismatch','native_mismatch','foreign_private_native'])
 def test_actual_original_texture_host(texture_host,mode):
     p=subprocess.run([str(texture_host),mode],capture_output=True,text=True,timeout=5)
     assert p.returncode==0,p.stdout+p.stderr

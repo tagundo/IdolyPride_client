@@ -3191,6 +3191,98 @@
       "registration_pointer_slot_rva": 175686816,
       "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
       "native_abi": "void(ScriptableRenderContext8*,const MethodInfo*)"
+    },
+    "mp4_control_create": {
+      "name": "UnityEngine.Timeline.ControlPlayableAsset.CreatePlayable",
+      "module": "Unity.Timeline.dll",
+      "type_definition_index": 30597,
+      "metadata_method_index": 205277,
+      "token_row": 498,
+      "rva": 125369228,
+      "return_type_index": 68357,
+      "parameters": [
+        {
+          "name": "graph",
+          "metadata_type_index": 68374,
+          "type_name": "UnityEngine.Playables.PlayableGraph"
+        },
+        {
+          "name": "go",
+          "metadata_type_index": 57907,
+          "type_name": "UnityEngine.GameObject"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 198,
+      "return_type": "UnityEngine.Playables.Playable",
+      "registration_pointer_slot_rva": 175625088,
+      "prefix16": "ff0302d1fc6f02a9fa6703a9f85f04a9",
+      "native_abi": "Playable16(void*,PlayableGraph16,void*,const MethodInfo*)"
+    },
+    "mp4_srp_add_precull": {
+      "name": "VL.Rendering.VLSRPCameraController.AddPreCullFrameEvent",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28636,
+      "metadata_method_index": 196105,
+      "token_row": 995,
+      "rva": 129812528,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "a",
+          "metadata_type_index": 76678,
+          "type_name": "UnityEngine.Events.UnityAction"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 486,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175853840,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "native_abi": "void(void*,void*,const MethodInfo*)"
+    },
+    "mp4_srp_invoke_precull": {
+      "name": "VL.Rendering.VLSRPCameraController.InvokePreCullFrameEvent",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28636,
+      "metadata_method_index": 196107,
+      "token_row": 997,
+      "rva": 129809756,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175853856,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_srp_begin_frame": {
+      "name": "VL.Rendering.VLSRPCameraController.OnBeginFrameRendering",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28636,
+      "metadata_method_index": 196087,
+      "token_row": 977,
+      "rva": 129809436,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "context",
+          "metadata_type_index": 71423,
+          "type_name": "UnityEngine.Rendering.ScriptableRenderContext"
+        },
+        {
+          "name": "cameras",
+          "metadata_type_index": 45764,
+          "type_name": "UnityEngine.Camera[]"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175853696,
+      "prefix16": "fa67bba9f85f01a9f65702a9f44f03a9",
+      "native_abi": "void(void*,ScriptableRenderContext8,void*,const MethodInfo*)"
     }
   },
   "hook_names": [
@@ -3288,7 +3380,11 @@
     "mp4_fog_enable",
     "mp4_fog_disable",
     "mp4_fog_late",
-    "mp4_context_submit"
+    "mp4_context_submit",
+    "mp4_control_create",
+    "mp4_srp_add_precull",
+    "mp4_srp_invoke_precull",
+    "mp4_srp_begin_frame"
   ],
   "segments": {
     "__TEXT": {
@@ -3330,12 +3426,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 3040,
+    "bytes": 3168,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 760,
+    "bytes": 792,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {
