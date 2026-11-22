@@ -29,6 +29,21 @@ MP4_HOOKS = frozenset(("mp4_presenter_update", "mp4_capture_pass", "mp4_end_came
                       "mp4_graph_mode", "mp4_brain_delta", "mp4_core_camera", "mp4_player_initialize",
                       "mp4_photography_initialize", "mp4_photography_player_initialize", "mp4_photography_end"))
 NEW_BASE_HOOKS = SHARED_HOOKS | MP4_HOOKS
+# The translated input executable predates every shared-resource/MV adapter.
+# These 41 hook positions belong to that pinned input and receive no exception.
+BASE_PRESENTATION_HOOKS = (
+    "q_set", "q_apply", "q_init", "q_update", "app_fps_set", "rt_update",
+    "limited_resolution", "scene_main_update", "scene_main_reset",
+    "scene_pano_update", "scene_pano_reset", "target_update", "target_late",
+    "fov_get", "fov_set", "aa_init", "shadow_update", "focal_get", "focal_set",
+    "rotation_wait", "rotation_wait_label", "rotation_wait_simple", "rotation_wait_preview",
+    "orientation_internal_move", "orientation_starts_portrait_ready",
+    "orientation_starts_landscape_ready", "orientation_fixed_portrait_ready",
+    "orientation_fixed_landscape_ready", "orientation_after_ready", "mv_ui_initialize",
+    "preview_ui_bind", "costume_sorted", "font_awake", "sound_bgm_volume",
+    "sound_bgm_soundable", "sound_se_volume", "sound_se_soundable",
+    "sound_voice_volume", "sound_voice_soundable", "sound_bind", "sound_save",
+)
 
 
 def _json(path, maximum):
@@ -176,22 +191,26 @@ def verify(stock_ipa, patched_unity, plan_path, library):
 
 
 def verify_base_delta(incoming, patched_unity, original_sha256, plan_path):
-    """Keep every previous base patch, permitting fifteen named new hook sites.
+    """Keep every previous base patch and reproduce the validated additions.
 
     This is independent of the stock reconstruction: old presentation hooks,
     bootstrap instructions and all other executable bytes must still equal the
-    translated 41-hook base image. Five shared-resource and ten MV-export
-    entries must have their original prefixes; their gateways must occupy old
-    zero padding. Existing entry points and gateways receive no exception.
+    translated 41-hook base image. Every additional entry must have its original
+    prefix; its gateway and any native relay must occupy old zero padding.
+    Existing entry points and gateways receive no exception.
     """
     plan = load_plan(plan_path)
-    require(NEW_BASE_HOOKS <= plan["entries"].keys(), "Declared additional hook plan is incomplete")
+    require(NEW_BASE_HOOKS <= plan["entries"].keys()
+            and tuple(plan["hook_names"][:len(BASE_PRESENTATION_HOOKS)]) == BASE_PRESENTATION_HOOKS,
+            "Declared additional hook plan is incomplete")
+    additions = set(plan["entries"]) - set(BASE_PRESENTATION_HOOKS)
     size = regular(patched_unity).st_size
     old_header = incoming.read(min(MAX_HEADER, size))
     header, load = patched_header(old_header, size)
     writes = [(0, header)]
     checks = []
-    for name in sorted(NEW_BASE_HOOKS):
+    relays = []
+    for name in sorted(additions):
         row = plan["entries"][name]
         entry, gateway = bytes.fromhex(row["patched_entry"]), bytes.fromhex(row["gateway_hex"])
         original = bytes.fromhex(row["original16"])
@@ -200,6 +219,13 @@ def verify_base_delta(incoming, patched_unity, original_sha256, plan_path):
         writes.extend(((row["rva"],entry),(row["gateway"],gateway)))
         checks.extend(((row["rva"],original),
                        (row["gateway"],bytes(len(gateway)))))
+        if "relay_in" in row:
+            relays.append(name)
+            for field in ("relay_in", "relay_out"):
+                raw = bytes.fromhex(row[field + "_hex"])
+                require(len(raw) == 4, "Declared native relay extent differs")
+                writes.append((row[field], raw))
+                checks.append((row[field], bytes(4)))
     writes.sort()
     require(all(0 <= offset <= size-len(raw) for offset,raw in writes)
             and all(a+len(raw) <= b for (a,raw),(b,_) in zip(writes,writes[1:])),
@@ -229,5 +255,6 @@ def verify_base_delta(incoming, patched_unity, original_sha256, plan_path):
                 "Pinned previous base Unity SHA or size differs")
     return {"schema":1,"base_unity_sha256":old_hash.hexdigest(),
             "output_unity_sha256":new_hash.hexdigest(),"new_shared_hooks":sorted(SHARED_HOOKS),
-            "new_mp4_hooks":sorted(MP4_HOOKS),"new_hook_count":len(NEW_BASE_HOOKS),"server_load":load,
+            "new_mp4_hooks":sorted(additions - SHARED_HOOKS),"new_hook_count":len(additions),
+            "new_native_relay_hooks":relays,"server_load":load,
             "previous_bootstrap_and_presentation_bytes_preserved":True}

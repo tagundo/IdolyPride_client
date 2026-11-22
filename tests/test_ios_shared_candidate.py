@@ -140,33 +140,83 @@ def test_unity_publication_preserves_a_concurrently_created_destination(tmp_path
     assert not output.with_suffix('.json').exists()
 
 
-def base_delta_fixture(tmp_path,monkeypatch):
-    old=bytearray(b'old executable and existing hooks'.ljust(4096,b'\0'))
+def base_delta_fixture(tmp_path,monkeypatch,*,later_hooks=False):
+    old=bytearray(b'old executable and existing hooks'.ljust(8192,b'\0'))
     entries={}
-    for index,name in enumerate(sorted(candidate.NEW_BASE_HOOKS)):
+    for index,name in enumerate(candidate.BASE_PRESENTATION_HOOKS):
+        at,gateway=4096+index*32,6144+index*32
+        old[at:at+16]=bytes([index+1])*16
+        old[gateway:gateway+28]=bytes([index+2])*28
+        entries[name]={'rva':at,'gateway':gateway,'original16':(bytes([index+3])*16).hex(),
+                       'patched_entry':old[at:at+4].hex(),'gateway_hex':old[gateway:gateway+28].hex()}
+    additions=sorted(candidate.NEW_BASE_HOOKS)
+    if later_hooks:
+        additions+=['mp4_capture_native_publication','mp4_fixed_loop_condition','mp4_context_submit']
+    for index,name in enumerate(additions):
         at,gateway=256+index*32,1024+index*32
         prefix=bytes([index+1])*16
         old[at:at+16]=prefix
         entries[name]={'rva':at,'gateway':gateway,'original16':prefix.hex(),
                        'patched_entry':(bytes([index+9])*4).hex(),
-                       'gateway_hex':(bytes([index+19])*28).hex()}
+                       'gateway_hex':(bytes([index+19])*(32 if name=='mp4_fixed_loop_condition' else 28)).hex()}
+    if later_hooks:
+        entries['mp4_capture_native_publication'].update(relay_in=2048,relay_out=2052,
+            relay_in_hex='01000014',relay_out_hex='02000014')
     # Existing branch/gateway data is outside every newly allowed span.
     old[1800:1816]=bytes.fromhex('40000014f44f01a9fd7b02a9fd830091')
     old[1900:1928]=bytes(range(1,29))
     expected=bytearray(old)
     expected[16]=77
-    for row in entries.values():
+    for name in additions:
+        row=entries[name]
         expected[row['rva']:row['rva']+4]=bytes.fromhex(row['patched_entry'])
         code=bytes.fromhex(row['gateway_hex'])
         expected[row['gateway']:row['gateway']+len(code)]=code
+        if 'relay_in' in row:
+            for field in ('relay_in','relay_out'):
+                expected[row[field]:row[field]+4]=bytes.fromhex(row[field+'_hex'])
     path=tmp_path/'UnityFramework';path.write_bytes(expected)
     monkeypatch.setattr(candidate,'MAX_HEADER',128)
-    monkeypatch.setattr(candidate,'load_plan',lambda path:{'entries':entries})
+    plan={'entries':entries,'hook_names':[*candidate.BASE_PRESENTATION_HOOKS,*additions]}
+    monkeypatch.setattr(candidate,'load_plan',lambda path:plan)
     def header(raw,size):
         value=bytearray(raw);value[16]=77
         return bytes(value),{'unchanged_layout':True}
     monkeypatch.setattr(candidate,'patched_header',header)
     return old,expected,path,entries
+
+
+def test_later_validated_managed_conditional_and_native_relay_additions_are_reproduced(tmp_path,monkeypatch):
+    old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch,later_hooks=True)
+    proof=candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
+    assert proof['new_hook_count']==18
+    assert proof['new_native_relay_hooks']==['mp4_capture_native_publication']
+    assert {'mp4_capture_native_publication','mp4_fixed_loop_condition','mp4_context_submit'} <= set(proof['new_mp4_hooks'])
+    assert proof['output_unity_sha256']==hashlib.sha256(expected).hexdigest()
+
+
+@pytest.mark.parametrize('location',['entry','original_tail','gateway','conditional_last_word','relay_in','relay_out'])
+def test_later_additions_require_exact_old_source_prefix_and_zero_slack(tmp_path,monkeypatch,location):
+    old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch,later_hooks=True)
+    row=entries['mp4_capture_native_publication'];conditional=entries['mp4_fixed_loop_condition']
+    at={'entry':row['rva'],'original_tail':row['rva']+15,'gateway':row['gateway'],
+        'conditional_last_word':conditional['gateway']+31,'relay_in':row['relay_in'],'relay_out':row['relay_out']}[location]
+    old[at]^=1
+    with pytest.raises(ValueError,match='prefix or zero gateway'):
+        candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
+
+
+@pytest.mark.parametrize('location',['entry','gateway','conditional_last_word','relay_in','relay_out','past_relay','baseline_entry','baseline_gateway','bootstrap'])
+def test_later_plan_never_substitutes_for_exact_executable_bytes_or_broadens_old_sites(tmp_path,monkeypatch,location):
+    old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch,later_hooks=True)
+    row=entries['mp4_capture_native_publication'];conditional=entries['mp4_fixed_loop_condition']
+    baseline=entries[candidate.BASE_PRESENTATION_HOOKS[0]]
+    at={'entry':row['rva'],'gateway':row['gateway'],'conditional_last_word':conditional['gateway']+31,
+        'relay_in':row['relay_in'],'relay_out':row['relay_out'],'past_relay':row['relay_out']+4,
+        'baseline_entry':baseline['rva'],'baseline_gateway':baseline['gateway'],'bootstrap':64}[location]
+    expected[at]^=1;path.write_bytes(expected)
+    with pytest.raises(ValueError,match='prior bootstrap, presentation or SDK byte'):
+        candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
 
 
 def test_previous_base_delta_preserves_old_hooks_and_all_other_sdk_bytes(tmp_path,monkeypatch):
