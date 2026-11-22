@@ -64,6 +64,11 @@ MIB = 1024 * 1024
 CHUNK = 256 * 1024
 MAX_APK = 768 * MIB
 MAX_EXPANDED = 1536 * MIB
+NATIVE_BRIDGE_SOURCE = "client-presentation/native/bridge.cpp"
+# This single translation unit includes the generated, source-pinned binding
+# tables. Its source grew past 2 MiB; compiled addon and input-count limits stay
+# at 8 MiB and 64. Other native source files retain their separate 2 MiB bound.
+MAX_BRIDGE_SOURCE = 4 * MIB
 JAVA_FLAGS = ("-Xmx512m", "-XX:MaxMetaspaceSize=256m", "-XX:ReservedCodeCacheSize=64m",
               "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1")
 ET.register_namespace("android", ANDROID[1:-1])
@@ -400,7 +405,11 @@ def validate_native_bridge(library, receipt_path, root, commit):
                 or any(part in ("", ".", "..") for part in name.split("/"))
                 or not re.fullmatch(r"[0-9a-f]{64}", digest)):
             raise ValueError("Native addon source receipt path is invalid")
-        path = regular(root / name, 2 * MIB)
+        maximum = MAX_BRIDGE_SOURCE if name == NATIVE_BRIDGE_SOURCE else 2 * MIB
+        try:
+            path = regular(root / name, maximum)
+        except ValueError as error:
+            raise ValueError("Native addon source is not regular or exceeds its byte bound: " + name) from error
         if not path.resolve(strict=True).is_relative_to(root) or sha256(path) != digest:
             raise ValueError("Native addon source differs from current snapshot")
     raw = library.read_bytes()

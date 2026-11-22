@@ -138,7 +138,11 @@ def source_pins(values, base, required):
              and not name.startswith("/") and type(digest) is str and re.fullmatch(r"[0-9a-f]{64}", digest), "source_pin_invalid")
         path = base / name
         need(path.resolve().is_relative_to(ROOT.resolve()), "source_pin_escapes_checkout")
-        regular(path, 2 * MIB)
+        # Match the package validator's one generated translation-unit bound;
+        # no other source or source namespace receives the exception.
+        maximum = (4 * MIB if base.resolve() == ROOT.resolve()
+                   and name == "client-presentation/native/bridge.cpp" else 2 * MIB)
+        regular(path, maximum)
         need(sha(path) == digest, "source_bytes_changed")
 
 

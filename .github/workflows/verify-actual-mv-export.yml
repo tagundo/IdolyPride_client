@@ -55,7 +55,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
           python -m pip install --disable-pip-version-check pytest==8.4.2 protobuf==6.33.0 pycryptodome==3.23.0
-          python -B -m pytest -q -p no:cacheprovider tests/test_actual_mv_export_qa.py tests/test_actual_mv_qa_input.py tests/test_package_qa_ui_client.py qa-game-ui/tests/test_loopback_server.py qa-game-ui/tests/test_session_policy.py
+          python -B -m pytest -q -p no:cacheprovider tests/test_actual_mv_export_qa.py tests/test_actual_mv_qa_input.py tests/test_android_native_source_receipt.py tests/test_package_qa_ui_client.py qa-game-ui/tests/test_loopback_server.py qa-game-ui/tests/test_session_policy.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
