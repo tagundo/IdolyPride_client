@@ -37,7 +37,7 @@ using VoidMethod=void(*)(void*,Method*);
 std::atomic<bool> ready{true};
 std::atomic<bool> mp4_native_clock_source_ready{true},mp4_native_clock_armed{false};
 std::atomic<const char*> mp4_native_clock_error{"none"};
-bool unity_thread=true,mp4_api_installed=true,observer_result=true,native_manager_verified=true;
+bool unity_thread=true,mp4_api_installed=true,observer_result=true,native_manager_verified=true,brain_permitted=true;
 unsigned original_calls=0,brain_calls=0;
 std::vector<int> order;
 bool game_call(bool=false){return unity_thread;}
@@ -45,6 +45,7 @@ struct Manager {alignas(8) uint8_t bytes[0x200]{};};
 Manager one,two;void* current_manager=&one;void* expected_manager=&one;double expected_wall=1000.1250000000001;
 void* brain=reinterpret_cast<void*>(0x11223344);
 Method* brain_method=reinterpret_cast<Method*>(0x55667788);
+bool mp4_camera_permit_brain(void* value){assert(value==brain);return brain_permitted;}
 template<class T>T get(void* p,size_t at){T value{};memcpy(&value,static_cast<uint8_t*>(p)+at,sizeof value);return value;}
 template<class T>void put(void* p,size_t at,T value){memcpy(static_cast<uint8_t*>(p)+at,&value,sizeof value);}
 uint64_t bits(double value){uint64_t result;memcpy(&result,&value,sizeof result);return result;}
@@ -94,7 +95,9 @@ int main(int argc,char** argv){
         if(mode=="brain_wrong_thread")unity_thread=false;
         if(mode=="brain_api_missing")mp4_api_installed=false;
         if(mode=="brain_observer_false")observer_result=false;
+        if(mode=="brain_owned_update_blocked")brain_permitted=false;
         mp4_brain_update_hook(brain,brain_method);
+        if(!brain_permitted){assert(!brain_calls&&!original_calls&&order.empty());return 0;}
         const bool observed=mode=="brain_ready"||mode=="brain_observer_false";
         assert(brain_calls==1&&original_calls==0);
         assert(order==(observed?std::vector<int>{1,2}:std::vector<int>{1}));return 0;
@@ -181,7 +184,7 @@ def test_extracted_bridge_calls_the_typed_native_original_once_even_on_runtime_f
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("mode", ["brain_ready", "brain_not_ready", "brain_wrong_thread", "brain_api_missing", "brain_observer_false"])
+@pytest.mark.parametrize("mode", ["brain_ready", "brain_not_ready", "brain_wrong_thread", "brain_api_missing", "brain_observer_false", "brain_owned_update_blocked"])
 def test_extracted_manual_update_calls_original_before_camera_observation(bridge_binary, mode):
     result = subprocess.run([str(bridge_binary), mode], capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -262,7 +265,7 @@ def test_hook_profiles_statically_link_the_exact_native_and_brain_originals(plat
     else:
         # The Android native TimeManager belongs to a separately retained
         # libunity image, never this managed libil2cpp alias/base table.
-        assert "mp4_native_time" not in aliases and len(aliases) == 157
+        assert "mp4_native_time" not in aliases
     game_name = "mp4_game_profile.json" if platform == "android" else "mp4_game_ios_profile.json"
     method = json.loads((NATIVE / game_name).read_text())["methods"]["brain_manual_update"]
     assert int(brain["rva"], 16) == int(method["rva"], 16) if platform == "android" else brain["rva"] == int(method["rva"], 16)

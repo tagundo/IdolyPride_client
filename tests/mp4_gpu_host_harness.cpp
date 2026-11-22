@@ -8,9 +8,18 @@
 #include <initializer_list>
 #include <utility>
 enum class Mp4SceneResult{ok,waiting,unsupported,stale};
+// This ticket/service fixture models a non-GL backend. The actual GL bootstrap
+// owner is independently extracted and executed by test_mp4_gl_bootstrap_host.
+Mp4SceneResult mp4_gpu_gl_preflight(uint64_t,uint64_t){return Mp4SceneResult::ok;}
 struct Mp4RenderContext{void*pointer=nullptr;};
 struct Mp4RenderSubmission{Mp4RenderContext context{};uint64_t source_generation=0,job_generation=0,tick=0,draw_token=0;bool prewarm=false;};
 namespace mp4game{struct Binding{uintptr_t rva=0;uint8_t prefix[16]{};};}
+namespace mp4_gl_completion {struct Witness {uintptr_t manager=0,device=0,gl_context=0;uint64_t generation=0;uint32_t minimum_serial=0;};enum class Result{ok,waiting};}
+std::atomic<bool> mp4_gl_observer_published{false};
+bool mp4_gl_hook_receipts(void*){return false;}
+namespace mp4_gl_host {struct Observer{mp4_gl_completion::Result witness(mp4_gl_completion::Witness&){return mp4_gl_completion::Result::waiting;}bool completed(const mp4_gl_completion::Witness&,uintptr_t){return false;}}observer;}
+struct GlPins{uintptr_t manager_cell=0;};GlPins mp4_gl_source_pins(){return {};}
+bool mp4_gl_native_read(void*,uintptr_t,void*,size_t){return false;}
 namespace mp4_gpu_fence{
 struct Code{uintptr_t rva=0;uint8_t prefix[16]{};};
 struct Pins{const char*engine_sha="engine";Code command_type{1,{}},ctor{2,{}},dispose{3,{}},create{4,{}},execute{5,{}},supports{6,{}},submit{7,{}};};
@@ -18,7 +27,8 @@ Pins android_gpu_fence_pins,ios_gpu_fence_pins;
 bool same_pins(const Pins&a,const Pins&b){return a.command_type.rva==b.command_type.rva;}
 struct Context{void*pointer;};
 enum class Result{ready,waiting,quarantined};
-struct Api{void*context=nullptr;uintptr_t managed_base=0,engine_base=0;bool(*sources)(void*,const Pins&)=nullptr;bool(*owner_thread)(void*)=nullptr;bool(*mapped)(void*,uintptr_t,size_t,bool)=nullptr;bool(*read)(void*,uintptr_t,void*,size_t)=nullptr;void*(*new_command)(void*)=nullptr;uint32_t(*retain)(void*,void*)=nullptr;void*(*target)(void*,uint32_t)=nullptr;void(*release)(void*,uint32_t)=nullptr;};
+struct Device {void*device=nullptr;bool gl_completion=false;};
+struct Api{bool(*capture_gl_witness)(void*,const Device&,mp4_gl_completion::Witness&)=nullptr;bool(*gl_completed)(void*,const mp4_gl_completion::Witness&,void*)=nullptr;void*context=nullptr;uintptr_t managed_base=0,engine_base=0;bool(*sources)(void*,const Pins&)=nullptr;bool(*owner_thread)(void*)=nullptr;bool(*mapped)(void*,uintptr_t,size_t,bool)=nullptr;bool(*read)(void*,uintptr_t,void*,size_t)=nullptr;void*(*new_command)(void*)=nullptr;uint32_t(*retain)(void*,void*)=nullptr;void*(*target)(void*,uint32_t)=nullptr;void(*release)(void*,uint32_t)=nullptr;};
 struct PinnedHost{Api services{};const Pins*pins=nullptr;};
 Api pinned_api(PinnedHost&h){return h.services;}
 Result poll_fixture=Result::ready;bool begin_fail=false,dispatch_returned=true;int retires=0,submits=0,source_checks=0;

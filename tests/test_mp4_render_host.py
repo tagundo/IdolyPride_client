@@ -23,7 +23,7 @@ def render_host(tmp_path_factory):
     compiler=shutil.which('c++')
     if not compiler:pytest.skip('Host C++ compiler required')
     bridge=(ROOT/'client-presentation/native/bridge.cpp').read_text()
-    actual=function(bridge,'void mp4_context_submit_hook(')+'\n'+function(bridge,'void mp4_unowned_render_call(')+'\n'+function(bridge,'void mp4_owned_render_call(')
+    actual=function(bridge,'void mp4_camera_withdraw_render_ticket() noexcept {')+'\n'+function(bridge,'void mp4_context_submit_hook(')+'\n'+function(bridge,'void mp4_unowned_render_call(')+'\n'+function(bridge,'void mp4_owned_render_call(')
     getter=function(bridge,'void* mp4_selected_renderer_hook(')
     prefix=r'''
 #include <cassert>
@@ -42,6 +42,8 @@ void* selected=reinterpret_cast<void*>(1);void* foreign=reinterpret_cast<void*>(
 bool on_thread=true,source=true,route=true,ready=true,preview=false,root_grant=true,wait_extra=false,fail_extra=false,fail_motion=false,fail_rng=false,nest=false,throw_original=false,gpu_wait=false,gpu_late_wait=false,no_submit=false,submit_throw=false,record_fail=false,nest_foreign=false,foreign_reenter=false;
 int original_calls=0,claims=0,rearms=0,completed=0,pre_completed=0,motion_begin=0,motion_end=0,extra_begin=0,extra_end=0,extra_restore=0,consumed=0,resolve_calls=0,submit_calls=0,gpu_recorded=0,gpu_failed=0,gpu_begin=0,gpu_end=0;
 bool last_success=false;std::vector<int> order;
+bool interception=true;
+bool mp4_camera_interception_published()noexcept{return interception;}
 bool game_call(){return on_thread;}
 std::atomic<bool>mp4_stage_lease_active{false},mp4_stage_foreign_dirty{false};
 struct Scope{bool enabled=true,permit=true;bool active(){return enabled;}bool render_tick(uint64_t& tick){tick=4;return true;}bool consume_render_grant(){++consumed;order.push_back(2);if(!permit)return false;permit=false;return true;}};
@@ -116,6 +118,8 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
         assert(resolve_calls==(on_thread?1:0));
         assert(mp4_camera_host.invalidated==(mode.rfind("getter_error",0)==0));return 0;
     }
+    if(mode=="withdrawn")interception=false;
+    if(mode=="withdrawn_nested"){interception=false;mp4_owned_render_depth=1;mp4_owned_render_ticket_active=true;mp4_camera_withdraw_render_ticket();}
     if(mode=="foreign_thread")on_thread=false;
     if(mode=="unowned")mp4_camera_host.scope.enabled=false;
     if(mode=="ordinary_submit"){Mp4RenderContext c{foreign};mp4_context_submit_hook(&c,expected_method);assert(submit_calls==1&&!gpu_recorded&&!gpu_failed);return 0;}
@@ -135,8 +139,10 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
     if(mode=="nested_unowned_selected_reentry")foreign_reenter=true;
     if(mode=="throw_original")throw_original=true;
     bool threw=false;try{mp4_owned_render_call(original,{foreign},selected,expected_method);}catch(const std::runtime_error&){threw=true;}
+    if(mode=="withdrawn_nested"){assert(original_calls==1&&submit_calls==1&&!gpu_recorded&&!completed&&mp4_owned_render_depth==1&&!mp4_owned_render_ticket_active);return 0;}
     assert(threw==(mode=="throw_original"||mode=="submit_throw"));assert(!mp4_owned_render_depth&&!mp4_owned_render_camera);
     if(mode=="foreign_thread"||mode=="unowned"){assert(original_calls==1&&!extra_begin&&!completed&&!pre_completed);return 0;}
+    if(mode=="withdrawn"){assert(original_calls==1&&!extra_begin&&!consumed&&!completed&&!gpu_begin);return 0;}
     if(mode=="held"){assert(!original_calls&&!extra_begin&&!consumed&&!completed);return 0;}
     if(gpu_wait||gpu_late_wait){
         assert(!original_calls&&!consumed&&!motion_begin&&!completed&&!pre_completed);
@@ -168,7 +174,7 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
     return binary
 
 
-@pytest.mark.parametrize('mode',['normal','nested','nested_unowned','nested_unowned_selected_reentry','held','ordinary_submit','gpu_wait','gpu_late_wait','no_submit','submit_throw','record_fail','wait','prewarm','prewarm_wait','extra_error','motion_error','rng_error','throw_original','foreign_thread','unowned','getter_forward','getter_foreign_thread','getter_owned','getter_error_called','getter_error_null','getter_error_forward'])
+@pytest.mark.parametrize('mode',['normal','withdrawn_nested','withdrawn','nested','nested_unowned','nested_unowned_selected_reentry','held','ordinary_submit','gpu_wait','gpu_late_wait','no_submit','submit_throw','record_fail','wait','prewarm','prewarm_wait','extra_error','motion_error','rng_error','throw_original','foreign_thread','unowned','getter_forward','getter_foreign_thread','getter_owned','getter_error_called','getter_error_null','getter_error_forward'])
 def test_actual_outer_draw_and_renderer_getter_preserve_tickets_and_forwarding(render_host,mode):
     result=subprocess.run([str(render_host),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

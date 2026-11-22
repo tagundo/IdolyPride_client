@@ -24,6 +24,15 @@ struct Vec3{float x,y,z;};
 mp4game::CameraGrant mp4_camera_grant;bool mp4_owned_camera_scope=true,unity=true,status_available=true,lookup_broken=false;
 int frame=100,original_calls=0;float advanced=0;unsigned char core[80]{},status[48]{};
 bool game_call(){return unity;}
+enum class Mp4CameraDispatch{forward,skip,scoped};
+Mp4CameraDispatch camera_dispatch=Mp4CameraDispatch::forward;
+bool pipeline_owned=true,isolation_good=true,isolation_runs=true;
+unsigned pipeline_entries=0,isolation_entries=0,isolation_failures=0;
+Mp4CameraDispatch mp4_camera_core_dispatch(void*){return camera_dispatch;}
+struct Mp4CameraPipelineScope{bool own(void*){++pipeline_entries;return pipeline_owned;}};
+struct{bool producer_completion_failed=false;const char*error="none";}mp4_camera_host;
+struct MonoGate{template<class F>bool isolate(F fn){++isolation_entries;if(isolation_runs)fn();return isolation_good;}}mp4_actor_mono_gate;
+void mp4_camera_isolation_failed(){++isolation_failures;}
 template<class T>T read(void* p,size_t off){T v;std::memcpy(&v,static_cast<char*>(p)+off,sizeof v);return v;}
 template<class T>void write(void* p,size_t off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof v);}
 int frame_count(Method*){return frame;}
@@ -48,6 +57,21 @@ int main(){
  mp4_camera_grant.begin();lookup_broken=true;mp4_core_camera_hook(core,camera,{0,1,0},.02f,nullptr);assert(!mp4_camera_grant.ok()&&original_calls==5&&advanced==.06f);
  lookup_broken=false;mp4_owned_camera_scope=false;frame=720;mp4_core_camera_hook(core,camera,{0,1,0},.02f,nullptr);assert(original_calls==6&&advanced>.25f); // Original behavior outside owned scope remains unchanged.
  mp4_camera_grant.begin();for(uintptr_t i=1;i<=128;++i)assert(mp4_camera_grant.visit(reinterpret_cast<void*>(i))==mp4game::CameraGrant::Visit::first);assert(mp4_camera_grant.visit(reinterpret_cast<void*>(129))==mp4game::CameraGrant::Visit::failed&&!mp4_camera_grant.ok());
+ // The actual scoped dispatch precedes the legacy frame-gap adapter. A held
+ // owned camera skips the original; an ordinary foreign-thread call forwards.
+ camera_dispatch=Mp4CameraDispatch::skip;unsigned before=original_calls;
+ mp4_core_camera_hook(core,camera,{0,1,0},.02f,nullptr);assert(original_calls==int(before)&&!pipeline_entries&&!isolation_entries);
+ unity=false;mp4_core_camera_hook(core,camera,{0,1,0},.02f,nullptr);assert(original_calls==int(before+1));unity=true;
+ camera_dispatch=Mp4CameraDispatch::scoped;before=original_calls;
+ mp4_core_camera_hook(core,camera,{0,1,0},.02f,nullptr);assert(original_calls==int(before+1)&&pipeline_entries==1&&isolation_entries==1&&!isolation_failures);
+ // Nested ordinary pipeline reentry must preserve one original invocation and
+ // record failed ownership, without manufacturing an isolated callback.
+ pipeline_owned=false;before=original_calls;
+ mp4_core_camera_hook(core,camera,{0,1,0},.02f,nullptr);assert(original_calls==int(before+1)&&pipeline_entries==2&&isolation_entries==1&&mp4_camera_host.producer_completion_failed);
+ assert(!std::strcmp(mp4_camera_host.error,"camera_unowned_pipeline_reentry"));
+ pipeline_owned=true;isolation_good=false;isolation_runs=false;before=original_calls;
+ mp4_core_camera_hook(core,camera,{0,1,0},.02f,nullptr);assert(original_calls==int(before)&&isolation_failures==1);
+ isolation_runs=true;mp4_core_camera_hook(core,camera,{0,1,0},.02f,nullptr);assert(original_calls==int(before+1)&&isolation_failures==2);
 }
 '''
     path=tmp_path/'clock.cpp';path.write_text(code);binary=tmp_path/'clock'

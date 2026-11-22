@@ -7,11 +7,11 @@
 #include "cine-volume-producer.inc"
 using namespace idoly_mp4_cine_volume_producer;
 struct O {int type=0,layer=3;bool alive=true,registered=false,abandoned=false,detached=false;O* go=nullptr;void* shared=nullptr;void* internal=nullptr;float priority=1,weight=.4f;};
-struct H {Scope scope;O brain{},asset{},go{1},volume{2},created_go{1},created_volume{2},foreign_go{1},foreign_volume{2};bool current=true,fail_restore=false,gpu=true;int touches=0,transfers=0,destroys=0;std::unordered_map<uint32_t,void*> roots;uint32_t next=1;H(){volume.go=&go;volume.registered=true;created_go.alive=false;created_volume.go=&created_go;foreign_volume.go=&foreign_go;}};
+struct H {Scope scope;O brain{},asset{},go{1},volume{2},created_go{1},created_volume{2},foreign_go{1},foreign_volume{2};bool current=true,fail_restore=false,gpu=true;int touches=0,transfers=0,destroys=0,owner_queries=0;std::unordered_map<uint32_t,void*> roots;uint32_t next=1;H(){volume.go=&go;volume.registered=true;created_go.alive=false;created_volume.go=&created_go;foreign_volume.go=&foreign_go;}};
 H* host=nullptr;
 VolumeImage image(O& v){return {&v,v.go,v.shared,v.internal,v.priority,0,v.weight,1,3,true};}
 Api api(H& h){Api a{};a.context=&h;a.source_asset=&h.asset;a.producer_method=0x1234;
- a.owner_thread=[](){return true;};a.current=[](void* p,uint64_t){return static_cast<H*>(p)->current;};a.routes_verified=[](void*){return true;};a.membership_current=[](void*){return true;};
+ a.owner_thread=[](){return true;};a.current=[](void* p,uint64_t){auto& h=*static_cast<H*>(p);++h.owner_queries;return h.current;};a.routes_verified=[](void*){return true;};a.membership_current=[](void*){return true;};
  a.retain=[](void* p){auto id=host->next++;host->roots[id]=p;return id;};a.target=[](uint32_t id)->void*{auto at=host->roots.find(id);return at==host->roots.end()?nullptr:at->second;};a.release=[](uint32_t id){assert(host->roots.erase(id)==1);};
  a.inventory=[](void* p,void*,GameObjectImage* gos,size_t,size_t* ng,VolumeImage* vs,size_t,size_t* nv){auto& h=*static_cast<H*>(p);gos[0]={&h.go,h.go.layer};vs[0]=image(h.volume);*ng=*nv=1;return true;};
  a.volume_current=[](void*,const VolumeImage& v){return static_cast<O*>(v.object)->alive;};a.game_object_current=[](void*,const GameObjectImage& g){return static_cast<O*>(g.object)->alive;};
@@ -32,6 +32,16 @@ Api api(H& h){Api a{};a.context=&h;a.source_asset=&h.asset;a.producer_method=0x1
 void begin(H& h){host=&h;assert(h.scope.capture(api(h),7,&h.brain));}
 void created(H& h){assert(h.scope.game_object_before(&h.created_go,reinterpret_cast<void*>(1))==Observe::owned);h.created_go.alive=true;assert(h.scope.volume_before_enable(&h.created_volume)==Observe::owned);h.created_volume.registered=true;}
 int main(){
+ {H h;begin(h);auto token=h.scope.begin_apply(&h.brain);created(h);
+  auto clear=[](void*p){auto&v=*static_cast<O*>(p);return !v.shared&&!v.internal;};
+  assert(!h.scope.created_volume_publications_withdrawn(clear));assert(h.scope.end_apply(token));
+  assert(!h.scope.created_volume_publications_withdrawn(clear));assert(h.scope.before_source_change()==Result::ok);
+  h.current=false;const auto queries=h.owner_queries;assert(h.scope.created_volume_publications_withdrawn(clear)&&h.owner_queries==queries);
+  h.created_volume.shared=&h.asset;assert(!h.scope.created_volume_publications_withdrawn(clear));h.created_volume.shared=nullptr;
+  uint32_t lost=0;for(const auto&v:h.roots)if(v.second==&h.created_volume)lost=v.first;assert(lost);auto value=h.roots[lost];h.roots.erase(lost);
+  assert(!h.scope.created_volume_publications_withdrawn(clear));h.roots[lost]=value;
+  assert(h.scope.release(false)==Result::ok&&h.roots.empty());}
+
  {H h;begin(h);auto token=h.scope.begin_apply(&h.brain);assert(token);created(h);Receipt r{};assert(h.scope.receipt(&h.created_volume,r)&&r.newly_created&&r.owner==&h.brain&&r.asset==&h.asset&&r.producer==0x1234&&r.epoch==7);h.go.layer=8;h.volume.priority=99;h.volume.shared=&h.asset;assert(h.scope.end_apply(token));assert(h.scope.restore()==Result::ok&&h.scope.delegated_restored(&h.volume)&&h.destroys==2);assert(h.scope.release(true)==Result::ok&&h.roots.empty());}
  {H h;begin(h);VolumeImage v{};Receipt r{};assert(h.scope.source_receipt(0,v,r)&&!r.newly_created&&r.object==&h.volume);assert(!h.scope.source_receipt(1,v,r));assert(h.scope.release(true)==Result::ok);}
  {H h;begin(h);auto token=h.scope.begin_apply(&h.brain);created(h);h.current=false;auto touches=h.touches;assert(h.scope.restore()==Result::stale);h.scope.abandon_before_source_change();assert(h.scope.release(false)==Result::waiting);assert(!h.scope.end_apply(token));assert(h.scope.release(false)==Result::ok&&h.roots.empty()&&h.touches==touches&&h.transfers==2&&h.created_go.alive&&h.created_volume.alive);}

@@ -14,6 +14,14 @@ from extract_client_schema import ClientImage
 ROOT=Path(__file__).resolve().parents[1]
 START='// BEGIN_ORIGINAL_CAMERA_STATE_PROFILE';END='// END_ORIGINAL_CAMERA_STATE_PROFILE'
 METHODS={
+ 'frame_rt_descriptor':('UnityEngine.RenderTexture','get_descriptor',0),
+ 'frame_rt_ctor':('UnityEngine.RenderTexture','.ctor',1,('UnityEngine.RenderTextureDescriptor',)),
+ 'frame_rt_create':('UnityEngine.RenderTexture','Create',0),
+ 'frame_rt_created':('UnityEngine.RenderTexture','IsCreated',0),
+ 'frame_copy':('UnityEngine.Graphics','CopyTexture',2,('UnityEngine.Texture','UnityEngine.Texture')),
+ 'frame_copy_support':('UnityEngine.SystemInfo','get_copyTextureSupport',0),
+ 'frame_wrapper_destroy':('VL.VLRenderTexture','DestroyImmediate',0),
+ 'frame_wrapper_publish':('VL.VLRenderTexture','UpdateGlobalTexture',0),
  'audio_clip':('UnityEngine.AudioSource','get_clip',0), 'audio_set_clip':('UnityEngine.AudioSource','set_clip',1),
  'audio_samples':('UnityEngine.AudioSource','get_timeSamples',0),'audio_set_samples':('UnityEngine.AudioSource','set_timeSamples',1),
  'audio_playing':('UnityEngine.AudioSource','get_isPlaying',0),'audio_volume':('UnityEngine.AudioSource','get_volume',0),
@@ -109,6 +117,74 @@ METHODS={
  'height_virtual_human':('Solis.Common.SolisVirtualActorController','get_HumanScale',0),
  'scriptable_ctor':('UnityEngine.ScriptableObject','.ctor',0),
  'scriptable_create_type':('UnityEngine.ScriptableObject','CreateScriptableObjectInstanceFromType',2),
+ 'target_image_process':('Solis.Timeline.SolisTargetImageTrackBehaviour','ProcessFrame',3),
+ 'target_image_destroy':('Solis.Timeline.SolisTargetImageTrackBehaviour','OnPlayableDestroy',1),
+ 'target_image_mixer':('Solis.Timeline.SolisTargetImageTrack','CreateTrackMixer',3),
+ 'target_image_create':('Solis.Timeline.SolisTargetImageClip','CreatePlayable',2),
+ 'raw_image_set_texture':('UnityEngine.UI.RawImage','set_texture',1),
+ 'raw_image_set_uv':('UnityEngine.UI.RawImage','set_uvRect',1),
+ 'graphic_set_color':('UnityEngine.UI.Graphic','set_color',1),
+ 'video_clip':('UnityEngine.Video.VideoPlayer', 'get_clip', 0),
+ 'video_set_clip':('UnityEngine.Video.VideoPlayer', 'set_clip', 1),
+ 'video_source':('UnityEngine.Video.VideoPlayer', 'get_source', 0),
+ 'video_set_source':('UnityEngine.Video.VideoPlayer', 'set_source', 1),
+ 'video_audio_mode':('UnityEngine.Video.VideoPlayer', 'get_audioOutputMode', 0),
+ 'video_set_audio_mode':('UnityEngine.Video.VideoPlayer', 'set_audioOutputMode', 1),
+ 'video_audio_tracks':('UnityEngine.Video.VideoPlayer', 'get_audioTrackCount', 0),
+ 'video_controlled_tracks':('UnityEngine.Video.VideoPlayer', 'get_controlledAudioTrackCount', 0),
+ 'video_render_mode':('UnityEngine.Video.VideoPlayer', 'get_renderMode', 0),
+ 'video_set_render_mode':('UnityEngine.Video.VideoPlayer', 'set_renderMode', 1),
+ 'video_play_on_awake':('UnityEngine.Video.VideoPlayer', 'get_playOnAwake', 0),
+ 'video_set_play_on_awake':('UnityEngine.Video.VideoPlayer', 'set_playOnAwake', 1),
+ 'video_loop':('UnityEngine.Video.VideoPlayer', 'get_isLooping', 0),
+ 'video_set_loop':('UnityEngine.Video.VideoPlayer', 'set_isLooping', 1),
+ 'video_skip':('UnityEngine.Video.VideoPlayer', 'get_skipOnDrop', 0),
+ 'video_set_skip':('UnityEngine.Video.VideoPlayer', 'set_skipOnDrop', 1),
+ 'video_wait_first':('UnityEngine.Video.VideoPlayer', 'get_waitForFirstFrame', 0),
+ 'video_set_wait_first':('UnityEngine.Video.VideoPlayer', 'set_waitForFirstFrame', 1),
+ 'video_update_mode':('UnityEngine.Video.VideoPlayer', 'get_timeUpdateMode', 0),
+ 'video_set_update_mode':('UnityEngine.Video.VideoPlayer', 'set_timeUpdateMode', 1),
+ 'video_speed':('UnityEngine.Video.VideoPlayer', 'get_playbackSpeed', 0),
+ 'video_set_speed':('UnityEngine.Video.VideoPlayer', 'set_playbackSpeed', 1),
+ 'video_time_ref':('UnityEngine.Video.VideoPlayer', 'get_timeReference', 0),
+ 'video_set_time_ref':('UnityEngine.Video.VideoPlayer', 'set_timeReference', 1),
+ 'video_playing':('UnityEngine.Video.VideoPlayer', 'get_isPlaying', 0),
+ 'video_paused':('UnityEngine.Video.VideoPlayer', 'get_isPaused', 0),
+ 'video_prepared':('UnityEngine.Video.VideoPlayer', 'get_isPrepared', 0),
+ 'video_prepare':('UnityEngine.Video.VideoPlayer', 'Prepare', 0),
+ 'video_time':('UnityEngine.Video.VideoPlayer', 'get_time', 0),
+ 'video_set_time':('UnityEngine.Video.VideoPlayer', 'set_time', 1),
+ 'video_frame':('UnityEngine.Video.VideoPlayer', 'get_frame', 0),
+ 'video_texture':('UnityEngine.Video.VideoPlayer', 'get_texture', 0),
+ 'video_pause':('UnityEngine.Video.VideoPlayer', 'Pause', 0),
+ 'video_stop':('UnityEngine.Video.VideoPlayer', 'Stop', 0),
+ 'video_step':('UnityEngine.Video.VideoPlayer', 'StepForward', 0),
+ 'video_send_frames':('UnityEngine.Video.VideoPlayer', 'get_sendFrameReadyEvents', 0),
+ 'video_set_send_frames':('UnityEngine.Video.VideoPlayer', 'set_sendFrameReadyEvents', 1),
+ 'video_clip_frames':('UnityEngine.Video.VideoClip', 'get_frameCount', 0),
+ 'video_clip_rate':('UnityEngine.Video.VideoClip', 'get_frameRate', 0),
+ 'video_clip_length':('UnityEngine.Video.VideoClip', 'get_length', 0),
+ 'video_clip_audio':('UnityEngine.Video.VideoClip', 'get_audioTrackCount', 0),
+ 'video_image_enable':('Solis.Common.VideoImage', 'OnEnable', 0),
+ 'video_image_disable':('Solis.Common.VideoImage', 'OnDisable', 0),
+ 'video_image_late':('Solis.Common.VideoImage', 'LateUpdate', 0),
+ 'maskable_image_enable':('UnityEngine.UI.MaskableGraphic', 'OnEnable', 0),
+ 'video_mixer_create':('Solis.Timeline.SolisVideoPlayerTrack', 'CreateTrackMixer', 3),
+ 'video_playable_create':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'OnPlayableCreate', 1),
+ 'video_playable_destroy':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'OnPlayableDestroy', 1),
+ 'video_prepare_frame':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'PrepareFrame', 2),
+ 'video_process_frame':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'ProcessFrame', 3),
+ 'video_update':('Solis.Timeline.SolisVideoPlayerTrackBehaviour','UpdateVideo',2),
+ 'video_sync':('Solis.Timeline.SolisVideoPlayerTrackBehaviour','SyncVideoToPlayable',1),
+ 'playable_input_weight':('UnityEngine.Playables.PlayableHandle','GetInputWeightFromIndex',1),
+ 'video_stop_behaviour':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'StopVideo', 0),
+ 'video_frame_ready':('UnityEngine.Video.VideoPlayer', 'InvokeFrameReadyCallback_Internal', 2),
+ 'video_seek_completed':('UnityEngine.Video.VideoPlayer', 'InvokeSeekCompletedCallback_Internal', 1),
+ 'video_prepare_completed':('UnityEngine.Video.VideoPlayer', 'InvokePrepareCompletedCallback_Internal', 1),
+ 'game_object_add_component':('UnityEngine.GameObject', 'AddComponent', 1, ('System.Type',)),
+ 'game_object_get_component':('UnityEngine.GameObject', 'GetComponent', 1, ('System.Type',)),
+ 'object_persist':('UnityEngine.Object', 'DontDestroyOnLoad', 1),
+ 'object_set_hide_flags':('UnityEngine.Object', 'set_hideFlags', 1),
 
 }
 EXPORTS={
@@ -151,9 +227,61 @@ TYPES={
  'virtual_actor':'Solis.Common.SolisVirtualActorController',
  'component':'UnityEngine.Component',
  'material':'UnityEngine.Material','shader':'UnityEngine.Shader',
+ 'target_image_track':'Solis.Timeline.SolisTargetImageTrack',
+ 'target_image_clip':'Solis.Timeline.SolisTargetImageClip',
+ 'target_image_mixer':'Solis.Timeline.SolisTargetImageTrackBehaviour',
+ 'target_image_behaviour':'Solis.Timeline.SolisTargetImageClipBehaviour',
+ 'raw_image':'UnityEngine.UI.RawImage','rect_transform':'UnityEngine.RectTransform',
+ 'video_player':'UnityEngine.Video.VideoPlayer',
+ 'video_clip':'UnityEngine.Video.VideoClip',
+ 'video_image':'Solis.Common.VideoImage',
+ 'video_track':'Solis.Timeline.SolisVideoPlayerTrack',
+ 'video_mixer':'Solis.Timeline.SolisVideoPlayerTrackBehaviour',
+ 'video_clip_asset':'Solis.Timeline.SolisVideoPlayerClip',
+ 'game_object':'UnityEngine.GameObject',
 
 }
 RENDER_FIELDS={
+ 'video_image_player':('Solis.Common.VideoImage', '_videoPlayer'),
+ 'video_track_loop':('Solis.Timeline.SolisVideoPlayerTrack', 'Loop'),
+ 'video_mixer_videoplayer':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'VideoPlayer'),
+ 'video_mixer_videoimage':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'VideoImage'),
+ 'video_mixer_isrecording':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'IsRecording'),
+ 'video_mixer_isplaymode':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'IsPlayMode'),
+ 'video_mixer_loop':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'Loop'),
+ 'video_mixer_playedonce':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', '_playedOnce'),
+ 'video_mixer_preparing':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', '_preparing'),
+ 'video_mixer_drifted':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', '_drifted'),
+ 'video_mixer_driftedtime':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', '_driftedTime'),
+ 'video_mixer_seektime':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', '_seekTime'),
+ 'video_event_preparecompleted':('UnityEngine.Video.VideoPlayer', 'prepareCompleted'),
+ 'video_event_looppointreached':('UnityEngine.Video.VideoPlayer', 'loopPointReached'),
+ 'video_event_started':('UnityEngine.Video.VideoPlayer', 'started'),
+ 'video_event_framedropped':('UnityEngine.Video.VideoPlayer', 'frameDropped'),
+ 'video_event_errorreceived':('UnityEngine.Video.VideoPlayer', 'errorReceived'),
+ 'video_event_seekcompleted':('UnityEngine.Video.VideoPlayer', 'seekCompleted'),
+ 'video_event_clockresyncoccurred':('UnityEngine.Video.VideoPlayer', 'clockResyncOccurred'),
+ 'video_event_frameready':('UnityEngine.Video.VideoPlayer', 'frameReady'),
+ 'target_controller_instance':('VL.Core.VLMonoBehaviourSingleton`1', '_instance'),
+ 'target_mixer_image':('Solis.Timeline.SolisTargetImageTrackBehaviour', '_rawImage'),
+ 'target_mixer_enabled':('Solis.Timeline.SolisTargetImageTrackBehaviour', '_rawImageInitialStateEnabled'),
+ 'target_clip_template':('Solis.Timeline.SolisTargetImageClip', 'behaviour'),
+ 'target_clip_reference':('Solis.Timeline.SolisTargetImageClip', 'trackingTargetReference'),
+ 'target_behaviour_target':('Solis.Timeline.SolisTargetImageClipBehaviour', 'trackingTarget'),
+ 'target_behaviour_alpha':('Solis.Timeline.SolisTargetImageClipBehaviour', 'alpha'),
+ 'target_behaviour_center':('Solis.Timeline.SolisTargetImageClipBehaviour', 'center'),
+ 'target_behaviour_scale':('Solis.Timeline.SolisTargetImageClipBehaviour', 'scale'),
+ 'raw_image_texture':('UnityEngine.UI.RawImage', 'm_Texture'),
+ 'raw_image_uv':('UnityEngine.UI.RawImage', 'm_UVRect'),
+ 'graphic_rect':('UnityEngine.UI.Graphic', 'm_RectTransform'),
+ 'graphic_color':('UnityEngine.UI.Graphic','m_Color'),
+ 'graphic_dirty_layout':('UnityEngine.UI.Graphic', 'm_OnDirtyLayoutCallback'),
+ 'graphic_dirty_vertices':('UnityEngine.UI.Graphic', 'm_OnDirtyVertsCallback'),
+ 'graphic_dirty_material':('UnityEngine.UI.Graphic', 'm_OnDirtyMaterialCallback'),
+ 'graphic_mask_material':('UnityEngine.UI.MaskableGraphic', 'm_MaskMaterial'),
+ 'graphic_parent_mask':('UnityEngine.UI.MaskableGraphic', 'm_ParentMask'),
+ 'graphic_cull_event':('UnityEngine.UI.MaskableGraphic', 'm_OnCullStateChanged'),
+ 'graphic_stencil':('UnityEngine.UI.MaskableGraphic', 'm_StencilValue'),
  'controller_additional':('VL.Rendering.VLSRPCameraController','_additionalCameraData'),
  'additional_camera':('UnityEngine.Rendering.Universal.UniversalAdditionalCameraData','m_Camera'),
  'additional_camera_type':('UnityEngine.Rendering.Universal.UniversalAdditionalCameraData','m_CameraType'),
@@ -301,6 +429,53 @@ def value_schemas(o):
   except ValueError:continue
  return result
 
+def focus_factory_binding(o,platform):
+ """Resolve actual shared CreateInstance<T> and each exact Focus callsite.
+
+ The generic wrapper calls CreateInstance(Type), which tailbranches to its
+ native icall. CreateScriptableObjectInstanceFromType's managed AOT wrapper is
+ therefore not an observer route for this source path.
+ """
+ metadata=0x96dd758 if platform=='android'else 0x9c1deb8
+ reg=[o.qword(metadata+k*8)for k in range(16)]
+ roles=[('profile',0x99a8b70,0x9218a84),('dof',0x9a08970,0x9218a90)]if platform=='android'else[('profile',0xa46f328,0x7b9e2a0),('dof',0xa46f320,0x7b9e2ac)]
+ rows=[];canonical=None
+ for role,slot,ret in roles:
+  usage=o.qword(slot)if platform=='android'else slot;encoded=o.qword(usage);kind=(encoded>>29)&7;ix=(encoded&0x1fffffff)>>1
+  need(kind==6 and ix<reg[8],'focus_factory_methodspec_usage')
+  spec=struct.unpack_from('<3i',o.b,o.offset(reg[9])+ix*12)
+  need(spec[1]<0 and spec[2]>=0,'focus_factory_static_generic_context')
+  inst=o.qword(reg[3]+spec[2]*8);argc=struct.unpack_from('<I',o.b,o.offset(inst))[0];argv=o.qword(inst+8)
+  args=[o.decode(o.qword(argv+k*8))for k in range(argc)]
+  need(args==(['UnityEngine.Rendering.VolumeProfile']if role=='profile'else['VL.PostProcessing.VLDOF']),'focus_factory_closed_role')
+  if canonical is None:
+   for si in range(reg[8]):
+    sp=struct.unpack_from('<3i',o.b,o.offset(reg[9])+si*12)
+    if sp[0]!=spec[0]or sp[1]>=0 or sp[2]<0:continue
+    ip=o.qword(reg[3]+sp[2]*8);ac=struct.unpack_from('<I',o.b,o.offset(ip))[0];av=o.qword(ip+8)
+    if ac==1 and o.decode(o.qword(av))=='System.Object':canonical=si;break
+  need(canonical is not None,'focus_factory_canonical_missing')
+  record=None
+  for ri in range(reg[4]):
+   rr=struct.unpack_from('<4i',o.b,o.offset(reg[5])+ri*16)
+   if rr[0]==canonical:record=rr;break
+  need(record is not None,'focus_factory_canonical_function_missing')
+  table=0x94f2f80 if platform=='android'else struct.unpack_from('<2Q',o.b,o.offset(0x982aed0)-104)[1]
+  shared=o.qword(table+record[1]*8)
+  need(shared==(0x60993a8 if platform=='android'else 0x3bb24f8),'focus_factory_shared_function_differs')
+  call=struct.unpack_from('<I',o.b,o.offset(ret-4))[0];delta=(call&0x3ffffff)*4
+  if delta&0x8000000:delta-=0x10000000
+  need(call>>26==0b100101 and ret-4+delta==shared,'focus_factory_direct_callsite')
+  rows.append({'role':role,'input_slot':hex(slot),'method_info_cell':hex(usage),'encoded':hex(encoded),'method_spec_index':ix,'method_spec':list(spec),'generic_arguments':args,'canonical_spec_index':canonical,'canonical_record':list(record),'metadata_registration':hex(metadata),'pointer_slot':hex(table+record[1]*8),'return_address':hex(ret),'call_site':{'rva':hex(ret-4),'prefix':o.b[o.offset(ret-4):o.offset(ret-4)+16].hex()}})
+ owner='VL.VLCinemachineFocusPoint/VcamFocusPointState';creator=o.method(owner,'CreateProfile',0)
+ mid=rows[0]['method_spec'][0];method_row=struct.unpack_from('<7I4H',o.m,o.h[12]+mid*36)
+ tid=o.type_id('UnityEngine.ScriptableObject');decl=o.types[tid][1]
+ need(decl[9]<=mid<decl[9]+decl[16]and o.string(method_row[0])=='CreateInstance'and method_row[10]==0 and bool(method_row[7]&16),'focus_factory_open_declaration_differs')
+ module=next(name for name,first,last in o.images if first<=tid<last)
+ method={'metadata_method_index':mid,'token_row':method_row[6]&0xffffff,'module':module}
+ shared={'type':'UnityEngine.ScriptableObject','name':'CreateInstance<T>','rva':hex(shared),'prefix':o.b[o.offset(shared):o.offset(shared)+16].hex(),'metadata_method_index':method['metadata_method_index'],'token_row':method['token_row'],'module':method['module'],'native_abi':'void*(const MethodInfo* closedGenericX0)','generic_arguments':['System.Object'],'method_spec_index':canonical,'metadata_registration':hex(metadata),'pointer_table':hex(table),'method_pointer_index':record[1],'pointer_slot':hex(table+record[1]*8)}
+ return {'shared':shared,'creator':creator,'roles':rows,'route':'shared reference generic CreateInstance<T> -> CreateInstance(Type) -> native icall; no AOT FromType wrapper hook'}
+
 def build(o,platform):
  methods={name:o.method(*spec)for name,spec in METHODS.items()}
  for row in methods.values():
@@ -339,7 +514,7 @@ def build(o,platform):
  for name,field in [('camera_data_camera','camera'),('camera_data_aspect','aspectRatio'),('camera_data_xr','xr'),('camera_data_dither','isDitheringEnabled')]:
   value=o.fields('UnityEngine.Rendering.Universal.CameraData')[field]
   render_fields[name]={'owner':'UnityEngine.Rendering.Universal.CameraData','name':field,**value,'offset':value['offset']-16,'unboxed':True}
- return {'platform':platform,'native_sha256':hashlib.sha256(o.b).hexdigest(),'metadata_sha256':hashlib.sha256(o.m).hexdigest(),'methods':methods,'exports':c_exports(o,platform,selected=EXPORTS),'types':{name:runtime_type(o,owner,8 if owner=='System.Int32'else 18)for name,owner in TYPES.items()},'type_names':{name:{'space':o.string(o.types[o.type_id(owner)][1][1]),'leaf':o.string(o.types[o.type_id(owner)][1][0])}for name,owner in TYPES.items()},'schemas':schemas(o),'values':value_schemas(o),'render_fields':render_fields,'render_arrays':{name:[{'owner':owner,'name':field,**o.fields(owner)[field]}for field in fields]for name,(owner,fields)in RENDER_ARRAY_FIELDS.items()},'render_context':context,'enums':{name:{'value':o.enum_value(owner,field)[0],'proof':o.enum_value(owner,field)[1]}for name,owner,field in [('camera_base','UnityEngine.Rendering.Universal.CameraRenderType','Base'),('projection_explicit','UnityEngine.Camera/ProjectionMatrixMode','Explicit'),('projection_implicit','UnityEngine.Camera/ProjectionMatrixMode','Implicit'),('projection_physical','UnityEngine.Camera/ProjectionMatrixMode','PhysicalPropertiesBased'),('camera_late','Cinemachine.CinemachineBrain/UpdateMethod','LateUpdate'),('camera_smart','Cinemachine.CinemachineBrain/UpdateMethod','SmartUpdate'),('cache_disabled','Cinemachine.TargetPositionCache/Mode','Disabled'),('blend_late','Cinemachine.CinemachineBrain/BrainUpdateMethod','LateUpdate')]},'fields':{name:o.fields(name)for name in ['.CinemachineMixer','.CinemachineShotPlayable','Cinemachine.CinemachineBrain','Cinemachine.CinemachineBrain/BrainFrame','Cinemachine.CinemachineCore','Cinemachine.CinemachineCore/UpdateStatus','Cinemachine.UpdateTracker','Cinemachine.UpdateTracker/UpdateStatus','Cinemachine.TargetPositionCache','Cinemachine.CinemachineVirtualCamera','Cinemachine.CinemachineVirtualCameraBase','Cinemachine.CinemachineComponentBase','Cinemachine.CinemachineBasicMultiChannelPerlin','Cinemachine.CinemachineImpulseManager','UnityEngine.Events.UnityEventBase','UnityEngine.Events.InvokableCallList','UnityEngine.Events.PersistentCallGroup']}}
+ return {'focus_factory':focus_factory_binding(o,platform),'platform':platform,'native_sha256':hashlib.sha256(o.b).hexdigest(),'metadata_sha256':hashlib.sha256(o.m).hexdigest(),'methods':methods,'exports':c_exports(o,platform,selected=EXPORTS),'types':{name:runtime_type(o,owner,8 if owner=='System.Int32'else 18)for name,owner in TYPES.items()},'type_names':{name:{'space':o.string(o.types[o.type_id(owner)][1][1]),'leaf':o.string(o.types[o.type_id(owner)][1][0])}for name,owner in TYPES.items()},'schemas':schemas(o),'values':value_schemas(o),'render_fields':render_fields,'render_arrays':{name:[{'owner':owner,'name':field,**o.fields(owner)[field]}for field in fields]for name,(owner,fields)in RENDER_ARRAY_FIELDS.items()},'render_context':context,'enums':{name:{'value':o.enum_value(owner,field)[0],'proof':o.enum_value(owner,field)[1]}for name,owner,field in [('camera_base','UnityEngine.Rendering.Universal.CameraRenderType','Base'),('projection_explicit','UnityEngine.Camera/ProjectionMatrixMode','Explicit'),('projection_implicit','UnityEngine.Camera/ProjectionMatrixMode','Implicit'),('projection_physical','UnityEngine.Camera/ProjectionMatrixMode','PhysicalPropertiesBased'),('camera_late','Cinemachine.CinemachineBrain/UpdateMethod','LateUpdate'),('camera_smart','Cinemachine.CinemachineBrain/UpdateMethod','SmartUpdate'),('cache_disabled','Cinemachine.TargetPositionCache/Mode','Disabled'),('blend_late','Cinemachine.CinemachineBrain/BrainUpdateMethod','LateUpdate'),('video_audio_none','UnityEngine.Video.VideoAudioOutputMode','None'),('video_render_api','UnityEngine.Video.VideoRenderMode','APIOnly'),('video_source_clip','UnityEngine.Video.VideoSource','VideoClip'),('private_hide_flags','UnityEngine.HideFlags','HideAndDontSave')]},'fields':{name:o.fields(name)for name in ['.CinemachineMixer','.CinemachineShotPlayable','Cinemachine.CinemachineBrain','Cinemachine.CinemachineBrain/BrainFrame','Cinemachine.CinemachineCore','Cinemachine.CinemachineCore/UpdateStatus','Cinemachine.UpdateTracker','Cinemachine.UpdateTracker/UpdateStatus','Cinemachine.TargetPositionCache','Cinemachine.CinemachineVirtualCamera','Cinemachine.CinemachineVirtualCameraBase','Cinemachine.CinemachineComponentBase','Cinemachine.CinemachineBasicMultiChannelPerlin','Cinemachine.CinemachineImpulseManager','UnityEngine.Events.UnityEventBase','UnityEngine.Events.InvokableCallList','UnityEngine.Events.PersistentCallGroup']}}
 
 def native_audio(o,platform,native):
  raw=native.read_bytes();digest=hashlib.sha256(raw).hexdigest()
@@ -393,6 +568,15 @@ def render(data):
    r=(d['methods']if name in METHODS else d['exports'])[name];prefix=r['prefix']
    lines.append(' {'+r['rva']+',{'+','.join('0x'+prefix[i:i+2]for i in range(0,32,2))+'}}, // '+name)
   lines+=['};']
+ lines+=['struct FocusFactory {Binding shared,creator;uintptr_t method_cells[2],return_sites[2];Binding call_sites[2];};']
+ for p,d in data.items():
+  f=d['focus_factory'];bindings=[]
+  for key in ('shared','creator'):
+   v=f[key];prefix=v['prefix'];bindings.append('{'+v['rva']+',{'+','.join('0x'+prefix[i:i+2]for i in range(0,32,2))+'}}')
+  calls=[]
+  for role in f['roles']:
+   v=role['call_site'];prefix=v['prefix'];calls.append('{'+v['rva']+',{'+','.join('0x'+prefix[i:i+2]for i in range(0,32,2))+'}}')
+  lines+=['inline constexpr FocusFactory '+p+'_focus_factory={'+','.join(bindings)+',{'+','.join(r['method_info_cell']for r in f['roles'])+'},{'+','.join(r['return_address']for r in f['roles'])+'},{'+','.join(calls)+'}};']
  lines+=['struct TypeName {const char* space;const char* leaf;};','struct TypeNames {']
  for name in TYPES:lines.append(' TypeName '+name+';')
  lines+=['};','inline constexpr TypeNames type_names={']

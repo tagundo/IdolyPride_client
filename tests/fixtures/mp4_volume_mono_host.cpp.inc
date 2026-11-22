@@ -1,5 +1,4 @@
 #include "mp4_camera_owner.hpp"
-#include "mp4_actor_state.hpp"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -147,6 +146,7 @@ const void *(*font_field_type)(void *) = get_field_type;
 void *(*font_class_type)(const void *) = get_class_type;
 const void *(*font_method)(void *, const char *, int32_t) = get_method;
 void *(*font_new)(void *) = new_object;
+#include "mp4_actor_state.hpp"
 
 namespace mp4actor=idoly_mp4_actor; using VoidMethod=void(*)(void*,Method*);
 bool callbacks=true;
@@ -239,7 +239,7 @@ VoidMethod mp4_mirror_late_original = original_mono,
            mp4_mirror_destroy_original = original_mono,
            mp4_fog_enable_original = original_mono,
            mp4_fog_disable_original = original_mono,
-           mp4_fog_late_original = original_mono;
+           mp4_fog_late_original = original_mono,mp4_light_volume_late_original=original_mono,mp4_light_volume_destroy_original=original_mono;
 std::map<std::pair<void *, void *>, std::vector<void *>> component_query;
 void *components(void *go, void *type, bool typed, bool recursive,
                  bool inactive, bool reverse, void *list, Method *) {
@@ -251,7 +251,6 @@ void *components(void *go, void *type, bool typed, bool recursive,
     std::memcpy(mp4_array_data(a), v.data(), v.size() * 8);
   return a;
 }
-
 namespace idoly_mp4_runtime {
 struct FixtureClock {
   bool active() const {return true;}
@@ -262,6 +261,9 @@ struct FixtureClock {
 const FixtureClock&native_clock_scope(){static FixtureClock c;return c;}
 }
 
+unsigned mono_destroys=0;bool mono_destroy_throw=false;
+void mono_destroy(void*p,Method*){++mono_destroys;if(mono_destroy_throw)throw std::runtime_error("destroy fixture");objects[p].alive=false;put(p,16,uintptr_t(0));}
+
 // SHIPPING_VOLUME_MONO_ADAPTER
 void *new_list(const std::vector<void *> &v) {
   void *l = object("System.Collections.Generic.List`1");
@@ -270,6 +272,7 @@ void *new_list(const std::vector<void *> &v) {
 }
 void *make_component(const Mp4VolumeComponentSchema &s) {
   void *c = object(s.name);
+  put(c,16,reinterpret_cast<uintptr_t>(c)^0x818181u);
   void *ro = object("System.Collections.ObjectModel.ReadOnlyCollection`1");
   void *l = new_list({});
   put(c, 40, ro);
@@ -291,7 +294,8 @@ void *make_component(const Mp4VolumeComponentSchema &s) {
 }
 void *make_profile(void *c) {
   void *p = object("UnityEngine.Rendering.VolumeProfile");
-  put(p, 16, new_list({c}));
+  put(p, 16, uintptr_t(0x424242));
+  put(p, 24, new_list({c}));
   return p;
 }
 int main(int argc, char **argv) {
@@ -305,12 +309,12 @@ int main(int argc, char **argv) {
   gos[root] = root_go;
   const auto &t = mp4_volume_mono_types;
   const mp4camp::Binding *pins[] = {&t.mirror, &t.height_fog, &t.volume,
-                                    &t.renderer};
+                                    &t.renderer, &t.light};
   const char *names[] = {
       "VL.Rendering.MirrorVolume", "Solis.Rendering.VolumetricHeightFogVolume",
-      "UnityEngine.Rendering.Volume", "UnityEngine.MeshRenderer"};
-  void *types[4]{};
-  for (size_t i = 0; i < 4; ++i) {
+      "UnityEngine.Rendering.Volume", "UnityEngine.MeshRenderer", "Solis.Common.LightVolume"};
+  void *types[5]{};
+  for (size_t i = 0; i < 5; ++i) {
     void *k = mp4_volume_factory_class(*pins[i], names[i]);
     types[i] = reflections[k];
   }
@@ -320,20 +324,21 @@ int main(int argc, char **argv) {
   mp4_actor_profile.get_components_internal.rva =
       reinterpret_cast<uintptr_t>(components);
   mp4_volume_factory_hooks.callbacks_closed = ctor_closed;
+  mp4_volume_mono_bindings.core_destroy.rva=reinterpret_cast<uintptr_t>(mono_destroy);
   void *producer = nullptr, *volume = nullptr, *renderer = nullptr,
        *mesh = nullptr, *profile = nullptr, *component = nullptr;
-  bool mirror = mode.find("mirror") == 0, zero = mode == "zero";
+  bool light=mode.find("light")==0;
+  bool mirror = mode.find("mirror") == 0 || mode == "profile_layout24", zero = mode == "zero";
   if (!zero) {
-    producer = object(mirror ? names[0] : names[1]);
+    producer = object(light?names[4]:mirror ? names[0] : names[1]);
     void *go = object("UnityEngine.GameObject"),
          *tr = object("UnityEngine.Transform");
     gos[producer] = go;
     transforms[producer] = tr;
-    component_query[{root_go, types[mirror ? 0 : 1]}] = {producer};
-    if (mirror) {
+    component_query[{root_go, types[light?4:mirror ? 0 : 1]}] = {producer};
+    if (mirror||light) {
       volume = producer;
-      mesh = object("UnityEngine.Mesh");
-      put(producer, 88, mesh);
+      if(mirror){mesh=object("UnityEngine.Mesh");put(producer,88,mesh);}
     } else {
       volume = object(names[2]);
       renderer = object(names[3]);
@@ -346,13 +351,14 @@ int main(int argc, char **argv) {
         put(producer, 88, volume);
       }
     }
-    const size_t schema = mirror ? 13 : 0;
+    const size_t schema = light?8:mirror ? 13 : 0;
     component = make_component(mp4_volume_component_schemas[schema]);
     profile = make_profile(component);
     put(volume, 48, profile);
     if (mode != "dormant") {
       put(volume, 64, profile);
-      put(producer, mirror ? 136 : 104, component);
+      put(producer, light?120:mirror ? 136 : 104, component);
+      if(light){void*c2=make_component(mp4_volume_component_schemas[12]);void*l=nullptr;mp4_actor_field(profile,24,l);lists[l].push_back(c2);put(producer,128,c2);}
     }
   }
   if (mode == "duplicate_producer")
@@ -397,6 +403,12 @@ int main(int argc, char **argv) {
       put(producer, 88, object(names[2]));
       assert(!mp4_volume_mono_inventory(nullptr, h.owners, h.count));
     }
+    if (mode == "profile_layout24") {
+      uintptr_t native=0;void*list=nullptr;
+      assert(mp4_actor_field(profile,16,native)&&native==0x424242);
+      assert(mp4_actor_field(profile,24,list)&&lists.count(list));
+      assert(mp4_volume_mono_contains(nullptr,profile,component,h.owners[0].kind));
+    }
     if (mode == "private_component_alias") {
       void *p = make_profile(component);
       assert(!mp4_volume_mono_profile(nullptr, p, h.owners[0]));
@@ -416,6 +428,26 @@ int main(int argc, char **argv) {
       void *c = make_component(mp4_volume_component_schemas[0]);
       void *p = make_profile(c);
       assert(mp4_volume_mono_profile(nullptr, p, h.owners[0]));
+    }
+    if(mode.find("private_cleanup")==0 ||mode=="cache_role"){
+      void*c=make_component(mp4_volume_component_schemas[0]);void*p=make_profile(c);void*l=nullptr;assert(mp4_actor_field(p,24,l));
+      void*c2=make_component(mp4_volume_component_schemas[12]);lists[l].push_back(c2);
+      assert(mp4_volume_mono_profile(nullptr,p,h.owners[0]));
+      void*cached=nullptr;assert(mp4_volume_mono_profile_cache(nullptr,p,mp4vm::Kind::height_fog,0,&cached)&&cached==c&&cached!=component);
+      if(mode=="private_cleanup_parent_dead"){objects[p].alive=false;put(p,16,uintptr_t(0));}
+      if(mode=="private_cleanup_component_dead"){objects[c2].alive=false;put(c2,16,uintptr_t(0));}
+      if(mode=="private_cleanup_source_alias")lists[l][1]=component;
+      if(mode=="private_cleanup_native_replaced")put(c2,16,uintptr_t(0x919191));
+      if(mode=="private_cleanup_list_changed")lists[l].pop_back();
+      if(mode=="private_cleanup_source_alias"||mode=="private_cleanup_native_replaced"||mode=="private_cleanup_list_changed")assert(!mp4_volume_mono_destroy_profile(nullptr,p)&&!mono_destroys);
+      else if(mode=="private_cleanup_throw"){
+        mono_destroy_throw=true;bool threw=false;try{mp4_volume_mono_destroy_profile(nullptr,p);}catch(...){threw=true;}
+        assert(threw&&mono_destroys==1);mono_destroy_throw=false;assert(!mp4_volume_mono_destroy_profile(nullptr,p)&&mono_destroys==1);
+      }else if(mode!="cache_role"){
+        assert(mp4_volume_mono_destroy_profile(nullptr,p));
+        assert(mono_destroys==unsigned(mode=="private_cleanup_parent_dead"||mode=="private_cleanup_component_dead"?2:3));
+        assert(objects[component].alive&&objects[profile].alive);
+      }
     }
     if (mode == "curve_profile") {
       void *c = make_component(mp4_volume_component_schemas[18]);
