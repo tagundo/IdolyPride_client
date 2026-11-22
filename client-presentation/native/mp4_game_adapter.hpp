@@ -228,6 +228,13 @@ public:
         return manual_&&wrapper&&get(captured_texture_)&&owned_primary_scene_current()&&get(capture_wrapper_)==wrapper
             &&field<void*>(wrapper,layout_.wrapper_texture)==get(captured_texture_);
     }
+    // The operation provider may inspect authority while the actual typed
+    // original and its end receipt are executing. Completed wrapper ownership
+    // is deliberately a different receipt, unavailable until original return.
+    bool owned_capture_request(void* controller,uint64_t serial)const {
+        return manual_&&serial&&capture_request_running_&&capture_inflight_==serial
+            &&controller==get(camera_controller_)&&owned_primary_scene_current();
+    }
     bool owned_pending_capture(void* wrapper)const {
         // CPU discard/readback does not mean that the native renderer has
         // consumed its real queued request. The host checks its exact tuple.
@@ -422,7 +429,8 @@ private:
     float camera_step_delta_=0;int32_t previous_brain_update_=0,previous_brain_blend_=0;
     bool manual_=false,output_geometry_applied_=false,shader_was_custom_=false,capture_pending_=false,
         capture_pass_seen_=false,capture_submitted_=false;
-    uint64_t capture_last_issued_=0;
+    uint64_t capture_last_issued_=0,capture_inflight_=0;
+    bool capture_request_running_=false;
     SceneKind scene_kind_=SceneKind::none;
     bool owner_replaced_=false;
     void* owned_player_anchor_=nullptr;
@@ -1027,6 +1035,9 @@ inline Result GameAdapter::capture_geometry(int32_t& width,int32_t& height) cons
     return width>0&&height>0?Result::ok:Result::waiting;
 }
 inline Result GameAdapter::request_capture() {
+    if(capture_request_running_)return fail(Result::invalid,"capture_request_reentered");
+    capture_request_running_=true;
+    struct RequestExit {uint64_t&inflight;bool&running;~RequestExit(){inflight=0;running=false;}} exit{capture_inflight_,capture_request_running_};
     if(!manual_||!identities_current())return fail(Result::stale,"selected_scene_changed");
     if(capture_pending_)return fail(Result::invalid,"capture_already_pending");
     if(output_geometry_applied_&&(!api_.output_projection||!api_.output_projection(get(camera_controller_),true)))
@@ -1041,6 +1052,7 @@ inline Result GameAdapter::request_capture() {
         if(begun!=Result::ok)return operation?fail(Result::failed,"capture_operation_wait_receipt"):begun;
         if(!operation||operation<=capture_last_issued_)return fail(Result::failed,"capture_operation_serial_invalid");
     }
+    capture_inflight_=operation;
     try{api_.camera_capture_request(get(camera_controller_),nullptr);}
     catch(...){if(operation&&api_.capture_operation_end)try{(void)api_.capture_operation_end(get(camera_controller_),operation,false);}catch(...){}throw;}
     if(operation&&(!api_.capture_operation_end||!api_.capture_operation_end(get(camera_controller_),operation,true)))
