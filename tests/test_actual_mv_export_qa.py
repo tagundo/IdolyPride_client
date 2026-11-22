@@ -375,6 +375,57 @@ def test_paused_game_source_requires_advancing_playerloop_then_full_restore():
     assert qa.validate_probe(probe(), state)["frames"] == 60
 
 
+def playing_snapshot(frame=100, seconds=1.25):
+    value = snapshot(frame)
+    value["native"]["observation"].update(source_identity="1234567890abcdef",
+        source_time=seconds, source_paused=False)
+    return value
+
+
+def test_normal_mv_playback_does_not_depend_on_an_in_game_pause_control_or_export_readiness():
+    first, second = playing_snapshot(), playing_snapshot(102, 1.5)
+    first["native"]["ready"] = second["native"]["ready"] = False
+    assert qa.validate_playing_source(first, second)["source_time"] == 1.5
+
+
+@pytest.mark.parametrize("field,value,error", [
+    ("source_paused", True, "source_not_playing"),
+    ("source_identity", "different", "source_not_playing"),
+    ("playerloop_frame", 100, "playing_source_playerloop"),
+    ("source_time", 1.25, "playing_source_timeline"),
+    ("source_time", 1.0, "playing_source_timeline"),
+    ("native_clock_owned", True, "baseline_already_owned"),
+    ("coordinator_active", True, "baseline_already_owned"),
+])
+def test_playing_source_observation_rejects_a_suspended_loop_or_held_export(field, value, error):
+    second = playing_snapshot(102, 1.5)
+    second["native"]["observation"][field] = value
+    with pytest.raises(qa.Rejected, match=error):
+        qa.validate_playing_source(playing_snapshot(), second)
+
+
+def test_open_mv_uses_the_real_view_route_without_searching_for_a_pause_button(tmp_path):
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.args = SimpleNamespace(song_label="Bittersweet Echo")
+    run.proof, run.report, run.journal = tmp_path, {}, []
+    run.explorer = SimpleNamespace(_snapshot=lambda: {"ok": True})
+    run.ui = SimpleNamespace(_home_role=lambda snap, role: {"name": "Idols"})
+    routes, shots = [], []
+    run.unity_touch = lambda *args: None
+    run.route = lambda pattern, *args, **kwargs: routes.append(pattern)
+    run.device = SimpleNamespace(screenshot=shots.append)
+    first, second = playing_snapshot(), playing_snapshot(102, 1.5)
+    first["native"]["ready"] = second["native"]["ready"] = False
+    payloads = iter((first, second))
+    run.mp4 = lambda: next(payloads)
+    run.wait = lambda action, timeout, code: action()
+    assert run.open_mv() is second
+    assert routes and not any("Pause" in route or "一時停止" in route or "정지" in route for route in routes)
+    assert shots == ["real-mv-playing"]
+    assert run.report["actual_mv_verified"] is True
+    assert run.journal[-1]["phase"] == "real_mv_playing"
+
+
 @pytest.mark.parametrize("field,value,error", [
     ("playerloop_frame", 100, "playerloop_suspended"),
     ("source_paused", False, "source_not_paused"),
@@ -491,14 +542,65 @@ def test_queue_replay_restores_its_native_acquired_source_not_previous_init_sequ
     replay["native"].update(phase="rendering", export_id="f" * 32)
     replay["native"]["observation"].update(acquired_source_valid=True, acquired_source_identity="1234567890abcdef",
         acquired_source_time=0.0, acquired_source_paused=False)
-    baseline = qa.replay_acquisition_baseline(before, replay)
+    baseline = qa.export_acquisition_baseline(before, replay, replay=True)
     assert baseline["native"]["observation"]["source_identity"] == "1234567890abcdef"
     assert baseline["native"]["observation"]["source_paused"] is False
     assert baseline["native"]["capture_acks"] == before["native"]["capture_acks"]
     assert before["native"]["observation"]["source_identity"] == "photography:opaque17"
     del replay["native"]["observation"]["acquired_source_time"]
     with pytest.raises(qa.Rejected, match="acquisition_baseline_unavailable"):
-        qa.replay_acquisition_baseline(before, replay)
+        qa.export_acquisition_baseline(before, replay, replay=True)
+
+
+def test_direct_export_restores_its_actual_acquisition_after_time_spent_in_server_settings():
+    before = playing_snapshot(seconds=1.25)
+    current = playing_snapshot(150, 30.75)
+    current["native"].update(phase="rendering", export_id="f" * 32)
+    current["native"]["observation"].update(acquired_source_valid=True,
+        acquired_source_identity="1234567890abcdef", acquired_source_time=30.75,
+        acquired_source_paused=False)
+    acquired = qa.export_acquisition_baseline(before, current)
+    assert before["native"]["observation"]["source_time"] == 1.25
+    assert acquired["native"]["observation"]["source_time"] == 30.75
+    final = snapshot(600, complete=True)
+    final["native"]["observation"].update(source_identity="1234567890abcdef", source_time=31.0,
+        source_paused=False, restored_source_identity="1234567890abcdef",
+        restored_source_time=30.75, restored_source_paused=False)
+    qa.validate_restored(acquired, final)
+    with pytest.raises(qa.Rejected, match="restoration_checkpoint"):
+        qa.validate_restored(before, final)
+    current["native"]["observation"]["acquired_source_identity"] = "fedcba0987654321"
+    with pytest.raises(qa.Rejected, match="direct_export_source_identity_changed"):
+        qa.export_acquisition_baseline(before, current)
+
+
+def test_direct_export_returns_the_acquired_checkpoint_to_the_later_save_and_replay_checks(tmp_path, monkeypatch):
+    before = playing_snapshot(seconds=1.25)
+    rendering = playing_snapshot(150, 30.75)
+    rendering["native"].update(phase="rendering", export_id="f" * 32)
+    rendering["native"]["observation"].update(coordinator_active=True, native_clock_owned=True,
+        world_admission="verified", simulation_tick=2, accepted_frames=2, rendered_simulation_ticks=3,
+        acquired_source_valid=True, acquired_source_identity="1234567890abcdef",
+        acquired_source_time=30.75, acquired_source_paused=False)
+    final = snapshot(600, complete=True)
+    final["native"]["export_id"] = "f" * 32
+    final["native"]["observation"].update(source_identity="1234567890abcdef", source_time=31.0,
+        source_paused=False, restored_source_identity="1234567890abcdef",
+        restored_source_time=30.75, restored_source_paused=False)
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.args = SimpleNamespace(width=256, height=144, fps=30)
+    run.proof, run.report, run.journal = tmp_path, {}, []
+    run.export_deadline = qa.time.monotonic() + 10
+    run.device = SimpleNamespace(adb=lambda *args, **kwargs: "4000")
+    payloads = iter((rendering, final))
+    run.mp4 = lambda: next(payloads)
+    run.exercise_export_pause = lambda: run.report.update(native_overlay_pause_resume_verified=True,
+        native_clock_hold_with_advancing_playerloop_verified=True)
+    monkeypatch.setattr(qa.time, "sleep", lambda _: None)
+    actual, acquired = run.await_export(before)
+    assert actual is final and acquired["native"]["observation"]["source_time"] == 30.75
+    assert run.journal[0]["phase"] == "native_direct_acquisition_baseline"
+    qa.validate_restored(acquired, actual)
 
 
 def test_encoded_packet_pts_must_match_rational_frame_schedule_even_with_decode_order_reordering():

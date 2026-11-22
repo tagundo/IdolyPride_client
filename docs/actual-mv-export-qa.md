@@ -1,4 +1,4 @@
-# Actual paused-MV export QA
+# Actual MV export QA
 
 `verify-actual-mv-export.yml` never creates a release. Its own definition push
 registers and tests the workflow; subsequent runs are dispatched manually
@@ -24,9 +24,11 @@ render pipeline or count as a rendering pass. Its bearer token is read from the 
 and is excluded from artifacts.
 
 The driver opens **Idols → Photography / Viewing → Live → Bittersweet Echo →
-View**, observes a real normal 3D source, and pauses it through the game UI. It
-requires an advancing PlayerLoop with a fixed paused timeline position before
-starting a direct export. During export it uses the actual native overlay's
+View** and observes a real normal 3D source with an advancing PlayerLoop and
+timeline. IDOLY PRIDE has no user-facing Pause button during this MV; the driver
+does not search for or require one. The exporter itself saves the actual source
+state and acquires its internal held clock before stepping frames. During export
+the driver uses the actual native export overlay's
 Pause and Resume controls while the Unity surface remains foreground. A paused
 acknowledgement must hold the simulation tick, accepted-frame count and timeline
 time while native PlayerLoop entries advance. Resume must advance the owned
@@ -47,11 +49,16 @@ for that evidence. A native source-state checkpoint is recorded before normal
 playback continues. An originally paused source must still hold that position;
 an originally playing source may advance after the verified checkpoint.
 
+Both direct and queued exports use the native job's actual acquired source
+identity/time/play-state snapshot as the restoration baseline. A normally
+playing MV may advance while the user opens the server menu and changes output
+settings, so its earlier UI observation is not the acquisition timestamp. A
+direct export must retain that same source identity. A queued replay may
+construct a new player and must use its new actual acquisition snapshot.
+
 The landscape 30fps case then adds and exports one queued MV. Add must persist
-the queue entry without hiding the server menu. A replay may construct a new
-player, so its restoration baseline comes from the native job's actual acquired
-source identity/time/pause snapshot, rather than the previous player's init
-sequence. The square 60fps case independently verifies direct export at another
+the queue entry without hiding the server menu. The square 60fps case
+independently verifies direct export at another
 aspect ratio. A shared deadline bounds all exports in each case.
 
 Both cases set a custom 0.5 Mbps video bitrate through the actual autosaving UI

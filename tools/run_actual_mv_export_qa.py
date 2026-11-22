@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the source-built game's normal 3D MV and validate its real output.
+"""Export a normal playing 3D MV and validate its real output and restoration.
 
 This never creates synthetic video or invokes gameplay/button delegates. Every
 functional verdict is separate from successful evidence collection. The only
@@ -303,6 +303,23 @@ def validate_paused_source(first, second):
     return y
 
 
+def validate_playing_source(first, second):
+    """Observe normal playback; IDOLY PRIDE has no in-MV Pause button."""
+    _, x = native_payload(first)
+    _, y = native_payload(second)
+    need(x["source_identity"] == y["source_identity"]
+         and x["source_paused"] is False and y["source_paused"] is False,
+         "source_not_playing")
+    need(y["playerloop_frame"] > x["playerloop_frame"], "playing_source_playerloop_not_advancing")
+    need(y["source_time"] > x["source_time"] + .0001, "playing_source_timeline_not_advancing")
+    need(x.get("coordinator_active") is False and y.get("coordinator_active") is False
+         and x.get("native_clock_owned") is False and y.get("native_clock_owned") is False,
+         "baseline_already_owned")
+    # Native export readiness is a separate gate. A visible, advancing real MV
+    # can be observed even when a required export provider is still unavailable.
+    return y
+
+
 def validate_running(payload, previous_tick=None):
     state, observed = native_payload(payload)
     need(observed.get("coordinator_active") is True and observed.get("native_clock_owned") is True
@@ -340,18 +357,19 @@ def validate_export_pause(first, second):
     validate_clock_hold(first, second)
 
 
-def replay_acquisition_baseline(before, current):
-    """Read the native job's actual pre-step replay snapshot, never guess it."""
-    old, _ = native_payload(before)
+def export_acquisition_baseline(before, current, *, replay=False):
+    """Use the actual internal acquisition, after menu/configuration time."""
+    old, previous = native_payload(before)
     state, observation = native_payload(current)
     need(state.get("export_id") != old.get("export_id") and state.get("phase") == "rendering",
-         "new_queue_export_scope_not_observed")
+         "new_export_scope_not_observed")
     identity, seconds, paused = (observation.get("acquired_source_identity"),
                                 observation.get("acquired_source_time"), observation.get("acquired_source_paused"))
     need(observation.get("acquired_source_valid") is True
          and type(identity) is str and re.fullmatch(r"[0-9a-f]{16}", identity) and identity != "0000000000000000"
          and finite(seconds) and 0 <= seconds <= 900 and type(paused) is bool,
-         "native_queue_acquisition_baseline_unavailable")
+         "native_export_acquisition_baseline_unavailable")
+    need(replay or identity == previous["source_identity"], "direct_export_source_identity_changed")
     baseline = json.loads(json.dumps(before))
     baseline["native"]["observation"].update(source_identity=identity, source_time=seconds, source_paused=paused)
     return baseline
@@ -760,27 +778,20 @@ class ActualRun:
             try:
                 payload = self.mp4()
                 state, obs = native_payload(payload)
-                return payload if state.get("ready") is True and obs["source_kind"] == "photography_3d" else None
+                return payload if obs["source_kind"] == "photography_3d" else None
             except (Rejected, ValueError, OSError):
                 return None
-        ready = self.wait(scene_ready, 600, "actual_normal_3d_mv_not_ready")
-        self.device.screenshot("real-mv-before-pause")
-        if not native_payload(ready)[1]["source_paused"]:
-            self.route(r"一時停止|일시\s*정지|Pause", r"^Pause(Button)?$")
-        def pause_acknowledged():
-            payload = self.mp4()
-            state, observation = native_payload(payload)
-            return payload if state.get("ready") is True and observation["source_paused"] is True else None
-        first = self.wait(pause_acknowledged, 30, "original_mv_pause_not_acknowledged")
-        def paused_again():
+        first = self.wait(scene_ready, 600, "actual_normal_3d_mv_not_observed")
+        self.device.screenshot("real-mv-playing")
+        def playing_again():
             second = self.mp4()
             try:
-                validate_paused_source(first, second)
+                validate_playing_source(first, second)
                 return second
             except Rejected:
                 return None
-        baseline = self.wait(paused_again, 30, "real_mv_pause_not_verified")
-        self.record("real_mv_paused", baseline)
+        baseline = self.wait(playing_again, 30, "real_mv_playback_not_verified")
+        self.record("real_mv_playing", baseline)
         self.report["actual_mv_verified"] = True
         return baseline
 
@@ -889,7 +900,7 @@ class ActualRun:
 
     def await_export(self, baseline, replay=False):
         deadline, previous_tick, observed_running, last_record = self.export_deadline, None, False, 0
-        acquired = not replay
+        acquired = False
         self.report["native_overlay_pause_resume_verified"] = False
         self.report["native_clock_hold_with_advancing_playerloop_verified"] = False
         while time.monotonic() < deadline:
@@ -898,19 +909,20 @@ class ActualRun:
             phase = state.get("phase")
             if phase == "completed":
                 need(observed_running, "no_actual_native_render_progress_observed")
-                need(acquired, "native_queue_acquisition_baseline_unavailable")
+                need(acquired, "native_export_acquisition_baseline_unavailable")
                 need(self.report.get("native_clock_hold_with_advancing_playerloop_verified") is True,
                      "independent_clock_hold_not_verified")
                 validate_completed(baseline, payload, self.args.width, self.args.height, self.args.fps)
                 self.record("native_export_completed_and_restored", payload)
-                return payload
+                return payload, baseline
             need(phase not in ("failed", "cancelled"), "native_export_failed_" + str(state.get("error_code", "unknown")))
             if phase in ("rendering", "finishing"):
                 previous_tick = validate_running(payload, previous_tick)
                 observed_running = True
-                if replay and not acquired and phase == "rendering":
-                    baseline = replay_acquisition_baseline(baseline, payload)
-                    self.record("native_queue_replay_acquisition_baseline", payload)
+                if not acquired and phase == "rendering":
+                    baseline = export_acquisition_baseline(baseline, payload, replay=replay)
+                    self.record("native_queue_replay_acquisition_baseline" if replay
+                                else "native_direct_acquisition_baseline", payload)
                     acquired = True
                 if phase == "rendering" and obs["accepted_frames"] >= 2 and not self.report.get("native_overlay_pause_resume_verified"):
                     self.exercise_export_pause()
@@ -1042,17 +1054,17 @@ class ActualRun:
             self.server_menu()
             self.export_deadline = time.monotonic() + self.args.export_timeout
             self.configure_and_start()
-            final = self.await_export(baseline)
+            final, baseline = self.await_export(baseline)
             path, digest = self.retrieve_and_decode(final, "direct")
             self.save_cancel(path, digest)
             self.save_completed(path, digest, final["native"]["export_id"])
-            self.report["direct_paused_source_export_and_restore_verified"] = True
+            self.report["direct_playing_source_export_and_restore_verified"] = True
             if self.args.queue_replay:
                 before_queue = self.mp4()
                 validate_restored(baseline, before_queue)
                 self.server_menu()
                 self.enqueue_and_start()
-                queued_final = self.await_export(before_queue, replay=True)
+                queued_final, _ = self.await_export(before_queue, replay=True)
                 self.retrieve_and_decode(queued_final, "queue")
                 self.report["queue_replay_export_and_acquired_source_restore_verified"] = True
             self.report["status"] = "PASS_ACTUAL_MV_EXPORT_TRANSLATED_GUEST_ONLY"
