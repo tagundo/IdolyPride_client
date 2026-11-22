@@ -23,7 +23,7 @@ def binary(tmp_path_factory):
     result=subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie',str(source),'-o',str(out)],capture_output=True,text=True,timeout=90)
     assert result.returncode==0,result.stderr
     return out
-@pytest.mark.parametrize('mode','srp_capture_refuses srp_current_lost srp_restore_wait srp_release_wait normal idempotent reuse foreign_release missing_handoff handoff_wait handoff_reentry release_reentry outer_abort transferred_release_wait missing_producer before_wait before_throw missing_commit commit_refuses cohort_refuses source_loss commit_source_loss cleanup_wait'.split())
+@pytest.mark.parametrize('mode','render_hold_wait render_checkpoint_wait render_retire_wait render_retire_reentry render_retire_source_changed property_restore_reentry video_handoff_reentry playback_handoff_reentry srp_capture_refuses srp_current_lost srp_restore_wait srp_release_wait normal idempotent reuse foreign_release missing_handoff handoff_wait handoff_reentry release_reentry outer_abort transferred_release_wait missing_producer before_wait before_throw missing_commit commit_refuses cohort_refuses source_loss commit_source_loss cleanup_wait'.split())
 def test_actual_scene_source_bootstrap(binary,mode):
     result=subprocess.run([str(binary),mode],capture_output=True,text=True,timeout=30)
     assert result.returncode==0,result.stdout+result.stderr

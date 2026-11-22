@@ -308,6 +308,7 @@ class MonoGate {
 public:
     // No current(), owner callback, Unity call, RNG access, or mutation. The host
     // separately checks the owner thread before using this scalar observation.
+    bool callbacks_unwound()const noexcept{return !random_depth_&&!active_invocation_&&!active_receiver_&&!active_callback_&&!rng_suspended_;}
     bool invocation(MonoInvocation& value)const{
         value={};
         if(!epoch_||!serial_||serial_!=last_serial_||poisoned_||!active_invocation_
@@ -867,6 +868,7 @@ public:
     const char* error()const{return error_;}
     bool active()const{return configured_;}
     bool captured()const{return captured_;}
+    bool transient_slots_unwound()const noexcept{if(block_copy_count_>512)return false;for(size_t i=0;i<block_copy_count_;++i)if(block_copies_[i].slot_displaced)return false;return true;}
     // Cheap callback/step witness, including the original DSP admission. This
     // performs no inventory allocation or scene mutation. A bound ADV voice
     // source must never run inside the private offline frame/RNG domain.

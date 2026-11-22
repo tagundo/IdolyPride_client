@@ -65,11 +65,78 @@ struct Mp4ParticleFinishOwner{void*managed=nullptr;uintptr_t native=0,particles=
 unsigned mp4_owned_render_depth=0,mp4_unowned_render_depth=0;bool mp4_owned_render_ticket_active=false;
 #include "particle-mutation-exclusion-host.inc"
 using Mp4ParticleSimulate=void(*)(void*,float,bool,bool,bool,Method*);
-#include "particle-mutation-hooks.inc"
+#include "particle-operation-rw-host.inc"
+// BEGIN_MP4_PARTICLE_MUTATION_HOOKS
+using Mp4SourceGameObjectActive = void (*)(void *, bool, Method *);
+Mp4SourceGameObjectActive mp4_source_game_object_active_original = nullptr;
+void mp4_source_game_object_active_hook(void *self, bool value,
+                                        Method *method) {
+  Mp4ParticleOperationWriter writer(Mp4ParticleOperationWriterRole::game_object_active);
+  Mp4ParticleMutationTicket ticket{};
+  try {
+    (void)mp4_particle_mutation_begin(self, true, ticket, value);
+  } catch (...) {
+    mp4_particle_mutation_handoff();
+  }
+  // An observer failure never suppresses/retries the ordinary original, nor
+  // substitutes a fabricated managed exception for an original exception.
+  if(!writer.original_begin()){mp4_particle_operation_read_revoke_owner();mp4_particle_mutation_handoff();(void)writer.original_begin();}
+  try {
+    mp4_source_game_object_active_original(self, value, method);
+  } catch (...) {
+    (void)writer.original_returned();
+    (void)mp4_particle_mutation_end(ticket, false);
+    throw;
+  }
+  (void)writer.original_returned();
+  (void)mp4_particle_mutation_end(ticket, true);
+}
+// Replace only the existing Simulate hook's actual-original call sites with
+// this helper. Authorization remains the exact existing typed hook's full
+// allow_simulate(...) result; this helper repeats the same finite predicate
+// before publishing its own temporary observer origin. Call on ALL original
+// forwarding branches, including ordinary/off-thread calls.
+void mp4_particle_simulate_observed(Mp4ParticleOperationWriter&writer, Mp4ParticleSimulate original, void *self,
+                                    float seconds, bool children, bool restart,
+                                    bool fixed, Method *method) {
+  Mp4ParticleSimulateMutationOrigin origin{self, seconds, children, restart,
+                                           fixed};
+  const auto *previous = mp4_particle_simulate_mutation_origin;
+  const bool owned = mp4_stage_hooks_intercept(game_call()) &&
+                     mp4_stage_particles.allow_simulate(self, seconds, children,
+                                                        restart, fixed);
+  struct OriginGuard {
+    const Mp4ParticleSimulateMutationOrigin *previous;
+    ~OriginGuard() { mp4_particle_simulate_mutation_origin = previous; }
+  } guard{previous};
+  if (owned)
+    mp4_particle_simulate_mutation_origin = &origin;
+  else
+    mp4_particle_simulate_mutation_origin = nullptr;
+  Mp4ParticleMutationTicket ticket{};
+  try {
+    (void)mp4_particle_mutation_begin(self, false, ticket);
+  } catch (...) {
+    mp4_particle_mutation_handoff();
+  }
+  if(!writer.original_begin()){mp4_particle_operation_read_revoke_owner();mp4_particle_mutation_handoff();(void)writer.original_begin();}
+  try {
+    original(self, seconds, children, restart, fixed, method);
+  } catch (...) {
+    (void)writer.original_returned();
+    (void)mp4_particle_mutation_end(ticket, false);
+    throw;
+  }
+  (void)writer.original_returned();
+  (void)mp4_particle_mutation_end(ticket, true);
+}
+// END_MP4_PARTICLE_MUTATION_HOOKS
+
+void mp4_particle_simulate_observed(Mp4ParticleSimulate original,void*self,float seconds,bool children,bool restart,bool fixed,Method*method){Mp4ParticleOperationWriter writer(Mp4ParticleOperationWriterRole::particle_simulate);mp4_particle_simulate_observed(writer,original,self,seconds,children,restart,fixed,method);}
 void*p=nullptr,*go=nullptr,*tr=nullptr,*ancestor=nullptr,*atr=nullptr,*foreign_go=nullptr;ActivationOrigin origin{};
 Mp4ParticleFinishOwner owner{};unsigned originals=0;bool original_throw=false,nest=false;Method*last_method=nullptr;bool last_value=false;float last_seconds=0;
-void original_active(void*self,bool v,Method*m){++originals;last_method=m;last_value=v;if(nest){nest=false;mp4_source_game_object_active_hook(self,v,m);}if(original_throw)throw 17;}
-void original_sim(void*,float s,bool c,bool r,bool f,Method*m){++originals;last_seconds=s;last_method=m;assert(!c&&r&&!f);if(original_throw)throw 19;}
+void original_active(void*self,bool v,Method*m){++originals;assert(mp4_particle_operation_writer_top&&mp4_particle_operation_writer_top->phase==Mp4ParticleOperationWriterPhase::in_original);last_method=m;last_value=v;if(nest){nest=false;mp4_source_game_object_active_hook(self,v,m);}if(original_throw)throw 17;}
+void original_sim(void*,float s,bool c,bool r,bool f,Method*m){++originals;assert(mp4_particle_operation_writer_top&&mp4_particle_operation_writer_top->phase==Mp4ParticleOperationWriterPhase::in_original);last_seconds=s;last_method=m;assert(!c&&r&&!f);if(original_throw)throw 19;}
 void*newobject(int id){void*o=alloc(32);void*n=alloc(0x100);put(o,16,(uintptr_t)n);put(n,8,(int32_t)id);return o;}
 void setup(){p=newobject(1);go=newobject(2);tr=newobject(3);ancestor=newobject(4);atr=newobject(5);foreign_go=newobject(6);go_of[p]=go;go_of[tr]=go;go_of[atr]=ancestor;transform_of[go]=tr;transform_of[ancestor]=atr;parent_of[tr]=atr;parent_of[atr]=nullptr;}
 void reset(){on_main=true;binding_current=true;mp4_particle_mutation_clear();alive=stage_current=clock_held=control_current=early=fixed_continuity=anim_continuity=anim_closed=quiet=allowed=paused=true;playing=stopped=false;mp4_stage_host={};mp4_stage_host.source={7,p};mp4_stage_host.count=1;mp4_stage_host.owners[0]={p};mp4_stage_host.configured=true;mp4_scene_host.source=mp4_stage_host.source;idoly_mp4_runtime::job.generation=11;mp4_stage_foreign_dirty=false;origin={true,53,{{go}},{}};mp4_activation_origin=nullptr;mp4_activation_targets={};origin_ok=true;origin_throw=false;mp4_raw_original_operation.depth=0;mp4_rebuild_ledger.active=false;mp4_owned_render_depth=mp4_unowned_render_depth=0;mp4_owned_render_ticket_active=false;originals=handoffs=0;original_throw=nest=false;mp4_source_game_object_active_original=original_active;parent_of[tr]=atr;parent_of[atr]=nullptr;put(p,16,(uintptr_t)regions[1].at);put((void*)regions[1].at,8,(int32_t)1);assert(mp4_particle_mutation_capture());uintptr_t n=0;int32_t id=0;assert(mp4_particle_mutation_unity_identity(p,&n,&id));owner={};owner.managed=p;owner.native=n;owner.instance=id;owner.capture=29;}

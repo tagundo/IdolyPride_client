@@ -1,5 +1,6 @@
 #define MP4_PARTICLE_BOUNDS_NO_MAIN
 #define MP4_PARTICLE_POLICY_NO_MAIN
+#include <atomic>
 #include <cassert>
 #include <cstdio>
 #include <cstdint>
@@ -18,7 +19,9 @@ bool mapped(const void*p,size_t n){auto a=(uintptr_t)p;for(auto r:regions)if(a>=
 template<class T>bool mp4_actor_field(void*p,size_t at,T&out){if(!mapped((uint8_t*)p+at,sizeof out))return false;::memcpy(&out,(uint8_t*)p+at,sizeof out);return true;}
 template<class T>void put(void*p,size_t at,T v){assert(mapped((uint8_t*)p+at,sizeof v));::memcpy((uint8_t*)p+at,&v,sizeof v);}
 bool mp4_particle_native_state_mapped(uintptr_t p,size_t n,bool=false){return mapped((void*)p,n);}bool mp4_native_mapped(uintptr_t p,size_t n,int){return mapped((void*)p,n);}
-bool main_thread=true,source=true,held=true,verified=true,live=true,finish_current=true;bool game_call(){return main_thread;}bool mp4_alive(void*p){return live&&p&&mapped(p,24);}bool mp4_stage_owner(void*){return source;}bool mp4_actor_clock_held(void*){return held;}
+bool main_thread=true,source=true,held=true,verified=true,live=true,finish_current=true;bool game_call(){return main_thread;}
+#include "particle-operation-rw-host.inc"
+bool mp4_alive(void*p){return live&&p&&mapped(p,24);}bool mp4_stage_owner(void*){return source;}bool mp4_actor_clock_held(void*){return held;}
 void*particle=nullptr,*renderer=nullptr,*go=nullptr,*native=nullptr,*rnative=nullptr,*gnative=nullptr,*state=nullptr,*modules=nullptr,*parameters=nullptr,*parts=nullptr,*renderer_type=nullptr,*code=nullptr,*vtable=nullptr,*array=nullptr,*component_array=nullptr;
 std::map<uint32_t,void*>roots;uint32_t root_next=1;unsigned retains=0,frees=0;bool retain_fail=false;
 uint32_t mp4_retain(void*p){++retains;if(retain_fail||!p)return 0;roots[root_next]=p;return root_next++;}void*weak_get(uint32_t r){auto it=roots.find(r);return it==roots.end()?nullptr:it->second;}void weak_free(uint32_t r){++frees;roots.erase(r);}
@@ -30,18 +33,18 @@ uintptr_t mp4_native_base=0,image_base=0;struct{const char*native_sha256="native
 bool mp4_source_verified=true,mp4_stage_source_verified=true;bool mp4_prefix(const mp4game::Binding&){return verified;}bool mp4_hook_was_statically_verified(const mp4game::Binding&){return verified;}
 bool mp4_timeline_class(const Mp4TimelineTypePin&){return verified;}bool mp4_timeline_exact(void*p,const Mp4TimelineTypePin&){return p==renderer;}
 std::map<void*,const char*> extra_types;
-bool mp4_type_is(void*p,const char*t){auto it=extra_types.find(p);if(it!=extra_types.end()&&!::strcmp(it->second,t))return true;return (p==particle&&!::strcmp(t,"UnityEngine.ParticleSystem"))||(p==go&&!::strcmp(t,"UnityEngine.GameObject"));}
+bool mp4_type_is(void*p,const char*t){if(p==renderer&&(!::strcmp(t,"UnityEngine.Renderer")||!::strcmp(t,"UnityEngine.ParticleSystemRenderer")))return true;auto it=extra_types.find(p);if(it!=extra_types.end()&&!::strcmp(it->second,t))return true;return (p==particle&&!::strcmp(t,"UnityEngine.ParticleSystem"))||(p==go&&!::strcmp(t,"UnityEngine.GameObject"));}
 struct Mp4SceneWitness{uint64_t generation=7;void*player=nullptr;};
 bool mp4_scene_same_source(const Mp4SceneWitness&a,const Mp4SceneWitness&b){return a.generation==b.generation;}
-struct{Mp4SceneWitness source{};struct StageOwner{void*particle=nullptr;}owners[256]{};size_t count=1;bool configured=true,restored=false;}mp4_stage_host;
+struct{Mp4SceneWitness source{};struct StageOwner{void*particle=nullptr;void*producer=nullptr;uint32_t producer_kind=1;}owners[256]{};size_t count=1;bool configured=true,restored=false;}mp4_stage_host;
 namespace idoly_mp4_runtime{struct{uint64_t generation=11;}job;}
 namespace idoly_mp4_stage{enum class Result:int{ok,waiting,unsupported=-1};struct Owner{void*particle=nullptr,*producer=nullptr;uint32_t producer_kind=0;};}
 uint64_t public_capture=13;bool public_restored=false;int public_capture_result=0;unsigned revoked=0;
-struct{idoly_mp4_stage::Result capture(){return static_cast<idoly_mp4_stage::Result>(public_capture_result);}void revoke_grants(){++revoked;}bool snapshot_receipt(void*p,idoly_mp4_stage::Owner*out,uint64_t*r,bool*restored){if(p!=particle||!source||!public_capture)return false;*out={p,p,1};*r=public_capture;*restored=public_restored;return true;}}mp4_stage_particles;
+struct{idoly_mp4_stage::Result capture(){return static_cast<idoly_mp4_stage::Result>(public_capture_result);}void revoke_grants(){++revoked;}bool active(){return public_capture!=0;}bool retained_snapshot_receipt(void*p,idoly_mp4_stage::Owner*out,uint64_t*r){if(p!=particle||!public_capture)return false;*out={p,p,1};*r=public_capture;return true;}bool snapshot_receipt(void*p,idoly_mp4_stage::Owner*out,uint64_t*r,bool*restored){if(p!=particle||!source||!public_capture)return false;*out={p,p,1};*r=public_capture;*restored=public_restored;return true;}}mp4_stage_particles;
 struct{const char*sha256="native";uintptr_t vtable=0,singleton=0;}mp4_particle_manager_pins;
 struct Mp4ParticleStateNativeValue{uint8_t bytes[352]{};};
 struct{uintptr_t rva=0;uint8_t prefix[16]{};}mp4_particle_state_pin;
-unsigned finish_calls=0;Mp4ParticleStateNativeValue original_finish(void*){++finish_calls;put(native,0x6c,uint8_t(0));return{};}
+unsigned finish_calls=0;Mp4ParticleStateNativeValue original_finish(void*self){assert(self==native);++finish_calls;put(native,0x6c,uint8_t(0));return{};}
 // This harness executes the production typed C++ aggregate call at the actual
 // function pointer. ARM entry pin/executable mapping are modeled separately.
 #include "particle-native-finish-receipt-host.cpp.inc"
@@ -151,10 +154,11 @@ namespace mp4_gpu_fence{enum class Result{ready,waiting,quarantined};}
 struct Ledger{bool wait=false,bad=false;unsigned polls=0,retires=0;mp4_gpu_fence::Result poll(uint64_t,uint64_t){++polls;return bad?mp4_gpu_fence::Result::quarantined:wait?mp4_gpu_fence::Result::waiting:mp4_gpu_fence::Result::ready;}bool retire_sequence(uint64_t,uint64_t){++retires;return !bad&&!wait;}};
 struct GPU{bool configured=false,draw=false;uint64_t source=7,epoch=11,retired=0,sequence=0;Ledger ledger;}mp4_gpu_fence_host,mp4_gpu_auxiliary_host;
 struct{unsigned depth=0;}mp4_raw_original_operation;struct{bool active=false;}mp4_rebuild_ledger;
-struct{bool active=false;unsigned depth=0;uint64_t generation=1;}mp4_particle_mutation_host;
+struct{bool active=false;unsigned depth=0;uint64_t generation=1,lease=47,job=11;Mp4SceneWitness source{7};}mp4_particle_mutation_host;
+std::atomic<bool>mp4_particle_mutation_published{true},mp4_particle_mutation_withdrawn{false},mp4_stage_foreign_dirty{false};
 struct{uint64_t serial=61,generation=1;}mp4_particle_mutation_boundary;
 bool mp4_particle_mutation_bindings(){return verified;}
-std::atomic<bool> mp4_particle_mutation_withdrawn{false};void mp4_particle_mutation_foreign(){mp4_particle_mutation_withdrawn=true;}
+void mp4_particle_mutation_foreign(){mp4_particle_mutation_withdrawn=true;}
 bool mutation_good=true;bool mp4_particle_mutation_source(){return !mp4_particle_mutation_withdrawn&&mutation_good&&source&&mp4_particle_mutation_host.active;}
 bool mp4_particle_mutation_closed(){return mp4_particle_mutation_source()&&!mp4_particle_mutation_host.depth&&!mp4_raw_original_operation.depth&&!mp4_rebuild_ledger.active;}
 bool mp4_particle_mutation_capture(){mp4_particle_mutation_host.active=true;return mutation_good;}
@@ -343,12 +347,19 @@ bool mp4_particle_data_verify(const Mp4ParticleDataImage&i){return i.captured&&i
 bool mp4_particle_renderer_cache_restore(Mp4ParticleRendererCacheImage&i,uint64_t r){assert(r&&public_restored);++cache_restores;if(cache_mode==9)return false;i.invalidated=true;return true;}
 void mp4_particle_data_release(Mp4ParticleDataImage&i){if(i.captured)++data_releases;i={};}
 
+int normal_mode=0,descriptor_calls=0;
+bool mp4_particle_renderer_normal_program_bindings(){return normal_mode!=1;}
+bool mp4_particle_renderer_descriptor_bindings(){return normal_mode!=2;}
+bool mp4_particle_renderer_descriptor_restore(Mp4ParticleRendererCacheImage&i,uint64_t plan,uint64_t r){assert(i.captured&&plan&&r&&public_restored&&mp4_particle_renderer_reader_current());++descriptor_calls;if(normal_mode==3)return false;((uint8_t*)state)[0x22]=0x6a;((uint8_t*)modules)[0x480]=0x6b;return true;}
+bool (*mp4_activation_additional_family)(void*,uint32_t*,uint64_t*)=nullptr;
 #include "particle-native-coordinator-host.inc"
 void*manager=nullptr,*manager_global=nullptr,*manager_rows=nullptr;
-void full_setup(){setup();extra_setup();present_setup();program_setup();manager=alloc(64);manager_global=alloc(8);manager_rows=alloc(8);registration_table=alloc(16);}
-void full_reset(){assert(mp4_particle_native_release(false)==Mp4SceneResult::ok);array=renderer_array;program_reset();present_reset(false,true);auto serial=create();(void)serial;mp4_stage_host.count=1;mp4_stage_host.owners[0].particle=particle;mp4_stage_host.configured=true;mp4_stage_host.restored=false;mp4_scene_host={};mp4_scene_host.source={7};mp4_scene_host.active=true;mp4_scene_host.all=15;mp4_scene_host.restored=0;public_restored=false;mutation_good=true;mp4_particle_mutation_host={};mp4_particle_mutation_host.generation=1;mp4_particle_mutation_boundary={61,1};active_boundary=61;mp4_raw_original_operation.depth=0;mp4_rebuild_ledger.active=false;mp4_gpu_fence_host={};mp4_gpu_auxiliary_host={};mp4_owned_render_depth=mp4_unowned_render_depth=0;mp4_owned_render_ticket_active=false;put(manager_global,0,(uintptr_t)manager);mp4_particle_manager_pins.singleton=(uintptr_t)manager_global-1;::memset(manager,0,64);put(manager,0,(uintptr_t)manager_rows);put(manager,16,uint64_t(1));put(manager,24,uint64_t(2));put(manager_rows,0,(uintptr_t)native);put(native,0x68,int32_t(0));}
+void full_setup(){setup();extra_setup();present_setup();program_setup();manager=alloc(64);manager_global=alloc(8);manager_rows=alloc(16);registration_table=alloc(16);}
+void full_reset(){assert(mp4_particle_native_release(false)==Mp4SceneResult::ok);array=renderer_array;program_reset();present_reset(false,true);auto serial=create();(void)serial;mp4_stage_host.count=1;mp4_stage_host.owners[0].particle=particle;mp4_stage_host.owners[0].producer=particle;mp4_stage_host.configured=true;mp4_stage_host.restored=false;mp4_scene_host={};mp4_scene_host.source={7};mp4_scene_host.active=true;mp4_scene_host.all=15;mp4_scene_host.restored=0;public_restored=false;mutation_good=true;mp4_particle_mutation_host={};mp4_particle_mutation_host.generation=1;mp4_particle_mutation_boundary={61,1};active_boundary=61;mp4_raw_original_operation.depth=0;mp4_rebuild_ledger.active=false;mp4_gpu_fence_host={};mp4_gpu_auxiliary_host={};mp4_owned_render_depth=mp4_unowned_render_depth=0;mp4_owned_render_ticket_active=false;put(manager_global,0,(uintptr_t)manager);mp4_particle_manager_pins.singleton=(uintptr_t)manager_global-1;::memset(manager,0,64);put(manager,0,(uintptr_t)manager_rows);put(manager,16,uint64_t(1));put(manager,24,uint64_t(2));put(manager_rows,0,(uintptr_t)native);put(native,0x68,int32_t(0));}
 void saved_source_returned(){mp4_stage_host.restored=true;mp4_scene_host.restored=mp4_scene_host.all;public_restored=true;}
 
+#include "particle-retained-worker-inventory-host.inc"
+#include "particle-retained-image-receipt-host.inc"
 namespace mp4stage=idoly_mp4_stage;
 Mp4SceneResult mp4_stage_result(mp4stage::Result r){return r==mp4stage::Result::ok?Mp4SceneResult::ok:r==mp4stage::Result::waiting?Mp4SceneResult::waiting:Mp4SceneResult::unsupported;}
 namespace idoly_mp4_source_bootstrap{enum class Result:int{ok=0,waiting=1,unsupported=-1,invalid=-2,failed=-3,stale=-4};struct Key{uint64_t epoch=0,job=0;uintptr_t source=0,root_asset=0;};bool same(const Key&a,const Key&b){return a.epoch==b.epoch&&a.job==b.job&&a.source==b.source&&a.root_asset==b.root_asset;}}
@@ -371,6 +382,6 @@ int main(){full_setup();unsigned cases=0;
  {adapter_reset();uint64_t r=0;assert(mp4_particle_source_bootstrap_advance(nullptr,key,&r)==BR::ok);source=false;assert(!mp4_particle_source_bootstrap_current(nullptr,key,r));assert(mp4_particle_source_bootstrap_release(nullptr,key)==BR::ok);source=true;++cases;}
  {adapter_reset();uint64_t r=0;public_capture_result=-1;assert(mp4_particle_source_bootstrap_advance(nullptr,key,&r)==BR::unsupported&&!r&&mp4_particle_source_bootstrap.started);assert(mp4_particle_source_bootstrap_release(nullptr,key)==BR::ok&&mp4_particle_source_program_count==0);++cases;}
  {adapter_reset();uint64_t r=0;assert(mp4_particle_source_bootstrap_advance(nullptr,key,&r)==BR::ok);mp4_gpu_fence_host.configured=true;mp4_gpu_fence_host.sequence=1;mp4_gpu_fence_host.ledger.wait=true;assert(mp4_particle_source_bootstrap_release(nullptr,key)==BR::waiting&&mp4_particle_source_bootstrap.started);mp4_gpu_fence_host.ledger.wait=false;assert(mp4_particle_source_bootstrap_release(nullptr,key)==BR::ok);++cases;}
- {adapter_reset();Mp4ControlPassiveImage raw{};assert(!mp4_source_control_particle_plan(context,raw,leaf));context.phase=Mp4TimelineProofPhase::active;assert(!mp4_source_control_particle_plan(context,raw,leaf));context.phase=Mp4TimelineProofPhase::source_bootstrap_plan;assert(!mp4_source_control_particle_plan(context,raw,leaf));leaf.role=Mp4ControlSourceRole::activation;assert(!mp4_source_control_particle_plan(context,raw,leaf));leaf.role=Mp4ControlSourceRole::director;assert(!mp4_source_control_particle_plan(context,raw,leaf));++cases;}
+ {adapter_reset();Mp4ControlPassiveImage raw{};assert(mp4_source_control_particle_plan(context,raw,leaf));context.phase=Mp4TimelineProofPhase::active;assert(!mp4_source_control_particle_plan(context,raw,leaf));context.phase=Mp4TimelineProofPhase::source_bootstrap_plan;assert(mp4_source_control_particle_plan(context,raw,leaf));normal_mode=1;assert(!mp4_source_control_particle_plan(context,raw,leaf));normal_mode=2;assert(!mp4_source_control_particle_plan(context,raw,leaf));normal_mode=0;leaf.role=Mp4ControlSourceRole::activation;assert(!mp4_source_control_particle_plan(context,raw,leaf));leaf.role=Mp4ControlSourceRole::director;assert(!mp4_source_control_particle_plan(context,raw,leaf));++cases;}
  assert(mp4_particle_native_release(false)==Mp4SceneResult::ok);if(mp4_particle_source_renderer_type){weak_free(mp4_particle_source_renderer_type);}::free(mp4_particle_source_policies);::free(mp4_particle_source_programs);delete static_cast<Material*>(source_material);assert(roots.empty()&&private_materials.empty()&&private_blocks.empty());std::printf("%u actual source bootstrap adapter cases passed\n",cases);
 }

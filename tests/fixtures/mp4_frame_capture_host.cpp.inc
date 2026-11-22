@@ -49,11 +49,13 @@ struct Mp4CaptureQueueHost{bool bound=false;};
 struct Mp4CaptureAliasHost{bool bound=false;void*context=nullptr;bool(*unwound)(void*,uint64_t,uint64_t)=nullptr;bool(*gpu)(void*,uint64_t,uint64_t)=nullptr;bool(*allocation)(void*,uint64_t,uint64_t,void*,void*,uintptr_t,bool*)=nullptr;bool(*detach)(void*,uint64_t,uint64_t,void*,void*,uintptr_t)=nullptr;bool(*consumers)(void*,uint64_t,uint64_t,void*,void*,uintptr_t)=nullptr;};
 uint64_t mp4_capture_queue_readers=0,mp4_capture_native_write_serial=0;unsigned mp4_owned_render_depth=0,mp4_unowned_render_depth=0;
 struct{bool configured=false;uint64_t source=7,epoch=9;bool draw=false;uint64_t sequence=1,retired=1;}mp4_gpu_fence_host,mp4_gpu_auxiliary_host;
+bool hold_checkpoint=true;unsigned paused_finish_calls=0;
+bool mp4_render_hold_gpu_checkpoint(uint64_t job){assert(job==9);return hold_checkpoint;}
 bool mp4_gpu_final_fenced(uint64_t){return gpu_ok;}Mp4SceneResult mp4_gpu_preflight(uint64_t,uint64_t){return gpu_ok?Mp4SceneResult::ok:Mp4SceneResult::waiting;}
 bool mp4_capture_native_quiescent(){return native_quiet;}bool mp4_capture_native_frontend_current(){return frontend_ok;}bool mp4_capture_native_property(int32_t*out){*out=57;return frontend_ok;}bool mp4_capture_frontends_current(uintptr_t*out){*out=11;return frontend_ok;}bool mp4_capture_queue_frontends_current(){return frontend_ok;}
 mp4frame::Result mp4_paused_image_capture(Mp4PausedImageHost&h,const Mp4SceneWitness&,uint64_t,void*context,bool(*held)(void*),bool(*produced)(void*,uint64_t,uint64_t,void*,void*,uintptr_t),bool(*unref)(void*,void*,void*,uintptr_t),bool(*preserve)(void*,void*)){
  h.configured=true;if(!held(context))return Mp4SceneResult::waiting;h.original_capture=ref(old_capture);h.scope.context=context;h.scope.held=held;h.scope.produced=produced;h.scope.unreferenced=unref;h.scope.preserve=preserve;h.scope.captured=true;h.scope.released_flag=false;h.scope.original=ref(old_capture);return Mp4SceneResult::ok;}
-bool mp4_paused_image_finish(Mp4PausedImageHost&h,bool done){if(!done||!h.scope.released())return false;h.configured=false;return true;}
+bool mp4_paused_image_finish(Mp4PausedImageHost&h,bool done){++paused_finish_calls;if(!done||!h.scope.released())return false;h.configured=false;return true;}
 bool mp4_capture_production_wrapper_texture(void*w,void**out){return mp4_actor_field(w,16,*out);}
 bool prod_current(void*context,uint64_t e,uint64_t j){auto&h=*static_cast<Mp4CaptureProductionHost*>(context);void*t=nullptr;return current_ok&&e==7&&j==9&&mp4_actor_field(ref(controller),152,t)&&t==h.target;}
 bool prod_owned(void*,void*c,uint64_t s){return c==ref(controller)&&s&&s==origin_serial;}
@@ -84,7 +86,7 @@ bool jobs(void*,const Mp4SceneWitness&,uint64_t){return jobs_ok;}bool program(vo
 bool retired(void*,uint64_t,uint64_t){return gpu_ok;}bool consumers(void*,uint64_t,uint64_t,void*,void*,uintptr_t){return consumers_ok;}bool detached(void*,uint64_t,uint64_t,void*,void*,uintptr_t){return owner_retired;}
 Mp4FrameCaptureCoordinator api(){return{&program_ok,jobs,program,retired,consumers,detached};}
 void setup(){objects.clear();for(auto pair:{std::pair<Obj*,const char*>{&controller,"VL.Rendering.VLSRPCameraController"},{&camera,"UnityEngine.Camera"},{&old_target,"VL.VLRenderTexture"},{&old_rt,"UnityEngine.RenderTexture"},{&old_capture,"VL.VLRenderTexture"},{&old_capture_rt,"UnityEngine.RenderTexture"},{&new_target,"VL.VLRenderTexture"},{&new_rt,"UnityEngine.RenderTexture"},{&private_wrapper,"VL.VLRenderTexture"},{&private_rt,"UnityEngine.RenderTexture"},{&name,"System.String"}}){std::memset(pair.first->data,0,256);pair.first->type=pair.second;objects[ref(*pair.first)]=pair.first;}
- roots.clear();next_root=old_reads=0;thread_ok=current_ok=jobs_ok=program_ok=gpu_ok=consumers_ok=alias_ok=frontend_ok=native_quiet=true;owner_retired=fail_root=false;origin_serial=0;mp4_capture_native_write_serial=mp4_capture_queue_readers=0;mp4_owned_render_depth=mp4_unowned_render_depth=0;mp4_gpu_fence_host.configured=mp4_gpu_auxiliary_host.configured=false;
+ roots.clear();next_root=old_reads=0;hold_checkpoint=true;paused_finish_calls=0;thread_ok=current_ok=jobs_ok=program_ok=gpu_ok=consumers_ok=alias_ok=frontend_ok=native_quiet=true;owner_retired=fail_root=false;origin_serial=0;mp4_capture_native_write_serial=mp4_capture_queue_readers=0;mp4_owned_render_depth=mp4_unowned_render_depth=0;mp4_gpu_fence_host.configured=mp4_gpu_auxiliary_host.configured=false;
  mp4_frame_capture_host=Mp4FrameCaptureHost{};for(auto&r:mp4_frame_capture_custody)r={};mp4_scene_host.active=true;mp4_scene_host.invalidated=mp4_scene_host.releasing=false;mp4_scene_host.configured=mp4_scene_host.all=15;mp4_scene_host.source={7,ref(controller),ref(camera)};
  put(controller,80,ref(camera));put(controller,152,ref(old_target));put(controller,160,ref(old_capture));put(old_target,16,ref(old_rt));put(old_capture,16,ref(old_capture_rt));put(old_capture_rt,16,uintptr_t(101));put(old_rt,16,uintptr_t(102));put(new_target,16,ref(new_rt));put(new_rt,16,uintptr_t(103));}
 void ready(){auto&h=mp4_frame_capture_host;assert(mp4_frame_capture_baseline(h,mp4_scene_host.source,9,api())==Mp4SceneResult::ok);assert(mp4_frame_capture_prepare(h)==Mp4SceneResult::ok);put(controller,152,ref(new_target));assert(mp4_frame_capture_bind_production(h)==Mp4SceneResult::ok&&h.production.target==ref(new_target));}
@@ -105,5 +107,11 @@ int main(){unsigned cases=0;
  {setup();ready();uint64_t op=0;assert(mp4_frame_capture_begin(ref(controller),&op)==Mp4SceneResult::ok);produce(op);current_ok=false;const auto before=old_reads;assert(!mp4_frame_capture_end(ref(controller),op,false));origin_serial=0;clean(false);assert(old_reads==before);++cases;}
  {setup();ready();mp4_frame_capture_seal(mp4_frame_capture_host);origin_serial=77;assert(mp4_frame_capture_release(mp4_frame_capture_host,false)==Mp4SceneResult::waiting);origin_serial=0;clean();++cases;}
  {setup();ready();auto&h=mp4_frame_capture_host;mp4_frame_capture_seal(h);put(controller,152,ref(old_target));assert(mp4_frame_capture_restore(h)==Mp4SceneResult::ok&&mp4_frame_capture_release(h,true)==Mp4SceneResult::ok);assert(!mp4_frame_capture_finish(h,false)&&h.active);assert(mp4_frame_capture_finish(h,true)&&roots.empty());++cases;}
+ {setup();ready();auto&h=mp4_frame_capture_host;assert(mp4_frame_capture_seal(h));put(controller,152,ref(old_target));
+  assert(mp4_frame_capture_restore(h)==Mp4SceneResult::ok&&mp4_frame_capture_release(h,true)==Mp4SceneResult::ok);
+  const auto source=h.source;const auto held_roots=roots.size();void*context=h.api.context;
+  hold_checkpoint=false;assert(!mp4_frame_capture_finish(h,true)&&h.active&&h.job==9&&h.api.context==context
+    &&h.source.generation==source.generation&&h.image.configured&&roots.size()==held_roots&&paused_finish_calls==0);
+  hold_checkpoint=true;assert(mp4_frame_capture_finish(h,true)&&!h.active&&!h.job&&roots.empty()&&paused_finish_calls==1);++cases;}
  std::printf("%u Frame/Capture join cases; actual Bank and join, physical/GPU leaf calls modeled\n",cases);
 }

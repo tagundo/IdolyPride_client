@@ -27,6 +27,7 @@ def aggregate(tmp_path_factory):
     harness=r'''
 #include "mp4_game_adapter.hpp"
 #include <cassert>
+#include <atomic>
 #include <map>
 #include <string>
 #include <stdexcept>
@@ -38,6 +39,7 @@ W live{reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<vo
     reinterpret_cast<void*>(7),reinterpret_cast<void*>(8),reinterpret_cast<void*>(9),reinterpret_cast<void*>(10),reinterpret_cast<void*>(11),reinterpret_cast<void*>(12),7};
 bool on_thread=true,witness_available=true,automatic=true,held=true,mp4_api_installed=true;unsigned witness_calls=0;
 bool game_call(){return on_thread;}
+struct{unsigned depth=0;}mp4_raw_original_operation;
 bool driving_permission=true;bool mp4_world_driving_permission(){return driving_permission;}
 bool mp4_exact_type(void*p,const char*){return p==reinterpret_cast<void*>(13);}
 bool mp4_alive(void*p){return p!=nullptr;}
@@ -53,6 +55,8 @@ unsigned admission_drops=0,admission_withdrawals=0;bool admission_receipt=true;i
 void mp4_source_director_plan_withdraw()noexcept{}
 void mp4_root_capture_withdraw()noexcept{}
 void mp4_srp_source_withdraw()noexcept{}
+void mp4_render_hold_handoff(void*)noexcept{}
+void mp4_render_hold_abandon_job(uint64_t)noexcept{}
 bool mp4_source_director_plan_drop(){return true;}
 void mp4_stage_admission_drop()noexcept{++admission_drops;admission_receipt=false;}
 void mp4_stage_admission_withdraw()noexcept{++admission_withdrawals;admission_receipt=false;}
@@ -109,7 +113,24 @@ R quiesce(void* c){auto& p=*static_cast<Part*>(c);return operation(p,"quiesce",p
 R capture(void* c){auto& p=*static_cast<Part*>(c);return operation(p,"capture",p.capture);}
 R prepare(void* c){auto& p=*static_cast<Part*>(c);return operation(p,"prepare",p.prepare);}
 R reset(void* c){auto& p=*static_cast<Part*>(c);return operation(p,"reset",p.reset);}
-R restore(void* c){auto& p=*static_cast<Part*>(c);return operation(p,"restore",p.restore);}
+bool inspect_restore=false,restore_throws=false,restore_withdraws=false,restore_reenters=false;
+uint64_t restore_serials[4]{};unsigned restore_observed=0;
+R restore(void* c){auto& p=*static_cast<Part*>(c);
+    if(inspect_restore){
+        Mp4ScenePropertyRestoreReceipt receipt{},completed{};
+        assert(mp4_scene_property_restore_current(&receipt));
+        assert(receipt.part==unsigned(p.index)&&receipt.context==c&&receipt.callback==restore&&receipt.entered&&!receipt.returned);
+        assert(receipt.job==idoly_mp4_runtime::job.generation&&receipt.source.generation==live.generation&&receipt.serial>restore_serials[p.index]);
+        restore_serials[p.index]=receipt.serial;++restore_observed;
+        assert(!mp4_scene_property_restore_completed_current(p.index,&completed));
+        on_thread=false;assert(!mp4_scene_property_restore_current(&completed));on_thread=true;
+        mp4_raw_original_operation.depth=1;assert(!mp4_scene_property_restore_current(&completed));mp4_raw_original_operation.depth=0;
+        if(restore_reenters){const auto kept=roots.size();assert(mp4_scene_release(nullptr,true)==R::waiting&&roots.size()==kept);assert(mp4_scene_restore(nullptr)==R::waiting);}
+        if(restore_withdraws){mp4_scene_property_restore_withdraw_source();assert(!mp4_scene_property_restore_current(&completed));}
+        if(restore_throws)throw std::runtime_error("typed restore body");
+    }
+    return operation(p,"restore",p.restore);
+}
 R release(void* c,bool own){auto& p=*static_cast<Part*>(c);p.owned.push_back(own);return operation(p,"release",p.release);}
 const char* error(void*){return "modeled_part_waiting";}
 R step(void* c,uint64_t t,double s){assert(t==0&&s==0);++static_cast<Part*>(c)->step;return R::ok;}
@@ -123,12 +144,38 @@ R finalized(void* c){auto& p=*static_cast<Part*>(c);return operation(p,"finalize
 bool verified(void* c){return static_cast<Part*>(c)->restoration&&static_cast<Part*>(c)->restore>0;}
 R admit(void* c,const W& w){assert(w.generation==live.generation);auto& p=*static_cast<Part*>(c);++p.admitted;if(p.index==admission_throw)throw std::runtime_error("admission");if(p.restorable&&p.index==2)admission_receipt=true;return p.restorable?R::ok:R::unsupported;}
 int post_begins=0,post_detaches=0,post_verifies=0,post_releases=0;bool post_checkpoint=false,post_begin_throws=false,post_begin_fails=false;
-R post_begin(bool checkpoint){++post_begins;post_checkpoint=checkpoint;if(post_begin_throws)throw std::runtime_error("observer");return post_begin_fails?R::failed:R::ok;}
+R post_begin(bool checkpoint){uint64_t serial=0;assert(!mp4_scene_video_handoff_current(live.generation,idoly_mp4_runtime::job.generation,&serial));++post_begins;post_checkpoint=checkpoint;if(post_begin_throws)throw std::runtime_error("observer");return post_begin_fails?R::failed:R::ok;}
 R post_detach(bool checkpoint){++post_detaches;assert(checkpoint==post_checkpoint);return R::ok;}
 R post_verify(){++post_verifies;return R::ok;}
 R post_release(){++post_releases;return R::ok;}
+unsigned defaults_releases=0,video_handoffs=0;uint64_t video_serial=0;
+bool defaults_wait=false,defaults_throw=false,video_wait=false,video_throw=false,video_withdraw=false,video_reenter=false;
+bool defaults_release(){
+    ++defaults_releases;assert(post_begins==1&&!actor_withdrawn&&!camera_withdrawn);
+    uint64_t serial=0;assert(!mp4_scene_video_handoff_current(live.generation,idoly_mp4_runtime::job.generation,&serial));
+    assert(mp4_scene_release(nullptr,true)==R::waiting&&mp4_scene_detach_after_restore(nullptr)==R::waiting);
+    if(defaults_throw)throw std::runtime_error("default release");
+    if(defaults_wait){defaults_wait=false;return false;}
+    return true;
+}
+R video_handoff(uint64_t source,uint64_t job){
+    ++video_handoffs;uint64_t serial=0;assert(defaults_releases&&mp4_scene_host.defaults_released);
+    assert(mp4_scene_video_handoff_current(source,job,&serial)&&serial);
+    if(video_serial)assert(serial==video_serial);else video_serial=serial;
+    assert(!actor_withdrawn&&!camera_withdrawn&&!parts[3].detached);
+    uint64_t refused=0;assert(!mp4_scene_video_handoff_current(source+1,job,&refused)&&!refused);
+    assert(!mp4_scene_video_handoff_current(source,job+1,&refused)&&!refused);
+    on_thread=false;assert(!mp4_scene_video_handoff_current(source,job,&refused));on_thread=true;
+    mp4_raw_original_operation.depth=1;assert(!mp4_scene_video_handoff_current(source,job,&refused));mp4_raw_original_operation.depth=0;
+    if(video_reenter){const auto kept=roots.size();assert(mp4_scene_detach_after_restore(nullptr)==R::waiting&&mp4_scene_release(nullptr,true)==R::waiting&&mp4_scene_restore(nullptr)==R::waiting&&roots.size()==kept);}
+    if(video_withdraw){mp4_scene_property_restore_withdraw_source();assert(!mp4_scene_video_handoff_current(source,job,&refused));return R::waiting;}
+    if(video_throw)throw std::runtime_error("video Play");
+    if(video_wait){video_wait=false;return R::waiting;}
+    return R::ok;
+}
 void install(bool missing=false){
     mp4_scene_post_restore={post_begin,post_detach,post_verify,post_release};
+    mp4_scene_playback_handoff={defaults_release,video_handoff};
     Mp4ScenePart table[4]{};
     for(unsigned i=0;i<4;++i){parts[i].index=i;table[i]={&parts[i],available,configure,current,quiesce,capture,prepare,reset,restore,release,error,nullptr,nullptr,nullptr,invalidate,admit,verified};}
     for(auto& part:table){part.prepare_step=step;part.grant=grant;part.revoke_grants=revoke;}table[3].clock_restorable=restorable;table[1].verify_source_restored=finalized;table[1].prepare_render=prepare_render;table[3].detach_global_loops=detach;
@@ -169,6 +216,40 @@ int main(int argc,char** argv){
     if(mode=="abandon_globals"){
         on_thread=false;mp4_scene_abandon_globals(nullptr);
         assert(actor_globals==1&&camera_globals==1&&actor_withdrawn==1&&camera_withdrawn==1);return 0;
+    }
+    if(mode=="property_restore_receipts"||mode=="property_restore_wait"||mode=="property_restore_throw"||mode=="property_restore_withdraw"||mode=="property_restore_reentry"){
+        begin();inspect_restore=true;restore_throws=mode=="property_restore_throw";
+        restore_withdraws=mode=="property_restore_withdraw";restore_reenters=mode=="property_restore_reentry";
+        Mp4ScenePropertyRestoreReceipt receipt{};assert(!mp4_scene_property_restore_current(&receipt));
+        if(mode=="property_restore_wait"){wait_operation="restore";wait_part=0;assert(mp4_scene_restore(nullptr)==R::waiting);assert(!mp4_scene_property_restore_completed_current(0,&receipt));}
+        if(restore_throws){bool threw=false;try{(void)mp4_scene_restore(nullptr);}catch(const std::runtime_error&){threw=true;}
+            assert(threw&&!mp4_scene_property_restore_current(&receipt)&&!mp4_scene_property_restore_completed_current(0,&receipt));return 0;}
+        const auto result=mp4_scene_restore(nullptr);
+        if(restore_withdraws){assert(result==R::stale&&!mp4_scene_property_restore_current(&receipt)&&!mp4_scene_property_restore_completed_current(0,&receipt)&&!mp4_scene_host.restored);return 0;}
+        assert(result==R::ok&&!mp4_scene_property_restore_current(&receipt)&&restore_observed>=4);
+        for(unsigned i=0;i<4;++i){assert(mp4_scene_property_restore_completed_current(i,&receipt)&&receipt.serial==restore_serials[i]&&receipt.returned&&receipt.result==R::ok);}
+        mp4_scene_property_restore_withdraw_source();assert(!mp4_scene_property_restore_completed_current(0,&receipt));return 0;
+    }
+    if(mode=="video_handoff"||mode=="video_handoff_wait"||mode=="video_handoff_throw"||mode=="video_handoff_withdraw"||mode=="video_handoff_reentry"||mode=="defaults_release_wait"||mode=="defaults_release_throw"||mode=="video_handoff_missing"){
+        begin();assert(mp4_scene_restore(nullptr)==R::ok&&mp4_scene_verify_source_restored(nullptr)==R::ok);
+        video_wait=mode=="video_handoff_wait";video_throw=mode=="video_handoff_throw";video_withdraw=mode=="video_handoff_withdraw";video_reenter=mode=="video_handoff_reentry";
+        defaults_wait=mode=="defaults_release_wait";defaults_throw=mode=="defaults_release_throw";
+        if(mode=="video_handoff_missing")mp4_scene_playback_handoff.resume_video=nullptr;
+        uint64_t serial=0;assert(!mp4_scene_video_handoff_current(live.generation,idoly_mp4_runtime::job.generation,&serial));
+        const auto result=mp4_scene_detach_after_restore(nullptr);
+        assert(!mp4_scene_video_handoff_current(live.generation,idoly_mp4_runtime::job.generation,&serial)&&!mp4_scene_host.playback_handoff_running);
+        if(video_throw||defaults_throw){assert(result==R::failed&&!actor_withdrawn&&!camera_withdrawn&&!mp4_scene_host.detached);return 0;}
+        if(video_withdraw){assert(result==R::waiting&&!actor_withdrawn);assert(mp4_scene_detach_after_restore(nullptr)==R::stale&&video_handoffs==1&&defaults_releases==1);return 0;}
+        if(mode=="video_handoff_missing"){assert(result==R::unsupported&&!defaults_releases&&!video_handoffs&&!actor_withdrawn);return 0;}
+        if(mode=="video_handoff_wait"||mode=="defaults_release_wait"){
+            assert(result==R::waiting&&!actor_withdrawn&&!camera_withdrawn&&!mp4_scene_host.detached);
+            const auto old_serial=mp4_scene_host.video_handoff_serial;
+            if(mode=="video_handoff_wait")parts[0].current=false;
+            assert(mp4_scene_detach_after_restore(nullptr)==R::ok&&mp4_scene_host.video_handoff_serial==old_serial);
+        }else assert(result==R::ok);
+        assert(mp4_scene_host.defaults_released&&mp4_scene_host.video_handoff_completed&&mp4_scene_host.detached);
+        assert(defaults_releases==(mode=="defaults_release_wait"?2u:1u)&&video_handoffs==(mode=="video_handoff_wait"?2u:1u));
+        const auto calls=video_handoffs;assert(mp4_scene_detach_after_restore(nullptr)==R::ok&&video_handoffs==calls);return 0;
     }
     if(mode=="final_handoff_before_detach"){
         begin();assert(mp4_scene_restore(nullptr)==R::ok);assert(mp4_scene_verify_source_restored(nullptr)==R::ok);
@@ -331,7 +412,7 @@ int main(int argc,char** argv){
     return binary
 
 
-@pytest.mark.parametrize("mode",["normal","final_handoff_before_detach","post_begin_failure","post_begin_exception","detach_partial","detach_pending_end","detach_checkpoint","detach_missing_provider","abandon_globals","abandon_loops_before_resource_wait","pending_end_blocks_detach","global_handoff","render_only","missing_render_arm","smart_callgraph","smart_callgraph_rejected","revoke_stale","cancel_before_reset","prepare_failed_restored","finalize_wait","admit","admit_reject","admit_after_stage_reject","admit_exception","admit_ledger","missing_camera_grant","missing_stage_grant","missing_world_grant","camera_attest_failed","stage_attest_failed","missing_part","unavailable","not_owned_clock","not_automatic","allocation_failure","configure_partial","root_lost","stale_callback","capture_wait","prepare_wait","reset_wait","world_not_restorable","stale_epoch","invalidate","restore_wait","release_wait"])
+@pytest.mark.parametrize("mode",["normal","video_handoff","video_handoff_wait","video_handoff_throw","video_handoff_withdraw","video_handoff_reentry","defaults_release_wait","defaults_release_throw","video_handoff_missing","property_restore_receipts","property_restore_wait","property_restore_throw","property_restore_withdraw","property_restore_reentry","final_handoff_before_detach","post_begin_failure","post_begin_exception","detach_partial","detach_pending_end","detach_checkpoint","detach_missing_provider","abandon_globals","abandon_loops_before_resource_wait","pending_end_blocks_detach","global_handoff","render_only","missing_render_arm","smart_callgraph","smart_callgraph_rejected","revoke_stale","cancel_before_reset","prepare_failed_restored","finalize_wait","admit","admit_reject","admit_after_stage_reject","admit_exception","admit_ledger","missing_camera_grant","missing_stage_grant","missing_world_grant","camera_attest_failed","stage_attest_failed","missing_part","unavailable","not_owned_clock","not_automatic","allocation_failure","configure_partial","root_lost","stale_callback","capture_wait","prepare_wait","reset_wait","world_not_restorable","stale_epoch","invalidate","restore_wait","release_wait"])
 def test_production_aggregate_preserves_order_roots_and_partial_phase_ownership(aggregate,mode):
     result=subprocess.run([str(aggregate),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

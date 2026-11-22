@@ -17,6 +17,7 @@ bool capture_lost=false,commit_lost=false,throw_before=false;
 std::vector<std::string>events;
 int configure_calls=0,baseline_calls=0,logical_calls=0,readonly_calls=0,cohort_calls=0,commit_calls=0,promotion_calls=0;bool promotion_wait=false,promotion_waited=false,promotion_reentry=false,release_reentry=false;
 int late_source_reads=0;bool observed_loss=false;
+unsigned mp4_scene_property_restore_entered=0,mp4_scene_video_handoff_entered=0;
 bool game_call(){return owner;}
 bool mp4_scene_source_current(){return source_current;}
 bool mp4_actor_clock_held(void*){return clock_held;}
@@ -34,7 +35,7 @@ Mp4SceneResult release_part(void*p,bool owned){assert(!owned);auto&v=*static_cas
 bool owner_current(void*p){if(observed_loss)++late_source_reads;return static_cast<Part*>(p)->current&&source_current;}
 struct PartApi{void*context;Mp4SceneResult(*quiesce)(void*);Mp4SceneResult(*release)(void*,bool);bool(*owner_current)(void*);bool(*restoration_verified)(void*)=nullptr;Mp4SceneResult(*detach_global_loops)(void*)=nullptr;};
 struct{Source source{};bool active=true,invalidated=false,releasing=false;unsigned count=4,configured=15,started=15,released=0,captured=0,all=15;
- bool release_owned=false,logical_checkpoint=false,pending_camera_restore=false,pending_dependency_restore=false,detached=false,last_camera_restore=false,last_dependency_restore=false;unsigned restored=0,finalized=0;void*last_player=nullptr,*last_presenter=nullptr;
+ bool playback_handoff_running=false,release_owned=false,logical_checkpoint=false,pending_camera_restore=false,pending_dependency_restore=false,detached=false,last_camera_restore=false,last_dependency_restore=false;unsigned restored=0,finalized=0;void*last_player=nullptr,*last_presenter=nullptr;
  void*root_asset=reinterpret_cast<void*>(4);const char*error="none";PartApi parts[4]{};}mp4_scene_host;
 Mp4SceneResult mp4_scene_part_result(const PartApi&,Mp4SceneResult r){return r;}
 Mp4SceneResult mp4_scene_configure(){if(!source_current)return Mp4SceneResult::stale;++configure_calls;events.push_back("configure");return Mp4SceneResult::ok;}
@@ -45,6 +46,18 @@ void mp4_birth_catalogue_clear(){++catalogue_clears;events.push_back("catalogue"
 struct{bool active=false;int acquires=0,releases=0;bool started()const{return active;}bool current()const{return active&&source_current;}
  Mp4SceneResult acquire(){events.push_back("gate");++acquires;active=true;return Mp4SceneResult::ok;}
  Mp4SceneResult release_after_fence(){events.push_back("ungate");++releases;active=false;return Mp4SceneResult::ok;}}mp4_early_source_gates;
+// Actual graphics/engine leaves are modeled separately from Source CPU gates.
+struct {bool active=false;uint64_t source=0,job=0;}mp4_render_hold_state;
+bool render_acquire_ready=true,render_checkpoint_ready=true,render_retire_ready=true,render_retire_reentry=false;
+int render_acquires=0,render_checkpoints=0,render_retires=0;
+Mp4SceneResult mp4_scene_source_bootstrap_release();
+Mp4SceneResult mp4_scene_source_bootstrap_before_part_release(bool);
+Mp4SceneResult mp4_render_hold_acquire(uint64_t source,uint64_t job){++render_acquires;events.push_back("render-acquire");if(!render_acquire_ready)return Mp4SceneResult::waiting;
+ if(mp4_render_hold_state.active)return mp4_render_hold_state.source==source&&mp4_render_hold_state.job==job?Mp4SceneResult::ok:Mp4SceneResult::stale;
+ mp4_render_hold_state={true,source,job};return Mp4SceneResult::ok;}
+bool mp4_render_hold_scope_checkpoint(uint64_t source,uint64_t job){++render_checkpoints;events.push_back("render-checkpoint");return render_checkpoint_ready&&mp4_render_hold_state.active&&mp4_render_hold_state.source==source&&mp4_render_hold_state.job==job;}
+Mp4SceneResult mp4_render_hold_retire(uint64_t job){++render_retires;events.push_back("render-retire");if(render_retire_reentry){assert(mp4_scene_source_bootstrap_release()==Mp4SceneResult::waiting);assert(mp4_scene_source_bootstrap_before_part_release(false)==Mp4SceneResult::waiting);}
+ if(!render_retire_ready||!mp4_render_hold_state.active||mp4_render_hold_state.job!=job){return Mp4SceneResult::waiting;}mp4_render_hold_state={};return Mp4SceneResult::ok;}
 bool srp_captured=false,srp_capture_ready=true,srp_current_ready=true,srp_release_ready=true,srp_restore_ready=true,srp_mutated=false,srp_restored=false;
 int srp_capture_calls=0,srp_restore_calls=0;
 bool mp4_srp_source_capture(){if(!srp_capture_ready)return false;if(!srp_captured){++srp_capture_calls;events.push_back("srp");srp_captured=true;}return srp_current_ready;}
@@ -114,6 +127,8 @@ void bind(){for(unsigned i=0;i<4;++i)mp4_scene_host.parts[i]={&part_models[i],qu
  mp4_source_bootstrap_joins.context=&recipes;mp4_source_bootstrap_joins.source_producers=external<0>();mp4_source_bootstrap_joins.provisional_roots=external<1>();mp4_source_bootstrap_joins.physical_cohort=external<2>();mp4_source_bootstrap_joins.initial_commit=initial_commit;mp4_source_bootstrap_joins.before_part_release=before_part_release;}
 size_t event(const std::string&v){auto at=std::find(events.begin(),events.end(),v);assert(at!=events.end());return size_t(at-events.begin());}
 int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];bind();
+ if(mode=="render_hold_wait")render_acquire_ready=false;
+ if(mode=="render_retire_reentry")render_retire_reentry=true;
  if(mode=="srp_capture_refuses")srp_capture_ready=false;
  if(mode=="srp_restore_wait"){srp_mutated=true;srp_restore_ready=false;}
  if(mode=="srp_release_wait")srp_mutated=true;
@@ -132,6 +147,7 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];bin
  if(mode=="handoff_reentry")promotion_reentry=true;
  if(mode=="release_reentry")release_reentry=true;
  auto result=mode=="outer_abort"?mp4_scene_quiesce(nullptr):mp4_scene_source_bootstrap_quiesce();
+ if(mode=="render_hold_wait"){assert(result==Mp4SceneResult::waiting&&mp4_early_source_gates.active&&!mp4_render_hold_state.active&&baseline_calls==0&&logical_calls==0&&part_models[0].quiet==0);render_acquire_ready=true;result=mp4_scene_source_bootstrap_quiesce();assert(render_acquires==2);}
  if(mode=="outer_abort"){
   assert(result==Mp4SceneResult::waiting&&mp4_early_source_gates.active&&mp4_scene_source_bootstrap.scope.active());
   source_current=false;mp4_scene_host.invalidated=true;observed_loss=true;
@@ -168,6 +184,10 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];bin
   assert(promotion_calls==0);srp_restore_ready=true;
  }
 
+ if(mode=="property_restore_reentry"||mode=="video_handoff_reentry"||mode=="playback_handoff_reentry"){
+  const auto count=events.size();if(mode=="property_restore_reentry")mp4_scene_property_restore_entered=1;if(mode=="video_handoff_reentry")mp4_scene_video_handoff_entered=1;if(mode=="playback_handoff_reentry")mp4_scene_host.playback_handoff_running=true;
+  assert(mp4_scene_release(nullptr,true)==Mp4SceneResult::waiting&&events.size()==count&&!mp4_scene_host.releasing&&mp4_scene_source_bootstrap.scope.transferred());mp4_scene_property_restore_entered=mp4_scene_video_handoff_entered=0;mp4_scene_host.playback_handoff_running=false;
+ }
  if(mode=="foreign_release"){
   const auto seen=events.size();owner=false;
   assert(mp4_scene_source_bootstrap_quiesce()==Mp4SceneResult::waiting);
@@ -200,7 +220,12 @@ int main(int argc,char**argv){assert(argc==2);const std::string mode=argv[1];bin
   assert(release_calls[2]==1&&release_calls[1]==1&&mp4_child_readonly_source.serial==0);
   assert(mp4_scene_source_bootstrap_quiesce()==Mp4SceneResult::waiting);
  }
+ if(mode=="render_checkpoint_wait"){render_checkpoint_ready=false;assert(mp4_scene_source_bootstrap_release()==Mp4SceneResult::waiting&&mp4_render_hold_state.active&&catalogue_clears==0&&render_retires==0);render_checkpoint_ready=true;}
+ if(mode=="render_retire_wait"){render_retire_ready=false;assert(mp4_scene_source_bootstrap_release()==Mp4SceneResult::waiting&&mp4_render_hold_state.active&&catalogue_clears==0&&render_retires==1);render_retire_ready=true;}
+ if(mode=="render_retire_source_changed"){source_current=false;observed_loss=true;}
  assert(mp4_scene_source_bootstrap_release()==Mp4SceneResult::ok&&!mp4_early_source_gates.active&&!mp4_scene_source_bootstrap.scope.transferred()&&!mp4_root_history_initial_sealed(1));
+ assert(!mp4_render_hold_state.active&&render_retires==(mode=="render_retire_wait"?2:1));if(mode=="render_retire_source_changed")assert(late_source_reads==0);
+ assert(event("render-acquire")<event("quiet0")&&event("ungate")<event("render-checkpoint")&&event("render-retire")<event("catalogue"));
  assert(release_calls[2]==1&&release_calls[0]==1);
  assert(catalogue_clears==1&&event("catalogue")>event("ungate")&&event("catalogue")>event("xrelease2"));
  assert(event("xwithdraw0")<event("xrelease2")&&event("xwithdraw1")<event("xrelease2"));

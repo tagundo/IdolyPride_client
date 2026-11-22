@@ -79,3 +79,8 @@ def test_factory_configuration_publication_concurrency(tmp_path):
     prefix = H+'#include <thread>\nusing Method=void;static const std::thread::id main_thread=std::this_thread::get_id();bool game_call(){return std::this_thread::get_id()==main_thread;}\n'
     source = prefix+block('MP4_TIMELINE_ANIMATION_FACTORY_CORE')+'\nmp4_animation_factory::Journal mp4_animation_factories;\n'+block('MP4_TIMELINE_ANIMATION_FACTORY_PUBLICATION')+block('MP4_TIMELINE_ANIMATION_FACTORY_FRONTENDS')+f('factory-publication-driver.cpp.inc')
     run(tmp_path,source,['source','throw','failed_configure'])
+
+def test_first_ordinary_factory_lazily_publishes_source_observer(tmp_path):
+    prefix = H+'#include <thread>\nusing Method=void;static const std::thread::id owner_thread=std::this_thread::get_id();bool game_call(){return std::this_thread::get_id()==owner_thread;}\n'
+    source = prefix+block('MP4_TIMELINE_ANIMATION_FACTORY_CORE')+'\nmp4_animation_factory::Journal mp4_animation_factories;\n'+block('MP4_TIMELINE_ANIMATION_FACTORY_PUBLICATION')+block('MP4_TIMELINE_ANIMATION_FACTORY_FRONTENDS')+f('factory-lazy-driver.cpp.inc')
+    run(tmp_path,source,['first_source','foreign_first','refused','configure_throw','reentrant_configure','original_throw'])

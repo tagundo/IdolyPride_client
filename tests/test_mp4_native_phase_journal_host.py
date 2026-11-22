@@ -33,7 +33,7 @@ bool mp4_child_call_same(const dm::Call&a,const dm::Call&b){return a.kind==b.kin
  &&a.source_asset==b.source_asset&&a.receiver==b.receiver&&a.method==b.method&&a.original_receipt==b.original_receipt;}
 '''
 DRIVER=r'''
-unsigned calls[8]{};bool native_entered=false,maintenance=false,returned_body=false;
+unsigned after_receipts=0;dm::Call last_after{};unsigned calls[8]{};bool native_entered=false,maintenance=false,returned_body=false;
 alignas(16) unsigned char manager[0x500]{},queue[16]{};
 bool plan(const dm::Call&c){const auto&r=mp4_raw_original_operation;
  return source_current&&owner&&r.depth&&c.epoch==r.epoch&&c.serial==r.serial&&c.source_asset==r.root_asset
@@ -44,6 +44,16 @@ bool current(void*,const dm::Call&c){if(mode=="after_observer_throw"&&returned_b
 bool origin(void*,const dm::Call&c){return plan(c);}
 bool retired(void*,uint64_t,uintptr_t,uintptr_t,uint32_t,uint64_t,uintptr_t){return false;}
 bool read(void*,uintptr_t a,void*out,size_t n){
+ const auto*scope=Mp4NativePhaseReturnedScope::current;uint64_t rt=999;uint8_t rp=99;
+ dm::Call current_call{};const bool operation=mp4_director_actual_operation(&current_call);
+ const bool wanted=scope&&scope->returned&&operation&&current_call.kind==dm::Kind::native_phase;
+ assert(mp4_native_phase_returned_current(current_call,&rt,&rp)==wanted);
+ if(wanted){++after_receipts;last_after=current_call;assert(rt==scope->tick&&rp==scope->phase);
+  auto wrong=current_call;++wrong.serial;assert(!mp4_native_phase_returned_current(wrong,&rt,&rp)&&!rt&&!rp);
+  if(mode=="after_wrong_tick"){auto*mutable_scope=Mp4NativePhaseReturnedScope::current;++mutable_scope->tick;assert(!mp4_native_phase_returned_current(current_call,&rt,&rp));--mutable_scope->tick;}
+  if(mode=="after_wrong_phase"){auto*mutable_scope=Mp4NativePhaseReturnedScope::current;++mutable_scope->phase;assert(!mp4_native_phase_returned_current(current_call,&rt,&rp));--mutable_scope->phase;}
+  if(mode=="after_offthread"){owner=false;assert(!mp4_native_phase_returned_current(current_call,&rt,&rp));owner=true;}
+ }
  const auto m=reinterpret_cast<uintptr_t>(manager),q=reinterpret_cast<uintptr_t>(queue);
  if(!((a>=m&&n<=sizeof manager&&a-m<=sizeof manager-n)||(a>=q&&n<=sizeof queue&&a-q<=sizeof queue-n)))return false;
  memcpy(out,reinterpret_cast<void*>(a),n);return true;
@@ -54,6 +64,7 @@ bool future(void*,const dm::Call&){return closure;}
 void observe(unsigned p){
  ++calls[p];dm::Call c{};uint64_t tick=999;uint8_t phase=99;
  const bool actual=mp4_director_actual_operation(&c);
+ assert(!mp4_native_phase_returned_current(c,&tick,&phase)&&!tick&&!phase);
  const bool admitted=!mp4_world_host.invalidated&&source_current&&mode!="ordinary";
  assert(actual==admitted);
  if(admitted){
@@ -110,15 +121,17 @@ int main(int argc,char**argv){assert(argc==2);mode=argv[1];setup();
  if(mode=="throw"||mode=="begin_throw"||mode=="after_observer_throw"){
   try{for(unsigned i=0;i<(mode=="begin_throw"?3u:1u);++i)mp4_animation_gate.invoke(i);assert(false);}catch(int x){assert(x==(mode=="after_observer_throw"?42:31));}
   assert(!mp4_animation_gate.healthy(17)&&!mp4_animation_gate.completed_frame(17,0));
-  assert(mp4_world_host.invalidated&&!mp4_child_pending_host.journal().active()&&!mp4_raw_original_operation.depth);
+  assert(mp4_world_host.invalidated&&!mp4_child_pending_host.journal().active()&&!mp4_raw_original_operation.depth&&!Mp4NativePhaseReturnedScope::current);
   if(mode=="begin_throw"){assert(mp4_animation_gate.invoke(4)&&calls[4]==1);}
   for(unsigned i=0;i<3;++i)assert(calls[i]<=1);
   assert(mp4_animation_gate.release(17));return 0;
  }
- const bool success=mode=="sequence"||mode=="deferred";
+ const bool success=mode=="sequence"||mode=="deferred"||mode=="after_returned"||mode=="after_wrong_tick"||mode=="after_wrong_phase"||mode=="after_offthread";
  const unsigned count=success?8:mode=="wrong_deferred_phase"?2:1;
  for(unsigned i=0;i<count;++i)assert(mp4_animation_gate.invoke(i));
- assert(!mp4_raw_original_operation.depth&&!mp4_child_pending_host.journal().active());
+ assert(!mp4_raw_original_operation.depth&&!mp4_child_pending_host.journal().active()&&!Mp4NativePhaseReturnedScope::current);
+ uint64_t out_tick=999;uint8_t out_phase=99;assert(!mp4_native_phase_returned_current(last_after,&out_tick,&out_phase)&&!out_tick&&!out_phase);
+ if(success)assert(after_receipts>=8);
  assert(mp4_animation_gate.completed_frame(17,0)==success);
  assert(mp4_world_host.invalidated==!success);
  for(unsigned i=0;i<count;++i)assert(calls[i]==1);
@@ -146,7 +159,7 @@ def binary(tmp_path_factory):
     built=subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-omit-frame-pointer','-no-pie','-I',str(ROOT/'client-presentation/native'),str(cpp),'-o',str(out)],capture_output=True,text=True)
     assert built.returncode==0,built.stderr
     return out
-@pytest.mark.parametrize('mode',['ordinary','sequence','maintenance','deferred','wrong_deferred_phase','unconfigured','unowned_forward','bad_routes','bad_closure','entry_failure','source_loss','throw','begin_throw','after_observer_throw'])
+@pytest.mark.parametrize('mode',['ordinary','sequence','maintenance','deferred','wrong_deferred_phase','unconfigured','unowned_forward','bad_routes','bad_closure','entry_failure','source_loss','throw','begin_throw','after_observer_throw','after_returned','after_wrong_tick','after_wrong_phase','after_offthread'])
 def test_shipping_phase_journal_boundary(binary,mode):
     result=subprocess.run([str(binary),mode],capture_output=True,text=True)
     assert result.returncode==0,result.stderr

@@ -1,0 +1,3 @@
+int main(int argc,char**argv){assert(argc==2);const auto kind=static_cast<Mp4SourceCallbackKind>(std::stoi(argv[1]));assert(static_cast<size_t>(kind)<3);uint64_t token=0;assert(mp4_source_callbacks_arm(&token));std::atomic<bool>original{false};std::thread t;
+ {Mp4SourcePropertyRw guard;assert(guard.current());t=std::thread([&]{Mp4SourceCallbackFrame frame(kind);original.store(true);});while(!__atomic_load_n(&mp4_source_callback_bank.in_flight[static_cast<size_t>(kind)],__ATOMIC_SEQ_CST)){};assert(!original.load()&&!guard.current());uint64_t stamp=99;assert(!mp4_source_property_rw_current(&stamp)&&!stamp);}
+ t.join();assert(original.load()&&mp4_source_callbacks_idle()&&!mp4_source_callbacks_current(token));assert(mp4_source_callbacks_release(token));return 0;}

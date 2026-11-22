@@ -43,3 +43,27 @@ def test_actual_source_workers(binaries, mode):
 @pytest.mark.parametrize("case", range(14))
 def test_actual_source_callback_observers(binaries, case):
     subprocess.run([str(binaries["callbacks"]), str(case)], check=True, timeout=30)
+
+
+@pytest.fixture(scope="module")
+def property_rw_binaries(tmp_path_factory):
+    bridge = (ROOT / "client-presentation/native/bridge.cpp").read_text()
+    callback = marker(bridge, "MP4_SOURCE_PRODUCER_CALLBACK_OBSERVERS")
+    folder = tmp_path_factory.mktemp("source-property-rw")
+    result = {}
+    for kind, driver in (("rw", "property-rw-driver.cpp.inc"), ("wait", "property-rw-wait-driver.cpp.inc")):
+        source, binary = folder / (kind+".cpp"), folder / kind
+        source.write_text((FIXTURES/"property-rw-prefix.cpp.inc").read_text()+callback+(FIXTURES/driver).read_text())
+        subprocess.run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined", "-fno-pie", "-no-pie", "-pthread", str(source), "-o", str(binary)], check=True)
+        result[kind] = binary
+    return result
+
+
+@pytest.mark.parametrize("case", ["current", "nested", "foreign_guard", "typed_throw"]+[family+str(i) for family in ["ordinary", "main_reentry", "existing_writer"] for i in range(3)])
+def test_property_rw_writer_exclusion(property_rw_binaries, case):
+    subprocess.run([str(property_rw_binaries["rw"]), case], check=True, timeout=30)
+
+
+@pytest.mark.parametrize("family", range(3))
+def test_foreign_writer_waits_before_original_during_property_access(property_rw_binaries, family):
+    subprocess.run([str(property_rw_binaries["wait"]), str(family)], check=True, timeout=30)

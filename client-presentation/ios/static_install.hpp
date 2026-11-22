@@ -137,7 +137,23 @@ void *install(void *) {
         HOOK(mp4_shader_memory_async,mp4_shader_memory_async_hook,mp4_shader_memory_async_original),
         HOOK(mp4_shader_file_async,mp4_shader_file_async_hook,mp4_shader_file_async_original),
         HOOK(mp4_shader_bundle_result,mp4_shader_bundle_result_hook,mp4_shader_bundle_result_original),
+        HOOK(mp4_control_create,mp4_control_create_hook,mp4_control_create_original),
+        HOOK(mp4_animation_root_factory,mp4_animation_root_factory_hook,mp4_animation_root_factory_original),
+        HOOK(mp4_animation_clips_factory,mp4_animation_clips_factory_hook,mp4_animation_clips_factory_original),
+        HOOK(mp4_animation_infinite_factory,mp4_animation_infinite_factory_hook,mp4_animation_infinite_factory_original),
+        HOOK(mp4_animation_clip_factory,mp4_animation_clip_factory_hook,mp4_animation_clip_factory_original),
+        HOOK(mp4_animation_interval_add,mp4_animation_interval_add_hook,mp4_animation_interval_add_original),
         HOOK(mp4_source_timeline_factory,mp4_child_factory_hook,mp4_child_factory_original),
+        HOOK(mp4_director_enqueue,mp4_director_enqueue_hook,mp4_director_enqueue_original),
+        HOOK(mp4_director_append_a,mp4_director_append_a_hook,mp4_director_append_a_original),
+        HOOK(mp4_director_append_b,mp4_director_append_b_hook,mp4_director_append_b_original),
+        HOOK(mp4_director_collect,mp4_director_collect_hook,mp4_director_collect_original),
+        HOOK(mp4_director_deferred_a,mp4_director_deferred_a_hook,mp4_director_deferred_a_original),
+        HOOK(mp4_director_deferred_b,mp4_director_deferred_b_hook,mp4_director_deferred_b_original),
+        HOOK(mp4_director_graph_create,mp4_child_graph_create_hook,mp4_child_graph_create_original),
+        HOOK(mp4_capture_native_publication,mp4_capture_native_hook,mp4_capture_native_original),
+        HOOK(mp4_audio_canonical_target,mp4_audio_canonical_hook,mp4_audio_canonical_original),
+        HOOK(mp4_audio_source_process_target,mp4_audio_source_process_hook,mp4_audio_source_process_original),
         HOOK(q_set,quality_set_hook,quality_set_original), HOOK(q_apply,quality_apply_hook,quality_apply_original),
         HOOK(q_init,quality_init_hook,quality_init_original), HOOK(q_update,quality_update_hook,quality_update_original),
         HOOK(app_fps_set,app_fps_set_hook,app_fps_set_original),
@@ -193,6 +209,7 @@ void *install(void *) {
         HOOK(mp4_actor_burst,mp4_actor_burst_hook,mp4_actor_burst_original),
         HOOK(mp4_psyllium_execute,mp4_psyllium_execute_hook,mp4_psyllium_execute_original),
         HOOK(mp4_particle_simulate,mp4_particle_simulate_hook,mp4_particle_simulate_original),
+        HOOK(mp4_source_game_object_active,mp4_source_game_object_active_hook,mp4_source_game_object_active_original),
         HOOK(mp4_live_particle_simulate,mp4_live_particle_simulate_hook,mp4_live_particle_simulate_original),
         HOOK(mp4_presenter_end,mp4_presenter_end_hook,mp4_presenter_end_original),
         HOOK(mp4_actor_update,mp4_actor_update_hook,mp4_actor_update_original),
@@ -208,6 +225,7 @@ void *install(void *) {
         HOOK(mp4_player_is_end,mp4_player_is_end_hook,mp4_player_is_end_original),
         HOOK(mp4_render_stack,mp4_render_stack_hook,mp4_render_stack_original),
         HOOK(mp4_render_camera,mp4_render_camera_hook,mp4_render_camera_original),
+        HOOK(mp4_camera_manual_render,mp4_camera_manual_render_hook,mp4_camera_manual_render_original),
         HOOK(mp4_vlb_draw,mp4_vlb_draw_hook,mp4_vlb_draw_original),
         HOOK(mp4_selected_renderer,mp4_selected_renderer_hook,mp4_selected_renderer_original),
         HOOK(mp4_volume_update,mp4_volume_update_hook,mp4_volume_update_original),
@@ -223,8 +241,9 @@ void *install(void *) {
         HOOK(mp4_fog_disable,mp4_fog_disable_hook,mp4_fog_disable_original),
         HOOK(mp4_fog_late,mp4_fog_late_hook,mp4_fog_late_original),
         HOOK(mp4_context_submit,mp4_context_submit_hook,mp4_context_submit_original),
-        HOOK(mp4_control_create,mp4_control_create_hook,mp4_control_create_original),
         HOOK(mp4_capture_request,mp4_capture_request_hook,mp4_capture_request_original),
+        HOOK(mp4_capture_add_target,mp4_capture_add_hook,mp4_capture_add_original),
+        HOOK(mp4_capture_request_target,mp4_capture_target_request_hook,mp4_capture_target_request_original),
         HOOK(mp4_capture_update,mp4_capture_update_hook,mp4_capture_update_original),
         HOOK(mp4_capture_wrapper_ctor,mp4_capture_wrapper_ctor_hook,mp4_capture_wrapper_ctor_original),
         HOOK(mp4_capture_texture_ctor,mp4_capture_texture_ctor_hook,mp4_capture_texture_ctor_original),
@@ -250,6 +269,15 @@ void *install(void *) {
             &&(!mp4_scene_shader_frontends_current()||!mp4_scene_shader_origin_install())){
             set_state("init_failed");return nullptr;
         }
+    }
+    const pin::Entry*director_native_entries[]={&pin::mp4_director_enqueue,&pin::mp4_director_append_a,
+        &pin::mp4_director_append_b,&pin::mp4_director_collect,&pin::mp4_director_deferred_a,
+        &pin::mp4_director_deferred_b,&pin::mp4_director_graph_create};
+    if(!mp4_child_native_install_static(director_native_entries,7)
+        ||!mp4_capture_native_install_static(pin::mp4_capture_native_publication)
+        ||!mp4_audio_native_install_static(pin::mp4_audio_canonical_target,pin::mp4_audio_source_process_target)
+        ||!mp4_capture_queue_frontends_bind(pin::mp4_capture_add_target,pin::mp4_capture_request_target)){
+        set_state("init_failed");return nullptr;
     }
     mp4_actor_managed_installed.store(true,std::memory_order_release);
     mp4_actor_burst_installed.store(true,std::memory_order_release);

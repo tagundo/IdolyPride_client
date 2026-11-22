@@ -1,3 +1,4 @@
+bool mp4_animation_factory_configure(){return false;} // explicit refused lazy source/CAPI leaf in this fixture
 using H=Mp4AnimationFactoryHandle;using V=Mp4AnimationFactoryVec3;
 static int calls=0;static bool throwing=false;
 void check(H g,void*go,Method*m){assert(g.handle==0x1234&&g.version==22&&go==reinterpret_cast<void*>(0x2000)&&m==reinterpret_cast<Method*>(0xdead));++calls;if(throwing)throw 71;}

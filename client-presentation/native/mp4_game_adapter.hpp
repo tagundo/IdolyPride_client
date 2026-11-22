@@ -319,6 +319,7 @@ public:
         error_="source_handoff_failed";return true;
     }
     idoly_mp4_playback::Phase automatic_rebuild_phase()const{return automatic_scope_.phase();}
+    bool primary_playback_mutation_started()const noexcept{return automatic_scope_.primary_playback_mutation_started();}
     bool automatic_rebuild_in_progress()const{return automatic_scope_.rebuilding();}
     bool restoration_pending()const{return automatic_&&automatic_scope_.active();}
     bool has_source_geometry_probe()const{return api_.source_geometry!=nullptr;}

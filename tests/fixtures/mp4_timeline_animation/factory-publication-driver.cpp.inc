@@ -1,3 +1,4 @@
+bool mp4_animation_factory_configure(){return false;} // explicit refused lazy source/CAPI leaf in this fixture
 // Real publication/core/frontend bodies; only Unity identity/query leaves below
 // are modeled. The actual configuring callback is held while a foreign thread
 // invokes every installed factory frontend.

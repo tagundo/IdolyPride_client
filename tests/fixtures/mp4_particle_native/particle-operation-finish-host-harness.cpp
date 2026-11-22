@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <stdexcept>
+#include <atomic>
 namespace mp4_director_maintenance{enum class Kind:uint8_t{play=1,stop=2,rebuild=3,zero_evaluate=4,saved_evaluate=5,maintenance=6,native_phase=7};struct Call{Kind kind=Kind::play;uint64_t epoch=0,serial=0;uintptr_t source_asset=0,receiver=0,method=0;uint64_t original_receipt=0;};}
 namespace mp4ps{struct Owner{void*managed=nullptr;uintptr_t native=0,particles=0,parameters=0,state=0,modules=0;int32_t instance=0;uint64_t policy=0,capture=0;};bool same(const Owner&a,const Owner&b){return a.managed==b.managed&&a.native==b.native&&a.particles==b.particles&&a.parameters==b.parameters&&a.state==b.state&&a.modules==b.modules&&a.instance==b.instance&&a.policy==b.policy&&a.capture==b.capture;}}
 struct Mp4ParticleRetainedWorkerOwner{mp4ps::Owner owner{};void*renderer=nullptr;uintptr_t renderer_native=0;int32_t renderer_id=0;uint64_t image=0;};
@@ -20,6 +21,7 @@ struct Mp4ParticleStateNativeValue{uint8_t bytes[352]{};};
 Mp4ParticleStateNativeValue mp4_particle_finish_original(uintptr_t p){++gets;if(throwget)throw std::runtime_error("original");auto*n=reinterpret_cast<Native*>(p);n->pending=0;if(fault==1)++generation;if(fault==2)++retained[0].owner.modules;if(fault==3)n->pending=1;if(fault==6)finishpin=false;return{};}
 void original_drain(){++drains;if(throwdrain)throw std::runtime_error("drain");queued=0;queuehead=0;if(fault==4)queuehead=3;if(fault==5)++generation;}
 struct{uintptr_t rva=reinterpret_cast<uintptr_t>(&original_drain);}mp4_particle_renderer_reader_pin;
+#include "particle-operation-rw-host.inc"
 #include "particle-operation-finish-host.inc"
 mp4_director_maintenance::Call call;Mp4ParticleOperationLease lease;
 bool leasecurrent(void*,const mp4_director_maintenance::Call&c,uint64_t serial,Mp4ParticleOperationPhase phase){return current&&serial==generation&&c.serial==23&&c.epoch==7&&c.source_asset==31&&c.receiver==37&&c.method==41&&c.original_receipt==43&&phase==lease.phase;}

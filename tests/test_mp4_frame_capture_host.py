@@ -50,4 +50,4 @@ def test_shipping_frame_capture_join(tmp_path):
     fixture = (ROOT / 'tests/fixtures/mp4_frame_capture_host.cpp.inc').read_text()
     fixture = fixture.replace('// REAL_PRODUCTION_BANK', bank)
     fixture = fixture.replace('// ACTUAL_JOIN', _marker(bridge, 'MP4_FRAME_CAPTURE_JOIN'))
-    _run(tmp_path, fixture, '14 Frame/Capture join cases')
+    _run(tmp_path, fixture, '15 Frame/Capture join cases')

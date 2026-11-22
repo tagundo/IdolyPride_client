@@ -574,6 +574,25 @@ public:
  // Read-only exact saved-image witness. This reports completed Scope restore,
  // not permission for native activation or proof against a later native write.
  // Callers must join their own actual lifecycle/final-checkpoint receipt.
+ // Readonly restorative-image existence while original graphs/producer nodes
+ // have retired. No graph query, job/clock quiet, live value or restored grant.
+ bool retained_snapshot_receipt(void* particle,Owner* owner,uint64_t* receipt)const {
+  if(owner){*owner={};}
+  if(receipt){*receipt=0;}
+  if(!configured_||!particle||!owner||!receipt){return false;}
+  for(size_t i=0;i<count_;++i){
+   const auto&e=entries_[i];
+   if(e.owner.particle!=particle){continue;}
+   if(!e.captured||!e.capture_receipt||!e.root||api_.retained(e.root)!=e.owner.particle
+    ||!e.producer_root||api_.retained(e.producer_root)!=e.owner.producer
+    ||!e.trail_box.root||api_.retained(e.trail_box.root)!=e.trail_box.object){return false;}
+   for(const auto&b:e.custom_boxes){if(!b.root||api_.retained(b.root)!=b.object){return false;}}
+   for(const auto&l:e.trail_lists){if(!list_current(l)){return false;}}
+   for(const auto&l:e.custom){if(!list_current(l)){return false;}}
+   *owner=e.owner;*receipt=e.capture_receipt;return true;
+  }
+  return false;
+ }
  bool snapshot_receipt(void* particle,Owner* owner,uint64_t* receipt,bool* restored)const {
   if(owner){*owner={};}
   if(receipt){*receipt=0;}

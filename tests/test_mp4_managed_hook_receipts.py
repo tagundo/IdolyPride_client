@@ -31,8 +31,12 @@ int main(int argc,char** argv){
     assert(argc==2);const std::string mode=argv[1];mp4_managed_hook_backend_current=backend_current;
     pin::Entry entry{"verified original",32,{}};for(unsigned i=0;i<16;++i)entry.bytes[i]=i;
     if(mode.rfind("bootstrap_",0)==0){
-        const unsigned index=mode=="bootstrap_async"?1:mode=="bootstrap_file"?2:mode=="bootstrap_result"?3:0;
-        const pin::Entry entries[]={pin::mp4_shader_memory_sync,pin::mp4_shader_memory_async,pin::mp4_shader_file_async,pin::mp4_shader_bundle_result};
+        const unsigned index=mode=="bootstrap_async"?1:mode=="bootstrap_file"?2:mode=="bootstrap_result"?3:
+            mode=="bootstrap_control"?4:mode=="bootstrap_animation_root"?5:mode=="bootstrap_animation_clips"?6:
+            mode=="bootstrap_animation_infinite"?7:mode=="bootstrap_animation_clip"?8:mode=="bootstrap_animation_add"?9:0;
+        const pin::Entry entries[]={pin::mp4_shader_memory_sync,pin::mp4_shader_memory_async,pin::mp4_shader_file_async,pin::mp4_shader_bundle_result,
+            pin::mp4_control_create,pin::mp4_animation_root_factory,pin::mp4_animation_clips_factory,pin::mp4_animation_infinite_factory,
+            pin::mp4_animation_clip_factory,pin::mp4_animation_interval_add};
         entry=entries[index];image_base=reinterpret_cast<uintptr_t>(image)+32-entry.rva;
     }
     mp4game::Binding binding{};binding.rva=entry.rva;memcpy(binding.prefix,entry.bytes,16);
@@ -59,7 +63,7 @@ int main(int argc,char** argv){
         if(mode=="bootstrap_foreign_prefix")binding.prefix[0]^=1;
         if(mode=="bootstrap_foreign_code")image[32]^=1;
         if(mode=="bootstrap_revoked_backend")backend_valid=false;
-        const bool accepted=mode=="bootstrap_sync"||mode=="bootstrap_async"||mode=="bootstrap_file"||mode=="bootstrap_result"||mode=="bootstrap_revoked";
+        const bool accepted=mode=="bootstrap_sync"||mode=="bootstrap_async"||mode=="bootstrap_file"||mode=="bootstrap_result"||mode=="bootstrap_revoked"||mode=="bootstrap_control"||mode.rfind("bootstrap_animation_",0)==0;
         assert(mp4_managed_hook_verified(binding)==accepted);
         if(mode=="bootstrap_revoked"){mp4_shader_bootstrap_receipts_open.store(false);assert(!mp4_managed_hook_verified(binding));}
         return 0;
@@ -91,7 +95,7 @@ int main(int argc,char** argv){
 
 @pytest.mark.parametrize('mode', ['missing_original', 'missing_stub', 'unmapped_record', 'valid', 'foreign_code',
     'foreign_original_prefix', 'foreign_rva', 'foreign_base', 'changed_trampoline', 'rollback', 'unmapped_check', 'bootstrap_sync', 'bootstrap_async', 'bootstrap_file',
-    'bootstrap_result', 'bootstrap_unpublished', 'bootstrap_foreign_prefix', 'bootstrap_foreign_code', 'bootstrap_revoked',
+    'bootstrap_result', 'bootstrap_control', 'bootstrap_animation_root', 'bootstrap_animation_clips', 'bootstrap_animation_infinite', 'bootstrap_animation_clip', 'bootstrap_animation_add', 'bootstrap_unpublished', 'bootstrap_foreign_prefix', 'bootstrap_foreign_code', 'bootstrap_revoked',
     'ordinary_bootstrap', 'last_slot', 'capacity', 'over_capacity', 'published_over_capacity', 'bootstrap_missing_backend',
     'bootstrap_rejected_backend', 'bootstrap_revoked_backend'])
 def test_own_installed_code_and_trampoline_identity_are_required(receipt_binary, mode):
@@ -103,8 +107,10 @@ def test_source_observers_install_before_the_font_delay():
     source = (NATIVE / 'bridge.cpp').read_text()
     table = source.split('    Hook hooks[] = {', 1)[1].split('    };', 1)[0]
     names = [line.split('HOOK(', 1)[1].split(',', 1)[0] for line in table.splitlines() if 'HOOK(' in line]
-    assert names[:10] == ['mp4_scene_shader_loaded', 'mp4_scene_shader_unloaded',
+    assert names[:16] == ['mp4_scene_shader_loaded', 'mp4_scene_shader_unloaded',
                           'mp4_scene_shader_bundle_unload', 'mp4_scene_shader_load',
                           'mp4_shader_memory_sync', 'mp4_shader_memory_async', 'mp4_shader_file_async',
-                          'mp4_shader_bundle_result', 'mp4_source_timeline_factory', 'font_awake']
+                          'mp4_shader_bundle_result', 'mp4_control_create', 'mp4_animation_root_factory',
+                          'mp4_animation_clips_factory', 'mp4_animation_infinite_factory', 'mp4_animation_clip_factory',
+                          'mp4_animation_interval_add', 'mp4_source_timeline_factory', 'font_awake']
     assert 'if (hooks[i].entry==&pin::font_awake) pause_ms(500)' in source

@@ -144,6 +144,7 @@ public:
     }
     bool active()const{return phase_!=Phase::idle;}
     bool owns_source_completion()const{return active()&&(!releasing_||release_owned_);}
+    bool primary_playback_mutation_started()const noexcept{return held_;}
     bool playing()const{return phase_==Phase::playing;}
     Phase phase()const{return phase_;}
     bool rebuilding()const{return rebuilding_;}
