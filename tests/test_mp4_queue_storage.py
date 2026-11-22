@@ -224,7 +224,10 @@ def test_failed_existing_journal_replace_keeps_old_committed_job(storage_runner,
 
 def test_public_queue_error_and_diagnostics_expose_bounded_stage_without_paths(tmp_path):
     runtime = (ROOT / "client-presentation/native/mp4_queue_runtime.hpp").read_text()
-    functions = runtime[runtime.index("inline void queue_set_error("):runtime.index("inline bool queue_configure(")]
+    # This fixture exercises storage error publication. The independently
+    # tested selected-MV cache is an input to its publisher, not a storage API.
+    functions = (runtime[runtime.index("inline void queue_set_error("):runtime.index("inline bool queue_cached_add(")]
+                 + runtime[runtime.index("inline void queue_publish("):runtime.index("inline bool queue_configure(")])
     source = HARNESS.split("int main(int argc,char** argv){", 1)[0] + r'''
 #include <pthread.h>
 namespace queue_model=idoly_mp4_queue;
@@ -237,6 +240,7 @@ static bool queue_pause_pending=false,queue_available=true,queue_running=false,q
 static bool queue_replay_available=false,queue_can_run=false,queue_active_published=false,queue_scene_owned=false;
 static char queue_error[65]="none",queue_last_added[33]{},queue_phase[32]="idle",queue_active_id[33]{};
 static char queue_published[16384]{};
+bool queue_cached_add(char* error,size_t capacity){snprintf(error,capacity,"%s","selected_mv_snapshot_missing");return false;}
 ''' + functions + r'''
 int main(int argc,char** argv){
  assert(argc==3);Queue queue(random_bytes);observed_store=&queue;
@@ -263,5 +267,6 @@ int main(int argc,char** argv){
         value = json.loads(result.stdout)
         assert value["error_code"] == error
         assert value["storage_stage"] == stage and value["storage_errno"] == number
+        assert value["can_add"] is False and value["add_error"] == "selected_mv_snapshot_missing"
         assert str(directory) not in result.stdout
         assert "queue-v1.bin" not in result.stdout
