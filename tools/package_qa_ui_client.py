@@ -351,9 +351,9 @@ def verify_manifest_preserved(before_xml, after_xml, input_profile=DIAGNOSTIC_PR
         found = [v for k, v in node["attributes"] if k == "android:" + name or k.startswith("android:" + name + "(")]
         return found[0] if len(found) == 1 else None
     if input_profile == UNIFIED_PROFILE:
-        if field(old_app, "appComponentFactory") != '"game.qualiarts.idolypride.localserver.UnifiedComponentFactory"':
+        if dict(old_app["attributes"]).get("android:appComponentFactory(0x0101057a)") != '"game.qualiarts.idolypride.localserver.UnifiedComponentFactory"':
             raise AndroidPackagingError("Current unified input has no exact launcher component factory")
-        names = [field(n, "name") for n in old_app["children"] if n["tag"] == "activity"]
+        names = [dict(n["attributes"]).get("android:name(0x01010003)") for n in old_app["children"] if n["tag"] == "activity"]
         if any(names.count('"game.qualiarts.idolypride.localserver.' + name + '"') != 1
                for name in ("MainActivity", "UnifiedGameActivity")):
             raise AndroidPackagingError("Current unified input launcher/game activities differ")

@@ -234,6 +234,16 @@ def test_observer_manifest_rejects_missing_factory_in_current_product_input():
         qa.verify_manifest_preserved(before,compiled_unified_manifest(probe=True),qa.UNIFIED_PROFILE)
 
 
+@pytest.mark.parametrize('old,new,message',[
+    ('appComponentFactory(0x0101057a)','appComponentFactory(0x0101057b)','exact launcher component factory'),
+    ('name(0x01010003)','name(0x01010004)','launcher/game activities differ'),
+])
+def test_known_attribute_name_does_not_hide_wrong_source_framework_id(old,new,message):
+    with pytest.raises(qa.AndroidPackagingError,match=message):
+        qa.verify_manifest_preserved(compiled_unified_manifest().replace(old,new),
+            compiled_unified_manifest(probe=True).replace(old,new),qa.UNIFIED_PROFILE)
+
+
 @pytest.mark.parametrize("bad", ("duplicate", "../private", "/absolute", "bad\\member"))
 def test_inventory_rejects_duplicates_and_unsafe_zip_names(tmp_path, bad):
     path = tmp_path / "input.zip"
