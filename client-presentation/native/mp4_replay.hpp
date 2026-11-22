@@ -81,7 +81,7 @@ public:
     explicit Replay(Api api={}):api_(api){}
     ~Replay(){clear_all();}
     Replay(const Replay&)=delete;Replay&operator=(const Replay&)=delete;
-    bool set_api(Api api){if(active())return false;reset();api_=api;return valid_api();}
+    bool set_api(Api api){if(!reset())return false;api_=api;return valid_api();}
     // Supply only a descriptor associated with THIS presenter's actual player.
     // Capture.selected(player, descriptor) is the integration boundary.
     bool observe(void*presenter,void*player,const Descriptor&descriptor,uint64_t selection_identity=0){
@@ -100,8 +100,8 @@ public:
             observed_=descriptor;observed_identity_=selection_identity;++observed_revision_;return true;
         }catch(...){fail("original_selection_observer_failed");return false;}
     }
-    bool begin(const Descriptor&descriptor,uint64_t now){
-        if(active())return false;
+    bool begin(const Descriptor&descriptor,uint64_t now,bool forceFresh=false){
+        if(active()||!settle_failure())return false;
         release_attempt();error_="none";phase_=Phase::idle;cancel_requested_=false;
         if(!valid_api()){fail("replay_api_unavailable");return false;}
         if(!idoly_mp4_queue::detail::descriptor(descriptor)){fail("invalid_mv_descriptor");return false;}
@@ -109,6 +109,8 @@ public:
             ||!api_.photography_current||!api_.photography_cancel)){
             fail("photography_replay_api_unavailable");return false;
         }
+        if(forceFresh&&load_sequence_==~uint64_t(0)){fail("replay_generation_exhausted");return false;}
+        force_fresh_=forceFresh;ready_load_serial_=0;
         target_=descriptor;started_=now;phase_=Phase::closing;return true;
     }
     // Read-only readiness for accepting Queue Run. A loaded native bridge or
@@ -120,6 +122,7 @@ public:
         catch(...){return false;}
     }
     void tick(uint64_t now){
+        if(phase_==Phase::failed){(void)settle_failure();return;}
         if(!active())return;
         if(now<started_){fail("replay_clock_invalid");return;}
         const uint64_t timeout=phase_==Phase::closing||phase_==Phase::waiting_for_close?60000:300000;
@@ -131,9 +134,9 @@ public:
                 if(target_.photo.source_kind==1){
                     if(!api_.photography_can_route())return;
                     if(observed_.photo.source_kind==1&&api_.photography_current(presenter,player)
-                        &&descriptor_equal(observed_,target_)){
+                        &&!force_fresh_&&descriptor_equal(observed_,target_)){
                         if(!keep(result_presenter_,presenter)||!keep(result_player_,player)){fail("replay_gc_handle_failed");return;}
-                        phase_=Phase::ready;return;
+                        ready_identity_=observed_identity_;ready_revision_=observed_revision_;phase_=Phase::ready;return;
                     }
                     phase_=Phase::opening;started_=now;
                 }else{
@@ -142,9 +145,9 @@ public:
                     // End assumes the original player has finished binding.
                     // Never tear down a half-initialized original MV ourselves.
                     if(!api_.player_ready(player,nullptr))return;
-                    if(descriptor_equal(observed_,target_)){
+                    if(!force_fresh_&&descriptor_equal(observed_,target_)){
                         if(!keep(result_presenter_,presenter)||!keep(result_player_,player)){fail("replay_gc_handle_failed");return;}
-                        phase_=Phase::ready;return;
+                        ready_identity_=observed_identity_;ready_revision_=observed_revision_;phase_=Phase::ready;return;
                     }
                     if(!keep(closing_presenter_,presenter)||!keep(closing_player_,player)){fail("replay_gc_handle_failed");return;}
                     // Keep the original source/token and consume exactly once.
@@ -212,14 +215,17 @@ public:
                 // Photo's root is nested inside a pooled screen. Until its
                 // new initializer publishes a fresh selection identity, the
                 // old still-active MV cannot satisfy or fail this new route.
-                if(target_.photo.source_kind==1&&observed_revision_==opening_revision_)return;
+                if((force_fresh_||target_.photo.source_kind==1)&&observed_revision_==opening_revision_)return;
                 // The original pool can reuse a presenter/player pair. The
                 // exact current top screen, ready player and associated frozen
                 // descriptor matter; pointer novelty is not a lifecycle proof.
                 if(!descriptor_equal(observed_,target_)){fail("queue_selection_changed");return;}
                 if(cancel_requested_){finish_cancel();return;}
                 if(!keep(result_presenter_,presenter)||!keep(result_player_,player)){fail("replay_gc_handle_failed");return;}
-                drop(transition_);drop(tree_);drop(closing_presenter_);drop(closing_player_);phase_=Phase::ready;
+                drop(transition_);drop(tree_);drop(closing_presenter_);drop(closing_player_);
+                ready_identity_=observed_identity_;ready_revision_=observed_revision_;
+                if(force_fresh_)ready_load_serial_=++load_sequence_;
+                phase_=Phase::ready;
             }
         }catch(...){fail("original_navigation_exception");}
     }
@@ -231,12 +237,42 @@ public:
     void cancel(){if(active()&&!cancel_requested_){cancel_requested_=true;
         if(target_.photo.source_kind==1&&api_.photography_cancel)api_.photography_cancel();
         if(phase_==Phase::closing||phase_==Phase::opening)finish_cancel();}}
-    bool reset(){if(active())return false;clear_all();return true;}
+    // A failed timeout does not complete an original End/Open already issued.
+    // Keep its real task/roots until the owning thread observes completion.
+    bool settle_failure(){
+        if(phase_!=Phase::failed)return !active();
+        try{
+            if(failure_close_pending_&&!close_consumed_){
+                if(closing_task_source_)closing_task_.source=get(closing_task_source_);
+                const int32_t status=api_.task_status(&closing_task_,nullptr);
+                if(status==0||status<1||status>3)return false;
+                UniTask16 awaiter=api_.task_get_awaiter(&closing_task_,nullptr);
+                close_consumed_=true;
+                try{api_.task_get_result(&awaiter,nullptr);}catch(...){/* This completed task is consumed exactly once. */}
+                drop(closing_task_source_);closing_task_={};
+            }
+            if(failure_open_pending_||failure_close_pending_){
+                if(target_.photo.source_kind==1){
+                    if(!api_.photography_can_route||!api_.photography_can_route())return false;
+                }else{
+                    void*scene=api_.scene_instance(nullptr);
+                    if(!scene||!api_.alive(scene)||api_.scene_busy(scene,nullptr))return false;
+                }
+            }
+            failure_open_pending_=failure_close_pending_=false;release_attempt();return true;
+        }catch(...){return false;}
+    }
+    bool reset(){if(active()||!settle_failure())return false;clear_all();return true;}
     Phase phase()const{return phase_;}
     const char*error()const{return error_;}
     bool active()const{return phase_==Phase::closing||phase_==Phase::waiting_for_close||phase_==Phase::opening||phase_==Phase::waiting_for_open;}
     void*presenter()const{return phase_==Phase::ready?get(result_presenter_):nullptr;}
     void*player()const{return phase_==Phase::ready?get(result_player_):nullptr;}
+    bool fresh_ready()const{return phase_==Phase::ready&&force_fresh_&&ready_load_serial_&&ready_identity_
+        &&ready_revision_!=opening_revision_&&observed_identity_==ready_identity_&&observed_revision_==ready_revision_
+        &&get(observed_player_)==get(result_player_)&&get(observed_presenter_)==get(result_presenter_);}
+    uint64_t ready_load_serial()const{return fresh_ready()?ready_load_serial_:0;}
+    uint64_t ready_identity()const{return phase_==Phase::ready?ready_identity_:0;}
 private:
     class Root {
     public:
@@ -256,11 +292,16 @@ private:
     bool keep(uint32_t&h,void*p){if(!p)return false;uint32_t next=api_.retain(p);if(!next)return false;drop(h);h=next;return true;}
     void drop(uint32_t&h){if(h&&api_.release)api_.release(h);h=0;}
     bool live_type(void*p,const char*name)const{return p&&api_.alive(p)&&api_.is_type(p,name);}
-    void release_attempt(){drop(transition_);drop(tree_);drop(closing_presenter_);drop(closing_player_);drop(result_presenter_);drop(result_player_);drop(closing_task_source_);closing_task_=UniTask16{};close_consumed_=false;}
+    void release_attempt(){drop(transition_);drop(tree_);drop(closing_presenter_);drop(closing_player_);drop(result_presenter_);drop(result_player_);drop(closing_task_source_);closing_task_=UniTask16{};close_consumed_=false;failure_close_pending_=failure_open_pending_=false;ready_identity_=ready_revision_=ready_load_serial_=0;}
     void finish_cancel(){release_attempt();phase_=Phase::cancelled;error_="cancelled";}
     void clear_all(){release_attempt();drop(observed_presenter_);drop(observed_player_);
         observed_identity_=observed_revision_=opening_revision_=0;phase_=Phase::idle;error_="none";}
-    void fail(const char*error){release_attempt();phase_=Phase::failed;error_=error;}
+    void fail(const char*error){
+        failure_close_pending_|=phase_==Phase::waiting_for_close;
+        failure_open_pending_|=phase_==Phase::waiting_for_open;
+        if(!failure_close_pending_&&!failure_open_pending_)release_attempt();
+        ready_identity_=ready_revision_=ready_load_serial_=0;phase_=Phase::failed;error_=error;
+    }
     bool construct_transition(){
         Root param(api_,api_.new_object(Kind::out_game_param));
         Root stage(api_,api_.new_string(target_.stage_asset)),timeline(api_,api_.new_string(target_.timeline_asset));
@@ -294,7 +335,9 @@ private:
     Api api_{};Descriptor observed_{},target_{};
     Phase phase_=Phase::idle;const char*error_="none";uint64_t started_=0,
         observed_identity_=0,observed_revision_=0,opening_revision_=0;
-    UniTask16 closing_task_{};bool close_consumed_=false,cancel_requested_=false;
+    uint64_t load_sequence_=0,ready_load_serial_=0,ready_identity_=0,ready_revision_=0;
+    UniTask16 closing_task_{};bool close_consumed_=false,cancel_requested_=false,force_fresh_=false,
+        failure_close_pending_=false,failure_open_pending_=false;
     uint32_t observed_presenter_=0,observed_player_=0,closing_presenter_=0,closing_player_=0,
         transition_=0,tree_=0,result_presenter_=0,result_player_=0,closing_task_source_=0;
 };

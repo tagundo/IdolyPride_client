@@ -315,7 +315,10 @@ public final class UnifiedMP4Export {
             JSONObject previousFailure = savedNativeTrace("last_failed_native_trace");
             if (previousFailure != null) result.put("last_failed_export_trace", previousFailure);
             result.put("ready", state.optBoolean("ready")).put("selected_mv", Boolean.TRUE.equals(state.opt("selected_mv")));
-            for (String key : new String[] {"phase", "readiness_error", "selection_error", "error_code", "pause_reason"}) {
+            String pipelineMode = state.optString("pipeline_mode", "");
+            if (pipelineMode.equals("fresh_original_scene") || pipelineMode.equals("legacy_owned_scene"))
+                result.put("pipeline_mode", pipelineMode);
+            for (String key : new String[] {"phase", "readiness_error", "selection_error", "error_code", "restoration_error", "pause_reason"}) {
                 String value = state.optString(key, "unknown");
                 result.put(key, value.matches("[A-Za-z0-9_]{1,96}") ? value : "unknown");
             }

@@ -223,6 +223,11 @@ SELECTIONS.update({
  'mp4_video_image_late':('Solis.Common.VideoImage', 'LateUpdate', 0, ()),
 })
 
+# Appended single original source mutation observer for Fresh Video.
+TYPED_PARAMETERS['mp4_video_behaviour_play']=['UnityEngine.Playables.Playable','UnityEngine.Playables.FrameData']
+TYPED_ABIS['mp4_video_behaviour_play']='void(void*,Playable16,FrameData64,const MethodInfo*)'
+SELECTIONS['mp4_video_behaviour_play']=('Solis.Timeline.SolisVideoPlayerTrackBehaviour','OnBehaviourPlay',2,tuple(TYPED_PARAMETERS['mp4_video_behaviour_play']))
+
 FIXED_ALIAS='mp4_fixed_loop_condition'
 NATIVE_IOS_ALIASES={
  'mp4_capture_native_publication':{'rva':0xb04424,'native_abi':'void(int32_t,void*)',

@@ -24,6 +24,9 @@ struct Vec3{float x,y,z;};
 mp4game::CameraGrant mp4_camera_grant;bool mp4_owned_camera_scope=true,unity=true,status_available=true,lookup_broken=false;
 int frame=100,original_calls=0;float advanced=0;unsigned char core[80]{},status[48]{};
 bool game_call(){return unity;}
+// The passive source observer owns no camera-clock behavior in this fixture.
+enum class Mp4SourceCallbackKind{core};
+struct Mp4SourceCallbackFrame{explicit Mp4SourceCallbackFrame(Mp4SourceCallbackKind){}};
 enum class Mp4CameraDispatch{forward,skip,scoped};
 Mp4CameraDispatch camera_dispatch=Mp4CameraDispatch::forward;
 bool pipeline_owned=true,isolation_good=true,isolation_runs=true;

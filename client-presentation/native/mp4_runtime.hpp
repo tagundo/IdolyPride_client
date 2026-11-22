@@ -238,6 +238,47 @@ struct NativeSceneControl {
 static NativeSceneControl native_scene_control;
 static void* native_scene_context=nullptr;
 static bool native_scene_installed=false,native_scene_required=false;
+// Fresh mode owns a disposable original scene and restores logical selection
+// by another original load. It never publishes legacy restoration receipts.
+struct FreshSceneApi {
+    void* context=nullptr;
+    bool (*available)(void*)=nullptr;
+    Result (*save_origin)(void*)=nullptr;
+    Result (*admit)(void*)=nullptr;
+    Result (*acquire)(void*,const idoly_mp4_game::SceneWitness&,uint64_t)=nullptr;
+    Result (*start)(void*)=nullptr;
+    bool (*current)(void*)=nullptr;
+    Result (*hold)(void*)=nullptr;
+    Result (*prepare_step)(void*,uint64_t,double)=nullptr;
+    Result (*grant)(void*,uint64_t)=nullptr;
+    Result (*prepare_render)(void*,uint64_t)=nullptr;
+    // Retire decoder work and restore its saved controls while the actual
+    // native clock is still held. WAIT retains that clock and source custody.
+    // A terminal result leaves no decoder cleanup requiring a clock grant.
+    Result (*prepare_finish)(void*)=nullptr;
+    // WAIT owns async original reload and may retain its independent Listener
+    // mute lease. Every terminal return has released all leases, even failure.
+    Result (*finish)(void*)=nullptr;
+    const char* (*audio_source_error)(void*,void*)=nullptr;
+    const char* (*error)(void*)=nullptr;
+    // Revoke future per-tick permits at every boundary. This reversible
+    // scalar operation neither withdraws scene ownership nor completes jobs.
+    void (*withdraw)(void*)=nullptr;
+    bool valid()const{return context&&available&&save_origin&&admit&&acquire&&start&&current&&hold
+        &&prepare_step&&grant&&prepare_render&&prepare_finish&&finish&&audio_source_error&&error&&withdraw;}
+};
+struct FreshFactoryReceipt {uint64_t serial=0,identity=0;void*presenter=nullptr,*player=nullptr;};
+static FreshSceneApi fresh_scene_api;
+static std::atomic<bool> fresh_scene_installed{false};
+static bool fresh_scene_available=false;
+inline bool fresh_factory_receipt(FreshFactoryReceipt*);
+inline Result fresh_prepare_start();
+inline void fresh_release_start();
+inline bool native_fresh_render_boundary(void*,double);
+inline const char* fresh_scene_error(const char*fallback){
+    const char*value=fresh_scene_api.error?fresh_scene_api.error(fresh_scene_api.context):nullptr;
+    return value&&value[0]&&strcmp(value,"none")?value:fallback;
+}
 inline void require_native_scene_pipeline(){native_scene_required=true;}
 inline const char* native_scene_error(const char* fallback){
     const char* code=native_scene_control.error?native_scene_control.error(native_scene_context):nullptr;
@@ -337,14 +378,16 @@ struct Job {
     double restored_source_time=0;
     bool restored_source_valid=false,restored_source_paused=false;
     uint64_t last_rendered_tick=0,rendered_ticks=0;
+    uint64_t fresh_render_tick=0;
+    bool fresh_render_ready=false;
     bool have_rendered_tick=false,prewarm_requested=false,prewarm_inflight=false,prewarm_completed=false;
-    bool automatic=false,scene_acquired=false,auto_started=false,capture_requested=false,
+    bool automatic=false,fresh=false,fresh_started=false,fresh_pre_finish_settled=false,fresh_finish_settled=false,scene_acquired=false,auto_started=false,capture_requested=false,
         scene_restored=false,clock_lost=false,restoration_verified=false,
         clock_settings_restored=false,camera_audio_restored=false,dependent_state_restored=false;
     bool logical_checkpoint_done=false,logical_checkpoint_valid=false,logical_camera_audio=false,
         scene_detached=false,post_verify_done=false,post_verified=false,post_release_done=false;
     uint64_t post_wait_started=0;
-    bool cancel_encoder_pending=false;
+    bool cancel_encoder_pending=false,media_finalized=false;
     bool pcm_owned=false,bundle_owned=false,pending_broker=false,audible_energy=false,captured=false,terminal_success=false,terminal_cancel=false;
 };
 static Job job;
@@ -385,16 +428,16 @@ inline void diagnostic_event(const char*stage,const char*code,uint64_t frame=0,u
 inline void diagnostic_job_event(const char*code,bool failure=false){
  diagnostic_event(trace_stage(job.stage),code,job.frame,job.schedule.next_tick()?job.schedule.next_tick()-1:0,failure);
 }
-inline void diagnostic_module(size_t index,bool bound,const char*missing){
+inline void diagnostic_module(size_t index,bool bound,const char*missing,bool selected=true){
  if(index>=trace_modules)return;
  pthread_mutex_lock(&trace_mutex);const uint8_t value=bound?2:1;const bool changed=export_trace.modules[index]!=value;
  export_trace.modules[index]=value;pthread_mutex_unlock(&trace_mutex);
- if(changed&&!bound)diagnostic_event("bindings",missing,0,0,true);
+ if(changed&&!bound&&selected)diagnostic_event("bindings",missing,0,0,true);
 }
 inline size_t diagnostics(char*out,size_t capacity){
  if(!out||!capacity)return 0;
  ExportTrace t{};pthread_mutex_lock(&trace_mutex);t=export_trace;pthread_mutex_unlock(&trace_mutex);
- int n=snprintf(out,capacity,"{\"export_trace\":{\"schema\":1,\"current_stage\":\"%s\",\"last_error\":\"%s\",\"events\":[",t.current_stage,t.last_error);
+ int n=snprintf(out,capacity,"{\"pipeline_mode\":\"%s\",\"export_trace\":{\"schema\":1,\"current_stage\":\"%s\",\"last_error\":\"%s\",\"events\":[",fresh_scene_installed.load(std::memory_order_acquire)?"fresh_original_scene":"legacy_owned_scene",t.current_stage,t.last_error);
  if(n<=0||static_cast<size_t>(n)>=capacity){out[0]=0;return 0;}size_t at=static_cast<size_t>(n);
  for(size_t i=0;i<t.count;++i){const auto&e=t.events[(t.next+trace_capacity-t.count+i)%trace_capacity];
   n=snprintf(out+at,capacity-at,"%s{\"sequence\":%llu,\"stage\":\"%s\",\"code\":\"%s\",\"frame\":%llu,\"tick\":%llu}",i?",":"",
@@ -444,7 +487,7 @@ inline bool install_native_scene_diagnostic_probe(void* context,NativeSceneDiagn
     pthread_mutex_unlock(&control_mutex);return same;
 }
 inline void refresh_native_diagnostics(bool source_valid,uint64_t identity,bool active){
-    if(active)return; // Never invoke fresh admission against a captured export.
+    if(active||fresh_scene_installed.load(std::memory_order_acquire))return; // The legacy deep-state probe is unselected in fresh mode.
     static bool sampled=false,sampled_source_valid=false;
     static uint64_t sampled_at=0,sampled_identity=0,sampled_generation=0;
     NativeSceneDiagnosticProbe probe=nullptr;void* context=nullptr;uint64_t generation=0;
@@ -484,7 +527,7 @@ inline void refresh_native_observation(bool rendered=false){
     next.rendered_ticks=job.rendered_ticks;
     next.restored=job.restoration_verified;next.clock_restored=job.clock_settings_restored;
     next.camera_audio=job.camera_audio_restored;next.dependents=job.dependent_state_restored;
-    next.world=last_admission_verified;
+    next.world=!fresh_scene_installed.load(std::memory_order_acquire)&&last_admission_verified;
     next.acquired_valid=job.acquired_source_valid;next.acquired_identity=job.acquired_source_identity;
     next.acquired_time=job.acquired_source_time;next.acquired_paused=job.acquired_source_paused;
     next.restored_valid=job.restored_source_valid;next.restored_identity=job.restored_source_identity;
@@ -509,7 +552,10 @@ inline void export_observer_failed(){
     try{
         if(job.automatic&&native_engine_clock.active()){
             if(native_engine_clock.hold_for_boundary(native_engine_clock.latest_manager(),native_engine_clock.last_wall_timestamp())
-                &&job.scene_acquired)native_scene_control.hold(native_scene_context);
+                &&job.scene_acquired){
+                if(job.fresh)fresh_scene_api.hold(fresh_scene_api.context);
+                else native_scene_control.hold(native_scene_context);
+            }
         }
     }catch(...){job.clock_lost=true;}
     game.discard_capture();
@@ -543,7 +589,8 @@ inline bool native_render_job_current(){
 }
 inline uint64_t claim_native_prewarm_render(){
     if(!native_render_job_current()||job.auto_started||!job.prewarm_requested||job.prewarm_inflight
-        ||(job.stage!=Stage::render_setup&&job.stage!=Stage::frame_request)||!native_engine_clock.held())return 0;
+        ||(job.stage!=Stage::render_setup&&job.stage!=Stage::frame_request)||!native_engine_clock.held()
+        ||(job.fresh&&(!job.fresh_render_ready||job.fresh_render_tick)))return 0;
     job.prewarm_requested=false;job.prewarm_inflight=true;return job.generation;
 }
 // A typed outer render hook can wait for a previous private GPU resource fence
@@ -567,7 +614,8 @@ inline void complete_native_prewarm_render(uint64_t generation,bool succeeded){
 inline uint64_t native_simulation_render_generation(uint64_t tick){
     if(!native_render_job_current()||!job.auto_started||!job.schedule.next_tick()
         ||tick!=job.schedule.next_tick()-1||!native_engine_clock.have_tick()||native_engine_clock.tick()!=tick
-        ||(job.have_rendered_tick&&job.last_rendered_tick==tick))return 0;
+        ||(job.have_rendered_tick&&job.last_rendered_tick==tick)
+        ||(job.fresh&&(!job.fresh_render_ready||job.fresh_render_tick!=tick)))return 0;
     if(job.schedule.awaiting_frame()&&!job.capture_requested)return 0;
     return job.generation;
 }
@@ -589,13 +637,16 @@ inline Result probe_readiness(Snapshot& snapshot,bool force_native_admission=tru
     static uint64_t admission_at=0,admission_generation=0,admission_identity=0;
     static Result admission_result=Result::waiting;
     static char admission_error[96]="selected_scene_admission_failed";
-    Result result=game.snapshot(snapshot);const char* error=result==Result::ok?"none":game.last_error();
+    Result result=game.snapshot(snapshot,fresh_scene_installed.load(std::memory_order_acquire));const char* error=result==Result::ok?"none":game.last_error();
     if(result!=Result::ok)admission_known=false;
-    if(result==Result::ok&&native_scene_required&&!native_scene_installed){
+    if(fresh_scene_installed.load(std::memory_order_acquire)){
+        if(result==Result::ok&&!fresh_scene_available){result=Result::unsupported;error=fresh_scene_error("fresh_scene_unavailable");}
+    }
+    if(result==Result::ok&&native_scene_required&&!native_scene_installed&&!fresh_scene_installed.load(std::memory_order_acquire)){
         result=Result::unsupported;error="offline_pipeline_not_verified";
         diagnostic_event("pipeline","native_scene_control_unbound",0,0,true);
     }
-    if(result==Result::ok&&native_scene_installed){
+    if(result==Result::ok&&native_scene_installed&&!fresh_scene_installed.load(std::memory_order_acquire)){
         pthread_mutex_lock(&control_mutex);
         const uint64_t generation=queue_selection_generation,identity=selected_identity;
         pthread_mutex_unlock(&control_mutex);
@@ -687,6 +738,15 @@ inline bool install_native_scene_api(
     native_scene_control=controls;native_scene_context=context;
     native_owned_boundary=native_render_boundary;native_scene_installed=true;return true;
 }
+inline bool install_fresh_scene_api(const FreshSceneApi&api){
+    if(!api.valid()||fresh_scene_installed.load(std::memory_order_acquire)||!installed||!native_clock_available()
+        ||busy_stage()||control_busy||start_pending)return false;
+    if(!game.install_fresh_audio_validation(api.context,api.audio_source_error))return false;
+    fresh_scene_api=api;
+    native_diagnostics=NativeSceneDiagnostics{};last_admission_verified=false;
+    native_owned_boundary=native_fresh_render_boundary;
+    fresh_scene_installed.store(true,std::memory_order_release);return true;
+}
 inline void observe_presenter(void* presenter){if(installed){
     if(native_scene_installed&&presenter&&presenter!=observed_presenter_scope&&game.automatic())
         native_scene_control.restore_globals_before_source_change(native_scene_context);
@@ -761,10 +821,13 @@ inline void observe_camera_controller(void* camera){if(installed){
     game.observe_camera_controller(camera);observed_camera_controller_scope=camera;
 }}
 inline void capture_pass_did_execute(void* pass,const void*data){try{if(installed)game.observe_capture_pass(pass,data);}catch(...){export_observer_failed();}}
-inline void camera_did_render(void*camera){try{if(installed&&job.stage==Stage::frame_wait&&!job.captured
-    &&(!job.automatic||(job.capture_requested&&job.schedule.awaiting_frame()
+inline void camera_did_render(void*camera){try{const bool preparing=job.automatic&&job.stage==Stage::render_setup
+        &&!job.auto_started&&job.capture_requested&&(job.prewarm_inflight||job.prewarm_completed)
+        &&job.source_generation==game.owned_scene_generation();
+    if(installed&&(job.stage==Stage::frame_wait||preparing)&&!job.captured
+    &&(!job.automatic||preparing||(job.capture_requested&&job.schedule.awaiting_frame()
         &&job.source_generation==game.owned_scene_generation()))&&game.after_camera(camera)){
-    if(job.automatic&&game.validate_automatic_frame(static_cast<double>(job.frame)*job.options.fps_den/job.options.fps_num)!=Result::ok){
+    if(job.automatic&&!preparing&&game.validate_automatic_frame(static_cast<double>(job.frame)*job.options.fps_den/job.options.fps_num)!=Result::ok){
         terminal(game.last_error());return;
     }
     job.captured=true;pthread_mutex_lock(&control_mutex);increment_counter(capture_acks);pthread_mutex_unlock(&control_mutex);}}catch(...){export_observer_failed();}
@@ -786,7 +849,8 @@ inline bool begin_job() {
         job.expected_width=pending_queue_width;job.expected_height=pending_queue_height;
         pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;
     }
-    start_pending=false;job.stage=Stage::begin;job.automatic=native_scene_required;
+    start_pending=false;job.stage=Stage::begin;job.fresh=fresh_scene_installed.load(std::memory_order_acquire);
+    job.automatic=native_scene_required||job.fresh;
     if(next_job_generation){job.generation=next_job_generation;next_job_generation=next_job_generation==~uint64_t(0)?0:next_job_generation+1;}
     pthread_mutex_unlock(&control_mutex);
     if(!job.generation){terminal("export_generation_exhausted");return true;}
@@ -949,7 +1013,7 @@ inline void encoder_poll() {
     if(count!=job.last_encoder_progress){job.last_encoder_progress=count;progress();}
     if(s.phase==IDMP4_FAILED){terminal(s.error_code);return;}
     if(s.phase==IDMP4_CANCELLED&&job.stage!=Stage::retiring){terminal("encoder_cancelled",true);return;}
-    if(s.phase==IDMP4_COMPLETED&&job.stage==Stage::finishing){job.terminal_success=true;job.stage=Stage::retiring;
+    if(s.phase==IDMP4_COMPLETED&&job.stage==Stage::finishing){job.media_finalized=true;job.terminal_success=true;job.stage=Stage::retiring;
         if(!job.automatic&&game.restore()!=Result::ok){job.terminal_success=false;stable_error(game.last_error());}phase("finishing");}
 }
 inline void service_deferred_encoder_cancel(){
@@ -976,7 +1040,7 @@ inline bool service_post_restore(){
     static bool running=false;
     if(running)return false;
     struct Guard{bool& value;explicit Guard(bool& v):value(v){value=true;}~Guard(){value=false;}} guard(running);
-    if(!job.automatic)return true;
+    if(!job.automatic||job.fresh)return true;
     if(!job.scene_detached)return false;
     if(!job.post_verify_done){
         if(!job.logical_checkpoint_valid){job.post_verify_done=true;job.post_verified=false;}
@@ -1020,7 +1084,7 @@ inline void retire() {
     static bool running=false;
     if(running)return;
     struct Guard{bool& value;explicit Guard(bool& v):value(v){value=true;}~Guard(){value=false;}} guard(running);
-    if(job.automatic&&!job.scene_restored)return;
+    if(job.automatic&&!job.scene_restored&&!(job.fresh&&job.fresh_finish_settled))return;
     service_deferred_encoder_cancel();
     if(game.restoration_pending()){
         const Result restored=game.restore();
@@ -1040,7 +1104,9 @@ inline void retire() {
     if(job.pcm_owned)unlink_owned(job.config.exports,job.pcm_name,job.pcm_identity);
     if(job.rgba){free(job.rgba);job.rgba=nullptr;}
     close_configuration(job.config);
-    job.stage=Stage::idle;phase(job.terminal_success?"completed":job.terminal_cancel?"cancelled":"failed");
+    if(job.fresh)fresh_release_start();
+    job.stage=Stage::idle;
+    phase((job.terminal_success||(job.fresh&&job.media_finalized))?"completed":job.terminal_cancel?"cancelled":"failed");
     pthread_mutex_lock(&control_mutex);control_busy=false;cancel_pending=false;pthread_mutex_unlock(&control_mutex);
 }
 // BEGIN_MP4_NATIVE_BOUNDARY
@@ -1224,13 +1290,28 @@ inline bool native_render_boundary_impl(void* manager,double wall){
     }
     if(job.stage==Stage::render_setup){
         // Materialize/verify the real capture target before consuming frame0.
-        // This preparatory image is never acknowledged as an export frame.
-        const Result requested=game.request_capture();
-        if(requested==Result::ok){
-            const bool prepared=prepare_frame_output();game.discard_capture();
-            if(prepared){job.stage=Stage::frame_request;job.prewarm_requested=!job.prewarm_completed;}
-        }else if(requested==Result::waiting)job.prewarm_requested=true;
-        else terminal(game.last_error());
+        // Its request remains pending until a genuine prewarm draw and
+        // ReadPixels return retire it. Discard alone cannot complete the
+        // Adapter's readback duty, even though these pixels are not encoded.
+        if(!job.capture_requested){
+            const Result requested=game.request_capture();
+            if(requested==Result::ok){
+                if(prepare_frame_output()){
+                    job.capture_requested=true;job.captured=false;
+                    job.prewarm_completed=false;job.prewarm_requested=true;progress();
+                }
+            }else if(requested!=Result::waiting)terminal(game.last_error());
+            return native_boundary_clock_tick(manager,wall);
+        }
+        if(!job.prewarm_completed||job.prewarm_inflight||!job.captured)
+            return native_boundary_clock_tick(manager,wall);
+        size_t count=0;int32_t width=0,height=0;
+        const Result readback=game.readback_rgba(job.rgba,job.rgba_capacity,count,width,height);
+        if(readback==Result::waiting)return native_boundary_clock_tick(manager,wall);
+        if(readback!=Result::ok)terminal(game.last_error());
+        else if(count!=job.rgba_capacity||static_cast<uint32_t>(width)!=job.status.width
+            ||static_cast<uint32_t>(height)!=job.status.height)terminal("native_prewarm_capture_identity_changed");
+        else {job.capture_requested=job.captured=false;job.stage=Stage::frame_request;progress();}
         return native_boundary_clock_tick(manager,wall);
     }
     if(job.stage!=Stage::frame_request&&job.stage!=Stage::frame_wait&&job.stage!=Stage::frame_submit)
@@ -1367,6 +1448,222 @@ inline bool native_render_boundary(void* manager,double wall){
     return result;
 }
 // END_MP4_NATIVE_BOUNDARY
+
+// BEGIN_MP4_FRESH_NATIVE_BOUNDARY
+// Explicit disposable-original-scene protocol. These callbacks owe real
+// current writer gates and render completion, not old history restoration.
+inline bool native_fresh_render_boundary_impl(void*manager,double wall){
+    auto&clock=native_engine_clock;auto&api=fresh_scene_api;
+    if(!job.fresh||!busy_stage())return native_boundary_clock_tick(manager,wall);
+    job.fresh_render_ready=false;
+    api.withdraw(api.context);
+    pthread_mutex_lock(&control_mutex);
+    const bool cancelled=cancel_pending,paused=requested_pause_reason!=IDMP4_PAUSE_NONE;
+    pthread_mutex_unlock(&control_mutex);
+    if(cancelled)terminal("cancelled_by_user",true);
+    if(clock.active()&&!clock.hold_for_boundary(manager,wall)){
+        job.clock_lost=true;terminal(clock.error());
+    }
+    if(job.scene_acquired&&!job.clock_lost&&job.stage!=Stage::retiring){
+        if(!api.current(api.context)||job.source_generation!=game.owned_scene_generation()
+            ||!game.owned_primary_scene_current())terminal("fresh_scene_changed");
+        else{
+            const Result held=api.hold(api.context);
+            if(held==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(held!=Result::ok)terminal(fresh_scene_error("fresh_hold_failed"));
+        }
+    }
+    if(job.stage==Stage::retiring){
+        service_deferred_encoder_cancel();
+        if(!job.scene_detached){
+            // Complete the actual fresh writers before disposing their graph.
+            // A replaced scene never authorizes a stale property write.
+            if(job.scene_acquired&&!job.clock_lost&&api.current(api.context)){
+                const Result held=api.hold(api.context);
+                if(held==Result::waiting)return native_boundary_clock_tick(manager,wall);
+                if(held!=Result::ok){job.clock_lost=true;restoration_failure(fresh_scene_error("fresh_hold_failed"));}
+            }
+            if(!job.fresh_pre_finish_settled){
+                const Result prepared=api.prepare_finish(api.context);
+                if(prepared==Result::waiting)return native_boundary_clock_tick(manager,wall);
+                job.fresh_pre_finish_settled=true;
+                if(prepared!=Result::ok)restoration_failure(fresh_scene_error("fresh_decoder_cleanup_failed"));
+            }
+            const Result released=game.end_fresh();
+            if(released==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(released!=Result::ok)restoration_failure(game.last_error());
+            // Keep virtual absolute time coherent, restore only owned global
+            // clock controls, and never copy a former scene's native history.
+            job.clock_settings_restored=!clock.active()||clock.restore(manager,wall,false);
+            if(!job.clock_settings_restored)restoration_failure("fresh_clock_release_failed");
+            job.scene_detached=!clock.active();
+            if(!job.scene_detached)return native_boundary_clock_tick(manager,wall);
+        }
+        // finish detaches shader/render globals before original End, then
+        // awaits a real reload of logical selection/time/pause. An independent
+        // Listener mute lease may span that reload and ends on every terminal
+        // result. Natural clock ticks permit the original async loader.
+        if(!job.fresh_finish_settled){
+            const Result finished=api.finish(api.context);
+            if(finished==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            job.fresh_finish_settled=true;job.scene_restored=finished==Result::ok;
+            if(!job.scene_restored)restoration_failure(fresh_scene_error("fresh_logical_restore_failed"));
+            progress();
+        }
+        return native_boundary_clock_tick(manager,wall);
+    }
+    if(paused){
+        pthread_mutex_lock(&control_mutex);pause_acknowledged=true;reset_watchdog_pending=true;pthread_mutex_unlock(&control_mutex);
+        return native_boundary_clock_tick(manager,wall);
+    }
+    if(job.stage==Stage::scene_acquire){
+        if(!clock.active()){
+            const Result admitted=api.admit(api.context);
+            if(admitted==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(admitted!=Result::ok){terminal(fresh_scene_error("fresh_factory_not_verified"));return native_boundary_clock_tick(manager,wall);}
+            if(!clock.acquire(manager,wall,idoly_mp4_output::simulation_hz(job.options.fps_num))){
+                if(strcmp(clock.error(),"engine_clock_engine_paused"))terminal(clock.error());
+                return native_boundary_clock_tick(manager,wall);
+            }
+        }
+        const Result begun=game.begin_fresh();
+        if(begun!=Result::ok){if(begun!=Result::waiting)terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
+        idoly_mp4_game::SceneWitness witness{};
+        if(!game.selected_scene_witness(witness)){terminal("fresh_scene_witness_missing");return native_boundary_clock_tick(manager,wall);}
+        const Result acquired=api.acquire(api.context,witness,job.generation);
+        if(acquired==Result::ok){
+            job.scene_acquired=true;job.source_generation=game.owned_scene_generation();
+            job.stage=Stage::audio_setup;progress();
+        }else if(acquired!=Result::waiting)terminal(fresh_scene_error("fresh_acquire_failed"));
+        return native_boundary_clock_tick(manager,wall);
+    }
+    if(!clock.active()){
+        job.clock_lost=true;terminal("fresh_clock_ownership_lost");return native_boundary_clock_tick(manager,wall);
+    }
+    if(job.stage==Stage::render_setup){
+        if(!job.fresh_started){
+            const Result started=api.start(api.context);
+            if(started==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(started!=Result::ok){terminal(fresh_scene_error("fresh_start_failed"));return native_boundary_clock_tick(manager,wall);}
+            const Result adopted=game.start_fresh();
+            if(adopted!=Result::ok){if(adopted!=Result::waiting)terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
+            job.fresh_started=true;
+        }
+        if(!job.capture_requested){
+            const Result requested=game.request_capture();
+            if(requested==Result::ok){if(prepare_frame_output()){
+                job.capture_requested=true;job.captured=false;job.prewarm_completed=false;job.prewarm_requested=true;progress();}}
+            else if(requested!=Result::waiting)terminal(game.last_error());
+            return native_boundary_clock_tick(manager,wall);
+        }
+        if(!job.prewarm_completed){
+            const Result ready=api.prepare_render(api.context,0);
+            if(ready==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(ready!=Result::ok){terminal(fresh_scene_error("fresh_prewarm_prepare_failed"));return native_boundary_clock_tick(manager,wall);}
+            job.fresh_render_tick=0;job.fresh_render_ready=true;
+        }
+        if(!job.prewarm_completed||job.prewarm_inflight||!job.captured)return native_boundary_clock_tick(manager,wall);
+        size_t count=0;int32_t width=0,height=0;
+        const Result read=game.readback_rgba(job.rgba,job.rgba_capacity,count,width,height);
+        if(read==Result::waiting)return native_boundary_clock_tick(manager,wall);
+        if(read!=Result::ok)terminal(game.last_error());
+        else if(count!=job.rgba_capacity||uint32_t(width)!=job.status.width||uint32_t(height)!=job.status.height)
+            terminal("fresh_prewarm_capture_identity_changed");
+        else{job.capture_requested=job.captured=false;job.stage=Stage::frame_request;progress();}
+        return native_boundary_clock_tick(manager,wall);
+    }
+    if(job.stage!=Stage::frame_request&&job.stage!=Stage::frame_wait&&job.stage!=Stage::frame_submit)
+        return native_boundary_clock_tick(manager,wall);
+    if(!job.auto_started){
+        if(!job.prewarm_completed||!job.fresh_started||!api.current(api.context)
+            ||!job.schedule.reset(job.generation,job.options.fps_num,job.total_frames)
+            ||!clock.set_owned_loop_quiescent(true)){
+            terminal("fresh_writer_gates_not_current");return native_boundary_clock_tick(manager,wall);
+        }
+        job.auto_started=true;progress();
+    }
+    if(job.schedule.next_tick()){
+        const uint64_t previous_tick=job.schedule.next_tick()-1;
+        if(game.validate_automatic_frame(job.schedule.tick_seconds(previous_tick))!=Result::ok){
+            terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
+        if(!job.have_rendered_tick||job.last_rendered_tick!=previous_tick){
+            if(job.schedule.awaiting_frame()&&!job.capture_requested)native_capture_request();
+            if(job.stage!=Stage::retiring){
+                const Result ready=api.prepare_render(api.context,previous_tick);
+                if(ready==Result::ok){job.fresh_render_tick=previous_tick;job.fresh_render_ready=true;}
+                else if(ready!=Result::waiting)terminal(fresh_scene_error("fresh_render_prepare_failed"));}
+            return native_boundary_clock_tick(manager,wall);
+        }
+    }
+    if(job.schedule.awaiting_frame()){
+        if(!job.capture_requested){native_capture_request();return native_boundary_clock_tick(manager,wall);}
+        if(!job.schedule.pixels_received()){
+            if(!job.captured)return native_boundary_clock_tick(manager,wall);
+            size_t count=0;int32_t width=0,height=0;
+            const Result read=game.readback_rgba(job.rgba,job.rgba_capacity,count,width,height);
+            if(read==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(read!=Result::ok){terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
+            if(count!=job.rgba_capacity||uint32_t(width)!=job.status.width||uint32_t(height)!=job.status.height
+                ||!job.schedule.readback_received(job.generation,job.frame)){
+                terminal("fresh_capture_identity_changed");return native_boundary_clock_tick(manager,wall);}
+            job.stage=Stage::frame_submit;progress();
+        }
+        const int appended=job.api.append(job.encoder,job.rgba,size_t(job.status.width)*4,job.frame);
+        if(appended==IDMP4_RETRY)return native_boundary_clock_tick(manager,wall);
+        if(appended!=IDMP4_ACCEPTED||!job.schedule.encoder_accepted(job.generation,job.frame)){
+            terminal("encoder_frame_rejected");return native_boundary_clock_tick(manager,wall);}
+        ++job.frame;job.status.frames=job.frame;job.capture_requested=job.captured=false;
+        job.stage=Stage::frame_request;progress();
+        if(job.schedule.complete()){
+            if(job.api.finish(job.encoder)<0)terminal("encoder_finish_rejected");
+            else{job.stage=Stage::finishing;phase("finishing");}
+            return native_boundary_clock_tick(manager,wall);
+        }
+    }
+    if(native_command_hold())return native_boundary_clock_tick(manager,wall);
+    const auto proposal=job.schedule.propose(job.generation);
+    if(!proposal.advance)return native_boundary_clock_tick(manager,wall);
+    const double seconds=job.schedule.tick_seconds(proposal.tick);
+    const Result prepared=api.prepare_step(api.context,proposal.tick,seconds);
+    if(prepared==Result::waiting)return native_boundary_clock_tick(manager,wall);
+    if(prepared!=Result::ok){terminal(fresh_scene_error("fresh_step_prepare_failed"));return native_boundary_clock_tick(manager,wall);}
+    if(native_command_hold()){api.withdraw(api.context);return native_boundary_clock_tick(manager,wall);}
+    const bool advanced=native_boundary_clock_tick(manager,wall,{true,proposal.tick});
+    if(!advanced){
+        api.withdraw(api.context);
+        if(strcmp(clock.error(),"engine_clock_engine_paused")){job.clock_lost=true;terminal(clock.error());}
+        return false;
+    }
+    if(!job.schedule.commit(job.generation,proposal)||game.prepare_automatic_frame(seconds)!=Result::ok){
+        api.withdraw(api.context);terminal("fresh_simulation_grant_failed");return false;}
+    if(api.grant(api.context,proposal.tick)!=Result::ok){api.withdraw(api.context);terminal(fresh_scene_error("fresh_simulation_grant_failed"));return false;}
+    if(proposal.frame>=0){
+        if(uint64_t(proposal.frame)!=job.frame){api.withdraw(api.context);terminal("native_frame_order_mismatch");return false;}
+        native_capture_request();
+    }
+    if(job.stage!=Stage::retiring){
+        const Result ready=api.prepare_render(api.context,proposal.tick);
+        if(ready==Result::ok){job.fresh_render_tick=proposal.tick;job.fresh_render_ready=true;}
+        else if(ready!=Result::waiting){api.withdraw(api.context);terminal(fresh_scene_error("fresh_render_prepare_failed"));return false;}}
+    publish();return true;
+}
+inline bool native_fresh_render_boundary(void*manager,double wall){
+    if(active_boundary_call){terminal("native_clock_reentered");return false;}
+    NativeBoundaryCall call{};active_boundary_call=&call;bool result=false;
+    struct BoundaryExit{~BoundaryExit(){active_boundary_call=nullptr;}}exit;
+    try{result=native_fresh_render_boundary_impl(manager,wall);}
+    catch(...){
+        try{fresh_scene_api.withdraw(fresh_scene_api.context);}catch(...){}
+        try{if(job.stage==Stage::retiring)restoration_failure("fresh_original_callback_exception");
+            else terminal("fresh_original_callback_exception");}
+        catch(...){job.terminal_success=false;job.stage=Stage::retiring;}
+        if(!call.called)try{result=native_boundary_clock_tick(manager,wall);}catch(...){job.clock_lost=true;}
+    }
+    try{refresh_native_observation();}catch(...){}
+    return result;
+}
+// END_MP4_FRESH_NATIVE_BOUNDARY
+
 inline void on_unity_tick_impl() {
     if(!installed)return;
     static bool running=false;
@@ -1377,7 +1674,7 @@ inline void on_unity_tick_impl() {
     pthread_mutex_lock(&control_mutex);
     increment_counter(unity_ticks);
     const bool should_cancel=cancel_pending;
-    if(should_cancel&&start_pending&&!busy_stage()){
+    if(should_cancel&&start_pending&&!busy_stage()&&!fresh_scene_installed.load(std::memory_order_acquire)){
         // A parked start has acquired no Unity or encoder state yet.
         start_pending=false;control_busy=false;cancel_pending=false;pause_acknowledged=false;
         job.status=PublicStatus{};
@@ -1400,6 +1697,21 @@ inline void on_unity_tick_impl() {
     if(reset_watchdog&&busy_stage())progress();
     game.maintenance();
     if(!busy_stage()){
+        // Immediate Start follows the same original forced-load protocol as
+        // Queue Run. Host threads only accepted the command above.
+        if(start_pending&&fresh_scene_installed.load(std::memory_order_acquire)){
+            const Result prepared=fresh_prepare_start();
+            if(prepared==Result::waiting)return;
+            if(prepared!=Result::ok){
+                pthread_mutex_lock(&control_mutex);
+                start_pending=control_busy=false;
+                const bool cancelled=cancel_pending;cancel_pending=false;
+                published=PublicStatus{};
+                snprintf(published.phase,sizeof published.phase,"%s",cancelled?"cancelled":"failed");
+                snprintf(published.error,sizeof published.error,"%s",fresh_scene_error("fresh_prepare_failed"));
+                pthread_mutex_unlock(&control_mutex);return;
+            }
+        }
         pthread_mutex_lock(&control_mutex);const bool force_admission=start_pending;pthread_mutex_unlock(&control_mutex);
         Result selected=probe_selection_source();
         // A missing camera fallback may be populated by the ordinary source
@@ -1494,8 +1806,8 @@ inline size_t status(char*buffer,size_t capacity){
         static_cast<unsigned long long>(observed.accepted),observed.restored?"true":"false",observed.clock_restored?"true":"false",
         observed.camera_audio?"true":"false",observed.dependents?"true":"false",observed.world?"verified":"unverified");
     if(observed_count<=0||static_cast<size_t>(observed_count)>=sizeof(observation))return 0;
-    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"selected_mv\":%s,\"selection_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"restoration_error\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u},\"observation\":%s,\"scene_diagnostics\":%s}",
-        static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",readiness,selected?"true":"false",selection_reason,current_phase,
+    int n=snprintf(buffer,capacity,"{\"schema\":1,\"pipeline_mode\":\"%s\",\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"selected_mv\":%s,\"selection_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"restoration_error\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u},\"observation\":%s,\"scene_diagnostics\":%s}",
+        fresh_scene_installed.load(std::memory_order_acquire)?"fresh_original_scene":"legacy_owned_scene",static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",readiness,selected?"true":"false",selection_reason,current_phase,
         paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,s.restoration_error,
         static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),
         static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.source_width,s.source_height,

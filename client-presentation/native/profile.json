@@ -5773,6 +5773,33 @@
       "registration_pointer_slot_rva": "0x9fc3890",
       "prefix16": "e80f1bfcfe0700f9fa6701a9f85f02a9",
       "native_abi": "void(void*,Playable16,FrameData64,const MethodInfo*)"
+    },
+    "mp4_video_behaviour_play": {
+      "name": "Solis.Timeline.SolisVideoPlayerTrackBehaviour.OnBehaviourPlay",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23068,
+      "metadata_method_index": 158423,
+      "token_row": 825,
+      "rva": "0x8812de4",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "playable",
+          "typeindex": 68482,
+          "type": "UnityEngine.Playables.Playable"
+        },
+        {
+          "name": "info",
+          "typeindex": 57590,
+          "type": "UnityEngine.Playables.FrameData"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 198,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9fc38d0",
+      "prefix16": "fe57bea9f44f01a9f5c200d0f48600f0",
+      "native_abi": "void(void*,Playable16,FrameData64,const MethodInfo*)"
     }
   },
   "graphics_fields": [

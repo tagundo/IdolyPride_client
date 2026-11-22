@@ -228,11 +228,11 @@ static void *hook(void *t, void *n, void **original, uint32_t flags, ...) {
 }
 int main() {
   unsigned cases = 0;
-  CHECK(managed_source_count==15);++cases;
+  CHECK(managed_source_count==21);++cases;
   CHECK(android_managed_source_pin(12)==&android_scene_managed_pins[3]);++cases;
   CHECK(android_managed_source_pin(13)==&android_capture_queue_pins[0]);++cases;
   CHECK(android_managed_source_pin(14)==&android_capture_queue_pins[1]);++cases;
-  CHECK(android_managed_source_pin(15)==nullptr);++cases;
+  CHECK(android_managed_source_pin(21)==nullptr);++cases;
   for(size_t i=0;i<managed_source_count;++i){
     CHECK(android_managed_source_pin(i));
     for(size_t j=0;j<i;++j)CHECK(android_managed_source_pin(i)->rva!=android_managed_source_pin(j)->rva);
@@ -241,7 +241,7 @@ int main() {
   struct PinRange { const BootstrapPin* pins; size_t count; };
   for (const auto range : {PinRange{android_bootstrap_pins,8},PinRange{ios_bootstrap_pins,8},
                           PinRange{android_managed_extra_pins,8},PinRange{ios_managed_extra_pins,8},
-                          PinRange{android_scene_managed_pins,4},PinRange{ios_scene_managed_pins,4},PinRange{android_capture_queue_pins,2},PinRange{ios_capture_queue_pins,2}})
+                          PinRange{android_scene_managed_pins,4},PinRange{ios_scene_managed_pins,4},PinRange{android_capture_queue_pins,2},PinRange{ios_capture_queue_pins,2},PinRange{android_fresh_video_event_pins,6}})
     for (size_t p = 0; p < range.count; ++p)
       for (unsigned mode = 0; mode < 4; ++mode) {
         const auto*pins=range.pins;

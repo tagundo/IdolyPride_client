@@ -53,7 +53,8 @@ struct Scan {
 template<class T> inline T field(const void* object, size_t offset) {
     return idoly_mp4_timeline_camera::field<T>(object, offset);
 }
-inline Scan scan(void* timeline, double duration, const Api& api, Layout layout = {}) {
+inline Scan scan(void* timeline, double duration, const Api& api, Layout layout = {},
+                 bool require_complete_audio = false) {
     Scan result{};
     const auto fail = [&result](const char* reason) { result.error = reason; return result; };
     if (!api.owned.is_type || !api.owned.alive || !api.owned.array_length
@@ -106,7 +107,10 @@ inline Scan scan(void* timeline, double duration, const Api& api, Layout layout 
                 const size_t length = api.string_utf8(api.object_get_name(track, nullptr), name, sizeof name);
                 if (!length || length >= sizeof name) return fail("audio_track_name_out_of_bounds");
                 const bool bgm = !::strcmp(name, "BGM"), voice = !::strcmp(name, "Voice");
-                if (!bgm && !voice) continue;
+                if (!bgm && !voice) {
+                    if (require_complete_audio) return fail("selected_audio_track_unsupported");
+                    continue;
+                }
                 if (bgm && bgm_found) return fail("ambiguous_bgm_track");
                 bgm_found = bgm_found || bgm;
                 if (result.count == max_audio_tracks) return fail("too_many_audio_tracks");
@@ -212,4 +216,177 @@ inline Scan scan(void* timeline, double duration, const Api& api, Layout layout 
         return fail("selected_audio_scan_exception");
     }
 }
+
+// BEGIN_MP4_FRESH_AUDIO_LISTENER
+// Original static AudioListener.volume only. This lease silences Unity's final
+// listener output; it neither reads DSP/voice memory nor changes AudioClip PCM.
+// Capture the authored PCM programme and its gains BEFORE acquiring it. Keep
+// the lease through the disposable MV's original teardown, then finish it on
+// Unity's owner thread even if that MV has been replaced.
+struct ListenerBinding {
+    uintptr_t rva;
+    uint8_t prefix[16];
+    uintptr_t registration_pointer_slot;
+    uint32_t metadata_method_index;
+};
+struct ListenerProfile {
+    const char* native_sha256;
+    const char* metadata_sha256;
+    ListenerBinding get_volume, set_volume;
+};
+// Exact methods from the pinned original 6.1.1 AudioModule metadata/codegen
+// tables. ABIs: float(const MethodInfo*), void(float,const MethodInfo*).
+inline constexpr ListenerProfile android_listener_profile = {
+    "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+    "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e",
+    {0x8f301c0,{0xfe,0x4f,0xbf,0xa9,0x33,0x8a,0x00,0xd0,0x60,0x62,0x41,0xf9,0xa0,0x00,0x00,0xb5},0xa018338,218167},
+    {0x8f301e8,{0xe8,0x0f,0x1e,0xfc,0xfe,0x4f,0x01,0xa9,0x33,0x8a,0x00,0xd0,0x60,0x66,0x41,0xf9},0xa018340,218168}
+};
+inline constexpr ListenerProfile ios_listener_profile = {
+    "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+    "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+    {0x77e07e0,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xd3,0x89,0x01,0xb0},0xa782238,218714},
+    {0x77e0820,{0xe9,0x23,0xbd,0x6d,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91},0xa782240,218715}
+};
+struct SourcePcmProfile {
+    ListenerBinding pitch, mute, loop, spatial_blend, pan_stereo, output_mixer, clip;
+};
+inline constexpr SourcePcmProfile android_source_pcm_profile = {
+    {0x8f30844,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x34,0x8a,0x00,0xd0,0x81,0x7e,0x41,0xf9},0xa0183f0,218190}, // get_pitch
+    {0x8f31a28,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x34,0x8a,0x00,0xb0,0x81,0x6e,0x42,0xf9},0xa0185c8,218249}, // get_mute
+    {0x8f311b4,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x34,0x8a,0x00,0xb0,0x81,0xee,0x41,0xf9},0xa0184b8,218215}, // get_loop
+    {0x8f314bc,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x34,0x8a,0x00,0xb0,0x81,0x1e,0x42,0xf9},0xa018518,218227}, // get_spatialBlend
+    {0x8f31434,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x34,0x8a,0x00,0xb0,0x81,0x16,0x42,0xf9},0xa018508,218225}, // get_panStereo
+    {0x8f30a54,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x34,0x8a,0x00,0xd0,0x81,0xc6,0x41,0xf9},0xa018430,218198}, // get_outputAudioMixerGroup
+    {0x8f309d4,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x34,0x8a,0x00,0xd0,0x81,0xbe,0x41,0xf9},0xa018420,218196}, // get_clip
+};
+inline constexpr SourcePcmProfile ios_source_pcm_profile = {
+    {0x77e1088,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xd3,0x89,0x01,0x90},0xa7822f0,218737}, // get_pitch
+    {0x77e2820,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb3,0x89,0x01,0xf0},0xa7824c8,218796}, // get_mute
+    {0x77e1c74,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xd3,0x89,0x01,0x90},0xa7823b8,218762}, // get_loop
+    {0x77e20ac,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb3,0x89,0x01,0xf0},0xa782418,218774}, // get_spatialBlend
+    {0x77e1ff8,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb3,0x89,0x01,0xf0},0xa782408,218772}, // get_panStereo
+    {0x77e1358,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xd3,0x89,0x01,0x90},0xa782330,218745}, // get_outputAudioMixerGroup
+    {0x77e12a4,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xd3,0x89,0x01,0x90},0xa782320,218743}, // get_clip
+};
+enum class ListenerResult { ok, waiting, stale, failed, invalid };
+// Read-only admission for the supported direct, two-dimensional Timeline mix.
+// Source volume is captured separately in AudioProgram before output muting.
+// A custom mixer, pitch/pan/spatialisation, direct clip or muted/disabled source
+// cannot silently become a different soundtrack in the private PCM mix.
+struct SourcePcmApi {
+    void* context = nullptr;
+    bool (*current)(void*,void*) = nullptr;
+    float (*pitch)(void*,void*) = nullptr;
+    bool (*mute)(void*,void*) = nullptr;
+    bool (*loop)(void*,void*) = nullptr;
+    float (*spatial_blend)(void*,void*) = nullptr;
+    float (*pan_stereo)(void*,void*) = nullptr;
+    void* (*output_mixer)(void*,void*) = nullptr;
+    void* (*clip)(void*,void*) = nullptr;
+    bool (*enabled)(void*,void*) = nullptr;
+    bool valid() const {
+        return current&&pitch&&mute&&loop&&spatial_blend&&pan_stereo&&output_mixer&&clip&&enabled;
+    }
+};
+inline const char* source_pcm_error(const SourcePcmApi& api,void* source) noexcept {
+    if (!source || !api.valid()) return "fresh_audio_source_api_unavailable";
+    try {
+        if (!api.current(api.context,source)) return "fresh_audio_source_unavailable";
+        if (!api.enabled(api.context,source)) return "fresh_audio_source_disabled";
+        if (api.clip(api.context,source)) return "fresh_audio_source_direct_clip_unsupported";
+        if (api.output_mixer(api.context,source)) return "fresh_audio_source_mixer_unsupported";
+        if (api.mute(api.context,source)) return "fresh_audio_source_muted_unsupported";
+        if (api.loop(api.context,source)) return "fresh_audio_source_loop_unsupported";
+        const float pitch=api.pitch(api.context,source);
+        if (!std::isfinite(pitch) || pitch!=1) return "fresh_audio_source_pitch_unsupported";
+        const float spatial=api.spatial_blend(api.context,source);
+        if (!std::isfinite(spatial) || spatial!=0) return "fresh_audio_source_spatial_unsupported";
+        const float pan=api.pan_stereo(api.context,source);
+        if (!std::isfinite(pan) || pan!=0) return "fresh_audio_source_pan_unsupported";
+        return api.current(api.context,source) ? nullptr : "fresh_audio_source_changed";
+    } catch (...) { return "fresh_audio_source_probe_exception"; }
+}
+struct ListenerApi {
+    void* context = nullptr;
+    // Source/method verification and owner-thread availability. This must not
+    // require the disposable scene to remain alive: final cleanup is global.
+    bool (*current)(void*) = nullptr;
+    float (*get_volume)(void*) = nullptr;
+    void (*set_volume)(void*,float) = nullptr;
+    bool valid() const { return current && get_volume && set_volume; }
+};
+class ListenerLease {
+    ListenerApi api_{};
+    uint64_t token_ = 0;
+    float saved_ = 0;
+    bool active_ = false, restoring_ = false;
+    const char* error_ = "none";
+    ListenerResult fail(ListenerResult result,const char* error) {
+        error_ = error;
+        return result;
+    }
+    void clear() { api_={};token_=0;saved_=0;active_=restoring_=false; }
+    static bool volume(float value) { return std::isfinite(value) && value >= 0 && value <= 1; }
+public:
+    ListenerLease() = default;
+    ListenerLease(const ListenerLease&) = delete;
+    ListenerLease& operator=(const ListenerLease&) = delete;
+    bool active() const { return active_; }
+    uint64_t token() const { return token_; }
+    const char* error() const { return error_; }
+    ListenerResult begin(ListenerApi api,uint64_t token) noexcept {
+        if (active_) return token && token==token_ ? verify(token)
+            : fail(ListenerResult::invalid,"fresh_audio_lease_already_owned");
+        if (!token || !api.valid()) return fail(ListenerResult::invalid,"fresh_audio_api_unavailable");
+        try {
+            if (!api.current(api.context)) return fail(ListenerResult::waiting,"fresh_audio_bindings_unavailable");
+            const float saved=api.get_volume(api.context);
+            if (!volume(saved)) return fail(ListenerResult::failed,"fresh_audio_listener_volume_invalid");
+            if (!api.current(api.context)) return fail(ListenerResult::waiting,"fresh_audio_bindings_unavailable");
+            api_=api;token_=token;saved_=saved;active_=true;
+            // Publish our cleanup duty before an original setter that may
+            // throw after applying its write.
+            api_.set_volume(api_.context,0);
+            return verify(token);
+        } catch (...) { return fail(ListenerResult::failed,"fresh_audio_mute_exception"); }
+    }
+    ListenerResult verify(uint64_t token) noexcept {
+        if (!active_ || !token || token!=token_ || restoring_)
+            return fail(ListenerResult::invalid,"fresh_audio_lease_not_held");
+        try {
+            if (!api_.current(api_.context)) return fail(ListenerResult::waiting,"fresh_audio_bindings_unavailable");
+            const float actual=api_.get_volume(api_.context);
+            if (!volume(actual) || actual!=0)
+                return fail(ListenerResult::stale,"fresh_audio_listener_mute_lost");
+            if (!api_.current(api_.context)) return fail(ListenerResult::waiting,"fresh_audio_bindings_unavailable");
+            error_="none";return ListenerResult::ok;
+        } catch (...) { return fail(ListenerResult::failed,"fresh_audio_verify_exception"); }
+    }
+    ListenerResult finish(uint64_t token) noexcept {
+        if (!active_) return ListenerResult::ok;
+        if (!token || token!=token_) return fail(ListenerResult::invalid,"fresh_audio_lease_not_owned");
+        try {
+            if (!api_.current(api_.context)) return fail(ListenerResult::waiting,"fresh_audio_bindings_unavailable");
+            const float actual=api_.get_volume(api_.context);
+            if (restoring_ && actual==saved_) { clear();error_="none";return ListenerResult::ok; }
+            // A different global writer supersedes our zero. Never overwrite
+            // its new value while retiring an old disposable scene. Public
+            // get/set cannot distinguish another writer assigning zero too;
+            // this lease does not attest complete writer exclusion.
+            if (!volume(actual) || actual!=0) {
+                clear();return fail(ListenerResult::stale,"fresh_audio_listener_lease_superseded");
+            }
+            if (!api_.current(api_.context)) return fail(ListenerResult::waiting,"fresh_audio_bindings_unavailable");
+            restoring_=true;
+            api_.set_volume(api_.context,saved_);
+            const float restored=api_.get_volume(api_.context);
+            if (restored!=saved_ || !volume(restored))
+                return fail(ListenerResult::failed,"fresh_audio_listener_restore_failed");
+            if (!api_.current(api_.context)) return fail(ListenerResult::waiting,"fresh_audio_bindings_unavailable");
+            clear();error_="none";return ListenerResult::ok;
+        } catch (...) { return fail(ListenerResult::failed,"fresh_audio_restore_exception"); }
+    }
+};
+// END_MP4_FRESH_AUDIO_LISTENER
 } // namespace idoly_mp4_timeline_audio

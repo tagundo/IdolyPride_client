@@ -50,8 +50,9 @@ def audit(native_path, metadata_path):
     original = Original(metadata, native)  # Whole SHA + metadata version + registrations.
     profile, plan = p.load_profile(), p.make_plan()
     old = json.loads(json.dumps(profile))
-    from audit_mp4_scene_aliases import SELECTIONS,DERIVED_ALIASES
-    appended=('mp4_native_time','mp4_brain_update','mp4_shader_set','mp4_shader_reset','mp4_actor_process','mp4_actor_burst','mp4_fixed_loop_condition',*SELECTIONS,*DERIVED_ALIASES)
+    from audit_mp4_scene_aliases import SELECTIONS,DERIVED_ALIASES,NATIVE_IOS_ALIASES
+    appended=('mp4_native_time','mp4_brain_update','mp4_shader_set','mp4_shader_reset','mp4_actor_process','mp4_actor_burst','mp4_fixed_loop_condition',*SELECTIONS,*DERIVED_ALIASES,*NATIVE_IOS_ALIASES)
+    assert len(appended)==len(set(appended)), 'duplicate_appended_gateway_role'
     for name in appended:
         del old['aliases'][name]
         old['hook_names'].remove(name)
@@ -60,6 +61,24 @@ def audit(native_path, metadata_path):
     del old['native_relay_region']
     del old['native_extra_relay_regions']
     assert digest((json.dumps(old, indent=2) + '\n').encode()) == OLD_PROFILE_SHA256
+    # This addition is one trailing gateway. Independently pin the complete
+    # immediately preceding 171-hook profile, not only the older 56-hook base.
+    previous = json.loads(json.dumps(profile))
+    added = 'mp4_video_behaviour_play'
+    del previous['aliases'][added]
+    assert previous['hook_names'].pop() == added
+    previous['gateway_region']['bytes'] -= 32
+    previous['slot_region']['bytes'] -= 8
+    assert digest((json.dumps(previous, indent=2) + '\n').encode()) == '53df619e3bdba53f3e2c9149504d3b21180698667f5cbe50b2cca2a10e050d74'
+    assert len(previous['hook_names']) == 171
+    for index, name in enumerate(previous['hook_names']):
+        entry = plan['entries'][name]
+        assert entry['gateway'] == previous['gateway_region']['rva'] + 32 * index
+        assert entry['slot'] == previous['slot_region']['rva'] + 8 * index
+        assert entry['original16'] == previous['aliases'][name]['prefix16']
+    new_gateway = plan['entries'][added]['gateway']
+    cave_offset = original.offset(new_gateway)
+    assert native[cave_offset:cave_offset + 32] == bytes(32)
     clock = json.loads((ROOT / 'client-presentation/native/mp4_engine_clock_profile.json').read_text())['platforms']['ios']
     update = clock['bindings']['update']
     address, body = int(update['rva'], 16), bytes.fromhex(update['body'])
@@ -119,6 +138,8 @@ def audit(native_path, metadata_path):
         'unrelated_bootstrap_bytes_preserved': unchanged_bootstrap,
         'original_and_bootstrap_rx_relay_gap_zero': True,
         'all_previous_56_gateway_mappings_unchanged': True,
+        'all_previous_171_gateway_mappings_unchanged': True,
+        'new_video_behaviour_gateway_original_32_bytes_zero': True,
         'patched_executables_published': False, 'runtime_device_verified': False}
 
 

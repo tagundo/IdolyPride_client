@@ -13,6 +13,13 @@ struct {sb::Key key{};uint64_t producer_receipt=73;}mp4_scene_source_bootstrap;
 bool worker_current(void*,const sb::Key&k,uint64_t receipt){return source_cpu_current&&k.epoch==4&&k.job==9&&receipt==73;}
 struct {void*context=reinterpret_cast<void*>(0x99);struct {bool(*current)(void*,const sb::Key&,uint64_t)=worker_current;}source_producers;}mp4_source_bootstrap_joins;
 struct {bool current()const{return early_current;}}mp4_early_source_gates;
+// The actual hold current/reader/activity bodies are extracted below. Only the
+// independently certified hook endpoints and the unused original-stack shape
+// are physical leaf fixtures; neither one grants unconditional quiet.
+bool render_frontends=true;
+bool mp4_render_hold_frontends(){return render_frontends;}
+struct Mp4RenderHoldOriginal{inline static thread_local void*current=nullptr;};
+// SHIPPING_RENDER_HOLD_QUIET
 struct {bool active=true,invalidated=false,releasing=false;unsigned configured=15,captured=15,prepared=0,all=15;}mp4_scene_host;
 struct{unsigned depth=0;}mp4_raw_original_operation;struct{bool active=false;}mp4_rebuild_ledger;
 bool mp4_scene_bootstrap_key(const sb::Key&key){return source_key_current&&key.epoch==4&&key.job==9;}

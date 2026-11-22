@@ -36,4 +36,4 @@ def test_shipping_bootstrap_exact_original_gateway_and_publication(tmp_path, cor
     assert result.returncode == 0, result.stderr
     result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
-    assert result.stdout == 'bootstrap cases 216 passed\n'
+    assert result.stdout == 'bootstrap cases 240 passed\n'

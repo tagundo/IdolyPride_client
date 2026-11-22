@@ -366,7 +366,8 @@ public class DiagnosticsHarness {
  public static void main(String[] args){
   last.put("phase","stale");
   nativeValue.put("ready",false).put("phase","idle").put("readiness_error","selected_capture_geometry_unsupported")
-   .put("error_code","../private/broker.capability").put("pause_reason","none")
+   .put("pipeline_mode","fresh_original_scene")
+   .put("error_code","../private/broker.capability").put("restoration_error","fresh_logical_restore_failed").put("pause_reason","none")
    .put("width",0).put("height",0).put("source_width",4095).put("source_height",2457)
    .put("fps_num",60).put("fps_den",1).put("video_bitrate",17250000).put("unity_ticks",51L).put("capture_acks",-1L)
    .put("frames",Long.MAX_VALUE).put("total_frames",100L)
@@ -384,7 +385,13 @@ public class DiagnosticsHarness {
   JSONObject result=diagnostics();
   need(result.map.get("phase").equals("idle"),"diagnostics obtains current native status rather than stale UI snapshot");
   need(result.map.get("readiness_error").equals("selected_capture_geometry_unsupported"),"actual readiness reason survives");
+  need(result.map.get("pipeline_mode").equals("fresh_original_scene"),"actual original-scene mode survives without inventing legacy verification");
+  for(Object mode:new Object[]{"/private/path","unknown",true,1,new JSONObject()}){
+   nativeValue.put("pipeline_mode",mode);need(!diagnostics().map.containsKey("pipeline_mode"),"unknown pipeline values are not copied");
+  }
+  nativeValue.put("pipeline_mode","legacy_owned_scene");need(diagnostics().map.get("pipeline_mode").equals("legacy_owned_scene"),"legacy mode remains explicit");
   need(result.map.get("error_code").equals("unknown"),"non-code/path error text is not copied");
+  need(result.map.get("restoration_error").equals("fresh_logical_restore_failed"),"media completion retains separate restoration warning");
   need(result.map.get("source_width").equals(4095L)&&result.map.get("source_height").equals(2457L),"idle source geometry survives");
   need(result.map.get("video_bitrate").equals(17250000L)&&result.map.get("fps_num").equals(60L),"actual encoder scalars survive");
   need(result.map.get("capture_acks").equals(0L)&&result.map.get("frames").equals(9007199254740991L),"numeric fields bounded");

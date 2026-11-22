@@ -21,6 +21,7 @@ def trace_binary(tmp_path_factory):
 #include <cstdio>
 #include <cstring>
 #include <pthread.h>
+#include <atomic>
 #include <thread>
 #include <vector>
 #include <cassert>
@@ -28,6 +29,7 @@ def trace_binary(tmp_path_factory):
 enum class Stage { STAGES };
 struct Schedule {uint64_t tick=0;uint64_t next_tick()const{return tick;}};
 struct Job {Stage stage=Stage::idle;uint64_t frame=0;Schedule schedule{};}job;
+std::atomic<bool> fresh_scene_installed{false};
 // ACTUAL
 int main(int argc,char**argv){
  assert(argc==2);const std::string mode=argv[1];

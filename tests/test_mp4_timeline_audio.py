@@ -87,7 +87,7 @@ int main(int argc,char** argv) {
     assert(argc==2);std::string s=argv[1];setup();auto calls=api();double root_duration=122;
     bool success=s=="actual_bittersweet_echo"||s=="identity_child"||s=="direct_master"||s=="multi_hop"||s=="default_reference"||s=="invalid_reference_uses_default"
         ||s=="duplicate_owned_entries"||s=="null_unused_asset"||s=="unrelated_unsupported_control"||s=="duration_roundoff"
-        ||s=="inactive_unrelated"||s=="silent_voice_no_clip_read"||s=="unrelated_audio_name";
+        ||s=="inactive_unrelated"||s=="silent_voice_no_clip_read"||s=="unrelated_audio_name"||s=="strict_supported_audio";
     if(s=="actual_bittersweet_echo"){root_duration=111.5;master->duration=111.5;audio->duration=111.49999999999899;other->duration=111.5;put(control_clip,0x30,111.5);}
     if(s=="direct_master"){master->asset->tracks=audio_tracks;audio->asset->tracks=array("UnityEngine.Timeline.TrackAsset[]",{});}
     if(s=="multi_hop"){references[{master->p(),17}]={true,other->go};add_control(other,audio,18);}
@@ -100,7 +100,7 @@ int main(int argc,char** argv) {
     if(s=="unrelated_unsupported_control"){auto* tr=add_control(master,other,18);auto* c=lookup[tr->clips->entries[0]];put(c,0x18,3.0);}
     if(s=="duration_roundoff"){audio->duration=121.9999999999;put(control_clip,0x30,121.9999999999);}
     if(s=="silent_voice_no_clip_read")voice->muted=true;
-    if(s=="unrelated_audio_name"){auto* tr=make("UnityEngine.Timeline.AudioTrack","SE");audio_tracks->entries.push_back(tr->p());audio_tracks->reported++;}
+    if(s=="unrelated_audio_name"||s=="strict_unknown_audio"||s=="strict_unknown_muted_audio"){auto* tr=make("UnityEngine.Timeline.AudioTrack","SE");tr->muted=s=="strict_unknown_muted_audio";audio_tracks->entries.push_back(tr->p());audio_tracks->reported++;}
     if(s=="inactive_audio")audio->active=false;
     if(s=="inactive_unrelated")other->active=false;
     if(s=="inactive_ancestor"){references[{master->p(),17}]={true,other->go};add_control(other,audio,18);other->active=false;}
@@ -151,7 +151,8 @@ int main(int argc,char** argv) {
     if(s=="nan_blend")put(control_clip,0x60,std::numeric_limits<double>::quiet_NaN());
     if(s=="duplicate_clock")add_control(master,audio,18);
     if(s=="clock_cycle"){root_tracks->entries.clear();root_tracks->reported=0;add_control(other,audio,18);add_control(audio,other,19);}
-    auto result=scan(timeline->p(),root_duration,calls);
+    auto result=scan(timeline->p(),root_duration,calls,{},s.rfind("strict_",0)==0);
+    if(s=="strict_unknown_audio"||s=="strict_unknown_muted_audio")assert(!std::strcmp(result.error,"selected_audio_track_unsupported"));
     if(success) {
         assert(result.ok()&&result.count==2);
         assert(result.tracks[0].track==bgm->p()&&!std::strcmp(result.tracks[0].name,"BGM"));
@@ -203,6 +204,7 @@ def audio_binary(tmp_path_factory):
     "hierarchy_control", "offset_control", "clip_in_control", "scaled_control", "nan_clock",
     "short_control", "short_child", "nan_child", "control_blend", "control_ease", "nan_blend",
     "duplicate_clock", "clock_cycle", "reference_throws", "dead_audio_track", "dead_control_track",
+    "strict_supported_audio", "strict_unknown_audio", "strict_unknown_muted_audio",
 ])
 def test_audio_owner_and_identity_control_clock(audio_binary, scenario):
     result = subprocess.run([str(audio_binary), scenario], capture_output=True, text=True)

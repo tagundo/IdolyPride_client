@@ -44,7 +44,8 @@ def installer(tmp_path_factory):
                     'mp4_capture_texture_ctor', 'mp4_shader_memory_sync', 'mp4_shader_memory_async',
                     'mp4_shader_file_async', 'mp4_shader_bundle_result', 'mp4_source_timeline_factory',
                     'mp4_scene_shader_loaded', 'mp4_scene_shader_unloaded', 'mp4_scene_shader_bundle_unload',
-                    'mp4_scene_shader_load', 'mp4_capture_add_target', 'mp4_capture_request_target']
+                    'mp4_scene_shader_load', 'mp4_capture_add_target', 'mp4_capture_request_target',
+                    'mp4_video_prepared', 'mp4_video_seek', 'mp4_video_frame_ready', 'mp4_video_update', 'mp4_video_loop', 'mp4_video_behaviour_play']
     source_rows = ','.join('{pin::' + name + '.rva}' for name in source_names)
     prefix = (ROOT / 'tests/fixtures/android_presentation_install.cpp.inc').read_text()
     text = prefix.replace('// PIN_ENTRIES', entries).replace('// HOOK_DECLARATIONS', '\n'.join(declarations))
@@ -71,7 +72,7 @@ CASES = ['normal', 'native_source', 'fixed_source', 'animation_source', 'managed
          'base_ready', 'shadow_init', 'missing_image']
 CASES += ['first_failure_none', 'first_failure_preserved', 'first_failure_bounded']
 CASES += ['director_' + str(index) for index in range(7)]
-CASES += ['source_' + stage + '_' + str(index) for stage in ('before', 'after') for index in range(15)]
+CASES += ['source_' + stage + '_' + str(index) for stage in ('before', 'after') for index in range(21)]
 
 
 @pytest.mark.parametrize('case', CASES)

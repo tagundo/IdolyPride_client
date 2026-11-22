@@ -805,9 +805,12 @@ static NSDictionary *mp4SanitizeExportTrace(id value) {
 static NSDictionary *mp4DiagnosticSummary(id value) {
     if (![value isKindOfClass:NSDictionary.class]) return @{};
     NSMutableDictionary *result=[NSMutableDictionary new];
-    for (NSString *key in @[@"phase",@"error_code",@"readiness_error",@"selection_error"]) {
+    for (NSString *key in @[@"phase",@"error_code",@"readiness_error",@"selection_error",@"restoration_error"]) {
         NSString *code=mp4DiagnosticCode(value[key]); if(code)result[key]=code;
     }
+    id pipelineMode=value[@"pipeline_mode"];
+    if([pipelineMode isKindOfClass:NSString.class]&&[@[@"fresh_original_scene",@"legacy_owned_scene"]containsObject:pipelineMode])
+        result[@"pipeline_mode"]=pipelineMode;
     for (NSString *key in @[@"frames",@"total_frames",@"unity_ticks",@"capture_acks"])
         if(mp4DiagnosticInteger(value[key]))result[key]=value[key];
     id selected=value[@"selected_mv"];
@@ -850,6 +853,8 @@ static void mp4DiagnosticRemember(NSDictionary *status) {
             ||![(old[@"error_code"]?:@"")isEqual:(summary[@"error_code"]?:@"")]
             ||![(old[@"readiness_error"]?:@"")isEqual:(summary[@"readiness_error"]?:@"")]
             ||![(old[@"selection_error"]?:@"")isEqual:(summary[@"selection_error"]?:@"")]
+            ||![(old[@"restoration_error"]?:@"")isEqual:(summary[@"restoration_error"]?:@"")]
+            ||![(old[@"pipeline_mode"]?:@"")isEqual:(summary[@"pipeline_mode"]?:@"")]
             ||![(old[@"selected_mv"]?:NSNull.null)isEqual:(summary[@"selected_mv"]?:NSNull.null)];
         BOOL failure=[summary[@"phase"]isEqual:@"failed"];
         // An idle readiness poll after relaunch must not replace the previous
@@ -878,11 +883,14 @@ static NSDictionary *mp4SessionStatus(void) {
                 && value.doubleValue == value.unsignedLongLongValue) status[key] = value;
     }
     NSRegularExpression *code = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" options:0 error:NULL];
-    for (NSString *key in @[@"export_id",@"error_code",@"readiness_error",@"selection_error",@"pause_reason",@"resume_phase"]) {
+    for (NSString *key in @[@"export_id",@"error_code",@"readiness_error",@"selection_error",@"restoration_error",@"pause_reason",@"resume_phase"]) {
         NSString *value = [raw[key] isKindOfClass:NSString.class] ? raw[key] : nil;
         if (value && [code numberOfMatchesInString:value options:0 range:NSMakeRange(0,value.length)] == 1)
             status[key] = value;
     }
+    id pipelineMode=raw[@"pipeline_mode"];
+    if([pipelineMode isKindOfClass:NSString.class]&&[@[@"fresh_original_scene",@"legacy_owned_scene"]containsObject:pipelineMode])
+        status[@"pipeline_mode"]=pipelineMode;
     for (NSString *key in @[@"paused",@"pause_requested",@"selected_mv"]) {
         NSNumber *value = [raw[key] isKindOfClass:NSNumber.class] ? raw[key] : nil;
         if (value && CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) status[key] = value;

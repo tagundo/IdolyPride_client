@@ -617,6 +617,10 @@ VoidMethod quality_update_original, quality_init_original, quality_apply_origina
 void (*quality_set_original)(void *, int, Method *);
 int (*app_fps_get)(Method *);
 void (*app_fps_set_original)(int, Method *);
+bool mp4_fresh_qos_active();
+int mp4_fresh_qos_target();
+void mp4_fresh_qos_external_fps(int);
+bool mp4_fresh_qos_before_quality_change();
 void *(*quality_names)(Method *);
 int (*screen_width)(Method *), (*screen_height)(Method *);
 int (*max_texture)(Method *);
@@ -742,6 +746,7 @@ Weak controller_candidates[4];
 unsigned candidate_cursor = 0;
 int base_quality = 0, applied_quality = 0;
 std::atomic<uint64_t> application_fps_baseline{0};
+std::atomic<bool>mp4_fresh_qos_published{false},mp4_fresh_qos_foreign_changed{false};
 constexpr uint64_t FPS_KNOWN = uint64_t{1} << 63;
 int64_t resolution_revision = -1;
 Config rendered_configuration;
@@ -1420,6 +1425,7 @@ bool mp4_source_callbacks_release(uint64_t token)noexcept{
 using Mp4BrainUpdate=void(*)(void*,Method*);
 Mp4BrainUpdate mp4_brain_update_original=nullptr;
 bool mp4_camera_permit_brain(void*);
+bool mp4_fresh_permit_brain(void*);
 void mp4_brain_update_hook(void* brain,Method* method){
  Mp4SourceCallbackFrame source_callback(Mp4SourceCallbackKind::brain);
     if(!mp4_camera_permit_brain(brain))return;
@@ -2380,12 +2386,17 @@ namespace mp4_bootstrap {
 [[maybe_unused]] inline constexpr BootstrapPin android_capture_queue_pins[2]={{BootstrapRole::factory,BootstrapImage::game,0x8dfe7ac,{0xff,0x43,0x2,0xd1,0xfe,0x33,0x0,0xf9,0xf6,0x57,0x7,0xa9,0xf4,0x4f,0x8,0xa9,0xb4,0x93,0x0,0xd0,0x88,0xbe,0x58,0x39}},{BootstrapRole::factory,BootstrapImage::game,0x923d57c,{0xff,0x83,0x2,0xd1,0xfe,0x33,0x0,0xf9,0xf8,0x5f,0x7,0xa9,0xf6,0x57,0x8,0xa9,0xf4,0x4f,0x9,0xa9,0x16,0x72,0x0,0xb0}}};
 [[maybe_unused]] inline constexpr BootstrapPin ios_capture_queue_pins[2]={{BootstrapRole::factory,BootstrapImage::game,0x767d10c,{0xff,0x83,0x1,0xd1,0xf6,0x57,0x3,0xa9,0xf4,0x4f,0x4,0xa9,0xfd,0x7b,0x5,0xa9,0xfd,0x43,0x1,0x91,0xf3,0x3,0x2,0xaa}},{BootstrapRole::factory,BootstrapImage::game,0x7bcb8b0,{0xff,0xc3,0x1,0xd1,0xf8,0x5f,0x3,0xa9,0xf6,0x57,0x4,0xa9,0xf4,0x4f,0x5,0xa9,0xfd,0x7b,0x6,0xa9,0xfd,0x83,0x1,0x91}}};
 // END_MP4_CAPTURE_QUEUE_BOOTSTRAP_PINS
-constexpr size_t managed_source_count=15;
+// BEGIN_MP4_FRESH_VIDEO_EVENT_SOURCE_PINS
+[[maybe_unused]] inline constexpr BootstrapPin android_fresh_video_event_pins[6]={{BootstrapRole::factory,BootstrapImage::game,0x8812990,{0xfe,0xf,0x1f,0xf8,0xe8,0x3,0x0,0xaa,0x0,0xc,0x40,0xf9,0x1f,0x91,0x0,0x39,0xa0,0x0,0x0,0xb4,0x21,0x0,0x80,0x52}},{BootstrapRole::factory,BootstrapImage::game,0x88129b8,{0xfe,0x4f,0xbf,0xa9,0xf3,0x3,0x0,0xaa,0xe0,0x3,0x1f,0xaa,0xb2,0xda,0x1d,0x94,0x61,0x1a,0x40,0xfd,0x0,0x38,0x61,0x1e}},{BootstrapRole::factory,BootstrapImage::game,0x91fe3a0,{0xfe,0xf,0x1f,0xf8,0x80,0x1,0x0,0xb4,0x8,0x28,0x40,0xf9,0xe2,0x3,0x1,0xaa,0xe1,0x3,0x0,0xaa,0xc8,0x0,0x0,0xb4}},{BootstrapRole::factory,BootstrapImage::game,0x8812078,{0xe8,0xf,0x1e,0xfc,0xfe,0x7,0x0,0xf9,0xf4,0x4f,0x1,0xa9,0x8,0x80,0x40,0x39,0x8,0x1c,0xa0,0x4e,0xf3,0x3,0x0,0xaa}},{BootstrapRole::factory,BootstrapImage::game,0x881294c,{0xfe,0x4f,0xbf,0xa9,0x8,0x88,0x40,0x39,0xf3,0x3,0x0,0xaa,0x9,0x1,0x0,0x52,0x9,0x8c,0x0,0x39,0x28,0x1,0x0,0x34}},{BootstrapRole::factory,BootstrapImage::game,0x8812de4,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x1,0xa9,0xf5,0xc2,0x0,0xd0,0xf4,0x86,0x0,0xf0,0xa8,0x62,0x7b,0x39,0x94,0xaa,0x47,0xf9}}};
+[[maybe_unused]] inline constexpr BootstrapPin ios_fresh_video_event_pins[6]={{BootstrapRole::factory,BootstrapImage::game,0x6f620b4,{0x1f,0x90,0x0,0x39,0x0,0xc,0x40,0xf9,0x80,0x0,0x0,0xb4,0x21,0x0,0x80,0x52,0x2,0x0,0x80,0xd2,0x91,0x9a,0x23,0x14}},{BootstrapRole::factory,BootstrapImage::game,0x6f620d8,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x1,0xa9,0xfd,0x43,0x0,0x91,0xf3,0x3,0x0,0xaa,0x0,0x0,0x80,0xd2,0x43,0xe5,0x23,0x94}},{BootstrapRole::factory,BootstrapImage::game,0x7b76bac,{0x40,0x1,0x0,0xb4,0xe2,0x3,0x1,0xaa,0xe1,0x3,0x0,0xaa,0x8,0x28,0x40,0xf9,0xa8,0x0,0x0,0xb4,0x4,0xd,0x40,0xf9}},{BootstrapRole::factory,BootstrapImage::game,0x6f613e0,{0xe9,0x23,0xbc,0x6d,0xf6,0x57,0x1,0xa9,0xf4,0x4f,0x2,0xa9,0xfd,0x7b,0x3,0xa9,0xfd,0xc3,0x0,0x91,0x8,0x1c,0xa0,0x4e}},{BootstrapRole::factory,BootstrapImage::game,0x6f61f90,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91,0xf3,0x3,0x0,0xaa,0x8,0x88,0x40,0x39}},{BootstrapRole::factory,BootstrapImage::game,0x6f625bc,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x1,0xa9,0xfd,0x7b,0x2,0xa9,0xfd,0x83,0x0,0x91,0xf3,0x3,0x0,0xaa,0x94,0xcd,0x1,0xd0}}};
+// END_MP4_FRESH_VIDEO_EVENT_SOURCE_PINS
+
+constexpr size_t managed_source_count=21;
 [[maybe_unused]] const BootstrapPin* android_managed_source_pin(size_t index){
  if(index<8)return &android_managed_extra_pins[index];
  if(index==8)return &android_bootstrap_pins[7];
  if(index<13)return &android_scene_managed_pins[index-9];
- return index<managed_source_count?&android_capture_queue_pins[index-13]:nullptr;
+ return index<15?&android_capture_queue_pins[index-13]:(index<managed_source_count?&android_fresh_video_event_pins[index-15]:nullptr);
 }
 // END_MP4_SCENE_MANAGED_SOURCE_PINS
 }
@@ -2407,7 +2418,9 @@ bool mp4_managed_hook_requires_backend(uintptr_t rva){
   ||rva==pin::mp4_source_timeline_factory.rva||rva==pin::mp4_scene_shader_load.rva
   ||rva==pin::mp4_scene_shader_loaded.rva||rva==pin::mp4_scene_shader_unloaded.rva
   ||rva==pin::mp4_scene_shader_bundle_unload.rva||rva==pin::mp4_capture_add_target.rva
-  ||rva==pin::mp4_capture_request_target.rva;
+  ||rva==pin::mp4_capture_request_target.rva||rva==pin::mp4_video_prepared.rva
+  ||rva==pin::mp4_video_seek.rva||rva==pin::mp4_video_frame_ready.rva||rva==pin::mp4_video_update.rva
+  ||rva==pin::mp4_video_loop.rva||rva==pin::mp4_video_behaviour_play.rva;
 }
 // Bounded receipt bank for the actual finite managed observer table.
 constexpr size_t mp4_managed_hook_capacity=160;
@@ -5666,7 +5679,7 @@ void mp4_scene_will_change(void* value){
 
 
 // BEGIN_MP4_ACTOR_SCENE_PART
-bool mp4_scene_actor_inventory(const Mp4SceneWitness& source,mp4actor::Owner* owners,size_t* owner_count){
+bool mp4_scene_actor_inventory(const Mp4SceneWitness& source,mp4actor::Owner* owners,size_t* owner_count,bool allow_manual=false){
     if(!owners||!owner_count||!source.player||!mp4_actor_routes(nullptr))return false;
     *owner_count=0;void* binder=nullptr;void* list=nullptr;void** actors=nullptr;size_t count=0;
     if(!mp4_actor_field(source.player,mp4game::Layout{}.player_binder,binder)
@@ -5696,7 +5709,7 @@ bool mp4_scene_actor_inventory(const Mp4SceneWitness& source,mp4actor::Owner* ow
             ||!mp4_actor_field(owner.builder,f.builder_playable,owner.playable)
             ||!mp4_actor_field(owner.builder,f.builder_output,owner.output))return false;
         int32_t mode=-1;
-        if(!api.graph_valid(&owner.graph,nullptr)||!mp4_actor_graph_mode(&owner.graph,&mode)||mode!=1
+        if(!api.graph_valid(&owner.graph,nullptr)||!mp4_actor_graph_mode(&owner.graph,&mode)||(mode!=1&&(!allow_manual||mode!=3))
             ||api.animator_mode(owner.animator,nullptr)!=0||api.animator_culling(owner.animator,nullptr)!=0
             ||!api.playable_valid(&owner.playable,nullptr)||api.output_target(&owner.output,nullptr)!=owner.animator)return false;
         owners[(*owner_count)++]=owner;
@@ -17783,6 +17796,7 @@ void mp4_scene_diagnostic_probe(void*,idoly_mp4_runtime::NativeSceneDiagnostics*
 // END_MP4_SCENE_DIAGNOSTIC_HOST
 
 bool mp4_camera_permit_brain(void* brain){
+    if(!mp4_fresh_permit_brain(brain))return false;
     if(!mp4_camera_interception_published()||!game_call()||!mp4_camera_host.scope.active())return true;
     return mp4_camera_host.scope.permit_brain_update(brain);
 }
@@ -32938,6 +32952,261 @@ void mp4_configure_photography_factory(const idoly_mp4_replay_factories::Calls& 
     }catch(...){snprintf(mp4_photography_navigation.error,sizeof(mp4_photography_navigation.error),"%s","photography_navigation_configuration_exception");}
 }
 
+// Disposable OriginalMV logical restoration. Insert after the replay helpers
+// and before mp4_install_replay_runtime; configure from its actual Replay Api.
+// This deliberately retains no old scene/native/GPU object or spring history.
+// finish must detach the export clock/Mono/render/shader leases BEFORE calling
+// this helper. An async original scene reload must run with ordinary Unity.
+using Mp4FreshOriginResult = idoly_mp4_runtime::Result;
+struct Mp4FreshOrigin {
+    idoly_mp4_replay::Replay replay{};
+    idoly_mp4_queue::Descriptor descriptor{}, observed{};
+    idoly_mp4_queue::Graphics graphics{};
+    idoly_mp4_game::Snapshot snapshot{};
+    Config queue_graphics{};
+    double seconds=0; int32_t mode=0,state=0;
+    uint64_t identity=0,shader_generation=0,restore_identity=0,load_serial=0,autoplay_wait_started=0;
+    bool configured=false,saved=false,playing=false,paused=false,queue_override=false;
+    bool shader_custom=false,globals_restored=false,shader_superseded=false;
+    float shader_time=0;
+    bool reload_started=false,pause_started=false,pause_returned=false,seek_started=false,state_started=false,failed=false;
+    const char* error="none";
+};
+alignas(Mp4FreshOrigin) uint8_t mp4_fresh_origin_storage[sizeof(Mp4FreshOrigin)]{};
+bool mp4_fresh_origin_initialized=false;
+Mp4FreshOrigin& mp4_fresh_origin_state(){
+    if(!mp4_fresh_origin_initialized){
+#ifdef IDOLY_DARWIN_BRIDGE
+        new(idoly_mp4_queue_placement::Address{mp4_fresh_origin_storage}) Mp4FreshOrigin{};
+#else
+        new(mp4_fresh_origin_storage) Mp4FreshOrigin{};
+#endif
+        mp4_fresh_origin_initialized=true;
+    }
+    return *reinterpret_cast<Mp4FreshOrigin*>(mp4_fresh_origin_storage);
+}
+bool mp4_fresh_origin_configure(const idoly_mp4_replay::Api& api){
+    auto& o=mp4_fresh_origin_state();
+    if(o.saved||o.replay.active())return false;
+    o.configured=o.replay.set_api(api);return o.configured;
+}
+Mp4FreshOriginResult mp4_fresh_origin_retire_failure(){
+    auto& o=mp4_fresh_origin_state();
+    if(!game_call())return Mp4FreshOriginResult::waiting;
+    // Cancel future intent, but keep polling an original close/load already
+    // in flight. The Photography bridge independently retains its real task.
+    if(o.replay.active()){
+        o.replay.cancel();o.replay.tick(idoly_mp4_runtime::milliseconds());
+        if(o.replay.active())return Mp4FreshOriginResult::waiting;
+    }
+    if(o.descriptor.photo.source_kind==1&&mp4_photography_navigation.pending){
+        mp4_photography_cancel();return Mp4FreshOriginResult::waiting;
+    }
+    if(!o.replay.settle_failure())return Mp4FreshOriginResult::waiting;
+    if(!o.replay.reset())return Mp4FreshOriginResult::waiting;
+    // Only a settled failed attempt drops its logical origin. Its error stays
+    // published, while the next authorized Run can save a new current source.
+    o.saved=false;return Mp4FreshOriginResult::failed;
+}
+Mp4FreshOriginResult mp4_fresh_origin_fail(const char* error){
+    auto& o=mp4_fresh_origin_state();o.failed=true;o.error=error;
+    return mp4_fresh_origin_retire_failure();
+}
+const char* mp4_fresh_origin_error(void*){return mp4_fresh_origin_state().error;}
+bool mp4_fresh_origin_current(const Mp4SceneWitness& source,uint64_t identity){
+    Mp4SceneWitness actual{};
+    return identity&&idoly_mp4_runtime::game.selected_scene_witness(actual,false)
+        &&actual.player==source.player&&actual.presenter==source.presenter&&actual.director==source.director
+        &&idoly_mp4_runtime::selection.identity(actual.player)==identity;
+}
+// The exact JobHandle lives in the current Animator, not in copied job data.
+// This finite completion boundary is also useful immediately before export's
+// one original set_TimelineTime(0). It does not capture or restore raw arrays.
+Mp4FreshOriginResult mp4_fresh_complete_selected_actors(const Mp4SceneWitness& source){
+    if(!game_call()||!source.player||!mp4_actor_source_verified)return Mp4FreshOriginResult::unsupported;
+    const uint64_t identity=idoly_mp4_runtime::selection.identity(source.player);
+    if(!mp4_fresh_origin_current(source,identity))return Mp4FreshOriginResult::stale;
+    mp4game::Binding complete{};complete.rva=mp4_actor_profile.complete.rva;
+    std::memcpy(complete.prefix,mp4_actor_profile.complete.prefix,16);
+    if(!mp4_prefix(complete))return Mp4FreshOriginResult::unsupported;
+    void* binder=nullptr;void* list=nullptr;void** actors=nullptr;size_t count=0;
+    if(!mp4_actor_field(source.player,mp4game::Layout{}.player_binder,binder)
+        ||!mp4_type_is(binder,"Solis.Common.Live.SolisLiveBinder")
+        ||!mp4_actor_field(binder,mp4game::Layout{}.binder_actors,list)
+        ||!mp4_actor_list(list,&actors,&count,32)||!count)return Mp4FreshOriginResult::unsupported;
+    using Complete=void(*)(void*,mp4actor::Method*);
+    auto original=reinterpret_cast<Complete>(image_base+complete.rva);
+    for(size_t i=0;i<count;++i){
+        void* animator=nullptr;uintptr_t native=0;
+        if(!mp4_fresh_origin_current(source,identity)||!mp4_type_is(actors[i],"VL.Core.VLActorController")
+            ||!mp4_actor_field(actors[i],mp4_actor_profile.fields.actor_animator,animator)
+            ||!mp4_type_is(animator,"UnityEngine.Animator")||!mp4_alive(animator)
+            ||!mp4_actor_field(animator,mp4_actor_profile.fields.cached_ptr,native)||!native
+            ||native>~uintptr_t(0)-mp4_actor_profile.fields.native_animator_job)
+            return Mp4FreshOriginResult::stale;
+        void* job=reinterpret_cast<void*>(native+mp4_actor_profile.fields.native_animator_job);
+        if(!mp4_actor_mapped(job,16,true))return Mp4FreshOriginResult::unsupported;
+        original(job,nullptr);
+        // Complete can enter original engine work: recheck source and receiver
+        // before observing its actual cleared handle, without reusing a copy.
+        uintptr_t current=0;uint64_t group=0;int32_t version=0;
+        if(!mp4_fresh_origin_current(source,identity)
+            ||!mp4_actor_field(animator,mp4_actor_profile.fields.cached_ptr,current)||current!=native
+            ||!mp4_actor_field(job,0,group)||!mp4_actor_field(job,8,version))return Mp4FreshOriginResult::stale;
+        if(group||version)return Mp4FreshOriginResult::waiting;
+    }
+    return Mp4FreshOriginResult::ok;
+}
+// Public Pause/Resume preserve the original sleep policy and reset behavior.
+// The nine playback profile calls supply the remaining original flag/mode APIs.
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr mp4game::Binding mp4_fresh_origin_pause_pin={0x6feee90,{0xff,0x83,0x01,0xd1,0xf6,0x57,0x03,0xa9,0xf4,0x4f,0x04,0xa9,0xfd,0x7b,0x05,0xa9}};
+constexpr mp4game::Binding mp4_fresh_origin_resume_pin={0x6fef0e8,{0xfd,0x7b,0xbf,0xa9,0xfd,0x03,0x00,0x91,0x08,0xc8,0x41,0x39,0x1f,0x05,0x00,0x71}};
+#else
+constexpr mp4game::Binding mp4_fresh_origin_pause_pin={0x888df74,{0xff,0x83,0x01,0xd1,0xfe,0x57,0x04,0xa9,0xf4,0x4f,0x05,0xa9,0x34,0xbf,0x00,0x90}};
+constexpr mp4game::Binding mp4_fresh_origin_resume_pin={0x888e19c,{0xfe,0x0f,0x1f,0xf8,0x08,0xc8,0x41,0x39,0x68,0x01,0x00,0x34,0x08,0x1c,0x40,0xf9}};
+#endif
+Mp4FreshOriginResult mp4_fresh_origin_save(void*){
+    auto& o=mp4_fresh_origin_state();
+    if(!game_call())return Mp4FreshOriginResult::waiting;
+    if(o.saved)return o.failed?Mp4FreshOriginResult::failed:Mp4FreshOriginResult::ok;
+    if(!o.configured||!mp4_prefix(mp4_fresh_origin_pause_pin)||!mp4_prefix(mp4_fresh_origin_resume_pin)){
+        o.error="fresh_origin_original_apis_unavailable";return Mp4FreshOriginResult::unsupported;
+    }
+    auto& game=idoly_mp4_runtime::game;
+    const auto sampled=game.snapshot(o.snapshot,false);if(sampled!=Mp4FreshOriginResult::ok)return sampled;
+    Mp4SceneWitness source{};
+    if(!game.selected_scene_witness(source,false))return Mp4FreshOriginResult::waiting;
+    const uint64_t identity=idoly_mp4_runtime::selection.identity(source.player);
+    const auto selected=idoly_mp4_runtime::selection.selected(source.player,o.descriptor);
+    if(selected!=Mp4FreshOriginResult::ok)return selected;
+    const auto& p=mp4_api.automatic_playback;
+    if(!p.director_state||!p.player_playing||!p.player_paused||!p.player_set_playing||!p.player_set_paused
+        ||!mp4_api.director_get_mode||!mp4_api.director_set_mode||!mp4_api.player_set_time)
+        return Mp4FreshOriginResult::unsupported;
+    double seconds=0;bool paused=false;
+    if(!game.observe_source(seconds,paused))return Mp4FreshOriginResult::waiting;
+    const int32_t state=p.director_state(source.director,nullptr),mode=mp4_api.director_get_mode(source.director,nullptr);
+    const bool playing=p.player_playing(source.player,nullptr);
+    if((state!=0&&state!=1)||mode<0||mode>3||(paused&&state==1))return Mp4FreshOriginResult::waiting;
+    // Preserve the live original whole-song coroutine. Initial construction
+    // and an already ended Photo source are not stable origins to replace.
+    if(o.descriptor.photo.source_kind==1&&!playing)return Mp4FreshOriginResult::waiting;
+    if(!mp4_queue_snapshot_graphics(o.graphics))return Mp4FreshOriginResult::waiting;
+    {
+        Mp4ShaderLock lock;
+        if(!mp4_shader_generation||!mp4_api.shader_use_custom||!mp4_api.shader_current_time
+            ||!mp4_shader_set_original||!mp4_shader_reset_original)return Mp4FreshOriginResult::unsupported;
+        o.shader_custom=mp4_api.shader_use_custom(nullptr);o.shader_time=mp4_api.shader_current_time(nullptr);
+        if(!std::isfinite(o.shader_time))return Mp4FreshOriginResult::unsupported;
+        o.shader_generation=mp4_shader_generation;
+    }
+    if(!mp4_fresh_origin_current(source,identity))return Mp4FreshOriginResult::stale;
+    pthread_mutex_lock(&config_mutex);o.queue_override=mp4_queue_graphics_override;o.queue_graphics=mp4_queue_graphics;pthread_mutex_unlock(&config_mutex);
+    o.seconds=seconds;o.mode=mode;o.state=state;o.playing=playing;o.paused=paused;o.identity=identity;
+    o.saved=true;o.failed=o.globals_restored=o.shader_superseded=o.reload_started=o.pause_started=o.pause_returned=o.seek_started=o.state_started=false;
+    o.restore_identity=o.load_serial=o.autoplay_wait_started=0;o.error="none";return Mp4FreshOriginResult::ok;
+}
+bool mp4_fresh_origin_observe(Mp4FreshOrigin& o){
+    void* player=idoly_mp4_runtime::game.selected_player();void* presenter=idoly_mp4_runtime::game.selected_presenter();
+    const uint64_t identity=idoly_mp4_runtime::selection.identity(player);
+    if(!player||!presenter||!identity)return false;
+    return idoly_mp4_runtime::selection.selected(player,o.observed)==Mp4FreshOriginResult::ok
+        &&o.replay.observe(presenter,player,o.observed,identity);
+}
+Mp4FreshOriginResult mp4_fresh_origin_restore(void*){
+    auto& o=mp4_fresh_origin_state();
+    if(!o.saved)return Mp4FreshOriginResult::ok;
+    if(!game_call())return Mp4FreshOriginResult::waiting;
+    if(o.failed)return mp4_fresh_origin_retire_failure();
+    // All global writes happen before the first possible async WAIT. A known
+    // superseding public shader writer wins even if it wrote the same float.
+    if(!o.globals_restored){
+        o.globals_restored=true;
+        {
+            Mp4ShaderLock lock;
+            if(mp4_shader_generation&&mp4_shader_generation==o.shader_generation){
+                if(o.shader_custom)mp4_shader_set_original(o.shader_time,nullptr);
+                else mp4_shader_reset_original(nullptr);
+            }else o.shader_superseded=true;
+        }
+        pthread_mutex_lock(&config_mutex);mp4_queue_graphics=o.queue_graphics;mp4_queue_graphics_override=o.queue_override;pthread_mutex_unlock(&config_mutex);
+    }
+    try{
+        (void)mp4_fresh_origin_observe(o);
+        if(!o.reload_started){
+            // Force the REAL original factory route even for the same selected
+            // song/costumes. Ready on an old retained player is insufficient.
+            if(!o.replay.begin(o.descriptor,idoly_mp4_runtime::milliseconds(),true))
+                return mp4_fresh_origin_fail(o.replay.error());
+            o.reload_started=true;
+        }
+        o.replay.tick(idoly_mp4_runtime::milliseconds());
+        if(o.replay.active())return Mp4FreshOriginResult::waiting;
+        if(o.replay.phase()!=idoly_mp4_replay::Phase::ready||!o.replay.fresh_ready()||!o.replay.ready_load_serial())
+            return mp4_fresh_origin_fail(o.replay.error());
+        auto& game=idoly_mp4_runtime::game;
+        const auto sampled=game.snapshot(o.snapshot,false);if(sampled==Mp4FreshOriginResult::waiting)return sampled;
+        if(sampled!=Mp4FreshOriginResult::ok)return mp4_fresh_origin_fail(game.last_error());
+        Mp4SceneWitness source{};
+        if(!game.selected_scene_witness(source,false)||source.player!=o.replay.player()||source.presenter!=o.replay.presenter())
+            return mp4_fresh_origin_fail("fresh_origin_reloaded_source_changed");
+        const uint64_t identity=idoly_mp4_runtime::selection.identity(source.player);
+        if(!identity||identity!=o.replay.ready_identity())return mp4_fresh_origin_fail("fresh_origin_factory_receipt_changed");
+        const auto& p=mp4_api.automatic_playback;
+        // Photography root initialization later starts its original whole-song
+        // PlayAsync. Wait for that actual start before a saved seek/Pause, so a
+        // delayed second Play cannot erase the restored logical state.
+        if(o.descriptor.photo.source_kind==1&&!o.pause_started
+            &&(!p.player_playing(source.player,nullptr)||p.director_state(source.director,nullptr)!=1)){
+            const uint64_t now=idoly_mp4_runtime::milliseconds();
+            if(!o.autoplay_wait_started)o.autoplay_wait_started=now;
+            else if(now<o.autoplay_wait_started||now-o.autoplay_wait_started>60000)
+                return mp4_fresh_origin_fail("fresh_origin_original_autoplay_not_started");
+            return Mp4FreshOriginResult::waiting;
+        }
+        if(!o.pause_started){
+            const auto fenced=mp4_fresh_complete_selected_actors(source);if(fenced!=Mp4FreshOriginResult::ok)return fenced;
+            if(!mp4_fresh_origin_current(source,identity))return mp4_fresh_origin_fail("fresh_origin_reloaded_source_changed");
+            o.pause_started=true;o.restore_identity=identity;o.load_serial=o.replay.ready_load_serial();
+            // Freeze ordinary playback BEFORE any later completion WAIT. Keep
+            // IsPlaying true so Photo's original whole-song task remains live.
+            p.player_set_paused(source.player,false,nullptr);
+            reinterpret_cast<VoidMethod>(image_base+mp4_fresh_origin_pause_pin.rva)(source.player,nullptr);
+            o.pause_returned=true;
+        }
+        if(!o.pause_returned)return mp4_fresh_origin_fail("fresh_origin_pause_incomplete");
+        if(identity!=o.restore_identity||o.load_serial!=o.replay.ready_load_serial()||!mp4_fresh_origin_current(source,identity))
+            return mp4_fresh_origin_fail("fresh_origin_seek_source_changed");
+        if(!o.seek_started){
+            if(p.director_state(source.director,nullptr)!=0||!p.player_paused(source.player,nullptr))
+                return mp4_fresh_origin_fail("fresh_origin_pause_not_held");
+            const auto fenced=mp4_fresh_complete_selected_actors(source);if(fenced!=Mp4FreshOriginResult::ok)return fenced;
+            if(!mp4_fresh_origin_current(source,identity))return mp4_fresh_origin_fail("fresh_origin_seek_source_changed");
+            o.seek_started=true;mp4_api.player_set_time(source.player,static_cast<float>(o.seconds),nullptr);
+        }
+        // No asynchronous WAIT follows the one-shot saved seek or Resume.
+        if(!o.state_started){
+            o.state_started=true;
+            mp4_api.director_set_mode(source.director,o.mode,nullptr);
+            if(!mp4_fresh_origin_current(source,identity))return mp4_fresh_origin_fail("fresh_origin_restore_source_changed");
+            if(o.state==1)reinterpret_cast<VoidMethod>(image_base+mp4_fresh_origin_resume_pin.rva)(source.player,nullptr);
+            if(!mp4_fresh_origin_current(source,identity))return mp4_fresh_origin_fail("fresh_origin_restore_source_changed");
+            // Paused Photo PlayAsync must KEEP IsPlaying=true, otherwise its
+            // original IsEndTimeline immediately completes the scene coroutine.
+            p.player_set_playing(source.player,o.playing,nullptr);p.player_set_paused(source.player,o.paused,nullptr);
+        }
+        const double actual=mp4_api.director_get_time(source.director,nullptr);
+        const double expected=static_cast<float>(o.seconds);
+        if(!mp4_fresh_origin_current(source,identity)||!std::isfinite(actual)||std::fabs(actual-expected)>.002
+            ||mp4_api.director_get_mode(source.director,nullptr)!=o.mode||p.director_state(source.director,nullptr)!=o.state
+            ||p.player_playing(source.player,nullptr)!=o.playing||p.player_paused(source.player,nullptr)!=o.paused)
+            return mp4_fresh_origin_fail("fresh_origin_logical_restore_failed");
+        if(!o.replay.reset())return mp4_fresh_origin_fail("fresh_origin_replay_release_failed");
+        o.saved=false;o.error="none";return Mp4FreshOriginResult::ok;
+    }catch(...){return mp4_fresh_origin_fail("fresh_origin_original_restore_exception");}
+}
+
 void mp4_install_replay_runtime(){
     if(!mp4_replay_verified)return;
     namespace factories=idoly_mp4_replay_factories;
@@ -32962,6 +33231,7 @@ void mp4_install_replay_runtime(){
     MP4_REPLAY_CALL(scene_instance);MP4_REPLAY_CALL(scene_busy);MP4_REPLAY_CALL(live_state);MP4_REPLAY_CALL(tree_with_param);MP4_REPLAY_CALL(open_tree);
     MP4_REPLAY_CALL(presenter_end);MP4_REPLAY_CALL(task_status);MP4_REPLAY_CALL(task_get_awaiter);MP4_REPLAY_CALL(task_get_result);MP4_REPLAY_CALL(top_screen);MP4_REPLAY_CALL(player_ready);
 #undef MP4_REPLAY_CALL
+    (void)mp4_fresh_origin_configure(api);
     idoly_mp4_runtime::install_queue_api(api,mp4_queue_snapshot_graphics,mp4_queue_apply_graphics,
 #ifdef IDOLY_DARWIN_BRIDGE
         mp4game::ios_original_sha256,
@@ -32977,8 +33247,9 @@ extern bool (*mp4_renderer_source_program_verified)();
 bool mp4_paused_copy_recipe_closed(uint64_t,uint64_t,uint64_t);
 void mp4_capture_frontends_install();
 bool mp4_frame_capture_install_operations();
+bool mp4_install_fresh_runtime();
 bool mp4_prepare_runtime() {
-    if(mp4_api_installed)return true;
+    if(mp4_api_installed){(void)mp4_install_fresh_runtime();return true;}
     auto unavailable=[](const char* reason){
         idoly_mp4_runtime::diagnostic_event("runtime_bindings",reason,0,0,true);
         pthread_mutex_lock(&idoly_mp4_runtime::control_mutex);
@@ -33063,7 +33334,7 @@ bool mp4_prepare_runtime() {
     if(!mp4_frame_capture_install_operations())return unavailable("capture_operation_install_failed");
     (void)idoly_mp4_runtime::install_native_scene_diagnostic_probe(&mp4_scene_host,mp4_scene_diagnostic_probe);
     mp4_install_replay_runtime();
-    mp4_api_installed=true;mp4_publish_pipeline_diagnostics();return true;
+    mp4_api_installed=true;(void)mp4_install_fresh_runtime();mp4_publish_pipeline_diagnostics();return true;
 }
 // BEGIN_MP4_SELECTED_CONTROLLER
 void *mp4_selected_controller(void *presenter) {
@@ -41120,6 +41391,89 @@ extern mp4_bootstrap::ShadowService<mp4_bootstrap::managed_source_count>mp4_mana
 }
 // END_MP4_CAPTURE_FRONTEND_SOURCE_HOST
 
+// BEGIN_MP4_FRESH_VIDEO_EVENT_HOST
+using Mp4FreshVideoSolisEvent=void(*)(void*,void*,Method*);
+using Mp4FreshVideoFrameEvent=void(*)(void*,int64_t,Method*);
+using Mp4FreshVideoUpdate=void(*)(void*,bool,double,Method*);
+using Mp4FreshVideoUpdateSink=bool(*)(void*,bool,double);
+using Mp4FreshVideoBehaviourPlay=void(*)(void*,mp4actor::Handle,Mp4ChildDrivingFrameData,Method*);
+Mp4FreshVideoBehaviourPlay mp4_video_behaviour_play_original=nullptr;
+Mp4FreshVideoSolisEvent mp4_video_loop_original=nullptr;
+Mp4FreshVideoUpdate mp4_video_update_original=nullptr;
+std::atomic<Mp4FreshVideoUpdateSink>mp4_fresh_video_update_sink{nullptr};
+void mp4_video_update_hook(void*script,bool prepare,double time,Method*method){
+ if(auto sink=mp4_fresh_video_update_sink.load(std::memory_order_acquire))if(sink(script,prepare,time))return;
+ mp4_video_update_original(script,prepare,time,method);
+}
+void mp4_video_loop_hook(void*script,void*player,Method*method){
+ if(auto sink=mp4_fresh_video_update_sink.load(std::memory_order_acquire))if(sink(script,false,0))return;
+ mp4_video_loop_original(script,player,method);
+}
+void mp4_video_behaviour_play_hook(void*script,mp4actor::Handle playable,Mp4ChildDrivingFrameData frame,Method*method){
+ if(auto sink=mp4_fresh_video_update_sink.load(std::memory_order_acquire))if(sink(script,false,0))return;
+ mp4_video_behaviour_play_original(script,playable,frame,method);
+}
+using Mp4FreshVideoEventSink=void(*)(unsigned,void*,void*,int64_t);
+Mp4FreshVideoSolisEvent mp4_video_prepared_original=nullptr,mp4_video_seek_original=nullptr;
+Mp4FreshVideoFrameEvent mp4_video_frame_ready_original=nullptr;
+std::atomic<Mp4FreshVideoEventSink>mp4_fresh_video_event_sink{nullptr};
+void mp4_video_prepared_hook(void*script,void*player,Method*method){
+ mp4_video_prepared_original(script,player,method);
+ if(auto sink=mp4_fresh_video_event_sink.load(std::memory_order_acquire))sink(0,script,player,0);
+}
+void mp4_video_seek_hook(void*script,void*player,Method*method){
+ mp4_video_seek_original(script,player,method);
+ if(auto sink=mp4_fresh_video_event_sink.load(std::memory_order_acquire))sink(1,script,player,0);
+}
+void mp4_video_frame_ready_hook(void*player,int64_t frame,Method*method){
+ mp4_video_frame_ready_original(player,frame,method);
+ if(auto sink=mp4_fresh_video_event_sink.load(std::memory_order_acquire))sink(2,nullptr,player,frame);
+}
+#ifdef IDOLY_DARWIN_BRIDGE
+bool mp4_fresh_video_static_event_current(const pin::Entry&e,const mp4_bootstrap::BootstrapPin&source,uintptr_t hook,uintptr_t original){
+ if(!e.gateway||!e.slot||e.relay_in||e.relay_out||e.rva!=source.rva||std::memcmp(e.bytes,source.original,16)
+  ||original!=image_base+e.gateway+20||!mp4_mapped(image_base+e.rva,24,true)
+  ||std::memcmp(reinterpret_cast<void*>(image_base+e.rva+4),source.original+4,20)
+  ||!mp4_mapped(image_base+e.slot,8,false)||read<uintptr_t>(reinterpret_cast<void*>(image_base+e.slot),0)!=hook)return false;
+ const auto branch=[](uintptr_t from,uintptr_t to,uint32_t*out){const intptr_t delta=static_cast<intptr_t>(to)-static_cast<intptr_t>(from);
+  if((delta&3)||delta<-(1ll<<27)||delta>=(1ll<<27))return false;*out=0x14000000u|(static_cast<uint32_t>(delta/4)&0x3ffffffu);return true;};
+ uint32_t displaced=0,incoming=0,back=0;std::memcpy(&displaced,e.bytes,4);
+ const bool compare=(displaced&0x7e000000u)==0x34000000u;
+ if(!mp4_mapped(image_base+e.gateway,compare?32:28,true)||!branch(e.rva,e.gateway,&incoming)
+  ||!branch(e.gateway+24,e.rva+4,&back)||read<uint32_t>(reinterpret_cast<void*>(image_base+e.rva),0)!=incoming)return false;
+ const intptr_t page=static_cast<intptr_t>(e.slot>>12)-static_cast<intptr_t>(e.gateway>>12);if(page<-(1<<20)||page>=(1<<20))return false;
+ uint32_t words[]={0x90000010u|((static_cast<uint32_t>(page)&3)<<29)|(((static_cast<uint32_t>(page)>>2)&0x7ffff)<<5),
+  0x91000210u|static_cast<uint32_t>((e.slot&0xfff)<<10),0xc8dffe10u,0xb4000050u,0xd61f0200u,displaced,back,0};
+ if(compare){if((displaced&31u)==16u||(displaced&31u)==17u)return false;
+  int32_t imm=static_cast<int32_t>((displaced>>5)&0x7ffffu);if(imm&(1<<18))imm-=1<<19;
+  const intptr_t target=static_cast<intptr_t>(e.rva)+static_cast<intptr_t>(imm)*4;
+  if(target<0||!branch(e.gateway+28,static_cast<uintptr_t>(target),&words[7]))return false;
+  words[5]=(displaced&~(0x7ffffu<<5))|(2u<<5);
+ }
+ return !std::memcmp(reinterpret_cast<void*>(image_base+e.gateway),words,compare?32:28);
+}
+#endif
+bool mp4_fresh_video_callbacks_ready(){
+ if(!game_call()||!mp4_source_verified||!ready.load(std::memory_order_acquire))return false;
+ const pin::Entry*entries[]={&pin::mp4_video_prepared,&pin::mp4_video_seek,&pin::mp4_video_frame_ready,&pin::mp4_video_update,&pin::mp4_video_loop,&pin::mp4_video_behaviour_play};
+ const uintptr_t hooks[]={reinterpret_cast<uintptr_t>(mp4_video_prepared_hook),reinterpret_cast<uintptr_t>(mp4_video_seek_hook),reinterpret_cast<uintptr_t>(mp4_video_frame_ready_hook),reinterpret_cast<uintptr_t>(mp4_video_update_hook),reinterpret_cast<uintptr_t>(mp4_video_loop_hook),reinterpret_cast<uintptr_t>(mp4_video_behaviour_play_hook)};
+ void**slots[]={reinterpret_cast<void**>(&mp4_video_prepared_original),reinterpret_cast<void**>(&mp4_video_seek_original),reinterpret_cast<void**>(&mp4_video_frame_ready_original),reinterpret_cast<void**>(&mp4_video_update_original),reinterpret_cast<void**>(&mp4_video_loop_original),reinterpret_cast<void**>(&mp4_video_behaviour_play_original)};
+ for(size_t i=0;i<6;++i){if(!*slots[i])return false;
+#ifdef IDOLY_DARWIN_BRIDGE
+  if(!mp4_fresh_video_static_event_current(*entries[i],mp4_bootstrap::ios_fresh_video_event_pins[i],hooks[i],reinterpret_cast<uintptr_t>(*slots[i])))return false;
+#else
+  const auto count=mp4_managed_hook_count.load(std::memory_order_acquire);if(count>mp4_managed_hook_capacity)return false;
+  const Mp4ManagedHookReceipt*found=nullptr;for(size_t j=0;j<count;++j)if(mp4_managed_hook_receipts[j].rva==entries[i]->rva){if(found)return false;found=&mp4_managed_hook_receipts[j];}
+  if(!found||found->base!=image_base||found->replacement!=reinterpret_cast<void*>(hooks[i])||found->original_location!=slots[i]||found->trampoline!=*slots[i]||!found->stub)return false;
+  mp4_bootstrap::Install actual{};
+  if(!mp4_managed_source_backend.receipt(15+i,image_base+entries[i]->rva,hooks[i],reinterpret_cast<uintptr_t>(*slots[i]),reinterpret_cast<uintptr_t>(found->stub),&actual))return false;
+#endif
+ }
+ return true;
+}
+// END_MP4_FRESH_VIDEO_EVENT_HOST
+
+
 // BEGIN_MP4_SOURCE_FACTORY_FRONTEND_HOST
 // This certificate is available during ordinary first-MV construction. It
 // proves only this installed typed source gateway, not Birth/Scene ownership.
@@ -41377,6 +41731,7 @@ bool mp4_paused_image_destroy_texture(void*context,mp4frame::Texture&texture){
 
 
 using Mp4RenderCamera=void(*)(Mp4RenderContext,void*,Method*);
+bool mp4_fresh_render_call(Mp4RenderCamera,Mp4RenderContext,void*,Method*);
 Mp4RenderCamera mp4_render_stack_original=nullptr,mp4_render_camera_original=nullptr;
 Mp4SceneResult (*mp4_camera_begin_extra_draw)(uint64_t*)=nullptr;
 bool (*mp4_camera_end_extra_draw)(uint64_t)=nullptr;
@@ -41469,6 +41824,7 @@ void mp4_unowned_render_call(Mp4RenderCamera original,Mp4RenderContext context,v
 // END_MP4_UNOWNED_RENDER_HOST
 
 void mp4_owned_render_call(Mp4RenderCamera original,Mp4RenderContext context,void* camera,Method* method){
+    if(mp4_fresh_render_call(original,context,camera,method))return;
     if(!mp4_camera_interception_published()){
         if(mp4_owned_render_depth)mp4_unowned_render_call(original,context,camera,method);
         else mp4_particle_render_observed(original,context,camera,method);
@@ -53916,6 +54272,7 @@ void quality_track(void *self) {
     quality_manager.set(self); base_quality = read<int>(self, 0x24);
     applied_quality = 0;
 }
+int mp4_selected_runtime_fps(const Config&config,int ordinary){return mp4_fresh_qos_active()?mp4_fresh_qos_target():selected_fps(config,ordinary);}
 int original_fps() {
     uint64_t value = application_fps_baseline.load(std::memory_order_acquire);
     if (!(value & FPS_KNOWN)) {
@@ -53936,6 +54293,7 @@ void quality_set_hook(void *self, int value, Method *method) {
         const uintptr_t count = names ? read<uintptr_t>(names, 0x18) : 0;
         if (!count || count > 1024) desired = value;
     }
+    if(!mp4_fresh_qos_before_quality_change())return;
     quality_set_original(self, desired, method);
     applied_quality = desired != value ? desired : 0;
 }
@@ -53980,9 +54338,9 @@ void quality_update_hook(void *self, Method *method) {
         const uintptr_t count = names ? read<uintptr_t>(names, 0x18) : 0;
         if (!count || count > 1024) { desired = base_quality; quality_unavailable = true; }
     }
-    if (desired != actual) quality_set_original(self, desired, nullptr);
-    applied_quality = config.custom_graphics && config.quality ? desired : 0;
-    const int desired_fps = selected_fps(config, original_fps());
+    if (desired != actual&&mp4_fresh_qos_before_quality_change())quality_set_original(self, desired, nullptr);
+    applied_quality = config.custom_graphics && config.quality ? read<int>(self,0x24) : 0;
+    const int desired_fps = mp4_selected_runtime_fps(config, original_fps());
     if (app_fps_get(nullptr) != desired_fps) app_fps_set_original(desired_fps, nullptr);
     quality_update_original(self, method);
     sound_tracker.tick(true);
@@ -53992,7 +54350,7 @@ void quality_update_hook(void *self, Method *method) {
     RectTypeMemoScope type_memo;
     const bool quality_readback = read<int>(self, 0x24)
         == (config.custom_graphics && config.quality && !quality_unavailable ? config.quality : base_quality);
-    const bool fps_readback = app_fps_get(nullptr) == selected_fps(config, original_fps());
+    const bool fps_readback = app_fps_get(nullptr) == mp4_selected_runtime_fps(config, original_fps());
     const int width = screen_width(nullptr), height = screen_height(nullptr);
     pthread_mutex_lock(&status_mutex);
     state.screen_w = width; state.screen_h = height;
@@ -54036,9 +54394,10 @@ void quality_update_hook(void *self, Method *method) {
 void app_fps_set_hook(int value, Method *method) {
     if (!ready.load(std::memory_order_acquire)) { app_fps_set_original(value, method); return; }
     application_fps_baseline.store(FPS_KNOWN | static_cast<uint32_t>(value), std::memory_order_release);
-    if (!game_call()) { app_fps_set_original(value, method); return; }
+    if (!game_call()) {if(mp4_fresh_qos_published.load(std::memory_order_acquire))mp4_fresh_qos_foreign_changed.store(true,std::memory_order_release);app_fps_set_original(value, method);return;}
     Config config = configuration();
-    app_fps_set_original(selected_fps(config, value), method);
+    mp4_fresh_qos_external_fps(selected_fps(config,value));
+    app_fps_set_original(mp4_selected_runtime_fps(config, value), method);
 }
 
 void aa_hook(void *camera, void *additional, bool final, void *data, Method *method) {
@@ -54499,7 +54858,8 @@ bool mp4_android_managed_source_prepare(const Image&game){
  const pin::Entry*entries[]={&pin::mp4_capture_request,&pin::mp4_capture_update,&pin::mp4_capture_wrapper_ctor,&pin::mp4_capture_texture_ctor,
   &pin::mp4_shader_memory_sync,&pin::mp4_shader_memory_async,&pin::mp4_shader_file_async,&pin::mp4_shader_bundle_result,
   &pin::mp4_source_timeline_factory,&pin::mp4_scene_shader_loaded,&pin::mp4_scene_shader_unloaded,
-  &pin::mp4_scene_shader_bundle_unload,&pin::mp4_scene_shader_load,&pin::mp4_capture_add_target,&pin::mp4_capture_request_target};
+  &pin::mp4_scene_shader_bundle_unload,&pin::mp4_scene_shader_load,&pin::mp4_capture_add_target,&pin::mp4_capture_request_target,
+  &pin::mp4_video_prepared,&pin::mp4_video_seek,&pin::mp4_video_frame_ready,&pin::mp4_video_update,&pin::mp4_video_loop,&pin::mp4_video_behaviour_play};
  static_assert(sizeof entries/sizeof entries[0]==mp4_bootstrap::managed_source_count,"source backend entries must match immutable pins");
  for(size_t i=0;i<mp4_bootstrap::managed_source_count;++i){const auto& p=*mp4_bootstrap::android_managed_source_pin(i);
   if(entries[i]->rva!=p.rva||std::memcmp(entries[i]->bytes,p.original,16))return false;
@@ -54694,6 +55054,12 @@ void *install(void *) {
         HOOK(mp4_fog_disable,mp4_fog_disable_hook,mp4_fog_disable_original),
         HOOK(mp4_fog_late,mp4_fog_late_hook,mp4_fog_late_original),
         HOOK(mp4_context_submit,mp4_context_submit_hook,mp4_context_submit_original),
+        HOOK(mp4_video_update,mp4_video_update_hook,mp4_video_update_original),
+        HOOK(mp4_video_loop,mp4_video_loop_hook,mp4_video_loop_original),
+        HOOK(mp4_video_behaviour_play,mp4_video_behaviour_play_hook,mp4_video_behaviour_play_original),
+        HOOK(mp4_video_prepared,mp4_video_prepared_hook,mp4_video_prepared_original),
+        HOOK(mp4_video_seek,mp4_video_seek_hook,mp4_video_seek_original),
+        HOOK(mp4_video_frame_ready,mp4_video_frame_ready_hook,mp4_video_frame_ready_original),
         HOOK(mp4_capture_request,mp4_capture_request_hook,mp4_capture_request_original),
         HOOK(mp4_capture_add_target,mp4_capture_add_hook,mp4_capture_add_original),
         HOOK(mp4_capture_request_target,mp4_capture_target_request_hook,mp4_capture_target_request_original),
@@ -55202,29 +55568,1539 @@ void mp4_render_hold_manual(VoidMethod original,void*camera,Method*method){
 }
 // END_MP4_RENDER_HOLD_HOST
 
+// BEGIN_MP4_FRESH_CONTROL_ROSTER
+// Read-only authored Control reachability. No retained-history Scope, graph
+// mutation, evaluation, worker completion or old-source CAPI is used here.
+struct Mp4FreshControlRoster {
+ struct Node {void*director=nullptr,*asset=nullptr;uintptr_t native=0;int32_t instance=0;
+  mp4game::PlayableGraph graph{};int32_t director_mode=-1,graph_mode=-1,desired_mode=-1;
+  bool flat=false,controlled=false;};
+ struct List {void*owner=nullptr,*list=nullptr,*array=nullptr;const char*array_type=nullptr;size_t offset=0,begin=0,count=0;int32_t version=0;};
+ struct Control {size_t parent=0;void*track=nullptr,*clip=nullptr,*asset=nullptr,*source=nullptr,*owner=nullptr,*excluded=nullptr;
+  mp4game::PropertyName4 name{};void*default_go=nullptr,*prefab=nullptr;
+  uint8_t update=0,time_control=0,hierarchy=0,active=0,particles=0;uint32_t seed=0;int32_t post=0;
+  bool muted=false;double timing[8]{};size_t component_begin=0,component_count=0;};
+ struct Edge {uint16_t control=0,child=0;};
+ struct PathGraph {mp4actor::Handle graph{};int32_t original_mode=-1,desired_mode=1;};
+ struct PathPlayable {mp4actor::Handle playable{};uint16_t graph=0;void*key=nullptr;};
+ struct PathDeclaration {void*key=nullptr,*binder=nullptr;};
+ struct PathOwner {void*component=nullptr,*go=nullptr,*declared=nullptr,*cache=nullptr,*array=nullptr;
+  uintptr_t native=0;int32_t instance=0,version=0;size_t declaration_begin=0,declaration_count=0,playable_begin=0,playable_count=0;};
+ struct PathBinding {void*binder=nullptr,*director=nullptr,*bindings=nullptr,*script=nullptr;mp4actor::Handle output{},playable{};size_t owner=0,declared=0;};
+ struct PathSearch {void*go=nullptr;size_t begin=0,count=0;};
+ Node nodes[129]{};size_t count=0;List lists[2048]{};size_t list_count=0;
+ Control controls[1024]{};size_t control_count=0;Edge edges[4096]{};size_t edge_count=0;
+ void*items[16384]{};size_t item_count=0;uint32_t roots[16384]{};size_t root_count=0;
+ PathGraph path_graphs[128]{};size_t path_graph_count=0;
+ PathPlayable path_playables[1024]{};size_t path_playable_count=0;
+ PathDeclaration path_declarations[2048]{};size_t path_declaration_count=0;
+ PathOwner path_owners[128]{};size_t path_owner_count=0;
+ PathBinding path_bindings[1024]{};size_t path_binding_count=0;
+ PathSearch path_searches[256]{};size_t path_search_count=0;
+ void*path_search_items[1024]{};size_t path_search_item_count=0;
+ void*player=nullptr,*environment=nullptr,*actor_binder=nullptr;
+ void*timeline=nullptr,*master=nullptr;uint64_t identity=0;bool ready=false,building=false,converted=false;
+ const char*error="fresh_control_roster_idle";
+};
+bool mp4_fresh_control_fail(Mp4FreshControlRoster&r,const char*error){r.error=error;r.ready=false;return false;}
+bool mp4_fresh_control_keep(Mp4FreshControlRoster&r,void*object){
+ if(!object)return true;
+ for(size_t i=0;i<r.root_count;++i)if(weak_get(r.roots[i])==object)return true;
+ if(r.root_count==16384)return false;
+ const auto handle=mp4_retain(object);
+ if(!handle||weak_get(handle)!=object){if(handle)weak_free(handle);return false;}
+ r.roots[r.root_count++]=handle;return true;
+}
+[[maybe_unused]] bool mp4_fresh_control_roster_clear(Mp4FreshControlRoster&r){
+ if(!game_call()||r.building)return false;
+ for(size_t i=0;i<r.root_count;++i)if(r.roots[i]){weak_free(r.roots[i]);r.roots[i]=0;}
+ r.root_count=r.item_count=r.list_count=r.control_count=r.edge_count=r.count=0;
+ r.path_graph_count=r.path_playable_count=r.path_declaration_count=r.path_owner_count=0;
+ r.path_binding_count=r.path_search_count=r.path_search_item_count=0;
+ r.player=r.environment=r.actor_binder=nullptr;r.timeline=r.master=nullptr;r.identity=0;r.ready=false;r.converted=false;r.error="fresh_control_roster_idle";return true;
+}
+bool mp4_fresh_control_pins(){
+ if(!game_call()||!mp4_source_verified||!mp4_actor_source_verified||!image_base)return false;
+ const auto pin=[](const auto&p){mp4game::Binding b{};b.rva=p.rva;std::memcpy(b.prefix,p.prefix,16);
+  return mp4_prefix(b)||mp4_hook_was_statically_verified(b);};
+ return mp4_api.director_get_asset&&mp4_api.director_get_reference&&mp4_api.director_graph_injected
+  &&mp4_api.director_get_mode&&mp4_api.track_muted_hierarchy&&mp4_api.graph_valid
+  &&pin(mp4_profile.director_get_asset)&&pin(mp4_profile.director_get_reference)
+  &&pin(mp4_profile.director_graph_injected)&&pin(mp4_profile.director_get_mode)
+  &&pin(mp4_profile.track_muted_hierarchy)&&pin(mp4_profile.graph_valid)&&pin(mp4_actor_profile.get_game_object)
+  &&pin(mp4_actor_profile.get_components_internal)&&pin(mp4_camera_owner_profile.component_get_component)
+  &&mp4_timeline_class(mp4_stage_other_pins.director_component)
+  &&reinterpret_cast<uintptr_t>(mp4_api.director_get_asset)==image_base+mp4_profile.director_get_asset.rva
+  &&reinterpret_cast<uintptr_t>(mp4_api.director_get_reference)==image_base+mp4_profile.director_get_reference.rva
+  &&reinterpret_cast<uintptr_t>(mp4_api.director_graph_injected)==image_base+mp4_profile.director_graph_injected.rva
+  &&reinterpret_cast<uintptr_t>(mp4_api.director_get_mode)==image_base+mp4_profile.director_get_mode.rva
+  &&reinterpret_cast<uintptr_t>(mp4_api.track_muted_hierarchy)==image_base+mp4_profile.track_muted_hierarchy.rva
+  &&reinterpret_cast<uintptr_t>(mp4_api.graph_valid)==image_base+mp4_profile.graph_valid.rva;
+}
+bool mp4_fresh_control_schema(void*asset){
+ if(!mp4_exact_type(asset,"UnityEngine.Timeline.ControlPlayableAsset")||!mp4_alive(asset))return false;
+ struct Field{const char*name;size_t offset;};
+ const Field fields[]={{"sourceGameObject",24},{"prefabGameObject",40},{"updateParticle",48},
+  {"particleRandomSeed",52},{"updateDirector",56},{"updateITimeControl",57},{"searchHierarchy",58},
+  {"active",59},{"postPlayback",60}};
+ for(const auto&field:fields)if(!mp4_root_track_field(asset,field.name,field.offset))return false;
+ return true;
+}
+bool mp4_fresh_control_list(Mp4FreshControlRoster&r,void*owner,size_t offset,const char*array_type,size_t*index){
+ if(!index||r.list_count==2048)return false;
+ auto&fact=r.lists[r.list_count];fact={};fact.owner=owner;fact.offset=offset;fact.begin=r.item_count;fact.array_type=array_type;
+ if(!mp4_actor_field(owner,offset,fact.list)||!mp4_fresh_control_keep(r,fact.list))return false;
+ if(fact.list){void**values=nullptr;size_t count=0;
+  if(!mp4_actor_list(fact.list,&values,&count,16384)||count>16384-r.item_count
+   ||!mp4_actor_field(fact.list,16,fact.array)||!mp4_type_is(fact.array,array_type?array_type:"System.Array")||!mp4_fresh_control_keep(r,fact.array)
+   ||!mp4_actor_field(fact.list,28,fact.version))return false;
+  fact.count=count;
+  for(size_t i=0;i<count;++i){void*object=values[i];if(!object||!mp4_fresh_control_keep(r,object))return false;r.items[r.item_count++]=object;}
+ }
+ *index=r.list_count++;return true;
+}
+bool mp4_fresh_control_list_current(const Mp4FreshControlRoster&r,const Mp4FreshControlRoster::List&fact){
+ void*list=nullptr,*array=nullptr;int32_t version=0;void**values=nullptr;size_t count=0;
+ if(!mp4_actor_field(fact.owner,fact.offset,list)||list!=fact.list)return false;
+ if(!list)return !fact.array&&!fact.count;
+ if(!mp4_actor_field(list,16,array)||array!=fact.array||!mp4_actor_field(list,28,version)||version!=fact.version
+  ||!mp4_actor_list(list,&values,&count,16384)||count!=fact.count||fact.begin>r.item_count||count>r.item_count-fact.begin)return false;
+ for(size_t i=0;i<count;++i)if(values[i]!=r.items[fact.begin+i])return false;
+ return true;
+}
+bool mp4_fresh_control_node(Mp4FreshControlRoster&r,void*director,bool flat,size_t*out){
+ if(!out||!mp4_type_is(director,"UnityEngine.Playables.PlayableDirector")||!mp4_alive(director))return false;
+ for(size_t i=0;i<r.count;++i)if(r.nodes[i].director==director){r.nodes[i].flat|=flat;*out=i;return true;}
+ if(r.count==129)return false;
+ auto&node=r.nodes[r.count];node={};node.director=director;node.flat=flat;
+ if(!mp4_fresh_control_keep(r,director)||!mp4_actor_field(director,16,node.native)||!node.native
+  ||!mp4_actor_field(reinterpret_cast<void*>(node.native),8,node.instance)||!node.instance)return false;
+ node.asset=mp4_api.director_get_asset(director,nullptr);
+ if(node.asset&&(!mp4_type_is(node.asset,"UnityEngine.Timeline.TimelineAsset")||!mp4_alive(node.asset)))return false;
+ if(!mp4_fresh_control_keep(r,node.asset))return false;
+ node.director_mode=mp4_api.director_get_mode(director,nullptr);
+ mp4_api.director_graph_injected(director,&node.graph,nullptr);
+ if(node.graph.handle&&!mp4_api.graph_valid(&node.graph,nullptr))node.graph={};
+ if(node.graph.handle){mp4actor::Handle graph{};std::memcpy(static_cast<void*>(&graph),&node.graph,16);
+  if(!mp4_actor_graph_mode(&graph,&node.graph_mode))return false;}
+ *out=r.count++;return true;
+}
+void*mp4_fresh_control_components(void*go,void*type,bool hierarchy){
+ using Components=void*(*)(void*,void*,bool,bool,bool,bool,void*,Method*);
+ return reinterpret_cast<Components>(image_base+mp4_actor_profile.get_components_internal.rva)
+  (go,type,true,hierarchy,true,false,nullptr,nullptr);
+}
+bool mp4_fresh_control_read(void*parent,void*track,void*clip,void*type,Mp4FreshControlRoster::Control&c){
+ c.track=track;c.clip=clip;
+ if(!mp4_actor_field(clip,mp4stage::Layout::clip_asset,c.asset)||!mp4_fresh_control_schema(c.asset))return false;
+ if(!mp4_actor_field(c.asset,24,c.name)||!mp4_actor_field(c.asset,32,c.default_go)||!mp4_actor_field(c.asset,40,c.prefab)
+  ||!mp4_actor_field(c.asset,48,c.particles)||!mp4_actor_field(c.asset,52,c.seed)||!mp4_actor_field(c.asset,56,c.update)
+  ||!mp4_actor_field(c.asset,57,c.time_control)||!mp4_actor_field(c.asset,58,c.hierarchy)||!mp4_actor_field(c.asset,59,c.active)
+  ||!mp4_actor_field(c.asset,60,c.post)||c.particles>1||c.update>1||c.time_control>1||c.hierarchy>1||c.active>1||c.post<0||c.post>2)return false;
+ if(c.prefab)return false; // An authored prefab needs actual original instance publication, never a guessed scene GO.
+ bool valid=false;void*resolved=mp4_api.director_get_reference(parent,c.name,&valid,nullptr);c.source=valid?resolved:c.default_go;
+ if(c.source&&(!mp4_type_is(c.source,"UnityEngine.GameObject")||!mp4_alive(c.source)))return false;
+ using GetObject=void*(*)(void*,Method*);using Component=void*(*)(void*,void*,Method*);
+ c.owner=reinterpret_cast<GetObject>(image_base+mp4_actor_profile.get_game_object.rva)(parent,nullptr);
+ if(!mp4_type_is(c.owner,"UnityEngine.GameObject")||!mp4_alive(c.owner))return false;
+ Mp4ActorTempRoot first(reinterpret_cast<Component>(image_base+mp4_camera_owner_profile.component_get_component.rva)(parent,type,nullptr));
+ if(!first.get()||!mp4_type_is(first.get(),"UnityEngine.Playables.PlayableDirector")||!mp4_alive(first.get()))return false;
+ c.excluded=mp4_api.director_get_asset(first.get(),nullptr);
+ c.muted=mp4_api.track_muted_hierarchy(track,nullptr);
+ const size_t offsets[]={0x18,0x30,0x20,0x38,0x48,0x50,0x58,0x60};
+ for(size_t i=0;i<8;++i)if(!mp4_actor_field(clip,offsets[i],c.timing[i])||!std::isfinite(c.timing[i]))return false;
+ return c.timing[1]>0&&c.timing[3]>0;
+}
+bool mp4_fresh_control_same(const Mp4FreshControlRoster::Control&a,const Mp4FreshControlRoster::Control&b){
+ return a.track==b.track&&a.clip==b.clip&&a.asset==b.asset&&a.name.id==b.name.id&&a.default_go==b.default_go
+  &&a.prefab==b.prefab&&a.source==b.source&&a.owner==b.owner&&a.excluded==b.excluded&&a.update==b.update
+  &&a.time_control==b.time_control&&a.hierarchy==b.hierarchy&&a.active==b.active&&a.particles==b.particles
+  &&a.seed==b.seed&&a.post==b.post&&a.muted==b.muted&&!std::memcmp(a.timing,b.timing,sizeof a.timing);
+}
+bool mp4_fresh_control_live_components(const Mp4FreshControlRoster::Control&c){
+ return !c.muted&&c.update&&c.source&&!(c.source==c.owner&&!c.hierarchy);
+}
+
+bool mp4_fresh_path_pins(){
+ const auto pin=[](const auto&p){mp4game::Binding b{};b.rva=p.rva;std::memcpy(b.prefix,p.prefix,16);return mp4_prefix(b)||mp4_hook_was_statically_verified(b);};
+#ifdef IDOLY_DARWIN_BRIDGE
+ const mp4game::Binding source[]={
+  {0x6f929ac,{0xff,0x43,0x03,0xd1,0xfc,0x6f,0x07,0xa9,0xfa,0x67,0x08,0xa9,0xf8,0x5f,0x09,0xa9}},
+  {0x6ff8078,{0xfa,0x67,0xbb,0xa9,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},
+  {0x6f942a4,{0xff,0x43,0x01,0xd1,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},
+  {0x6f9412c,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}},
+  {0x6f94214,{0xf8,0x5f,0xbc,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xfd,0x7b,0x03,0xa9}}};
+#else
+ const mp4game::Binding source[]={
+  {0x883c12c,{0xff,0x43,0x03,0xd1,0xfd,0x7b,0x07,0xa9,0xfc,0x6f,0x08,0xa9,0xfa,0x67,0x09,0xa9}},
+  {0x8896210,{0xfe,0x67,0xbc,0xa9,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},
+  {0x883d72c,{0xff,0x03,0x01,0xd1,0xfe,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}},
+  {0x883d5f8,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0xb5,0xc1,0x00,0x90,0xb4,0x85,0x00,0xb0}},
+  {0x883d6a8,{0xfe,0x5f,0xbd,0xa9,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xb6,0xc1,0x00,0x90}}};
+#endif
+ for(const auto&p:source)if(!pin(p))return false;
+ return mp4_resolved_type_class(mp4_cam_types.component,"UnityEngine","Component")&&pin(mp4_actor_profile.playable_valid)&&pin(mp4_world_profile.output_valid)&&pin(mp4_output_pins.source)
+  &&pin(mp4_actor_profile.script_instance)&&pin(mp4_actor_profile.playable_graph_get)
+  &&pin(mp4_actor_profile.graph_root_count)&&pin(mp4_actor_profile.graph_root);
+}
+bool mp4_fresh_path_output(mp4actor::Handle output,mp4actor::Handle playable){
+ using Valid=bool(*)(mp4actor::Handle*,Method*);using Source=void(*)(mp4actor::Handle*,mp4actor::Handle*,Method*);
+ if(!output.handle||!reinterpret_cast<Valid>(image_base+mp4_world_profile.output_valid.rva)(&output,nullptr))return false;
+ mp4actor::Handle source{};reinterpret_cast<Source>(image_base+mp4_output_pins.source.rva)(&output,&source,nullptr);
+ return source.handle==playable.handle&&source.version==playable.version;
+}
+bool mp4_fresh_path_same(mp4actor::Handle a,mp4actor::Handle b){return a.handle==b.handle&&a.version==b.version;}
+bool mp4_fresh_path_array(void*array,size_t stride,size_t cap,uint8_t**data,size_t*count){
+ if(!array||!data||!count||!mp4_type_is(array,"System.Array"))return false;
+ *count=mp4_array_length(array);*data=static_cast<uint8_t*>(mp4_array_data(array));
+ return *count<=cap&&(!*count||(*data&&mp4_actor_mapped(*data,*count*stride,false)));
+}
+bool mp4_fresh_path_owner(Mp4FreshControlRoster&r,void*component){
+ for(size_t i=0;i<r.path_owner_count;++i)if(r.path_owners[i].component==component)return true;
+ if(r.path_owner_count==128||!mp4_fresh_path_pins()||!mp4_exact_type(component,"Solis.Common.PathBindingAnimation")
+  ||!mp4_alive(component)||!mp4_root_track_field(component,"_pathBinderStructs",32)||!mp4_root_track_field(component,"_keyPlayables",40))return false;
+ auto&o=r.path_owners[r.path_owner_count];o={};o.component=component;o.declaration_begin=r.path_declaration_count;o.playable_begin=r.path_playable_count;
+ using Get=void*(*)(void*,Method*);o.go=reinterpret_cast<Get>(image_base+mp4_actor_profile.get_game_object.rva)(component,nullptr);
+ if(!mp4_type_is(o.go,"UnityEngine.GameObject")||!mp4_alive(o.go)||!mp4_actor_field(component,16,o.native)||!o.native
+  ||!mp4_actor_field(reinterpret_cast<void*>(o.native),8,o.instance)||!o.instance
+  ||!mp4_actor_field(component,32,o.declared)||!mp4_actor_field(component,40,o.cache))return false;
+ for(void*object:{component,o.go,o.declared,o.cache})if(!mp4_fresh_control_keep(r,object))return false;
+ uint8_t*data=nullptr;size_t count=0;
+ if(o.declared&&!mp4_fresh_path_array(o.declared,16,2048-r.path_declaration_count,&data,&count))return false;
+ o.declaration_count=count;
+ for(size_t i=0;i<count;++i){auto&d=r.path_declarations[r.path_declaration_count++];std::memcpy(&d.key,data+i*16,8);std::memcpy(&d.binder,data+i*16+8,8);
+  if((d.key&&!mp4_type_is(d.key,"System.String"))||!mp4_fresh_control_keep(r,d.key)||!mp4_fresh_control_keep(r,d.binder))return false;}
+ int32_t used=0;if(!o.cache||!mp4_actor_field(o.cache,16,o.array)||!mp4_actor_field(o.cache,24,used)||used<0
+  ||!mp4_actor_field(o.cache,28,o.version)||!mp4_fresh_path_array(o.array,24,1024,&data,&count)||size_t(used)>count
+  ||size_t(used)>1024-r.path_playable_count||!mp4_fresh_control_keep(r,o.array))return false;
+ o.playable_count=size_t(used);const auto api=mp4_actor_state_api();
+ for(size_t i=0;i<o.playable_count;++i){auto&p=r.path_playables[r.path_playable_count];p={};
+  std::memcpy(&p.key,data+i*24,8);std::memcpy(&p.playable,data+i*24+8,16);
+  if(!p.key||!mp4_type_is(p.key,"System.String")||!mp4_fresh_control_keep(r,p.key)||!p.playable.handle||!api.playable_valid(&p.playable,nullptr))return false;
+  bool declared=false;for(size_t d=0;d<o.declaration_count;++d)declared|=r.path_declarations[o.declaration_begin+d].key==p.key;
+  if(!declared)return false;
+  mp4actor::Handle graph{};using Graph=void(*)(mp4actor::Handle*,mp4actor::Handle*,Method*);
+  reinterpret_cast<Graph>(image_base+mp4_actor_profile.playable_graph_get.rva)(&p.playable,&graph,nullptr);
+  if(!graph.handle||!api.graph_valid(&graph,nullptr))return false;
+  size_t g=0;for(;g<r.path_graph_count;++g)if(mp4_fresh_path_same(graph,r.path_graphs[g].graph))break;
+  if(g==r.path_graph_count){if(g==128)return false;auto&saved=r.path_graphs[g];saved={};saved.graph=graph;
+   if(!mp4_actor_graph_mode(&graph,&saved.original_mode)||(saved.original_mode!=0&&saved.original_mode!=1))return false;
+   ++r.path_graph_count;}
+  p.graph=uint16_t(g);++r.path_playable_count;
+ }
+ // Only a real registered Timeline binder and its exact returned script can
+ // classify a Director as manually driven. Other native-mode3 roots still fail.
+ for(size_t d=0;d<o.declaration_count;++d){const auto&decl=r.path_declarations[o.declaration_begin+d];void*binder=decl.binder;
+  if(!mp4_type_is(binder,"Solis.Common.PathBinder.PathBinderTimeline"))continue;
+  if(!mp4_exact_type(binder,"Solis.Common.PathBinder.PathBinderTimeline")||!mp4_alive(binder))return false;
+  struct Field{const char*name;size_t offset;};
+  const Field fields[]={{"_playableDirector",32},{"_bindingStructs",40},{"_output",48},{"_playable",64}};
+  for(const auto&field:fields)if(!mp4_root_track_field(binder,field.name,field.offset))return false;
+  Mp4FreshControlRoster::PathBinding b{};b.binder=binder;b.owner=r.path_owner_count;b.declared=d;
+  if(!mp4_actor_field(binder,32,b.director)||!mp4_actor_field(binder,40,b.bindings)||!mp4_actor_field(binder,48,b.output)||!mp4_actor_field(binder,64,b.playable))return false;
+  bool cached=false;for(size_t i=0;i<o.playable_count;++i){const auto&p=r.path_playables[o.playable_begin+i];cached|=p.key==decl.key&&mp4_fresh_path_same(p.playable,b.playable);}
+  if(!cached)continue; // Original Awake did not publish this binder as a driver.
+  if(!mp4_fresh_path_output(b.output,b.playable)||!api.playable_valid(&b.playable,nullptr))return false;
+  b.script=mp4_timeline_script(b.playable);void*target=nullptr;
+  if(!mp4_exact_type(b.script,"Solis.Common.PathBindingTimelinePlayable")||!mp4_root_track_field(b.script,"_playableDirector",16)
+   ||!mp4_actor_field(b.script,16,target)||target!=b.director)return false;
+  size_t child=0;if(!mp4_fresh_control_node(r,b.director,false,&child)||r.path_binding_count==1024)return false;
+  r.nodes[child].controlled=true;
+  for(void*object:{binder,b.director,b.bindings,b.script})if(!mp4_fresh_control_keep(r,object))return false;
+  r.path_bindings[r.path_binding_count++]=b;
+ }
+ ++r.path_owner_count;return true;
+}
+bool mp4_fresh_path_search(Mp4FreshControlRoster&r,void*component){
+ if(!mp4_fresh_path_pins())return false;
+ using Get=void*(*)(void*,Method*);void*go=reinterpret_cast<Get>(image_base+mp4_actor_profile.get_game_object.rva)(component,nullptr);
+ if(!mp4_type_is(go,"UnityEngine.GameObject")||!mp4_alive(go))return false;
+ for(size_t i=0;i<r.path_search_count;++i)if(r.path_searches[i].go==go)return true;
+ if(r.path_search_count==256||!mp4_fresh_control_keep(r,go))return false;
+ Mp4ActorTempRoot type(mp4_type_get_object(reinterpret_cast<void*>(image_base+mp4_cam_types.component.rva)));
+ if(!type.get())return false;
+ Mp4ActorTempRoot array(mp4_fresh_control_components(go,type.get(),true));
+ if(!array.get()||!mp4_type_is(array.get(),"System.Array"))return false;
+ const size_t count=mp4_array_length(array.get());auto**values=static_cast<void**>(mp4_array_data(array.get()));
+ if(count>16384||(count&&!values))return false;
+ auto&search=r.path_searches[r.path_search_count++];search.go=go;search.begin=r.path_search_item_count;
+ for(size_t i=0;i<count;++i)if(mp4_type_is(values[i],"Solis.Common.PathBindingAnimation")){
+  if(r.path_search_item_count==1024||!mp4_fresh_path_owner(r,values[i]))return false;
+  r.path_search_items[r.path_search_item_count++]=values[i];++search.count;
+ }
+ return true;
+}
+bool mp4_fresh_path_current(const Mp4FreshControlRoster&r){
+ if((r.path_owner_count||r.path_search_count)&&!mp4_fresh_path_pins())return false;
+ if(r.player){void*value=nullptr;if(!mp4_actor_field(r.player,0x40,value)||value!=r.environment
+   ||!mp4_actor_field(r.player,mp4game::Layout{}.player_binder,value)||value!=r.actor_binder)return false;}
+ const auto api=mp4_actor_state_api();
+ for(size_t g=0;g<r.path_graph_count;++g){auto graph=r.path_graphs[g].graph;int32_t mode=-1;
+  if(!api.graph_valid(&graph,nullptr)||!mp4_actor_graph_mode(&graph,&mode)
+   ||(!(!r.converted&&mode==r.path_graphs[g].original_mode)&&mode!=1&&mode!=3))return false;
+  const int32_t count=api.graph_root_count(&graph,nullptr);if(count<0||count>1024)return false;
+  size_t expected=0;for(size_t i=0;i<r.path_playable_count;++i)if(r.path_playables[i].graph==g)++expected;
+  if(size_t(count)!=expected)return false;
+  for(int32_t i=0;i<count;++i){mp4actor::Handle root{};api.graph_root(&graph,i,&root,nullptr);size_t matches=0;
+   for(size_t k=0;k<r.path_playable_count;++k)if(r.path_playables[k].graph==g&&mp4_fresh_path_same(root,r.path_playables[k].playable))++matches;
+   if(matches!=1)return false;}
+ }
+ for(size_t i=0;i<r.path_owner_count;++i){const auto&o=r.path_owners[i];void*value=nullptr;uintptr_t native=0;int32_t instance=0,used=0,version=0;
+  using Get=void*(*)(void*,Method*);
+  if(!mp4_alive(o.component)||!mp4_actor_field(o.component,16,native)||native!=o.native||!mp4_actor_field(reinterpret_cast<void*>(native),8,instance)||instance!=o.instance
+   ||reinterpret_cast<Get>(image_base+mp4_actor_profile.get_game_object.rva)(o.component,nullptr)!=o.go
+   ||!mp4_actor_field(o.component,32,value)||value!=o.declared||!mp4_actor_field(o.component,40,value)||value!=o.cache)return false;
+  uint8_t*data=nullptr;size_t count=0;
+  if(o.declared&&(!mp4_fresh_path_array(o.declared,16,2048,&data,&count)||count!=o.declaration_count))return false;
+  for(size_t j=0;j<o.declaration_count;++j){void*key=nullptr,*binder=nullptr;std::memcpy(&key,data+j*16,8);std::memcpy(&binder,data+j*16+8,8);
+   const auto&d=r.path_declarations[o.declaration_begin+j];if(key!=d.key||binder!=d.binder)return false;}
+  if(!mp4_actor_field(o.cache,16,value)||value!=o.array||!mp4_actor_field(o.cache,24,used)||used<0||size_t(used)!=o.playable_count
+   ||!mp4_actor_field(o.cache,28,version)||version!=o.version||!mp4_fresh_path_array(o.array,24,1024,&data,&count)||size_t(used)>count)return false;
+  for(size_t j=0;j<o.playable_count;++j){void*key=nullptr;mp4actor::Handle playable{},graph{};std::memcpy(&key,data+j*24,8);std::memcpy(&playable,data+j*24+8,16);
+   const auto&p=r.path_playables[o.playable_begin+j];if(key!=p.key||!mp4_fresh_path_same(playable,p.playable)||!api.playable_valid(&playable,nullptr))return false;
+   using Graph=void(*)(mp4actor::Handle*,mp4actor::Handle*,Method*);reinterpret_cast<Graph>(image_base+mp4_actor_profile.playable_graph_get.rva)(&playable,&graph,nullptr);
+   if(p.graph>=r.path_graph_count||!mp4_fresh_path_same(graph,r.path_graphs[p.graph].graph))return false;}
+ }
+ for(size_t i=0;i<r.path_binding_count;++i){const auto&b=r.path_bindings[i];void*value=nullptr;mp4actor::Handle handle{};
+  if(!mp4_alive(b.binder)||!mp4_actor_field(b.binder,32,value)||value!=b.director||!mp4_actor_field(b.binder,40,value)||value!=b.bindings
+   ||!mp4_actor_field(b.binder,48,handle)||!mp4_fresh_path_same(handle,b.output)||!mp4_fresh_path_output(handle,b.playable)
+   ||!mp4_actor_field(b.binder,64,handle)||!mp4_fresh_path_same(handle,b.playable)||mp4_timeline_script(handle)!=b.script
+   ||!mp4_actor_field(b.script,16,value)||value!=b.director)return false;
+ }
+ Mp4ActorTempRoot type(mp4_type_get_object(reinterpret_cast<void*>(image_base+mp4_cam_types.component.rva)));if(!type.get())return false;
+ for(size_t i=0;i<r.path_search_count;++i){const auto&s=r.path_searches[i];if(!mp4_alive(s.go))return false;
+  Mp4ActorTempRoot array(mp4_fresh_control_components(s.go,type.get(),true));if(!array.get()||!mp4_type_is(array.get(),"System.Array"))return false;
+  const size_t count=mp4_array_length(array.get());auto**values=static_cast<void**>(mp4_array_data(array.get()));if(count>16384||(count&&!values))return false;
+  size_t seen=0;for(size_t j=0;j<count;++j)if(mp4_type_is(values[j],"Solis.Common.PathBindingAnimation")){
+   if(seen==s.count||values[j]!=r.path_search_items[s.begin+seen++])return false;}
+  if(seen!=s.count)return false;
+ }
+ return true;
+}
+[[maybe_unused]] bool mp4_fresh_control_roster_current(const Mp4FreshControlRoster&r){
+ if(!game_call()||!r.ready||r.building||!r.count||r.count>129||!mp4_fresh_control_pins())return false;
+ for(size_t i=0;i<r.root_count;++i)if(!r.roots[i]||!weak_get(r.roots[i]))return false;
+ void*master=nullptr;if(!mp4_actor_field(r.timeline,mp4game::Layout{}.controller_master,master)||master!=r.master)return false;
+ for(size_t i=0;i<r.list_count;++i)if(!mp4_fresh_control_list_current(r,r.lists[i]))return false;
+ for(size_t i=0;i<r.count;++i){const auto&n=r.nodes[i];uintptr_t native=0;int32_t instance=0;
+  if(!mp4_alive(n.director)||!mp4_actor_field(n.director,16,native)||native!=n.native
+   ||!mp4_actor_field(reinterpret_cast<void*>(native),8,instance)||instance!=n.instance
+   ||mp4_api.director_get_asset(n.director,nullptr)!=n.asset)return false;
+  const int32_t mode=mp4_api.director_get_mode(n.director,nullptr);
+  const bool original=!r.converted&&mode==n.director_mode;
+  if(!original&&mode!=n.desired_mode)return false;
+  mp4game::PlayableGraph now{};mp4_api.director_graph_injected(n.director,&now,nullptr);
+  if(!n.controlled&&(now.handle!=n.graph.handle||now.version!=n.graph.version))return false;
+  const bool live=now.handle&&mp4_api.graph_valid(&now,nullptr);
+  if(live){mp4actor::Handle current{};int32_t observed=-1;std::memcpy(static_cast<void*>(&current),&now,16);
+   // Query only the CURRENT Director publication. Controlled graphs may be
+   // born/replaced by their original Control lifecycle; no saved graph CAPI.
+   if(!mp4_actor_graph_mode(&current,&observed))return false;
+   const bool captured=!r.converted&&observed==n.graph_mode;
+   const bool owned=observed==n.desired_mode||observed==3;
+   if(!captured&&!owned)return false;
+  }else if(!n.controlled&&n.asset)return false;
+ }
+ Mp4ActorTempRoot type(mp4_type_get_object(reinterpret_cast<void*>(image_base+mp4_stage_other_pins.director_component.binding.rva)));
+ if(!type.get())return false;
+ if(!mp4_fresh_path_current(r))return false;
+ for(size_t i=0;i<r.control_count;++i){const auto&saved=r.controls[i];Mp4FreshControlRoster::Control current{};
+  if(saved.parent>=r.count||!mp4_fresh_control_read(r.nodes[saved.parent].director,saved.track,saved.clip,type.get(),current)
+   ||!mp4_fresh_control_same(saved,current))return false;
+  if(!mp4_fresh_control_live_components(current)){if(saved.component_count)return false;continue;}
+  Mp4ActorTempRoot array(mp4_fresh_control_components(current.source,type.get(),current.hierarchy!=0));
+  if(!array.get()||!mp4_type_is(array.get(),"System.Array")||mp4_array_length(array.get())!=saved.component_count)return false;
+  auto**values=static_cast<void**>(mp4_array_data(array.get()));
+  if(saved.component_count&&!values)return false;
+  for(size_t k=0;k<saved.component_count;++k)if(values[k]!=r.items[saved.component_begin+k])return false;
+ }
+ return true;
+}
+[[maybe_unused]] bool mp4_fresh_control_roster_build(void*timeline,Mp4FreshControlRoster&r,void*player=nullptr,void*environment=nullptr){
+ if(!game_call()||r.building||r.root_count||!mp4_fresh_control_pins()
+  ||!mp4_type_is(timeline,"Solis.Common.Live.SolisLiveTimelineController")||!mp4_alive(timeline))return false;
+ r.building=true;struct Exit{bool&flag;~Exit(){flag=false;}}exit{r.building};r.timeline=timeline;
+ const auto fail=[&](const char*error){return mp4_fresh_control_fail(r,error);};
+ if(!mp4_fresh_control_keep(r,timeline)||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,r.master))return fail("fresh_control_master_missing");
+ size_t index=0;if(!mp4_fresh_control_node(r,r.master,true,&index)||index)return fail("fresh_control_master_invalid");
+ size_t initial=0;if(!mp4_fresh_control_list(r,timeline,mp4game::Layout{}.controller_directors,"UnityEngine.Playables.PlayableDirector[]",&initial))return fail("fresh_control_flat_list_invalid");
+ const auto flat=r.lists[initial];for(size_t i=0;i<flat.count;++i)
+  if(!mp4_fresh_control_node(r,r.items[flat.begin+i],true,&index))return fail("fresh_control_flat_director_invalid");
+ Mp4ActorTempRoot type(mp4_type_get_object(reinterpret_cast<void*>(image_base+mp4_stage_other_pins.director_component.binding.rva)));
+ if(!type.get())return fail("fresh_control_director_type_missing");
+ if(player){r.player=player;r.environment=environment;
+  if(!mp4_alive(player)||!environment||!mp4_actor_field(player,mp4game::Layout{}.player_binder,r.actor_binder)
+   ||!r.actor_binder||!mp4_fresh_control_keep(r,player)||!mp4_fresh_control_keep(r,environment)||!mp4_fresh_control_keep(r,r.actor_binder)
+   ||!mp4_fresh_path_search(r,player)||!mp4_fresh_path_search(r,environment))return fail("fresh_path_source_roots_invalid");
+  size_t actors=0;if(!mp4_fresh_control_list(r,r.actor_binder,mp4game::Layout{}.binder_actors,nullptr,&actors))return fail("fresh_path_actor_list_invalid");
+  const auto list=r.lists[actors];if(list.count>32)return fail("fresh_path_actor_count_invalid");
+  for(size_t i=0;i<list.count;++i)if(!mp4_fresh_path_search(r,r.items[list.begin+i]))return fail("fresh_path_actor_root_invalid");
+ }
+ for(size_t parent=0;parent<r.count;++parent){const auto node=r.nodes[parent];
+  if(!mp4_fresh_path_search(r,node.director))return fail("fresh_path_registry_invalid");
+  if(!node.asset)continue;
+  if(!mp4_root_track_field(node.asset,"m_Tracks",mp4stage::Layout::timeline_tracks))return fail("fresh_control_track_schema_invalid");
+  size_t roots=0;if(!mp4_fresh_control_list(r,node.asset,mp4stage::Layout::timeline_tracks,"UnityEngine.Timeline.TrackAsset[]",&roots))return fail("fresh_control_track_list_invalid");
+  void*tracks[512]{};size_t track_count=0;const auto root_list=r.lists[roots];
+  if(root_list.count>512)return fail("fresh_control_track_count_invalid");
+  for(size_t i=0;i<root_list.count;++i)tracks[track_count++]=r.items[root_list.begin+i];
+  for(size_t t=0;t<track_count;++t){void*track=tracks[t];
+   if(!mp4_type_is(track,"UnityEngine.Timeline.TrackAsset")||!mp4_alive(track))return fail("fresh_control_track_invalid");
+   for(size_t i=0;i<t;++i)if(tracks[i]==track)return fail("fresh_control_track_cycle");
+   if(!mp4_root_track_field(track,"m_Children",mp4stage::Layout::track_children)
+    ||!mp4_root_track_field(track,"m_Clips",mp4stage::Layout::track_clips))return fail("fresh_control_track_schema_invalid");
+   size_t children=0,clips=0;
+   if(!mp4_fresh_control_list(r,track,mp4stage::Layout::track_children,"UnityEngine.Timeline.TrackAsset[]",&children)
+    ||!mp4_fresh_control_list(r,track,mp4stage::Layout::track_clips,"UnityEngine.Timeline.TimelineClip[]",&clips))return fail("fresh_control_track_list_invalid");
+   const auto child_list=r.lists[children];if(child_list.count>512-track_count)return fail("fresh_control_track_count_invalid");
+   for(size_t i=0;i<child_list.count;++i)tracks[track_count++]=r.items[child_list.begin+i];
+   if(!mp4_type_is(track,"UnityEngine.Timeline.ControlTrack"))continue;
+   if(!mp4_exact_type(track,"UnityEngine.Timeline.ControlTrack"))return fail("fresh_control_track_subclass_unsupported");
+   const auto clip_list=r.lists[clips];
+   for(size_t k=0;k<clip_list.count;++k){
+    if(r.control_count==1024)return fail("fresh_control_clip_limit");
+    auto&c=r.controls[r.control_count];c={};c.parent=parent;
+    void*clip=r.items[clip_list.begin+k];
+    if(!mp4_type_is(clip,"UnityEngine.Timeline.TimelineClip")||!mp4_fresh_control_read(node.director,track,clip,type.get(),c))
+     return fail("fresh_control_recipe_unsupported");
+    for(auto*object:{c.asset,c.default_go,c.source,c.owner,c.excluded})if(!mp4_fresh_control_keep(r,object))return fail("fresh_control_root_failed");
+    if(mp4_fresh_control_live_components(c)){
+     Mp4ActorTempRoot array(mp4_fresh_control_components(c.source,type.get(),c.hierarchy!=0));
+     if(!array.get()||!mp4_type_is(array.get(),"System.Array"))return fail("fresh_control_component_array_invalid");
+     c.component_count=mp4_array_length(array.get());c.component_begin=r.item_count;
+     auto**values=static_cast<void**>(mp4_array_data(array.get()));
+     if(c.component_count>129||c.component_count>16384-r.item_count||(c.component_count&&!values))return fail("fresh_control_component_count_invalid");
+     for(size_t j=0;j<c.component_count;++j){void*child=values[j];
+      if(!mp4_type_is(child,"UnityEngine.Playables.PlayableDirector")||!mp4_alive(child)||!mp4_fresh_control_keep(r,child))return fail("fresh_control_child_invalid");
+      for(size_t a=0;a<j;++a)if(values[a]==child)return fail("fresh_control_component_duplicate");
+      r.items[r.item_count++]=child;
+      void*asset=mp4_api.director_get_asset(child,nullptr);
+      if(asset==c.excluded)continue; // The actual original same-asset exclusion.
+      if(!asset)return fail("fresh_control_child_asset_missing");
+      size_t child_index=0;if(!mp4_fresh_control_node(r,child,false,&child_index))return fail("fresh_control_child_invalid");
+      if(r.edge_count==4096)return fail("fresh_control_edge_limit");
+      r.nodes[child_index].controlled=true;
+      r.edges[r.edge_count++]={static_cast<uint16_t>(r.control_count),static_cast<uint16_t>(child_index)};
+     }
+    }
+    ++r.control_count;
+   }
+  }
+ }
+ // Actual authored cycle detection; flat membership does not exempt a cycle.
+ uint8_t color[129]{};
+ const auto visit=[&](auto&&self,size_t node)->bool{
+  if(color[node]==1)return false;
+  if(color[node]==2)return true;
+  color[node]=1;
+  for(size_t i=0;i<r.edge_count;++i){const auto&e=r.edges[i];if(r.controls[e.control].parent==node&&!self(self,e.child))return false;}
+  color[node]=2;return true;};
+ for(size_t i=0;i<r.count;++i)if(!visit(visit,i))return fail("fresh_control_director_cycle");
+ for(size_t i=0;i<r.count;++i){auto&n=r.nodes[i];n.desired_mode=n.controlled?3:1;
+  const auto known=[](int32_t mode){return mode==0||mode==1||mode==3;};
+  if(n.controlled){if(!known(n.director_mode)||(n.graph.handle&&!known(n.graph_mode)))return fail("fresh_control_child_clock_unsupported");}
+  else if((n.director_mode!=0&&n.director_mode!=1)||(n.graph.handle?(n.graph_mode!=0&&n.graph_mode!=1):bool(n.asset)))return fail("fresh_control_root_clock_unsupported");
+ }
+ r.identity=1469598103934665603ULL;
+ const auto mix=[&](uintptr_t value){for(size_t i=0;i<sizeof value;++i){r.identity^=uint8_t(value>>(i*8));r.identity*=1099511628211ULL;}};
+ mix(reinterpret_cast<uintptr_t>(timeline));mix(r.count);mix(r.edge_count);mix(r.path_graph_count);
+ for(size_t g=0;g<r.path_graph_count;++g){mix(r.path_graphs[g].graph.handle);mix(r.path_graphs[g].graph.version);}
+ for(size_t i=0;i<r.count;++i){mix(reinterpret_cast<uintptr_t>(r.nodes[i].director));mix(reinterpret_cast<uintptr_t>(r.nodes[i].asset));mix(r.nodes[i].controlled);}
+ for(size_t i=0;i<r.edge_count;++i){mix(r.edges[i].control);mix(r.edges[i].child);}
+ r.building=false;r.ready=true;r.error="none";
+ if(!mp4_fresh_control_roster_current(r))return fail("fresh_control_roster_changed");
+ return true;
+}
+// END_MP4_FRESH_CONTROL_ROSTER
+
+
+// BEGIN_MP4_FRESH_QOS_LEASE
+// Pinned actual engine state: native FPS getter; source-derived current
+// native QualitySetting.vSyncCount. See fresh-qos audit native-bodies.json.
+namespace idoly_mp4_fresh_qos {
+enum class Result { ok, waiting, failed, superseded };
+struct Observed {
+    void* manager=nullptr;
+    uintptr_t data=0;
+    int32_t index=0,fps=0,vsync=0;
+};
+struct Api {
+    void* context=nullptr;
+    bool (*observe)(void*,Observed&)=nullptr;
+    bool (*set_fps)(void*,int32_t)=nullptr;
+    bool (*set_vsync)(void*,int32_t)=nullptr;
+};
+struct State {
+    Observed saved{};
+    int32_t wanted_fps=-1;
+    bool active=false,entered=false,fps_duty=false,vsync_duty=false;
+    bool superseded=false,setter_error=false;
+};
+inline bool same_quality(const Observed&a,const Observed&b){
+    return a.manager&&a.manager==b.manager&&a.data&&a.data==b.data&&a.index>=0&&a.index==b.index;
+}
+inline bool valid(const Observed&v){return v.manager&&v.data&&v.index>=0;}
+inline bool api_valid(const Api&a){return a.observe&&a.set_fps&&a.set_vsync;}
+inline Result verify(const State&s,const Api&a){
+    if(!s.active||!s.entered||!api_valid(a))return Result::failed;
+    Observed now{};
+    if(!a.observe(a.context,now)||!valid(now))return Result::waiting;
+    return same_quality(s.saved,now)&&now.fps==s.wanted_fps&&now.vsync==0?Result::ok:Result::superseded;
+}
+inline Result begin(State&s,const Api&a,int32_t wanted_fps=-1){
+    if(s.active)return s.entered&&s.wanted_fps==wanted_fps?verify(s,a):Result::failed;
+    if(!api_valid(a))return Result::failed;
+    Observed before{};
+    if(!a.observe(a.context,before)||!valid(before))return Result::waiting;
+    s=State{};s.saved=before;s.wanted_fps=wanted_fps;s.active=true;
+    // Set duty BEFORE calling a setter: it can fail after writing native state.
+    if(before.fps!=wanted_fps){s.fps_duty=true;if(!a.set_fps(a.context,wanted_fps)){s.setter_error=true;return Result::failed;}}
+    Observed after{};
+    if(!a.observe(a.context,after)||!valid(after))return Result::waiting;
+    if(!same_quality(before,after)||after.fps!=s.wanted_fps||after.vsync!=before.vsync){s.superseded=true;return Result::superseded;}
+    if(before.vsync!=0){s.vsync_duty=true;if(!a.set_vsync(a.context,0)){s.setter_error=true;return Result::failed;}}
+    if(!a.observe(a.context,after)||!valid(after))return Result::waiting;
+    if(!same_quality(before,after)||after.fps!=s.wanted_fps||after.vsync!=0){s.superseded=true;return Result::superseded;}
+    s.entered=true;return Result::ok;
+}
+// Only for an intercepted REAL external setter request whose ordinary target
+// is known before the host substitutes temporary FPS target. Do not feed config
+// preference0 or a synthetic per-frame baseline into this function.
+inline void external_fps_target(State&s,int32_t ordinary_target){
+    if(!s.active)return;
+    s.saved.fps=ordinary_target;s.fps_duty=ordinary_target!=s.wanted_fps;
+}
+inline Result finish(State&s,const Api&a){
+    if(!s.active)return Result::ok;
+    if(!api_valid(a))return Result::failed;
+    Observed now{};
+    if(!a.observe(a.context,now)||!valid(now))return Result::waiting;
+    // Restore in reverse order. Never write a retired quality cell, and never
+    // replace an observed external value with a stale saved value.
+    if(s.vsync_duty){
+        if(!same_quality(s.saved,now)){s.superseded=true;s.vsync_duty=false;}
+        else if(now.vsync==s.saved.vsync){s.vsync_duty=false;}
+        else if(now.vsync!=0){s.superseded=true;s.vsync_duty=false;}
+        else {
+            if(!a.set_vsync(a.context,s.saved.vsync))s.setter_error=true;
+            Observed after{};
+            if(!a.observe(a.context,after)||!valid(after))return Result::waiting;
+            if(!same_quality(s.saved,after)){s.superseded=true;s.vsync_duty=false;}
+            else if(after.vsync==s.saved.vsync)s.vsync_duty=false;
+            else if(after.vsync!=0){s.superseded=true;s.vsync_duty=false;}
+            else return Result::failed; // Own temporary value remains; retry cleanup.
+            now=after;
+        }
+    }
+    if(s.fps_duty){
+        if(now.fps==s.saved.fps)s.fps_duty=false;
+        else if(now.fps!=s.wanted_fps){s.superseded=true;s.fps_duty=false;}
+        else {
+            if(!a.set_fps(a.context,s.saved.fps))s.setter_error=true;
+            Observed after{};
+            if(!a.observe(a.context,after)||!valid(after))return Result::waiting;
+            if(after.fps==s.saved.fps)s.fps_duty=false;
+            else if(after.fps!=s.wanted_fps){s.superseded=true;s.fps_duty=false;}
+            else return Result::failed;
+            now=after;
+        }
+    }
+    s.active=false;s.entered=false;
+    return s.superseded?Result::superseded:(s.setter_error?Result::failed:Result::ok);
+}
+} // namespace idoly_mp4_fresh_qos
+
+// END_MP4_FRESH_QOS_LEASE
+
+// BEGIN_MP4_FRESH_SCENE_HOST
+// Disposable original scenes: ordinary factory topology, one initialization
+// seek, original GameTime stepping, and exact pass/ReadPixels completion.
+// This host never advertises the former scene's transient histories restored.
+using Mp4FreshResult=idoly_mp4_game::Result;
+struct Mp4FreshSceneHost {
+ Mp4SceneWitness source{};
+ Mp4FreshControlRoster*roster=nullptr;
+ mp4actor::Owner actors[32]{};int32_t actor_modes[32]{};size_t actor_count=0;
+ mp4actor::PresentationInventory callbacks{};
+ void*directors[129]{};int32_t director_modes[129]{};mp4actor::Handle director_graphs[129]{};double director_times[129]{};size_t director_count=0;
+ uint64_t director_identity=0,job=0,factory=0,tick=0,prepared_tick=0,brain_serial=0,listener_token=0,grant_boundary=0;
+ double prepared_seconds=0;
+ uint32_t roots[1024]{};size_t root_count=0;
+ unsigned render_depth=0;
+ bool active=false,mono=false,shader=false,started=false,start_returned=false,prepared=false,detached=false,held=false,camera_started=false,camera_returned=false,path_reset_started=false,path_reset_returned=false,pre_release_done=false,pre_release_failed=false;
+ const char*error="none";
+ idoly_mp4_timeline_audio::ListenerLease listener{};
+ idoly_mp4_fresh_qos::State qos{};bool qos_failed=false;
+}mp4_fresh_host;
+std::atomic<bool>mp4_fresh_withdrawn{false};
+uint64_t mp4_fresh_listener_sequence=0;
+Mp4FreshResult mp4_fresh_fail(Mp4FreshResult r,const char*error){mp4_fresh_host.error=error;return r;}
+bool mp4_fresh_keep(void*object){
+ auto&h=mp4_fresh_host;if(!object)return true;
+ if(h.root_count==1024)return false;const auto root=mp4_retain(object);
+ if(!root||weak_get(root)!=object){if(root)weak_free(root);return false;}
+ h.roots[h.root_count++]=root;return true;
+}
+bool mp4_fresh_current(void*){
+ auto&h=mp4_fresh_host;if(!game_call()||!h.active||h.detached||mp4_fresh_withdrawn.load(std::memory_order_acquire))return false;
+ Mp4SceneWitness now{};if(!idoly_mp4_runtime::game.selected_scene_witness(now)||!mp4_scene_same_source(now,h.source))return false;
+ for(size_t i=0;i<h.root_count;++i)if(!h.roots[i]||!weak_get(h.roots[i]))return false;
+ void*timeline=nullptr;if(!mp4_actor_field(h.source.player,mp4game::Layout{}.player_director_controller,timeline)
+  ||!h.roster||timeline!=h.roster->timeline||!mp4_fresh_control_roster_current(*h.roster)||h.director_count!=h.roster->count)return false;
+ for(size_t i=0;i<h.director_count;++i)if(h.directors[i]!=h.roster->nodes[i].director)return false;
+ return true;
+}
+// BEGIN_MP4_FRESH_VIDEO_HOST
+namespace mp4freshvideo=idoly_mp4_fresh_video;
+struct Mp4FreshVideoEntry {
+ mp4freshvideo::Scope frames;mp4freshvideo::Identity identity{};mp4freshvideo::Clip clip{};
+ struct Knobs {int32_t audio=0,render=0,reference=0,update=0;float speed=1;
+  bool awake=false,loop=false,skip=false,frames=false,captured=false,restored=false;}saved;
+ void*image=nullptr;uintptr_t image_native=0;void*script=nullptr;
+ void*textures[4]{};uintptr_t texture_native[4]{};size_t texture_count=0;
+ bool active=false;
+};
+Mp4FreshVideoEntry mp4_fresh_videos[16];size_t mp4_fresh_video_count=0;
+std::atomic<void*>mp4_fresh_video_players[16];
+std::atomic<void*>mp4_fresh_video_scripts[16];
+bool mp4_fresh_video_callbacks_ready();
+bool mp4_fresh_video_program_current();
+bool mp4_fresh_video_program_current();
+bool mp4_fresh_video_bindings(){
+ if(!game_call()||!mp4_source_verified||!mp4_video_native_source()||!mp4_fresh_video_callbacks_ready())return false;
+ const mp4camp::Binding*calls[]={&mp4_cam_profile.video_clip,&mp4_cam_profile.video_source,
+  &mp4_cam_profile.video_audio_mode,&mp4_cam_profile.video_set_audio_mode,&mp4_cam_profile.video_render_mode,&mp4_cam_profile.video_set_render_mode,
+  &mp4_cam_profile.video_play_on_awake,&mp4_cam_profile.video_set_play_on_awake,&mp4_cam_profile.video_loop,&mp4_cam_profile.video_set_loop,
+  &mp4_cam_profile.video_skip,&mp4_cam_profile.video_set_skip,&mp4_cam_profile.video_update_mode,&mp4_cam_profile.video_set_update_mode,
+  &mp4_cam_profile.video_speed,&mp4_cam_profile.video_set_speed,&mp4_cam_profile.video_time_ref,&mp4_cam_profile.video_set_time_ref,
+  &mp4_cam_profile.video_playing,&mp4_cam_profile.video_paused,&mp4_cam_profile.video_prepared,&mp4_cam_profile.video_prepare,
+  &mp4_cam_profile.video_frame,&mp4_cam_profile.video_set_frame,&mp4_cam_profile.video_set_external_reference_time,
+  &mp4_cam_profile.video_texture,&mp4_cam_profile.video_pause,&mp4_cam_profile.video_stop,&mp4_cam_profile.video_send_frames,
+  &mp4_cam_profile.video_set_send_frames,&mp4_cam_profile.video_step,&mp4_cam_profile.video_clip_frames,&mp4_cam_profile.video_clip_rate,&mp4_cam_profile.video_clip_length,
+  &mp4_cam_profile.video_clip_audio,&mp4_cam_profile.raw_image_set_texture};
+ for(const auto*p:calls)if(!mp4_video_pin(*p))return false;
+ const auto&p=mp4_video_native_pins.update;const auto at=mp4_native_base+p.rva;
+ return at>=mp4_native_base&&mp4_native_mapped(at,16,5)&&!std::memcmp(reinterpret_cast<void*>(at),p.prefix,16);
+}
+bool mp4_fresh_video_current(void*context,const mp4freshvideo::Identity&id){
+ auto*e=static_cast<Mp4FreshVideoEntry*>(context);uintptr_t vp=0,clip=0,image=0;void*bound=nullptr;
+ if(!e||!e->active||!mp4freshvideo::same(e->identity,id)||!mp4_fresh_current(nullptr)||!mp4_fresh_video_program_current()||!mp4_fresh_video_bindings()
+  ||id.source!=mp4_fresh_host.source.generation||id.job!=mp4_fresh_host.job
+  ||!mp4_video_native(id.player,&vp)||vp!=id.player_native||!mp4_video_native(id.clip,&clip)||clip!=id.clip_native
+  ||!mp4_video_native(e->image,&image)||image!=e->image_native
+  ||!mp4_actor_field(e->image,mp4camp::RenderLayout::video_image_player,bound)||bound!=id.player)return false;
+ if(e->script){uint8_t recording=1;
+  if(!mp4_root_track_field(e->script,"IsRecording",mp4camp::RenderLayout::video_mixer_isrecording)
+   ||!mp4_actor_field(e->script,mp4camp::RenderLayout::video_mixer_isrecording,recording)||recording)return false;
+ }
+ using Ref=void*(*)(void*,Method*);
+ return mp4_cam_call<Ref>(mp4_cam_profile.video_clip)(id.player,nullptr)==id.clip;
+}
+bool mp4_fresh_video_native_pump(void*context,const mp4freshvideo::Identity&id){
+ if(!mp4_fresh_video_current(context,id)||!idoly_mp4_runtime::native_clock_scope().held()||mp4_fresh_host.render_depth)return false;
+ // This is one genuine per-player engine body, not an Animation/Director
+ // phase replay. Its original last branch drains scripting invocations.
+ uint8_t changed=0;using Update=void(*)(void*,uint8_t*);
+ reinterpret_cast<Update>(mp4_native_base+mp4_video_native_pins.update.rva)(reinterpret_cast<void*>(id.player_native),&changed);
+ uintptr_t begin=0,end=1;
+ return mp4_fresh_video_current(context,id)
+  &&mp4_actor_field(reinterpret_cast<void*>(id.player_native),0x98,begin)
+  &&mp4_actor_field(reinterpret_cast<void*>(id.player_native),0xa0,end)&&begin==end;
+}
+bool mp4_fresh_video_knobs(void*context,const mp4freshvideo::Identity&id){
+ auto*e=static_cast<Mp4FreshVideoEntry*>(context);if(!mp4_fresh_video_current(context,id))return false;
+ using SetInt=void(*)(void*,int32_t,Method*);using SetBool=void(*)(void*,bool,Method*);using SetFloat=void(*)(void*,float,Method*);
+ mp4_cam_call<SetInt>(mp4_cam_profile.video_set_render_mode)(id.player,mp4camp::ExtraLayout::video_render_api,nullptr);
+ mp4_cam_call<SetInt>(mp4_cam_profile.video_set_audio_mode)(id.player,mp4camp::ExtraLayout::video_audio_none,nullptr);
+ mp4_cam_call<SetInt>(mp4_cam_profile.video_set_time_ref)(id.player,2,nullptr);
+ mp4_cam_call<SetInt>(mp4_cam_profile.video_set_update_mode)(id.player,1,nullptr);
+ mp4_cam_call<SetBool>(mp4_cam_profile.video_set_send_frames)(id.player,true,nullptr);
+ mp4_cam_call<SetBool>(mp4_cam_profile.video_set_skip)(id.player,false,nullptr);
+ mp4_cam_call<SetBool>(mp4_cam_profile.video_set_play_on_awake)(id.player,false,nullptr);
+ mp4_cam_call<SetBool>(mp4_cam_profile.video_set_loop)(id.player,e->clip.loop,nullptr);
+ mp4_cam_call<SetFloat>(mp4_cam_profile.video_set_speed)(id.player,1,nullptr);
+ return mp4_fresh_video_current(context,id);
+}
+bool mp4_fresh_video_pause(void*context,const mp4freshvideo::Identity&id){
+ if(!mp4_fresh_video_knobs(context,id))return false;
+ if(!mp4_fresh_video_current(context,id))return false;
+ using Call=void(*)(void*,Method*);mp4_cam_call<Call>(mp4_cam_profile.video_pause)(id.player,nullptr);
+ return mp4_fresh_video_current(context,id);
+}
+bool mp4_fresh_video_read(void*context,const mp4freshvideo::Identity&id,mp4freshvideo::State*out){
+ auto*e=static_cast<Mp4FreshVideoEntry*>(context);if(!out||!mp4_fresh_video_current(context,id))return false;
+ using Int=int32_t(*)(void*,Method*);using Bool=bool(*)(void*,Method*);using Float=float(*)(void*,Method*);
+ using Frame=int64_t(*)(void*,Method*);using Ref=void*(*)(void*,Method*);using Count=uint64_t(*)(void*,Method*);using Rate=double(*)(void*,Method*);using Tracks=uint16_t(*)(void*,Method*);
+ mp4freshvideo::State now{};now.identity=id;
+ now.configured=mp4_cam_call<Int>(mp4_cam_profile.video_source)(id.player,nullptr)==mp4camp::ExtraLayout::video_source_clip
+  &&mp4_cam_call<Int>(mp4_cam_profile.video_audio_mode)(id.player,nullptr)==mp4camp::ExtraLayout::video_audio_none
+  &&mp4_cam_call<Int>(mp4_cam_profile.video_render_mode)(id.player,nullptr)==mp4camp::ExtraLayout::video_render_api
+  &&mp4_cam_call<Int>(mp4_cam_profile.video_time_ref)(id.player,nullptr)==2
+  &&mp4_cam_call<Int>(mp4_cam_profile.video_update_mode)(id.player,nullptr)==1
+  &&mp4_cam_call<Bool>(mp4_cam_profile.video_send_frames)(id.player,nullptr)
+  &&!mp4_cam_call<Bool>(mp4_cam_profile.video_skip)(id.player,nullptr)
+  &&!mp4_cam_call<Bool>(mp4_cam_profile.video_play_on_awake)(id.player,nullptr)
+  &&mp4_cam_call<Bool>(mp4_cam_profile.video_loop)(id.player,nullptr)==e->clip.loop
+  &&mp4_cam_call<Float>(mp4_cam_profile.video_speed)(id.player,nullptr)==1
+  &&mp4_cam_call<Tracks>(mp4_cam_profile.video_clip_audio)(id.clip,nullptr)==0
+  &&mp4_cam_call<Count>(mp4_cam_profile.video_clip_frames)(id.clip,nullptr)==e->clip.frames
+  &&mp4_cam_call<Rate>(mp4_cam_profile.video_clip_rate)(id.clip,nullptr)==e->clip.rate
+  &&mp4_cam_call<Rate>(mp4_cam_profile.video_clip_length)(id.clip,nullptr)==e->clip.length;
+ now.prepared=mp4_cam_call<Bool>(mp4_cam_profile.video_prepared)(id.player,nullptr);
+ now.paused=mp4_cam_call<Bool>(mp4_cam_profile.video_paused)(id.player,nullptr);
+ now.playing=mp4_cam_call<Bool>(mp4_cam_profile.video_playing)(id.player,nullptr);
+ now.frame=mp4_cam_call<Frame>(mp4_cam_profile.video_frame)(id.player,nullptr);
+ Mp4ActorTempRoot texture(mp4_cam_call<Ref>(mp4_cam_profile.video_texture)(id.player,nullptr));now.texture=texture.get();
+ if(now.texture){
+  if(!mp4_video_native(now.texture,&now.texture_native))return false;
+  bool kept=false;for(size_t i=0;i<e->texture_count;++i)if(e->textures[i]==now.texture&&e->texture_native[i]==now.texture_native)kept=true;
+  if(!kept){if(e->texture_count==4||!mp4_fresh_keep(now.texture))return false;e->textures[e->texture_count]=now.texture;e->texture_native[e->texture_count++]=now.texture_native;}
+ }
+ if(!mp4_fresh_video_current(context,id))return false;*out=now;return true;
+}
+bool mp4_fresh_video_write_image(Mp4FreshVideoEntry&e,void*texture,uintptr_t native){
+ if(!mp4_fresh_video_current(&e,e.identity))return false;
+ if(texture){uintptr_t actual=0;if(!mp4_video_native(texture,&actual)||actual!=native)return false;}
+ using Set=void(*)(void*,void*,Method*);mp4_cam_call<Set>(mp4_cam_profile.raw_image_set_texture)(e.image,texture,nullptr);
+ void*actual=nullptr;return mp4_fresh_video_current(&e,e.identity)
+  &&mp4_actor_field(e.image,mp4camp::RenderLayout::raw_image_texture,actual)&&actual==texture;
+}
+bool mp4_fresh_video_capture_knobs(Mp4FreshVideoEntry&e){
+ if(e.saved.captured)return true;
+ if(!mp4_fresh_video_current(&e,e.identity))return false;
+ using Int=int32_t(*)(void*,Method*);using Bool=bool(*)(void*,Method*);using Float=float(*)(void*,Method*);
+ Mp4FreshVideoEntry::Knobs saved{};auto*vp=e.identity.player;
+ saved.audio=mp4_cam_call<Int>(mp4_cam_profile.video_audio_mode)(vp,nullptr);
+ saved.render=mp4_cam_call<Int>(mp4_cam_profile.video_render_mode)(vp,nullptr);
+ saved.reference=mp4_cam_call<Int>(mp4_cam_profile.video_time_ref)(vp,nullptr);
+ saved.update=mp4_cam_call<Int>(mp4_cam_profile.video_update_mode)(vp,nullptr);
+ saved.speed=mp4_cam_call<Float>(mp4_cam_profile.video_speed)(vp,nullptr);
+ saved.awake=mp4_cam_call<Bool>(mp4_cam_profile.video_play_on_awake)(vp,nullptr);
+ saved.loop=mp4_cam_call<Bool>(mp4_cam_profile.video_loop)(vp,nullptr);
+ saved.skip=mp4_cam_call<Bool>(mp4_cam_profile.video_skip)(vp,nullptr);
+ saved.frames=mp4_cam_call<Bool>(mp4_cam_profile.video_send_frames)(vp,nullptr);
+ if(saved.audio<0||saved.audio>3||saved.render<0||saved.render>4||saved.reference<0||saved.reference>2
+  ||saved.update<0||saved.update>2||!std::isfinite(saved.speed)||!mp4_fresh_video_current(&e,e.identity))return false;
+ saved.captured=true;e.saved=saved;return true;
+}
+bool mp4_fresh_video_configure(void*context,const mp4freshvideo::Identity&id,const mp4freshvideo::Clip&clip){
+ auto*e=static_cast<Mp4FreshVideoEntry*>(context);if(!mp4_fresh_video_current(context,id)||!mp4_fresh_video_capture_knobs(*e)||!mp4_fresh_video_write_image(*e,nullptr,0))return false;
+ using Call=void(*)(void*,Method*);using SetInt=void(*)(void*,int32_t,Method*);using SetBool=void(*)(void*,bool,Method*);using SetFloat=void(*)(void*,float,Method*);
+ mp4_cam_call<Call>(mp4_cam_profile.video_stop)(id.player,nullptr);
+ if(!mp4_fresh_video_native_pump(context,id))return false;
+ mp4_cam_call<SetInt>(mp4_cam_profile.video_set_render_mode)(id.player,mp4camp::ExtraLayout::video_render_api,nullptr);
+ mp4_cam_call<SetInt>(mp4_cam_profile.video_set_audio_mode)(id.player,mp4camp::ExtraLayout::video_audio_none,nullptr);
+ mp4_cam_call<SetInt>(mp4_cam_profile.video_set_time_ref)(id.player,2,nullptr);
+ mp4_cam_call<SetInt>(mp4_cam_profile.video_set_update_mode)(id.player,1,nullptr);
+ mp4_cam_call<SetBool>(mp4_cam_profile.video_set_send_frames)(id.player,true,nullptr);
+ mp4_cam_call<SetBool>(mp4_cam_profile.video_set_skip)(id.player,false,nullptr);
+ mp4_cam_call<SetBool>(mp4_cam_profile.video_set_play_on_awake)(id.player,false,nullptr);
+ mp4_cam_call<SetBool>(mp4_cam_profile.video_set_loop)(id.player,clip.loop,nullptr);
+ mp4_cam_call<SetFloat>(mp4_cam_profile.video_set_speed)(id.player,1,nullptr);
+ mp4freshvideo::State now{};return mp4_fresh_video_read(context,id,&now)&&now.configured&&!now.prepared;
+}
+bool mp4_fresh_video_prepare(void*context,const mp4freshvideo::Identity&id){
+ if(!mp4_fresh_video_current(context,id))return false;
+ using Call=void(*)(void*,Method*);mp4_cam_call<Call>(mp4_cam_profile.video_prepare)(id.player,nullptr);
+ return mp4_fresh_video_current(context,id);
+}
+bool mp4_fresh_video_reference(void*context,const mp4freshvideo::Identity&id,double time){
+ if(!mp4_fresh_video_current(context,id)||!std::isfinite(time)||time<0)return false;
+ using Set=void(*)(void*,double,Method*);mp4_cam_call<Set>(mp4_cam_profile.video_set_external_reference_time)(id.player,time,nullptr);
+ return mp4_fresh_video_current(context,id);
+}
+bool mp4_fresh_video_set_frame(void*context,const mp4freshvideo::Identity&id,int64_t frame){
+ if(!mp4_fresh_video_current(context,id)||frame<0)return false;
+ using Set=void(*)(void*,int64_t,Method*);mp4_cam_call<Set>(mp4_cam_profile.video_set_frame)(id.player,frame,nullptr);
+ return mp4_fresh_video_current(context,id);
+}
+bool mp4_fresh_video_can_step(void*context,const mp4freshvideo::Identity&id){
+ if(!mp4_fresh_video_current(context,id))return false;
+#ifdef IDOLY_DARWIN_BRIDGE
+ const auto&p=mp4freshvideo::ios_can_step;
+#else
+ const auto&p=mp4freshvideo::android_can_step;
+#endif
+ mp4game::Binding pin{};pin.rva=p.rva;std::memcpy(pin.prefix,p.prefix,16);
+ const auto slot=image_base+p.registration_slot;
+ if(!mp4_prefix(pin)||slot<image_base||!mp4_mapped(slot,sizeof(uintptr_t),false)
+  ||read<uintptr_t>(reinterpret_cast<void*>(slot),0)!=image_base+p.rva)return false;
+ using Can=bool(*)(void*,Method*);return reinterpret_cast<Can>(image_base+p.rva)(id.player,nullptr);
+}
+bool mp4_fresh_video_step(void*context,const mp4freshvideo::Identity&id){
+ if(!mp4_fresh_video_can_step(context,id))return false;
+ using Step=void(*)(void*,Method*);mp4_cam_call<Step>(mp4_cam_profile.video_step)(id.player,nullptr);
+ return mp4_fresh_video_current(context,id);
+}
+bool mp4_fresh_video_publish(void*context,const mp4freshvideo::Identity&id,void*texture,uintptr_t native){
+ auto*e=static_cast<Mp4FreshVideoEntry*>(context);return e&&mp4_fresh_video_current(context,id)&&mp4_fresh_video_write_image(*e,texture,native);
+}
+void mp4_fresh_video_event(unsigned kind,void*script,void*player,int64_t frame){
+ if(!game_call()){
+  for(auto&p:mp4_fresh_video_players)if(p.load(std::memory_order_acquire)==player){mp4_fresh_withdrawn.store(true,std::memory_order_release);break;}
+  return;
+ }
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];if(!e.active||e.identity.player!=player)continue;
+  if(!mp4_fresh_video_current(&e,e.identity))return;
+  if(kind<2){void*bound=nullptr;uint8_t recording=1;
+   if(!script||!mp4_video_exact(script,mp4_cam_types.video_mixer,mp4camp::type_names.video_mixer)
+    ||!mp4_root_track_field(script,"VideoPlayer",mp4camp::RenderLayout::video_mixer_videoplayer)
+    ||!mp4_root_track_field(script,"IsRecording",mp4camp::RenderLayout::video_mixer_isrecording)
+    ||!mp4_actor_field(script,mp4camp::RenderLayout::video_mixer_videoplayer,bound)||bound!=player
+    ||!mp4_actor_field(script,mp4camp::RenderLayout::video_mixer_isrecording,recording)||recording){e.frames.abandon();return;}
+   if(e.script&&e.script!=script){e.frames.abandon();return;}
+   if(!e.script){if(!mp4_fresh_keep(script)){e.frames.abandon();return;}e.script=script;mp4_fresh_video_scripts[i].store(script,std::memory_order_release);}
+  }
+  if(kind==0)(void)e.frames.on_prepared(e.identity);
+  else if(kind==1)(void)e.frames.on_seek_completed(e.identity);
+  else if(kind==2)(void)e.frames.on_frame_ready(e.identity,frame);
+  return;
+ }
+}
+// BEGIN_MP4_FRESH_VIDEO_UPDATE_SUPPRESSION
+// The exact installed original UpdateVideo wrapper consults this only while
+// the independent Fresh bank is published. Ordinary scenes always forward.
+// Producer-owned native/public calls are separate; no original Video command
+// is replayed or represented as completed by this predicate.
+bool mp4_fresh_video_suppress(void*script,bool,double){
+ if(!script)return false;
+ if(!game_call()){
+  for(auto&p:mp4_fresh_video_scripts)if(p.load(std::memory_order_acquire)==script){
+   mp4_fresh_withdrawn.store(true,std::memory_order_release);return true;
+  }
+  return false;
+ }
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];
+  if(!e.active)continue;
+  // A previously retained exact owned script may remain withheld until bank
+  // detachment, even if its scene/root receipt was just withdrawn.
+  if(e.script==script){
+   if(!mp4_fresh_video_current(&e,e.identity)){e.frames.abandon();mp4_fresh_withdrawn.store(true,std::memory_order_release);}
+   return true;
+  }
+ }
+ if(!mp4_fresh_current(nullptr)||!mp4_fresh_video_callbacks_ready()
+  ||!mp4_video_exact(script,mp4_cam_types.video_mixer,mp4camp::type_names.video_mixer)
+  ||!mp4_root_track_field(script,"VideoPlayer",mp4camp::RenderLayout::video_mixer_videoplayer))return false;
+ void*player=nullptr;if(!mp4_actor_field(script,mp4camp::RenderLayout::video_mixer_videoplayer,player))return false;
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];
+  if(!e.active||e.identity.player!=player)continue;
+  uint8_t recording=1;
+  if(e.script||!mp4_fresh_video_current(&e,e.identity)
+   ||!mp4_root_track_field(script,"IsRecording",mp4camp::RenderLayout::video_mixer_isrecording)
+   ||!mp4_actor_field(script,mp4camp::RenderLayout::video_mixer_isrecording,recording)||recording
+   ||!mp4_fresh_keep(script)){
+   e.frames.abandon();mp4_fresh_withdrawn.store(true,std::memory_order_release);return true;
+  }
+  e.script=script;mp4_fresh_video_scripts[i].store(script,std::memory_order_release);return true;
+ }
+ return false;
+}
+// END_MP4_FRESH_VIDEO_UPDATE_SUPPRESSION
+// Call only after the actual controlled-director walker proved a supported
+// single full-song identity-time SolisVideoPlayerTrack bound to this VP/image.
+bool mp4_fresh_video_add(void*player,void*image,bool loop){
+ if(mp4_fresh_video_count==16||!mp4_fresh_video_bindings()||!mp4_fresh_current(nullptr))return false;
+ for(size_t i=0;i<mp4_fresh_video_count;++i)if(mp4_fresh_videos[i].identity.player==player)return false;
+ using Ref=void*(*)(void*,Method*);using Tracks=uint16_t(*)(void*,Method*);using Count=uint64_t(*)(void*,Method*);using Rate=double(*)(void*,Method*);using Int=int32_t(*)(void*,Method*);
+ Mp4ActorTempRoot clip(mp4_cam_call<Ref>(mp4_cam_profile.video_clip)(player,nullptr));
+ auto&e=mp4_fresh_videos[mp4_fresh_video_count];uintptr_t vp=0,native=0,inative=0;void*bound=nullptr;
+ if(!mp4_video_exact(player,mp4_cam_types.video_player,mp4camp::type_names.video_player)
+  ||!mp4_video_exact(clip.get(),mp4_cam_types.video_clip,mp4camp::type_names.video_clip)
+  ||!mp4_video_exact(image,mp4_cam_types.video_image,mp4camp::type_names.video_image)
+  ||mp4_cam_call<Int>(mp4_cam_profile.video_source)(player,nullptr)!=mp4camp::ExtraLayout::video_source_clip
+  ||mp4_cam_call<Tracks>(mp4_cam_profile.video_clip_audio)(clip.get(),nullptr)!=0
+  ||!mp4_video_native(player,&vp)||!mp4_video_native(clip.get(),&native)||!mp4_video_native(image,&inative)
+  ||!mp4_actor_field(image,mp4camp::RenderLayout::video_image_player,bound)||bound!=player
+  ||!mp4_fresh_keep(player)||!mp4_fresh_keep(clip.get())||!mp4_fresh_keep(image))return false;
+ e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;
+ e.clip={mp4_cam_call<Rate>(mp4_cam_profile.video_clip_rate)(clip.get(),nullptr),mp4_cam_call<Rate>(mp4_cam_profile.video_clip_length)(clip.get(),nullptr),mp4_cam_call<Count>(mp4_cam_profile.video_clip_frames)(clip.get(),nullptr),loop};
+ const mp4freshvideo::Api api={&e,mp4_fresh_video_current,mp4_fresh_video_read,mp4_fresh_video_configure,mp4_fresh_video_prepare,
+  mp4_fresh_video_pause,mp4_fresh_video_reference,mp4_fresh_video_set_frame,mp4_fresh_video_native_pump,mp4_fresh_video_publish,
+  mp4_fresh_video_can_step,mp4_fresh_video_step};
+ if(!e.frames.bind(api,e.identity,e.clip))return false;
+ e.active=true;mp4_fresh_video_players[mp4_fresh_video_count].store(player,std::memory_order_release);++mp4_fresh_video_count;return true;
+}
+Mp4FreshResult mp4_fresh_video_prepare_all(){
+ bool waiting=false;
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];const auto r=e.frames.prepare();
+  if(r==mp4freshvideo::Result::waiting)waiting=true;
+  else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
+ }
+ return waiting?Mp4FreshResult::waiting:Mp4FreshResult::ok;
+}
+Mp4FreshResult mp4_fresh_video_frame_all(double seconds){
+ bool waiting=false;
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];const auto r=e.frames.request(seconds);
+  if(r==mp4freshvideo::Result::waiting)waiting=true;
+  else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
+ }
+ return waiting?Mp4FreshResult::waiting:Mp4FreshResult::ok;
+}
+// Synchronous terminal step BEFORE clock/shader/RT detachment and original End.
+// No decoder wait and no texture/history restoration. Stop cancels the fresh
+// codec, then one actual returned native Update drains its stopped queue. All
+// public settings are restored even if an original pool retains this VP.
+// A scalar frame-authority withdrawal does not erase a still-proven property
+// cleanup duty. This independent check still requires the same selected scene,
+// complete controlled programme, rooted player/clip and exact native bindings.
+bool mp4_fresh_video_cleanup_current(Mp4FreshVideoEntry&e){
+ auto&h=mp4_fresh_host;const auto&id=e.identity;uintptr_t vp=0,clip=0;
+ if(!game_call()||!e.active||!h.active||h.detached||h.render_depth||!mp4_fresh_video_bindings()
+  ||id.source!=h.source.generation||id.job!=h.job||!h.roster
+  ||!mp4_fresh_control_roster_current(*h.roster)||!mp4_fresh_video_program_current())return false;
+ Mp4SceneWitness now{};
+ if(!idoly_mp4_runtime::game.selected_scene_witness(now)||!mp4_scene_same_source(now,h.source))return false;
+ for(size_t i=0;i<h.root_count;++i)if(!h.roots[i]||!weak_get(h.roots[i]))return false;
+ using Ref=void*(*)(void*,Method*);
+ return mp4_video_native(id.player,&vp)&&vp==id.player_native&&mp4_video_native(id.clip,&clip)&&clip==id.clip_native
+  &&mp4_cam_call<Ref>(mp4_cam_profile.video_clip)(id.player,nullptr)==id.clip;
+}
+bool mp4_fresh_video_cleanup_pump(Mp4FreshVideoEntry&e){
+ if(!mp4_fresh_video_cleanup_current(e)||!idoly_mp4_runtime::native_clock_scope().held())return false;
+ uint8_t changed=0;using Update=void(*)(void*,uint8_t*);
+ reinterpret_cast<Update>(mp4_native_base+mp4_video_native_pins.update.rva)(reinterpret_cast<void*>(e.identity.player_native),&changed);
+ uintptr_t begin=0,end=1;
+ return mp4_fresh_video_cleanup_current(e)
+  &&mp4_actor_field(reinterpret_cast<void*>(e.identity.player_native),0x98,begin)
+  &&mp4_actor_field(reinterpret_cast<void*>(e.identity.player_native),0xa0,end)&&begin==end;
+}
+bool mp4_fresh_video_restore_knobs(){
+ bool complete=true;
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];
+  if(!e.saved.captured||e.saved.restored)continue;
+  e.frames.abandon();
+  if(!mp4_fresh_video_cleanup_current(e)){complete=false;continue;}
+  try{
+   using Call=void(*)(void*,Method*);auto*vp=e.identity.player;
+   mp4_cam_call<Call>(mp4_cam_profile.video_stop)(vp,nullptr);
+   if(!mp4_fresh_video_cleanup_pump(e)){complete=false;continue;}
+   using SetInt=void(*)(void*,int32_t,Method*);using SetBool=void(*)(void*,bool,Method*);using SetFloat=void(*)(void*,float,Method*);
+   mp4_cam_call<SetInt>(mp4_cam_profile.video_set_audio_mode)(vp,e.saved.audio,nullptr);
+   mp4_cam_call<SetInt>(mp4_cam_profile.video_set_render_mode)(vp,e.saved.render,nullptr);
+   mp4_cam_call<SetInt>(mp4_cam_profile.video_set_time_ref)(vp,e.saved.reference,nullptr);
+   mp4_cam_call<SetInt>(mp4_cam_profile.video_set_update_mode)(vp,e.saved.update,nullptr);
+   mp4_cam_call<SetBool>(mp4_cam_profile.video_set_play_on_awake)(vp,e.saved.awake,nullptr);
+   mp4_cam_call<SetBool>(mp4_cam_profile.video_set_loop)(vp,e.saved.loop,nullptr);
+   mp4_cam_call<SetBool>(mp4_cam_profile.video_set_skip)(vp,e.saved.skip,nullptr);
+   mp4_cam_call<SetBool>(mp4_cam_profile.video_set_send_frames)(vp,e.saved.frames,nullptr);
+   mp4_cam_call<SetFloat>(mp4_cam_profile.video_set_speed)(vp,e.saved.speed,nullptr);
+   using Int=int32_t(*)(void*,Method*);using Bool=bool(*)(void*,Method*);using Float=float(*)(void*,Method*);
+   uintptr_t backend=1,begin=0,end=1;
+   const bool restored=mp4_fresh_video_cleanup_current(e)
+    &&mp4_actor_field(reinterpret_cast<void*>(e.identity.player_native),0x40,backend)&&!backend
+    &&mp4_actor_field(reinterpret_cast<void*>(e.identity.player_native),0x98,begin)
+    &&mp4_actor_field(reinterpret_cast<void*>(e.identity.player_native),0xa0,end)&&begin==end
+    &&mp4_cam_call<Int>(mp4_cam_profile.video_audio_mode)(vp,nullptr)==e.saved.audio
+    &&mp4_cam_call<Int>(mp4_cam_profile.video_render_mode)(vp,nullptr)==e.saved.render
+    &&mp4_cam_call<Int>(mp4_cam_profile.video_time_ref)(vp,nullptr)==e.saved.reference
+    &&mp4_cam_call<Int>(mp4_cam_profile.video_update_mode)(vp,nullptr)==e.saved.update
+    &&mp4_cam_call<Bool>(mp4_cam_profile.video_play_on_awake)(vp,nullptr)==e.saved.awake
+    &&mp4_cam_call<Bool>(mp4_cam_profile.video_loop)(vp,nullptr)==e.saved.loop
+    &&mp4_cam_call<Bool>(mp4_cam_profile.video_skip)(vp,nullptr)==e.saved.skip
+    &&mp4_cam_call<Bool>(mp4_cam_profile.video_send_frames)(vp,nullptr)==e.saved.frames
+    &&mp4_cam_call<Float>(mp4_cam_profile.video_speed)(vp,nullptr)==e.saved.speed;
+   e.saved.restored=restored;complete=complete&&restored;
+  }catch(...){complete=false;}
+ }
+ return complete;
+}
+// Must follow real disposable original End, after clocks/render globals have
+// detached. GC roots remain in FreshHost's independent root bank until then.
+void mp4_fresh_video_clear_after_end(){
+ mp4_fresh_video_event_sink.store(nullptr,std::memory_order_release);
+ mp4_fresh_video_update_sink.store(nullptr,std::memory_order_release);
+ for(size_t i=0;i<mp4_fresh_video_count;++i){mp4_fresh_video_players[i].store(nullptr,std::memory_order_release);mp4_fresh_video_scripts[i].store(nullptr,std::memory_order_release);mp4_fresh_videos[i].~Mp4FreshVideoEntry();new(idoly_mp4_actor_placement::Address{&mp4_fresh_videos[i]})Mp4FreshVideoEntry{};}
+ mp4_fresh_video_count=0;
+}
+// END_MP4_FRESH_VIDEO_HOST
+
+// BEGIN_MP4_FRESH_VIDEO_PROGRAM
+struct Mp4FreshVideoProgram {
+ struct Track {size_t node=0;void*track=nullptr,*clip=nullptr,*asset=nullptr,*player=nullptr,*image=nullptr;double timing[8]{},extrapolation[2]{};int32_t extrapolation_mode[2]{};uint8_t loop=0;};
+ Track tracks[16]{};size_t count=0;double duration=0;bool ready=false,adopted=false;
+}mp4_fresh_video_program;
+const Mp4FreshControlRoster::List*mp4_fresh_video_list(void*owner,size_t offset){
+ const auto*r=mp4_fresh_host.roster;if(!r)return nullptr;
+ const Mp4FreshControlRoster::List*found=nullptr;
+ for(size_t i=0;i<r->list_count;++i)if(r->lists[i].owner==owner&&r->lists[i].offset==offset){const auto&fact=r->lists[i];if(found&&(found->list!=fact.list||found->array!=fact.array||found->count!=fact.count||found->version!=fact.version))return nullptr;found=&fact;}
+ return found;
+}
+bool mp4_fresh_video_identity_time(const double*t,double duration){
+ for(size_t i=0;i<8;++i)if(!std::isfinite(t[i]))return false;
+ return std::fabs(t[0])<0.000001&&t[1]+0.002>=duration&&std::fabs(t[2])<0.000001&&std::fabs(t[3]-1)<0.000001
+  &&t[4]<=0&&t[5]<=0&&t[6]<=0&&t[7]<=0;
+}
+bool mp4_fresh_video_clock_path(size_t node,double duration){
+ const auto&r=*mp4_fresh_host.roster;uint8_t seen[129]{};
+ while(node<r.count){if(seen[node])return false;seen[node]=1;
+  if(!r.nodes[node].controlled)return true;
+  const Mp4FreshControlRoster::Control*parent=nullptr;
+  for(size_t i=0;i<r.edge_count;++i)if(r.edges[i].child==node){
+   if(parent||r.edges[i].control>=r.control_count)return false;parent=&r.controls[r.edges[i].control];}
+  if(!parent||parent->muted||!parent->update||!mp4_fresh_video_identity_time(parent->timing,duration))return false;
+  node=parent->parent;
+ }
+ return false;
+}
+bool mp4_fresh_video_program_current(){
+ const auto&p=mp4_fresh_video_program;const auto*r=mp4_fresh_host.roster;
+ if(!game_call()||!p.ready||!r||!r->ready||p.count>16||!mp4_fresh_control_roster_current(*r))return false;
+ for(size_t i=0;i<p.count;++i){const auto&t=p.tracks[i];uint8_t loop=2;void*asset=nullptr;
+  if(t.node>=r->count||mp4_api.track_muted_hierarchy(t.track,nullptr)
+   ||mp4_api.director_get_binding(r->nodes[t.node].director,t.track,nullptr)!=t.player
+   ||!mp4_actor_field(t.track,mp4camp::RenderLayout::video_track_loop,loop)||loop!=t.loop
+   ||!mp4_actor_field(t.clip,mp4game::Layout{}.clip_asset,asset)||asset!=t.asset
+   ||!mp4_fresh_video_clock_path(t.node,p.duration))return false;
+  for(size_t j=0;j<2;++j){double time=0;int32_t mode=-1;
+   if(!mp4_actor_field(t.clip,0x94+j*4,mode)||mode!=t.extrapolation_mode[j]
+    ||!mp4_actor_field(t.clip,0xa0+j*8,time)||time!=t.extrapolation[j])return false;}
+  const size_t offsets[]={0x18,0x30,0x20,0x38,0x48,0x50,0x58,0x60};
+  for(size_t j=0;j<8;++j){double now=0;if(!mp4_actor_field(t.clip,offsets[j],now)||now!=t.timing[j])return false;}
+ }
+ return true;
+}
+Mp4FreshResult mp4_fresh_video_inventory(void*player){
+ auto&h=mp4_fresh_host;auto&p=mp4_fresh_video_program;
+ if(p.ready)return mp4_fresh_video_program_current()?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::stale,"fresh_video_program_changed");
+ if(p.count||!h.roster||!h.roster->ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_video_inventory_incomplete");
+ const auto&r=*h.roster;const auto fail=[](const char*e){return mp4_fresh_fail(Mp4FreshResult::unsupported,e);};
+ p.duration=mp4_api.director_get_duration(r.master,nullptr);
+ if(!std::isfinite(p.duration)||p.duration<=0||p.duration>900||!mp4_fresh_video_bindings())return fail("fresh_video_bindings_unavailable");
+ Mp4ActorTempRoot image_type(mp4_type_get_object(reinterpret_cast<void*>(image_base+mp4_cam_types.video_image.rva)));
+ Mp4ActorTempRoot player_type(mp4_type_get_object(reinterpret_cast<void*>(image_base+mp4_cam_types.video_player.rva)));
+ if(!image_type.get()||!player_type.get()||!mp4_video_pin(mp4_cam_profile.game_object_get_component)||!mp4_video_pin(mp4_cam_profile.component_object))return fail("fresh_video_inventory_type_unavailable");
+ using Object=void*(*)(void*,Method*);using Get=void*(*)(void*,void*,Method*);using Audio=uint16_t(*)(void*,Method*);
+ for(size_t node=0;node<r.count;++node){if(!r.nodes[node].asset)continue;
+  const auto*roots=mp4_fresh_video_list(r.nodes[node].asset,mp4stage::Layout::timeline_tracks);if(!roots)return fail("fresh_video_root_tracks_unavailable");
+  void*tracks[512]{};size_t count=0;if(roots->count>512)return fail("fresh_video_track_limit");
+  for(size_t i=0;i<roots->count;++i)tracks[count++]=r.items[roots->begin+i];
+  for(size_t at=0;at<count;++at){void*track=tracks[at];
+   for(size_t i=0;i<at;++i)if(tracks[i]==track)return fail("fresh_video_track_cycle");
+   const auto*children=mp4_fresh_video_list(track,mp4stage::Layout::track_children);const auto*clips=mp4_fresh_video_list(track,mp4stage::Layout::track_clips);
+   if(!children||!clips||children->count>512-count)return fail("fresh_video_track_lists_unavailable");
+   for(size_t i=0;i<children->count;++i)tracks[count++]=r.items[children->begin+i];
+   if(!mp4_type_is(track,"Solis.Timeline.SolisVideoPlayerTrack"))continue;
+   if(!mp4_video_exact(track,mp4_cam_types.video_track,mp4camp::type_names.video_track))return fail("fresh_video_track_type_unsupported");
+   if(mp4_api.track_muted_hierarchy(track,nullptr))continue;
+   if(p.count==16||clips->count!=1)return fail("fresh_video_single_full_song_clip_required");
+   auto&t=p.tracks[p.count];t.node=node;t.track=track;t.clip=r.items[clips->begin];
+   if(!mp4_actor_field(t.clip,mp4game::Layout{}.clip_asset,t.asset)
+    ||!mp4_video_exact(t.asset,mp4_cam_types.video_clip_asset,mp4camp::type_names.video_clip_asset)
+    ||!mp4_actor_field(track,mp4camp::RenderLayout::video_track_loop,t.loop)||t.loop>1)return fail("fresh_video_clip_type_unsupported");
+   const size_t offsets[]={0x18,0x30,0x20,0x38,0x48,0x50,0x58,0x60};
+   for(size_t j=0;j<8;++j)if(!mp4_actor_field(t.clip,offsets[j],t.timing[j]))return fail("fresh_video_timing_unavailable");
+   if(!mp4_fresh_video_identity_time(t.timing,p.duration)||!mp4_fresh_video_clock_path(node,p.duration))return fail("fresh_video_nonidentity_timing_unsupported");
+   const char*mode_names[]={"m_PostExtrapolationMode","m_PreExtrapolationMode"};const char*time_names[]={"m_PostExtrapolationTime","m_PreExtrapolationTime"};
+   for(size_t j=0;j<2;++j)if(!mp4_root_track_field(t.clip,mode_names[j],0x94+j*4)
+    ||!mp4_root_track_field(t.clip,time_names[j],0xa0+j*8)
+    ||!mp4_actor_field(t.clip,0x94+j*4,t.extrapolation_mode[j])||t.extrapolation_mode[j]
+    ||!mp4_actor_field(t.clip,0xa0+j*8,t.extrapolation[j])||t.extrapolation[j]!=0)return fail("fresh_video_extrapolation_unsupported");
+   if(!mp4_root_track_field(track,"Loop",mp4camp::RenderLayout::video_track_loop))return fail("fresh_video_track_schema_unsupported");
+   t.player=mp4_api.director_get_binding(r.nodes[node].director,track,nullptr);
+   if(!mp4_video_exact(t.player,mp4_cam_types.video_player,mp4camp::type_names.video_player)||!mp4_alive(t.player)||!mp4_api.active_enabled(t.player,nullptr))return fail("fresh_video_player_binding_unsupported");
+   for(size_t i=0;i<p.count;++i)if(p.tracks[i].player==t.player)return fail("fresh_video_player_binding_ambiguous");
+   Mp4ActorTempRoot clip(mp4_cam_call<Object>(mp4_cam_profile.video_clip)(t.player,nullptr));
+   if(!mp4_video_exact(clip.get(),mp4_cam_types.video_clip,mp4camp::type_names.video_clip)||!mp4_alive(clip.get()))return fail("fresh_video_clip_unavailable");
+   if(mp4_cam_call<Audio>(mp4_cam_profile.video_clip_audio)(clip.get(),nullptr)!=0)return fail("fresh_video_audio_pcm_unsupported");
+   Mp4ActorTempRoot go(mp4_cam_call<Object>(mp4_cam_profile.component_object)(t.player,nullptr));
+   if(!mp4_type_is(go.get(),"UnityEngine.GameObject")||!mp4_alive(go.get()))return fail("fresh_video_image_binding_unsupported");
+   Mp4ActorTempRoot image(mp4_cam_call<Get>(mp4_cam_profile.game_object_get_component)(go.get(),image_type.get(),nullptr));t.image=image.get();void*bound=nullptr;
+   if(!mp4_video_exact(t.image,mp4_cam_types.video_image,mp4camp::type_names.video_image)
+    ||!mp4_actor_field(t.image,mp4camp::RenderLayout::video_image_player,bound)||bound!=t.player)return fail("fresh_video_image_binding_unsupported");
+   if(!mp4_fresh_keep(t.player)||!mp4_fresh_keep(t.image)||!mp4_fresh_keep(t.asset))return fail("fresh_video_inventory_root_failed");
+   ++p.count;
+  }
+ }
+ // Include inactive descendants: every live VP in the selected scene roots
+ // must be explained by the actual authored Video tracks above.
+ void*environment=nullptr;if(!mp4_actor_field(player,0x40,environment)||!environment)return fail("fresh_environment_missing");
+ void*scopes[131]{};scopes[0]=player;scopes[1]=environment;for(size_t i=0;i<r.count;++i)scopes[i+2]=r.nodes[i].director;
+ for(size_t i=0;i<r.count+2;++i){Mp4ActorTempRoot go(reinterpret_cast<Object>(image_base+mp4_actor_profile.get_game_object.rva)(scopes[i],nullptr));
+  if(!mp4_type_is(go.get(),"UnityEngine.GameObject")||!mp4_alive(go.get()))return fail("fresh_video_inventory_root_invalid");
+  Mp4ActorTempRoot array(mp4_fresh_control_components(go.get(),player_type.get(),true));
+  if(!array.get()||!mp4_type_is(array.get(),"System.Array"))return fail("fresh_video_inventory_unavailable");
+  const auto count=mp4_array_length(array.get());auto**values=static_cast<void**>(mp4_array_data(array.get()));
+  if(count>128||(count&&!values))return fail("fresh_video_player_limit");
+  for(size_t j=0;j<count;++j){bool found=false;for(size_t k=0;k<p.count;++k)if(values[j]==p.tracks[k].player)found=true;
+   if(!found)return fail("fresh_video_player_outside_authored_program");}
+ }
+ p.ready=true;return mp4_fresh_video_program_current()?Mp4FreshResult::ok:fail("fresh_video_program_changed");
+}
+Mp4FreshResult mp4_fresh_video_adopt(){
+ auto&p=mp4_fresh_video_program;if(p.adopted)return mp4_fresh_video_program_current()?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::stale,"fresh_video_program_changed");
+ if(!mp4_fresh_video_program_current())return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_video_program_changed");
+ // The one original initialization seek has returned before script capture.
+ for(size_t i=0;i<p.count;++i)if(!mp4_fresh_video_add(p.tracks[i].player,p.tracks[i].image,p.tracks[i].loop!=0))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_video_bank_binding_failed");
+ mp4_fresh_video_event_sink.store(mp4_fresh_video_event,std::memory_order_release);
+ mp4_fresh_video_update_sink.store(mp4_fresh_video_suppress,std::memory_order_release);
+ p.adopted=true;return Mp4FreshResult::ok;
+}
+// END_MP4_FRESH_VIDEO_PROGRAM
+
+// BEGIN_MP4_FRESH_QOS_HOST
+bool mp4_fresh_qos_observe(void*,idoly_mp4_fresh_qos::Observed&out){
+ if(!game_call()||!mp4_native_base||!mp4_native_clock_source_ready.load(std::memory_order_acquire)||!mp4_actor_refresh_maps())return false;
+ for(const auto*p:{&mp4_native_profile.application_fps_get,&mp4_native_profile.application_fps_set,&mp4_native_profile.quality_manager,&mp4_native_profile.vsync_set}){
+  const auto at=mp4_native_base+p->rva;if(at<mp4_native_base||!mp4_native_mapped(at,16,5)||std::memcmp(reinterpret_cast<void*>(at),p->prefix,16))return false;}
+ using Quality=void*(*)();using Fps=int32_t(*)();
+ const auto quality=reinterpret_cast<Quality>(mp4_native_base+mp4_native_profile.quality_manager.rva);
+ idoly_mp4_fresh_qos::Observed value{};value.manager=quality();
+ if(!value.manager||!mp4_actor_field(value.manager,0x74,value.index)||value.index<0||!mp4_actor_field(value.manager,0x30,value.data)||!value.data)return false;
+ const auto delta=static_cast<uintptr_t>(value.index)*0xf8u;
+ if(delta/0xf8u!=static_cast<uintptr_t>(value.index)||value.data+delta<value.data||value.data+delta+0x88u<value.data+delta)return false;
+ if(!mp4_actor_field(reinterpret_cast<void*>(value.data+delta+0x88u),0,value.vsync))return false;
+ value.fps=reinterpret_cast<Fps>(mp4_native_base+mp4_native_profile.application_fps_get.rva)();
+ uintptr_t data=0;int32_t index=-1;
+ if(quality()!=value.manager||!mp4_actor_field(value.manager,0x74,index)||index!=value.index||!mp4_actor_field(value.manager,0x30,data)||data!=value.data)return false;
+ out=value;return true;
+}
+bool mp4_fresh_qos_fps(void*,int32_t value){
+ if(!game_call())return false;try{reinterpret_cast<void(*)(int32_t)>(mp4_native_base+mp4_native_profile.application_fps_set.rva)(value);return true;}catch(...){return false;}
+}
+bool mp4_fresh_qos_vsync(void*,int32_t value){
+ if(!game_call())return false;try{reinterpret_cast<void(*)(int32_t)>(mp4_native_base+mp4_native_profile.vsync_set.rva)(value);return true;}catch(...){return false;}
+}
+idoly_mp4_fresh_qos::Api mp4_fresh_qos_api(){return {&mp4_fresh_host,mp4_fresh_qos_observe,mp4_fresh_qos_fps,mp4_fresh_qos_vsync};}
+bool mp4_fresh_qos_active(){return game_call()&&mp4_fresh_host.qos.active&&mp4_fresh_host.qos.entered&&!mp4_fresh_qos_foreign_changed.load(std::memory_order_acquire);}
+int mp4_fresh_qos_target(){return mp4_fresh_host.qos.wanted_fps;}
+void mp4_fresh_qos_external_fps(int value){if(game_call())idoly_mp4_fresh_qos::external_fps_target(mp4_fresh_host.qos,value);}
+bool mp4_fresh_qos_before_quality_change(){
+ if(!game_call())return false;
+ if(!mp4_fresh_host.qos.active)return true;
+ const auto result=idoly_mp4_fresh_qos::finish(mp4_fresh_host.qos,mp4_fresh_qos_api());
+ mp4_fresh_host.qos_failed=true;mp4_fresh_qos_foreign_changed.store(true,std::memory_order_release);
+ if(result!=idoly_mp4_fresh_qos::Result::ok)mp4_fresh_host.error="fresh_qos_quality_change_cleanup_failed";
+ if(!mp4_fresh_host.qos.active)mp4_fresh_qos_published.store(false,std::memory_order_release);
+ return !mp4_fresh_host.qos.active;
+}
+Mp4FreshResult mp4_fresh_qos_begin(){
+ auto&h=mp4_fresh_host;
+ if(h.qos_failed||mp4_fresh_qos_foreign_changed.load(std::memory_order_acquire))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_qos_setting_superseded");
+ const auto result=idoly_mp4_fresh_qos::begin(h.qos,mp4_fresh_qos_api(),1000);
+ mp4_fresh_qos_published.store(h.qos.active,std::memory_order_release);
+ if(result==idoly_mp4_fresh_qos::Result::ok)return Mp4FreshResult::ok;
+ return mp4_fresh_fail(result==idoly_mp4_fresh_qos::Result::waiting?Mp4FreshResult::waiting:Mp4FreshResult::failed,"fresh_qos_configuration_unavailable");
+}
+// END_MP4_FRESH_QOS_HOST
+
+bool mp4_fresh_listener_current(void*){
+ if(!game_call()||!mp4_source_verified||!image_base)return false;
+#ifdef IDOLY_DARWIN_BRIDGE
+ const auto&p=idoly_mp4_timeline_audio::ios_listener_profile;
+#else
+ const auto&p=idoly_mp4_timeline_audio::android_listener_profile;
+#endif
+ for(const auto*b:{&p.get_volume,&p.set_volume}){
+  mp4game::Binding pin{};pin.rva=b->rva;std::memcpy(pin.prefix,b->prefix,16);
+  const auto slot=image_base+b->registration_pointer_slot;
+  if(!mp4_prefix(pin)||slot<image_base||!mp4_mapped(slot,sizeof(uintptr_t),false)
+   ||read<uintptr_t>(reinterpret_cast<void*>(slot),0)!=image_base+b->rva)return false;
+ }
+ return true;
+}
+float mp4_fresh_listener_get(void*){
+#ifdef IDOLY_DARWIN_BRIDGE
+ const auto&p=idoly_mp4_timeline_audio::ios_listener_profile;
+#else
+ const auto&p=idoly_mp4_timeline_audio::android_listener_profile;
+#endif
+ return reinterpret_cast<float(*)(Method*)>(image_base+p.get_volume.rva)(nullptr);
+}
+void mp4_fresh_listener_set(void*,float value){
+#ifdef IDOLY_DARWIN_BRIDGE
+ const auto&p=idoly_mp4_timeline_audio::ios_listener_profile;
+#else
+ const auto&p=idoly_mp4_timeline_audio::android_listener_profile;
+#endif
+ reinterpret_cast<void(*)(float,Method*)>(image_base+p.set_volume.rva)(value,nullptr);
+}
+bool mp4_fresh_available(void*){
+ return game_call()&&mp4_api_installed&&mp4_source_verified&&mp4_replay_verified&&mp4_playback_source_verified
+  &&idoly_mp4_runtime::native_clock_available()&&mp4_actor_routes(nullptr)&&mp4_render_hold_frontends()
+  &&mp4_capture_pass_original&&mp4_end_camera_original&&mp4_shader_set_original&&mp4_shader_reset_original
+  &&mp4_fresh_listener_current(nullptr)&&mp4_fresh_video_callbacks_ready();
+}
+Mp4FreshResult mp4_fresh_admit(void*){
+ if(!mp4_fresh_available(nullptr))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_original_bindings_unavailable");
+ idoly_mp4_runtime::FreshFactoryReceipt receipt{};
+ if(!idoly_mp4_runtime::fresh_factory_receipt(&receipt)||!receipt.serial||!receipt.identity
+  ||receipt.player!=idoly_mp4_runtime::game.selected_player()||receipt.presenter!=idoly_mp4_runtime::game.selected_presenter())
+  return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_original_factory_wait");
+ void*timeline=nullptr,*master=nullptr;
+ if(!mp4_actor_field(receipt.player,mp4game::Layout{}.player_director_controller,timeline)
+  ||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||!mp4_alive(master))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_original_start_wait");
+ // Original Photo PlayAsync awaits the whole song. Its true IsPlaying+native
+ // Playing edge proves startup entered, without awaiting song completion.
+ if(!mp4_api.automatic_playback.player_playing(receipt.player,nullptr)
+  ||mp4_api.automatic_playback.director_state(master,nullptr)!=1)return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_original_start_wait");
+ auto&h=mp4_fresh_host;
+ if(!h.roster){void*storage=::malloc(sizeof(Mp4FreshControlRoster));if(!storage)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_control_roster_allocation_failed");
+  h.roster=new(idoly_mp4_actor_placement::Address{storage})Mp4FreshControlRoster{};}
+ void*environment=nullptr;if(!mp4_actor_field(receipt.player,0x40,environment)||!environment)return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_environment_wait");
+ if(!h.roster->ready&&!mp4_fresh_control_roster_build(timeline,*h.roster,receipt.player,environment))return mp4_fresh_fail(Mp4FreshResult::unsupported,h.roster->error);
+ if(!mp4_fresh_control_roster_current(*h.roster))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_control_roster_changed");
+ h.factory=receipt.serial;
+ return mp4_fresh_video_inventory(receipt.player);
+}
+bool mp4_fresh_complete_handle(void*handle){
+ if(!handle||!mp4_actor_mapped(handle,16,true))return false;
+ using Complete=void(*)(void*,Method*);reinterpret_cast<Complete>(image_base+mp4_actor_profile.complete.rva)(handle,nullptr);
+ uint64_t group=1;int32_t version=1;
+ return mp4_actor_field(handle,0,group)&&mp4_actor_field(handle,8,version)&&!group&&!version;
+}
+bool mp4_fresh_actors_current(){
+ auto&h=mp4_fresh_host;void*binder=nullptr,*list=nullptr;void**actors=nullptr;size_t count=0;
+ if(!mp4_actor_field(h.source.player,mp4game::Layout{}.player_binder,binder)
+  ||!mp4_actor_field(binder,mp4game::Layout{}.binder_actors,list)||!mp4_actor_list(list,&actors,&count,32)||count!=h.actor_count)return false;
+ const auto&f=mp4_actor_profile.fields;const auto api=mp4_actor_state_api();
+ for(size_t i=0;i<count;++i){const auto&a=h.actors[i];void*value=nullptr,*animation=nullptr;mp4actor::Handle graph{},playable{},output{};
+  if(actors[i]!=a.actor||!mp4_actor_field(a.actor,f.actor_player,animation)||!mp4_type_is(animation,"VL.VLAnimationClipPlayer")
+   ||!mp4_actor_field(a.actor,f.actor_animator,value)||value!=a.animator
+   ||!mp4_actor_field(a.extension,f.extension_rig,value)||value!=a.rig
+   ||!mp4_actor_field(a.extension,f.extension_builder,value)||value!=a.builder
+   ||!mp4_actor_field(a.builder,f.builder_rig,value)||value!=a.rig
+   ||!mp4_actor_field(animation,f.player_graph,graph)||!mp4_actor_same_handle(graph,a.graph)
+   ||!mp4_actor_field(a.builder,f.builder_playable,playable)||!mp4_actor_same_handle(playable,a.playable)
+   ||!mp4_actor_field(a.builder,f.builder_output,output)||!mp4_actor_same_handle(output,a.output)
+   ||!api.graph_valid(&graph,nullptr)||api.output_target(&output,nullptr)!=a.animator)return false;
+  int32_t mode=-1;if(!mp4_actor_graph_mode(&graph,&mode)||(mode!=1&&mode!=3))return false;
+ }
+ return true;
+}
+Mp4FreshResult mp4_fresh_hold(void*){
+ auto&h=mp4_fresh_host;if(!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_scene_changed");
+ if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return Mp4FreshResult::waiting;
+ if(h.mono&&!mp4_actor_mono_gate.hold(h.source.generation))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_gate_lost");
+ if(!mp4_fresh_actors_current())return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_identity_changed");
+ for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
+  if(!mp4_actor_graph_mode(&graph,&mode))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_mode_invalid");
+  if(mode!=3)mp4_actor_graph_set(&graph,3,nullptr);
+  if(!mp4_actor_graph_mode(&graph,&mode)||mode!=3)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_hold_failed");}
+ h.brain_serial=0;
+ // Hold scheduling without generating OnBehaviourPause/Resume every frame.
+ // Video and other original ScriptPlayables retain their real playing state.
+ for(size_t i=0;i<h.director_count;++i){
+  const double time=mp4_api.director_get_time(h.directors[i],nullptr);
+  if(!std::isfinite(time)||(h.held&&std::fabs(time-h.director_times[i])>0.000001))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_director_advanced_while_held");
+  if(mp4_api.director_get_asset(h.directors[i],nullptr)&&mp4_api.director_get_mode(h.directors[i],nullptr)!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_owned_director_clock_changed");
+  mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
+  mp4actor::Handle graph{};std::memcpy(&graph,&raw,16);if(graph.handle&&!mp4_api.graph_valid(&raw,nullptr))graph={};h.director_graphs[i]=graph;
+  if(graph.handle&&mp4_api.graph_valid(&raw,nullptr)){int32_t mode=-1;if(!mp4_actor_graph_mode(&graph,&mode)||(mode!=h.director_modes[i]&&mode!=3))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_owned_graph_clock_unsupported");
+   if(mode!=3)mp4_actor_graph_set(&graph,3,nullptr);
+   mp4game::PlayableGraph after{};mp4_api.director_graph_injected(h.directors[i],&after,nullptr);
+   if(!mp4_fresh_current(nullptr)||std::memcmp(&raw,&after,16)||!mp4_actor_graph_mode(&graph,&mode)||mode!=3)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_graph_hold_failed");}
+  h.director_times[i]=time;
+ }
+ for(size_t i=0;i<h.roster->path_graph_count;++i){auto graph=h.roster->path_graphs[i].graph;int32_t mode=-1;
+  if(!mp4_actor_graph_mode(&graph,&mode)||(mode!=1&&mode!=3))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_graph_mode_changed");
+  if(mode!=3)mp4_actor_graph_set(&graph,3,nullptr);
+  if(!mp4_actor_graph_mode(&graph,&mode)||mode!=3||!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_graph_hold_failed");}
+ h.held=true;
+ for(size_t i=0;i<h.actor_count;++i){uintptr_t native=0;
+  if(!mp4_actor_field(h.actors[i].animator,16,native)||!native||native+0x238<native
+   ||!mp4_fresh_complete_handle(reinterpret_cast<void*>(native+0x238)))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_animator_job_wait");
+ }
+ for(size_t i=0;i<h.callbacks.node_count;++i){auto*object=h.callbacks.nodes[i].object;
+  const bool foot=mp4_type_is(object,"VL.VLActorFootShadow");
+  if(!foot&&!mp4_type_is(object,"VL.Core.VLActorController"))continue;
+  if(!mp4_fresh_complete_handle(static_cast<uint8_t*>(object)+184))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_actor_aux_job_wait");
+  if(foot){uint8_t scheduled=2;if(!mp4_actor_field(object,180,scheduled)||scheduled>1)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_foot_job_state_invalid");
+   if(scheduled)mp4_actor_foot_apply_original(object,nullptr);
+   if(!mp4_actor_field(object,180,scheduled)||scheduled)return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_foot_apply_wait");}
+ }
+ return mp4_fresh_current(nullptr)?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::stale,"fresh_scene_changed");
+}
+Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job){
+ auto&h=mp4_fresh_host;
+ if(h.active&&(h.job!=job||!mp4_scene_same_source(source,h.source)))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_scene_already_owned");
+ if(h.active&&h.roster&&h.roster->converted)return mp4_fresh_hold(nullptr);
+ if(!job||!source.generation||!idoly_mp4_runtime::native_clock_scope().held())return mp4_fresh_fail(Mp4FreshResult::invalid,"fresh_acquire_clock_missing");
+ h.source=source;h.job=job;h.active=true;h.detached=false;mp4_fresh_withdrawn.store(false,std::memory_order_release);
+ if(!h.mono){
+ void*timeline=nullptr;if(!mp4_actor_field(source.player,mp4game::Layout{}.player_director_controller,timeline))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_timeline_missing");
+ if(!h.roster||!h.roster->ready||h.roster->timeline!=timeline||!mp4_fresh_control_roster_current(*h.roster))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_control_roster_changed");
+ h.director_identity=h.roster->identity;h.director_count=h.roster->count;
+ for(size_t i=0;i<h.director_count;++i){h.directors[i]=h.roster->nodes[i].director;h.director_modes[i]=h.roster->nodes[i].desired_mode;}
+ void*anchors[]={source.presenter,source.player,source.director,source.controller,source.camera,source.brain,source.bgm,source.voice,source.environment,source.camera_director,source.camera_asset,source.camera_track,timeline};
+ for(auto*object:anchors)if(!mp4_fresh_keep(object))return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_root_failed");
+ if(!mp4_scene_actor_inventory(source,h.actors,&h.actor_count,true)
+  ||!mp4_actor_presentation_collect(h.actors,h.actor_count,false,h.callbacks))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_actor_callbacks_unsupported");
+ for(size_t i=0;i<h.actor_count;++i){const auto&a=h.actors[i];auto graph=a.graph;
+  if(!mp4_actor_graph_mode(&graph,&h.actor_modes[i])||(h.actor_modes[i]!=1&&h.actor_modes[i]!=3))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_actor_clock_unsupported");
+  for(auto*object:{a.actor,a.extension,a.rig,a.builder,a.animator})if(!mp4_fresh_keep(object))return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_actor_root_failed");}
+ for(size_t i=0;i<h.callbacks.node_count;++i)if(!mp4_fresh_keep(h.callbacks.nodes[i].object))return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_callback_root_failed");
+ auto api=mp4_actor_presentation_api(mp4_actor_foot_apply_original).mono;api.current=mp4_fresh_current;
+ if(!mp4_actor_mono_gate.publish(api,&h,source.generation,h.callbacks.callbacks,h.callbacks.callback_count))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_actor_gate_unavailable");
+ h.mono=true;
+ if(!mp4_shader_lease_begin(&h))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_shader_lease_unavailable");h.shader=true;
+ }
+ if(h.listener.verify(h.listener_token)!=idoly_mp4_timeline_audio::ListenerResult::ok)return mp4_fresh_fail(Mp4FreshResult::failed,h.listener.error());
+ // These are NEW disposable original graphs. Convert their captured original
+ // DSP settings through the original typed setter, never grant DSP authority.
+ for(size_t i=0;i<h.actor_count;++i){uintptr_t native=0;if(!mp4_actor_field(h.actors[i].animator,16,native)||!native
+   ||!mp4_fresh_complete_handle(reinterpret_cast<void*>(native+0x238)))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_initial_animator_job_wait");}
+ if(!h.roster->converted){for(size_t i=0;i<h.director_count;++i){
+   mp4_api.director_set_mode(h.directors[i],h.director_modes[i],nullptr);
+   if(!mp4_fresh_current(nullptr)||mp4_api.director_get_mode(h.directors[i],nullptr)!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_clock_conversion_failed");
+   mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
+   if(raw.handle&&mp4_api.graph_valid(&raw,nullptr)){mp4actor::Handle graph{};int32_t mode=-1;std::memcpy(&graph,&raw,16);
+    if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_clock_conversion_failed");}
+  }
+  for(size_t i=0;i<h.roster->path_graph_count;++i){auto graph=h.roster->path_graphs[i].graph;int32_t mode=-1;
+   mp4_actor_graph_set(&graph,h.roster->path_graphs[i].desired_mode,nullptr);
+   if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode||!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_clock_conversion_failed");}
+  h.roster->converted=true;}
+ return mp4_fresh_hold(nullptr);
+}
+Mp4FreshResult mp4_fresh_start(void*){
+ auto&h=mp4_fresh_host;
+ const auto qos=mp4_fresh_qos_begin();if(qos!=Mp4FreshResult::ok)return qos;
+ if(!h.path_reset_started){
+#ifdef IDOLY_DARWIN_BRIDGE
+  const mp4game::Binding reset{0x6f93480,{0xff,0x03,0x02,0xd1,0xe9,0x23,0x04,0x6d,0xf6,0x57,0x05,0xa9,0xf4,0x4f,0x06,0xa9}};
+#else
+  const mp4game::Binding reset{0x883cb24,{0xff,0x83,0x01,0xd1,0xe8,0x1b,0x00,0xfd,0xfe,0x57,0x04,0xa9,0xf4,0x4f,0x05,0xa9}};
+#endif
+  if(h.roster->path_owner_count&&!mp4_prefix(reset))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_path_reset_source_unverified");
+  h.path_reset_started=true;
+  using Reset=void(*)(void*,double,Method*);for(size_t i=0;i<h.roster->path_owner_count;++i)reinterpret_cast<Reset>(image_base+reset.rva)(h.roster->path_owners[i].component,0,nullptr);
+  const auto api=mp4_actor_state_api();for(size_t i=0;i<h.roster->path_playable_count;++i){auto node=h.roster->path_playables[i].playable;
+   if(!api.playable_valid(&node,nullptr)||std::fabs(api.playable_time(&node,nullptr))>0.000001)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_initial_time_invalid");}
+  h.path_reset_returned=true;
+ }
+ if(!h.path_reset_returned)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_path_initial_reset_incomplete");
+ if(!h.started){const auto held=mp4_fresh_hold(nullptr);if(held!=Mp4FreshResult::ok)return held;
+  h.started=true;mp4_api.player_set_time(h.source.player,0,nullptr);h.start_returned=true;h.held=false;}
+ if(!h.start_returned)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_initial_seek_incomplete");
+ if(!mp4_fresh_current(nullptr)||std::fabs(mp4_api.director_get_time(h.source.director,nullptr))>0.0001)
+  return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_initial_time_invalid");
+ if(!mp4_shader_lease_set_time(&h,0))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_shader_clock_lost");
+ if(!h.camera_started){h.camera_started=true;
+  using Manual=void(*)(void*,Method*);
+  if(!mp4_actor_mono_gate.isolate_preview([&](){reinterpret_cast<Manual>(image_base+mp4_profile.brain_manual_update.rva)(h.source.brain,nullptr);}))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_camera_initialization_failed");
+  h.camera_returned=true;}
+ if(!h.camera_returned)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_camera_initialization_incomplete");
+ const auto held=mp4_fresh_hold(nullptr);if(held!=Mp4FreshResult::ok)return held;
+ const auto adopted=mp4_fresh_video_adopt();if(adopted!=Mp4FreshResult::ok)return adopted;
+ return mp4_fresh_video_prepare_all();
+}
+Mp4FreshResult mp4_fresh_prepare_step(void*,uint64_t tick,double seconds){
+ auto&h=mp4_fresh_host;if(tick==~uint64_t(0)||!std::isfinite(seconds)||seconds<0||seconds>900)return Mp4FreshResult::invalid;
+ const auto held=mp4_fresh_hold(nullptr);if(held!=Mp4FreshResult::ok)return held;
+ if(h.qos_failed||mp4_fresh_qos_foreign_changed.load(std::memory_order_acquire)||idoly_mp4_fresh_qos::verify(h.qos,mp4_fresh_qos_api())!=idoly_mp4_fresh_qos::Result::ok)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_qos_setting_superseded");
+ if(h.listener.verify(h.listener_token)!=idoly_mp4_timeline_audio::ListenerResult::ok)return mp4_fresh_fail(Mp4FreshResult::stale,h.listener.error());
+ h.prepared_tick=tick;h.prepared_seconds=seconds;h.prepared=true;return Mp4FreshResult::ok;
+}
+Mp4FreshResult mp4_fresh_grant(void*,uint64_t tick){
+ auto&h=mp4_fresh_host;const auto&clock=idoly_mp4_runtime::native_clock_scope();
+ if(!mp4_fresh_current(nullptr)||!h.prepared||h.prepared_tick!=tick||!clock.have_tick()||clock.tick()!=tick)
+  return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_step_receipt_missing");
+ h.prepared=false;h.tick=tick;h.grant_boundary=idoly_mp4_runtime::native_entries;
+ for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
+  mp4_actor_graph_set(&graph,h.actor_modes[i],nullptr);
+  if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.actor_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_grant_failed");}
+ for(size_t i=0;i<h.director_count;++i){auto graph=h.director_graphs[i];if(!graph.handle)continue;
+  mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
+  if(std::memcmp(&graph,&raw,16))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_graph_changed_before_grant");
+  int32_t mode=-1;mp4_actor_graph_set(&graph,h.director_modes[i],nullptr);
+  mp4game::PlayableGraph after{};mp4_api.director_graph_injected(h.directors[i],&after,nullptr);
+  if(!mp4_fresh_current(nullptr)||std::memcmp(&raw,&after,16)||!mp4_actor_graph_mode(&graph,&mode)||mode!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_graph_grant_failed");}
+ for(size_t i=0;i<h.roster->path_graph_count;++i){auto graph=h.roster->path_graphs[i].graph;int32_t mode=-1;
+  mp4_actor_graph_set(&graph,h.roster->path_graphs[i].desired_mode,nullptr);
+  if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode||!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_graph_grant_failed");}
+ if(!mp4_actor_mono_gate.grant(h.source.generation,tick+1))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_grant_failed");
+ h.held=false;h.brain_serial=tick+1;return Mp4FreshResult::ok;
+}
+Mp4FreshResult mp4_fresh_prepare_render(void*,uint64_t tick){
+ auto&h=mp4_fresh_host;if(!mp4_fresh_current(nullptr)||h.tick!=tick)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_render_tick_changed");
+ const auto&clock=idoly_mp4_runtime::native_clock_scope();
+ // Tick zero also has zero delta. Its grant entry precedes the actual original
+ // Timeline/Actor phase; require a later genuine native boundary before polls.
+ if(clock.have_tick()&&idoly_mp4_runtime::native_entries<=h.grant_boundary)return Mp4FreshResult::waiting;
+ if(!clock.held())return Mp4FreshResult::waiting;
+ if(!mp4_fresh_video_program_current())return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_video_program_changed");
+ return mp4_fresh_video_frame_all(clock.have_tick()?double(tick)/clock.simulation_hz():0.);
+}
+bool mp4_fresh_permit_brain(void*brain){
+ auto&h=mp4_fresh_host;if(!h.active||h.detached||brain!=h.source.brain)return true;
+ if(!mp4_fresh_current(nullptr)||!h.brain_serial)return false;h.brain_serial=0;return true;
+}
+void mp4_fresh_withdraw(void*){
+ // Runtime revokes future permits at every native boundary. This is not a
+ // source-loss publication and must preserve the held owner's cleanup duty.
+ if(game_call()){mp4_fresh_host.brain_serial=0;
+  if(mp4_fresh_host.mono)(void)mp4_actor_mono_gate.revoke(mp4_fresh_host.source.generation);}
+}
+// Return true when this is the fresh selected route, including suppression.
+bool mp4_fresh_render_call(Mp4RenderCamera original,Mp4RenderContext context,void*camera,Method*method){
+ auto&h=mp4_fresh_host;if(!h.active||h.detached||camera!=h.source.camera)return false;
+ if(!mp4_fresh_current(nullptr))return true;
+ if(h.render_depth){++h.render_depth;try{mp4_particle_render_observed(original,context,camera,method);}catch(...){--h.render_depth;throw;}--h.render_depth;return true;}
+ const auto prewarm=idoly_mp4_runtime::claim_native_prewarm_render();
+ const auto generation=prewarm?prewarm:idoly_mp4_runtime::native_simulation_render_generation(h.tick);
+ if(!generation)return true;
+ const double seconds=prewarm?0.:double(h.tick)/idoly_mp4_runtime::native_clock_scope().simulation_hz();
+ bool success=false;++h.render_depth;
+ const auto complete=[&](){--h.render_depth;if(prewarm)idoly_mp4_runtime::complete_native_prewarm_render(generation,success);else idoly_mp4_runtime::complete_native_simulation_render(generation,h.tick,success);};
+ try{
+  const auto&clock=idoly_mp4_runtime::native_clock_scope();
+  if(!clock.active()||(!prewarm&&(!clock.have_tick()||clock.tick()!=h.tick))
+   ||std::fabs(mp4_api.director_get_time(h.source.director,nullptr)-seconds)>0.0002
+   ||!mp4_shader_lease_set_time(&h,static_cast<float>(seconds))){h.error="fresh_render_clock_changed";complete();return true;}
+  const auto draw=[&](){mp4_particle_render_observed(original,context,camera,method);};
+  success=(prewarm?mp4_actor_mono_gate.isolate_preview(draw):mp4_actor_mono_gate.isolate_render(reinterpret_cast<uintptr_t>(camera),draw))&&mp4_fresh_current(nullptr);
+ }catch(...){complete();throw;}
+ complete();return true;
+}
+const char*mp4_fresh_error(void*){return mp4_fresh_host.error;}
+Mp4FreshResult mp4_fresh_save_origin(void*){
+ auto&h=mp4_fresh_host;
+ if(h.active)return mp4_fresh_fail(Mp4FreshResult::invalid,"fresh_previous_cleanup_pending");
+ if(!mp4_fresh_origin_state().saved&&!h.listener.active()){
+  h.~Mp4FreshSceneHost();new(idoly_mp4_actor_placement::Address{&h})Mp4FreshSceneHost{};
+  mp4_fresh_withdrawn.store(false,std::memory_order_release);mp4_fresh_qos_foreign_changed.store(false,std::memory_order_release);mp4_fresh_video_program=Mp4FreshVideoProgram{};}
+ const auto saved=mp4_fresh_origin_save(nullptr);
+ if(saved!=Mp4FreshResult::ok){h.error=mp4_fresh_origin_error(nullptr);return saved;}
+ idoly_mp4_timeline_audio::ListenerResult muted;
+ if(h.listener.active())muted=h.listener.verify(h.listener_token);
+ else{
+  if(mp4_fresh_listener_sequence==~uint64_t(0))return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_audio_lease_serial_exhausted");
+  h.listener_token=++mp4_fresh_listener_sequence;
+  const idoly_mp4_timeline_audio::ListenerApi audio{&h,mp4_fresh_listener_current,mp4_fresh_listener_get,mp4_fresh_listener_set};
+  muted=h.listener.begin(audio,h.listener_token);
+ }
+ if(muted==idoly_mp4_timeline_audio::ListenerResult::ok)return Mp4FreshResult::ok;
+ h.error=h.listener.error();return muted==idoly_mp4_timeline_audio::ListenerResult::waiting?Mp4FreshResult::waiting:Mp4FreshResult::failed;
+}
+Mp4FreshResult mp4_fresh_prepare_finish(void*){
+ auto&h=mp4_fresh_host;
+ if(!game_call())return Mp4FreshResult::waiting;
+ if(h.pre_release_done)return h.pre_release_failed?Mp4FreshResult::failed:Mp4FreshResult::ok;
+ if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return Mp4FreshResult::waiting;
+ bool complete=true;h.brain_serial=0;
+ if(mp4_fresh_current(nullptr)){
+  complete=mp4_fresh_video_restore_knobs();
+  try{
+   for(size_t i=0;i<h.director_count;++i){mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
+    if(raw.handle&&mp4_api.graph_valid(&raw,nullptr)){mp4actor::Handle graph{};int32_t mode=-1;std::memcpy(&graph,&raw,16);
+     if(!mp4_actor_graph_mode(&graph,&mode)||(mode!=h.director_modes[i]&&mode!=3)){complete=false;continue;}
+     mp4_actor_graph_set(&graph,h.director_modes[i],nullptr);
+     if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.director_modes[i])complete=false;}}
+   for(size_t i=0;i<h.roster->path_graph_count;++i){auto graph=h.roster->path_graphs[i].graph;int32_t mode=-1;
+    mp4_actor_graph_set(&graph,h.roster->path_graphs[i].desired_mode,nullptr);if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode)complete=false;}
+   if(mp4_fresh_actors_current())for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
+    mp4_actor_graph_set(&graph,h.actor_modes[i],nullptr);if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.actor_modes[i])complete=false;}
+   else complete=false;
+  }catch(...){complete=false;}
+ }else if(h.active||mp4_fresh_video_count)complete=false;
+ // Source tasks may reuse pooled wrappers after End. Stop consulting owned
+ // script pointers before the first ordinary reload; retain GC custody only.
+ mp4_fresh_video_event_sink.store(nullptr,std::memory_order_release);
+ mp4_fresh_video_update_sink.store(nullptr,std::memory_order_release);
+ h.pre_release_done=true;h.pre_release_failed=!complete;
+ return complete?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::failed,"fresh_scene_local_release_failed");
+}
+Mp4FreshResult mp4_fresh_finish(void*){
+ auto&h=mp4_fresh_host;
+ if(!game_call())return Mp4FreshResult::waiting;
+ if(!h.detached){
+  const auto qos=idoly_mp4_fresh_qos::finish(h.qos,mp4_fresh_qos_api());
+  if(h.qos.active)return Mp4FreshResult::waiting;
+  mp4_fresh_qos_published.store(false,std::memory_order_release);
+  if(qos!=idoly_mp4_fresh_qos::Result::ok){h.qos_failed=true;h.error="fresh_qos_restore_failed";}
+  if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return Mp4FreshResult::waiting;
+  h.brain_serial=0;
+  if(h.mono){mp4_actor_mono_gate.release(h.source.generation);h.mono=false;}
+  if(h.shader){
+   // Transfer only a currently held public-setter lease across the task's
+   // known original factory writes; preserve the original saved value.
+   {Mp4ShaderLock lock;if(mp4_shader_lease.active&&mp4_shader_lease.context==&h
+     &&mp4_shader_lease.generation==mp4_shader_generation)mp4_fresh_origin_state().shader_generation=mp4_shader_generation;}
+   mp4_shader_lease_finish(&h);h.shader=false;
+  }
+  // Original asynchronous End/Single-scene replacement still owns decoder,
+  // ScriptPlayable and scene wrappers. Revoke new grants now; retain their
+  // exact GC custody until that real original lifecycle settles below.
+  for(size_t i=0;i<mp4_fresh_video_count;++i)mp4_fresh_videos[i].frames.abandon();
+  h.active=false;h.detached=true;
+ }
+ const auto restored=mp4_fresh_origin_restore(nullptr);
+ if(restored==Mp4FreshResult::waiting)return restored;
+ if(restored!=Mp4FreshResult::ok)h.error=mp4_fresh_origin_error(nullptr);
+ mp4_fresh_video_clear_after_end();mp4_fresh_video_program=Mp4FreshVideoProgram{};
+ for(size_t i=0;i<h.root_count;++i)if(h.roots[i]){weak_free(h.roots[i]);h.roots[i]=0;}h.root_count=0;
+ if(h.roster){if(!mp4_fresh_control_roster_clear(*h.roster))return Mp4FreshResult::waiting;h.roster->~Mp4FreshControlRoster();::free(h.roster);h.roster=nullptr;}
+ // The listener is the only global lease deliberately retained through the
+ // real reload/seek. Release it on every terminal restore outcome.
+ const auto audio=h.listener.finish(h.listener_token);
+ if(audio!=idoly_mp4_timeline_audio::ListenerResult::ok){h.error=h.listener.error();
+  if(h.listener.active())return Mp4FreshResult::waiting;
+  return Mp4FreshResult::failed;
+ }
+ return restored==Mp4FreshResult::ok&&(h.qos_failed||h.pre_release_failed)?Mp4FreshResult::failed:restored;
+}
+// No DSP/source-memory snapshot: accept only the finite direct PCM contract.
+const char*mp4_fresh_audio_source_error(void*,void*source){
+#ifdef IDOLY_DARWIN_BRIDGE
+ const auto&p=idoly_mp4_timeline_audio::ios_source_pcm_profile;
+#else
+ const auto&p=idoly_mp4_timeline_audio::android_source_pcm_profile;
+#endif
+ const auto current=[&](){
+  if(!game_call()||!mp4_source_verified||!mp4_type_is(source,"UnityEngine.AudioSource")||!mp4_alive(source))return false;
+  for(const auto*b:{&p.pitch,&p.mute,&p.loop,&p.spatial_blend,&p.pan_stereo,&p.output_mixer,&p.clip}){
+   mp4game::Binding pin{};pin.rva=b->rva;std::memcpy(pin.prefix,b->prefix,16);const auto slot=image_base+b->registration_pointer_slot;
+   if(!mp4_prefix(pin)||slot<image_base||!mp4_mapped(slot,sizeof(uintptr_t),false)||read<uintptr_t>(reinterpret_cast<void*>(slot),0)!=image_base+b->rva)return false;}
+  return true;
+ };
+ if(!current())return "fresh_audio_source_bindings_unavailable";
+ struct Context{void*source;const idoly_mp4_timeline_audio::SourcePcmProfile*profile;};Context context{source,&p};
+ idoly_mp4_timeline_audio::SourcePcmApi api{};api.context=&context;
+ api.current=[](void*c,void*s){auto&v=*static_cast<Context*>(c);return v.source==s&&game_call()&&mp4_type_is(s,"UnityEngine.AudioSource")&&mp4_alive(s);};
+#define MP4_FRESH_PCM(field,type) api.field=[](void*c,void*s){auto&v=*static_cast<Context*>(c);return reinterpret_cast<type(*)(void*,Method*)>(image_base+v.profile->field.rva)(s,nullptr);}
+ MP4_FRESH_PCM(pitch,float);MP4_FRESH_PCM(mute,bool);MP4_FRESH_PCM(loop,bool);MP4_FRESH_PCM(spatial_blend,float);MP4_FRESH_PCM(pan_stereo,float);MP4_FRESH_PCM(output_mixer,void*);MP4_FRESH_PCM(clip,void*);
+#undef MP4_FRESH_PCM
+ api.enabled=[](void*,void*s){return mp4_api.active_enabled(s,nullptr);};
+ const char*error=idoly_mp4_timeline_audio::source_pcm_error(api,source);
+ return error?error:(current()?nullptr:"fresh_audio_source_bindings_changed");
+}
+bool mp4_install_fresh_runtime(){
+ if(idoly_mp4_runtime::fresh_scene_installed.load(std::memory_order_acquire))return true;
+ idoly_mp4_runtime::FreshSceneApi api{};api.context=&mp4_fresh_host;
+ api.available=mp4_fresh_available;api.save_origin=mp4_fresh_save_origin;api.admit=mp4_fresh_admit;
+ api.acquire=mp4_fresh_acquire;api.start=mp4_fresh_start;api.current=mp4_fresh_current;api.hold=mp4_fresh_hold;
+ api.prepare_step=mp4_fresh_prepare_step;api.grant=mp4_fresh_grant;api.prepare_render=mp4_fresh_prepare_render;
+ api.prepare_finish=mp4_fresh_prepare_finish;api.finish=mp4_fresh_finish;api.error=mp4_fresh_error;api.withdraw=mp4_fresh_withdraw;api.audio_source_error=mp4_fresh_audio_source_error;
+ return idoly_mp4_runtime::install_fresh_scene_api(api);
+}
+// END_MP4_FRESH_SCENE_HOST
+
+
 // BEGIN_MP4_EXPORT_PIPELINE_DIAGNOSTICS
 // These cached bits report bindings/completed receipts, never enable a route.
 void mp4_publish_pipeline_diagnostics(){
  using idoly_mp4_runtime::diagnostic_module;
- diagnostic_module(0,idoly_mp4_runtime::native_scene_installed,"native_scene_control_unbound");
- diagnostic_module(1,mp4_scene_host.registered,"scene_parts_unregistered");
- diagnostic_module(2,mp4_scene_playback_handoff.valid(),"final_playback_handoff_unbound");
- diagnostic_module(3,mp4native7::host_configured.load(std::memory_order_acquire),"pending_journal_unbound");
- diagnostic_module(4,mp4_frame_capture_host.api.valid(),"frame_coordinator_unbound");
- diagnostic_module(5,false,"animation_defaults_unbound");
- diagnostic_module(6,false,"monitor_ui_coordinator_unbound");
- diagnostic_module(7,false,"video_coordinator_unbound");
+ const bool legacy=!idoly_mp4_runtime::fresh_scene_installed.load(std::memory_order_acquire);
+ diagnostic_module(0,idoly_mp4_runtime::native_scene_installed,"native_scene_control_unbound",legacy);
+ diagnostic_module(1,mp4_scene_host.registered,"scene_parts_unregistered",legacy);
+ diagnostic_module(2,mp4_scene_playback_handoff.valid(),"final_playback_handoff_unbound",legacy);
+ diagnostic_module(3,mp4native7::host_configured.load(std::memory_order_acquire),"pending_journal_unbound",legacy);
+ diagnostic_module(4,mp4_frame_capture_host.api.valid(),"frame_coordinator_unbound",legacy);
+ diagnostic_module(5,false,"animation_defaults_unbound",legacy);
+ diagnostic_module(6,false,"monitor_ui_coordinator_unbound",legacy);
+ diagnostic_module(7,false,"video_coordinator_unbound",legacy);
  diagnostic_module(8,mp4_renderer_proflare_data_reference==mp4_proflare_renderer_data_reference
-  &&mp4_gpu_stage_auxiliary_recipe_closed==mp4_proflare_auxiliary_recipe,"proflare_source_routes_unbound");
- diagnostic_module(9,mp4_particle_renderer_normal_program_bindings()&&mp4_particle_renderer_descriptor_bindings(),"particle_renderer_source_unverified");
- diagnostic_module(10,mp4_gpu_graphics_producers_closed!=nullptr,"graphics_program_unbound");
+  &&mp4_gpu_stage_auxiliary_recipe_closed==mp4_proflare_auxiliary_recipe,"proflare_source_routes_unbound",legacy);
+ diagnostic_module(9,mp4_particle_renderer_normal_program_bindings()&&mp4_particle_renderer_descriptor_bindings(),"particle_renderer_source_unverified",legacy);
+ diagnostic_module(10,mp4_gpu_graphics_producers_closed!=nullptr,"graphics_program_unbound",legacy);
  diagnostic_module(11,mp4_srp_source_mutations.context&&mp4_srp_source_mutations.current&&mp4_srp_source_mutations.fenced
-  &&mp4_srp_source_mutations.root_add&&mp4_srp_source_mutations.source_retired,"srp_mutations_unbound");
- diagnostic_module(12,mp4_audio_native_hook_ready&&mp4_audio_process_hook_ready,"audio_frontends_unbound");
+  &&mp4_srp_source_mutations.root_add&&mp4_srp_source_mutations.source_retired,"srp_mutations_unbound",legacy);
+ diagnostic_module(12,mp4_audio_native_hook_ready&&mp4_audio_process_hook_ready,"audio_frontends_unbound",legacy);
  diagnostic_module(13,mp4_export_observer_install_complete.load(std::memory_order_acquire),"offline_observer_certificates_unavailable");
- diagnostic_module(14,mp4_child_native_hooks_current(),"native_director_gateway_unverified");
- diagnostic_module(15,mp4_capture_queue_frontends_current(),"capture_queue_frontends_unbound");
- diagnostic_module(16,mp4_initial_source_gpu_fence.completed,"initial_source_gpu_fence_not_completed");
+ diagnostic_module(14,mp4_child_native_hooks_current(),"native_director_gateway_unverified",legacy);
+ diagnostic_module(15,mp4_capture_queue_frontends_current(),"capture_queue_frontends_unbound",legacy);
+ diagnostic_module(16,mp4_initial_source_gpu_fence.completed,"initial_source_gpu_fence_not_completed",legacy);
  diagnostic_module(17,mp4_render_hold_frontends(),"camera_render_interception_unverified");
  diagnostic_module(18,idoly_mp4_runtime::native_clock_available(),"native_clock_unbound");
  diagnostic_module(19,mp4_api_installed,"game_api_unbound");

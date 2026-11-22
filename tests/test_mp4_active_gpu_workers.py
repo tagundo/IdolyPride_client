@@ -4,12 +4,23 @@ import subprocess
 import pytest
 ROOT=Path(__file__).resolve().parents[1]
 F=ROOT/'tests/fixtures/mp4_active_gpu_workers'
-MODES=['initial_no_cpu', 'initial_no_images', 'initial_too_late', 'initial_no_programme', 'initial_wait_once', 'initial_create_throw', 'initial_execute_throw', 'initial_source_lost_poll', 'initial_no_work_is_not_fence', 'initial_receipt_cannot_replace_ledger', 'baseline', 'historical_no_old_roster', 'production_empty', 'frame_complete', 'readback_missing', 'readback_wrong_operation', 'adapter_active', 'readback_active', 'adapter_pending', 'publication_pending', 'publication_bad_return', 'queue_nonempty', 'queue_readers', 'queue_untracked', 'queue_foreign', 'queue_cancel', 'queue_capture_tls', 'request_tls', 'bank_tls', 'native_reader', 'native_write_changed', 'native_untracked', 'render_depth', 'unowned_render_depth', 'render_ticket', 'draw_pending', 'draw_active', 'draw_unknown', 'draw_sealed', 'aux_pending', 'aux_missing_dispatch', 'poll_reentry_native_write', 'job_mismatch', 'foreign_production', 'frame_sealed', 'offthread']
+MODES=['initial_no_cpu', 'initial_no_images', 'initial_too_late', 'initial_no_programme', 'initial_no_render_hold', 'initial_render_reader', 'initial_render_original', 'initial_render_frontends', 'initial_render_handoff', 'initial_wait_once', 'initial_create_throw', 'initial_execute_throw', 'initial_source_lost_poll', 'initial_no_work_is_not_fence', 'initial_receipt_cannot_replace_ledger', 'baseline', 'historical_no_old_roster', 'production_empty', 'frame_complete', 'readback_missing', 'readback_wrong_operation', 'adapter_active', 'readback_active', 'adapter_pending', 'publication_pending', 'publication_bad_return', 'queue_nonempty', 'queue_readers', 'queue_untracked', 'queue_foreign', 'queue_cancel', 'queue_capture_tls', 'request_tls', 'bank_tls', 'native_reader', 'native_write_changed', 'native_untracked', 'render_depth', 'unowned_render_depth', 'render_ticket', 'draw_pending', 'draw_active', 'draw_unknown', 'draw_sealed', 'aux_pending', 'aux_missing_dispatch', 'poll_reentry_native_write', 'poll_reentry_render_reader', 'render_hold_withdrawn', 'job_mismatch', 'foreign_production', 'frame_sealed', 'offthread']
 
 
 def marker(text,name):
     begin=text.index('// BEGIN_'+name)
     end=text.index('// END_'+name,begin)
+    return text[begin:end]
+
+
+def definition(text,signature):
+    begin=text.index(signature)
+    brace=text.index('{',begin)
+    depth=1
+    end=brace+1
+    while depth:
+        depth+=(text[end]=='{')-(text[end]=='}')
+        end+=1
     return text[begin:end]
 
 
@@ -28,6 +39,15 @@ def binaries(tmp_path_factory):
     host_prefix='#include <atomic>\n#include <iostream>\n#include <functional>\nstd::function<void()>gpu_query_action;\n'+host_prefix
     host_prefix=host_prefix.replace('++h.queries;if(h.gl_switch_query)','++h.queries;if(gpu_query_action)gpu_query_action();if(h.gl_switch_query)')
     prefix=(F/'prefix.cpp.inc').read_text()
+    start=bridge.index('struct Mp4RenderHoldState {')
+    end=bridge.index('struct Mp4RenderHoldReader {',start)
+    hold=bridge[start:end]
+    for signature in ('bool mp4_render_hold_readers_idle()noexcept',
+                      'void mp4_render_hold_gpu_activity()noexcept',
+                      'bool mp4_render_hold_current(uint64_t source,uint64_t job)',
+                      'bool mp4_render_hold_job_quiet(uint64_t source,uint64_t job)'):
+        hold+=definition(bridge,signature)+'\n'
+    prefix=prefix.replace('// SHIPPING_RENDER_HOLD_QUIET',hold)
     work=marker(adapter,'MP4_ADAPTER_CAPTURE_WORKERS')
     prefix=prefix.replace('// SHIPPING_CAPTURE_WORK_SNAPSHOT','struct ModelGame {\n'+work+'\n CaptureWorkers capture_workers_{};bool capture_request_running_=false,capture_pending_=false,capture_pass_seen_=false,capture_submitted_=false;\n}game;')
     native=marker(bridge,'MP4_CAPTURE_NATIVE_PUBLICATION_HOST').split('#ifdef IDOLY_DARWIN_BRIDGE')[0]

@@ -26,6 +26,7 @@ SCENE_APPENDED += ('mp4_monitor_tv_update_texture','mp4_monitor_tv_disable')
 SCENE_APPENDED += ('mp4_monitor_image_apply','mp4_monitor_graphic_rebuild')
 SCENE_APPENDED += ('mp4_monitor_pool_get','mp4_monitor_pool_release','mp4_monitor_pool_clear')
 SCENE_APPENDED += ('mp4_video_prepare_frame','mp4_video_process_frame')
+SCENE_APPENDED += ('mp4_video_behaviour_play',)
 SCENE_SOURCE_ONLY = set()
 SCENE_APPENDED += ('mp4_video_mixer_create', 'mp4_video_playable_create', 'mp4_video_playable_destroy', 'mp4_video_update', 'mp4_video_sync', 'mp4_video_set_skip', 'mp4_video_set_wait_first', 'mp4_video_set_play_on_awake', 'mp4_video_set_loop', 'mp4_video_set_time', 'mp4_video_set_external_reference_time', 'mp4_video_step', 'mp4_video_loop', 'mp4_video_prepared', 'mp4_video_seek', 'mp4_video_error', 'mp4_video_frame_ready', 'mp4_video_image_enable', 'mp4_video_image_late')
 
@@ -166,9 +167,9 @@ def test_original_cache_conditional_gateway_executes_both_paths(item_pointer):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "f3b04228764ee2a7da999218b64ff4c96c6590e646e2cd1c8d969d270b4a4209"
+    assert hashlib.sha256(header).hexdigest() == "c594e50131bc72476f85899a2ca52bf8f829adbc20e46765f7ef08f48e222f62"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 246 and len(plan["entries"]) == 171
+    assert len(profile["aliases"]) == 247 and len(plan["entries"]) == 172
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -444,13 +445,28 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 171 * 32
-    assert profile["slot_region"]["bytes"] == 171 * 8
+    assert profile["gateway_region"]["bytes"] == 172 * 32
+    assert profile["slot_region"]["bytes"] == 172 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
     installed = re.findall(r"HOOK\((\w+),", installer)
-    assert set(installed) - {"entry"} == set(plan["entries"])
+    # Reserved typed gateways remain dormant while the finite Fresh source
+    # path installs only its required original mutation/observation hooks.
+    dormant = {
+        "mp4_animation_binding_build", "mp4_animation_output_create", "mp4_animation_output_target",
+        "mp4_gobo_disable", "mp4_gobo_late_update", "mp4_monitor_graphic_rebuild", "mp4_monitor_image_apply",
+        "mp4_monitor_pool_clear", "mp4_monitor_pool_get", "mp4_monitor_pool_release",
+        "mp4_monitor_tv_disable", "mp4_monitor_tv_update_texture", "mp4_video_error",
+        "mp4_video_image_enable", "mp4_video_image_late", "mp4_video_mixer_create",
+        "mp4_video_playable_create", "mp4_video_playable_destroy", "mp4_video_prepare_frame",
+        "mp4_video_process_frame", "mp4_video_set_external_reference_time", "mp4_video_set_loop",
+        "mp4_video_set_play_on_awake", "mp4_video_set_skip", "mp4_video_set_time",
+        "mp4_video_set_wait_first", "mp4_video_step", "mp4_video_sync",
+    }
+    installed = set(installed) - {"entry"}
+    assert dormant.isdisjoint(installed)
+    assert installed | dormant == set(plan["entries"])
 
 
 def test_plan_mutation_and_unrecognized_native_are_rejected_before_patch():
@@ -476,8 +492,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 171 * 32
-    assert original["slot_region"]["bytes"] == 171 * 8
+    assert original["gateway_region"]["bytes"] == 172 * 32
+    assert original["slot_region"]["bytes"] == 172 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length
@@ -636,7 +652,7 @@ def test_required_child_native_roles_extend_only_ios_and_keep_exact_relay_order(
     import json
     profile = p.load_profile()
     android = json.loads((p.PROFILE.parent.parent / 'native/profile.json').read_text())
-    assert len(android['aliases']) == 252
+    assert len(android['aliases']) == 253
     relays = p._profile_native_relays(profile)
     assert len(relays) == 15
     assert relays[0]['rva'] == 0x8610a44 and relays[-1]['rva'] + 8 == 0x8610abc
@@ -723,3 +739,40 @@ def test_required_child_native_original_fallback_executes_one_displaced_prologue
     for index, value in enumerate(initial):
         if index != 16:  # gateway scratch register, never a native7 ABI input
             assert machine.reg_read(getattr(r, 'UC_ARM64_REG_X' + str(index))) == value
+
+
+def test_video_behaviour_play_appends_one_exact_original_gateway():
+    """The real source callback adds one slot without moving any prior hook."""
+    import json
+    ios, plan = p.load_profile(), p.make_plan()
+    android = json.loads((p.PROFILE.parent.parent / 'native/profile.json').read_text())
+    alias = 'mp4_video_behaviour_play'
+    for profile, rva, mid, slot, prefix in (
+        (android, '0x8812de4', 158423, '0x9fc38d0', 'fe57bea9f44f01a9f5c200d0f48600f0'),
+        (ios, 0x6f625bc, 158842, 0xa72da10, 'f657bda9f44f01a9fd7b02a9fd830091'),
+    ):
+        row = profile['aliases'][alias]
+        assert row['name'] == 'Solis.Timeline.SolisVideoPlayerTrackBehaviour.OnBehaviourPlay'
+        assert (row['rva'], row['metadata_method_index'], row['registration_pointer_slot_rva']) == (rva, mid, slot)
+        assert row['token_row'] == 825 and row['parameter_count'] == 2
+        assert row['method_flags'] & 0x10 == 0 and row['return_type'] == 'System.Void'
+        assert row['prefix16'] == prefix
+        assert [arg.get('type', arg.get('type_name')) for arg in row['parameters']] == [
+            'UnityEngine.Playables.Playable', 'UnityEngine.Playables.FrameData']
+        assert row['native_abi'] == 'void(void*,Playable16,FrameData64,const MethodInfo*)'
+    old = copy.deepcopy(ios)
+    del old['aliases'][alias]
+    assert old['hook_names'].pop() == alias
+    old['gateway_region']['bytes'] -= 32
+    old['slot_region']['bytes'] -= 8
+    assert hashlib.sha256((json.dumps(old, indent=2) + '\n').encode()).hexdigest() == '53df619e3bdba53f3e2c9149504d3b21180698667f5cbe50b2cca2a10e050d74'
+    assert len(old['hook_names']) == 171
+    for index, name in enumerate(old['hook_names']):
+        row = plan['entries'][name]
+        assert row['gateway'] == old['gateway_region']['rva'] + 32 * index
+        assert row['slot'] == old['slot_region']['rva'] + 8 * index
+        assert row['original16'] == old['aliases'][name]['prefix16']
+    header = p.render_header(plan).decode()
+    header = re.sub(r'^inline constexpr Entry '+alias+r'\{[^\n]+\};\n', '', header, flags=re.M)
+    header = header.replace('    '+alias+',\n', '')
+    assert hashlib.sha256(header.encode()).hexdigest() == 'f3b04228764ee2a7da999218b64ff4c96c6590e646e2cd1c8d969d270b4a4209'

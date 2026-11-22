@@ -24,6 +24,7 @@ HARNESS = r'''
 #include <cstdio>
 #include <cstring>
 #include <pthread.h>
+#include <atomic>
 #include <string>
 #include <stdexcept>
 namespace idoly_mp4_runtime {
@@ -37,7 +38,7 @@ struct FakeGame {
     const char* error="selected_render_controller_missing";
     bool geometry_probe=true;int32_t width=1920,height=1080;
     unsigned snapshots=0;
-    Result snapshot(Snapshot&){++snapshots;return result;}
+    Result snapshot(Snapshot&,bool=false){++snapshots;return result;}
     const char* last_error()const{return error;}
     bool has_source_geometry_probe()const{return geometry_probe;}
     Result source_geometry(int32_t& w,int32_t& h){w=width;h=height;return geometry;}
@@ -56,6 +57,8 @@ NativeSceneDiagnostics native_diagnostics;
 NativeSceneDiagnosticProbe native_diagnostic_probe=nullptr;
 void* native_diagnostic_context=nullptr;
 bool native_scene_required=false,native_scene_installed=false,last_admission_verified=false;
+std::atomic<bool> fresh_scene_installed{false};bool fresh_scene_available=false;
+const char* fresh_scene_error(const char*value){return value;}
 uint64_t queue_selection_generation=1,selected_identity=17,now=1000;
 uint64_t native_entries=19;
 uint64_t milliseconds(){return now;}

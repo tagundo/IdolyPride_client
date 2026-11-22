@@ -74,6 +74,7 @@ bool defer_render=false,defer_prewarm=false;
 std::string throw_phase;int throw_count=0;
 void original_fault(const char* phase){if(throw_phase==phase&&throw_count){--throw_count;throw std::runtime_error("synthetic original callback failure");}}
 int encoder_retries=0,readback_waits=0,destroy_waits=0;
+bool truncate_readback=false;
 uint8_t gpu_pixel=0;
 void* camera_token=reinterpret_cast<void*>(0x9876);
 template<class T>T load(void* p,size_t at){T v{};std::memcpy(&v,static_cast<unsigned char*>(p)+at,sizeof v);return v;}
@@ -100,6 +101,8 @@ uint64_t selected_identity=0x91827;
 int context_token=13;
 void* native_scene_context=&context_token;
 NativeSceneControl native_scene_control;
+FreshSceneApi fresh_scene_api;
+void fresh_release_start(){assert(!job.fresh);}
 struct {bool source_valid=true;} native_observation;
 unsigned queue_invalidations=0;
 void invalidate_queue_selection_locked(const char* reason){assert(std::string(reason)=="source_handoff_failed");++queue_invalidations;events.push_back("invalidate-queue");}
@@ -107,6 +110,7 @@ void refresh_native_observation(bool=false){original_fault("observation");} // S
 void increment_counter(uint64_t& value){++value;}
 void progress(){++job.activity;}
 void publish(){}
+void diagnostic_event(const char*,const char*,uint64_t,uint64_t,bool){} // Synthetic diagnostic sink.
 void stable_error(const char* value){std::snprintf(job.status.error,sizeof job.status.error,"%s",value);}
 void phase(const char* value){std::snprintf(job.status.phase,sizeof job.status.phase,"%s",value);events.push_back(std::string("phase:")+value);}
 bool busy_stage(){return job.stage!=Stage::idle;}
@@ -154,7 +158,7 @@ struct FakeGame {
     Result abandon_automatic(const char*){events.push_back("abandon");++abandons;if(abandon_waits){--abandon_waits;return Result::waiting;}own=pending=false;return Result::stale;}
     Result request_capture(){
         events.push_back("capture-request");if(capture_waits){--capture_waits;return Result::waiting;}
-        ++captures;capture_pending=true;return Result::ok;
+        assert(!capture_pending);++captures;capture_pending=true;return Result::ok;
     }
     void discard_capture(){capture_pending=false;events.push_back("discard");}
     void observe_capture_pass(void*,const void*){original_fault("capture-pass");}
@@ -166,7 +170,7 @@ struct FakeGame {
     Result prepare_automatic_frame(double seconds){++shader_steps;shader_time=seconds;events.push_back("shader-step");original_fault("shader");return source?Result::ok:Result::stale;}
     Result readback_rgba(uint8_t* dst,size_t capacity,size_t& count,int32_t& w,int32_t& h){
         events.push_back("readback");original_fault("readback");if(readback_waits){--readback_waits;return Result::waiting;}
-        assert(capture_pending);++reads;std::memset(dst,gpu_pixel,capacity);count=capacity;w=width;h=height;
+        assert(capture_pending);++reads;std::memset(dst,gpu_pixel,capacity);count=truncate_readback?capacity-4:capacity;w=width;h=height;
         capture_pending=false;return Result::ok;
     }
 } game;
@@ -281,7 +285,10 @@ bool boundary(bool acknowledge=true){
         body_ticks.push_back(published_tick);game.time=published_tick/double(native_engine_clock.simulation_hz());gpu_pixel=uint8_t(published_tick+10);events.push_back("player-loop");
     }
     if(const uint64_t generation=claim_native_prewarm_render()){
-        if(!defer_prewarm)complete_native_prewarm_render(generation,true);
+        if(!defer_prewarm){
+            if(acknowledge&&job.capture_requested&&job.stage==Stage::render_setup)camera_did_render(camera_token);
+            complete_native_prewarm_render(generation,true);
+        }
     }
     if(render_armed&&!defer_render&&job.schedule.next_tick()){
         const uint64_t tick=job.schedule.next_tick()-1;
@@ -429,7 +436,7 @@ int main(int argc,char**argv){
     }
     if(s=="prewarm_wait"||s=="prewarm_resource_wait"){
         job.stage=Stage::render_setup;job.prewarm_completed=false;defer_prewarm=true;
-        boundary();assert(job.stage==Stage::frame_request&&job.prewarm_inflight&&!job.auto_started&&grants.empty());
+        boundary();assert(job.stage==Stage::render_setup&&job.capture_requested&&game.capture_pending&&job.prewarm_inflight&&!job.auto_started&&grants.empty());
         boundary();assert(!job.auto_started&&grants.empty());
         complete_native_prewarm_render(job.generation+1,true);assert(job.prewarm_inflight);
         if(s=="prewarm_resource_wait"){
@@ -440,9 +447,47 @@ int main(int argc,char**argv){
             assert(job.prewarm_requested);
             boundary();assert(job.prewarm_inflight&&!job.auto_started&&grants.empty());
         }
-        complete_native_prewarm_render(job.generation,true);boundary();assert(job.auto_started&&grants.size()==1);
+        camera_did_render(camera_token);complete_native_prewarm_render(job.generation,true);
+        boundary();assert(job.stage==Stage::frame_request&&!game.capture_pending&&game.reads==1&&!job.auto_started&&grants.empty());
+        boundary();assert(job.auto_started&&grants.size()==1);
         for(int i=0;i<10&&job.stage!=Stage::finishing;++i)boundary();
         finish_and_restore();return 0;
+    }
+    if(s.rfind("prep_",0)==0){
+        job.stage=Stage::render_setup;job.prewarm_completed=false;
+        if(s=="prep_request_wait"){
+            game.capture_waits=2;boundary();boundary();
+            assert(job.stage==Stage::render_setup&&!job.capture_requested&&!job.prewarm_inflight&&!job.prewarm_completed
+                &&game.captures==0&&game.reads==0&&grants.empty()&&accepted.empty());
+        }
+        boundary(s!="prep_pending");
+        assert(job.stage==Stage::render_setup&&job.capture_requested&&game.capture_pending&&job.prewarm_completed
+            &&game.captures==1&&game.reads==0&&grants.empty()&&accepted.empty());
+        if(s=="prep_pending"){
+            for(int i=0;i<3;++i)boundary(false);
+            assert(!job.captured&&game.captures==1&&game.reads==0&&grants.empty());
+            camera_did_render(reinterpret_cast<void*>(0x123));assert(!job.captured);
+            camera_did_render(camera_token);camera_did_render(camera_token);assert(job.captured&&capture_acks==1);
+        }
+        if(s=="prep_readback_wait"){
+            readback_waits=2;boundary();boundary();
+            assert(job.stage==Stage::render_setup&&job.capture_requested&&game.capture_pending&&game.reads==0
+                &&game.captures==1&&grants.empty()&&offered.empty());
+        }
+        if(s=="prep_throw"){throw_phase="readback";throw_count=1;}
+        if(s=="prep_identity")truncate_readback=true;
+        boundary();
+        if(s=="prep_throw"||s=="prep_identity"){
+            assert(job.stage==Stage::retiring&&!job.terminal_success&&grants.empty()&&offered.empty()&&game.captures==1);
+            if(s=="prep_identity")assert(std::string(job.status.error)=="native_prewarm_capture_identity_changed");
+            boundary();retire();return 0;
+        }
+        assert(job.stage==Stage::frame_request&&!job.capture_requested&&!job.captured&&!game.capture_pending
+            &&game.reads==1&&game.captures==1&&grants.empty()&&offered.empty()&&job.frame==0&&job.schedule.next_tick()==0);
+        assert(std::find(events.begin(),events.end(),"discard")==events.end());
+        boundary();assert(game.starts==1&&grants==std::vector<uint64_t>({0}));
+        for(int i=0;i<15&&job.stage!=Stage::finishing;++i)boundary();
+        assert(game.reads==4&&accepted==std::vector<uint64_t>({0,1,2}));finish_and_restore();return 0;
     }
     if(s=="render_wait"||s=="outer_render_failure"){
         defer_render=s=="render_wait";fail_outer_render=s=="outer_render_failure";
@@ -519,10 +564,11 @@ int main(int argc,char**argv){
         assert(job.acquired_source_valid&&job.acquired_source_identity==selected_identity
             &&job.acquired_source_time==.37&&job.acquired_source_paused);
         job.stage=Stage::render_setup;boundary();
-        assert(job.stage==Stage::frame_request&&game.captures==1&&!job.capture_requested&&grants.empty());
+        assert(job.stage==Stage::render_setup&&game.captures==1&&job.capture_requested&&job.captured&&grants.empty());
+        boundary();assert(job.stage==Stage::frame_request&&game.reads==1&&!job.capture_requested&&grants.empty());
         for(unsigned i=0;i<12&&job.stage!=Stage::finishing;++i)boundary();
-        assert(accepted==std::vector<uint64_t>({0,1,2})&&game.reads==3&&game.captures==4);
-        assert(kernel_calls==(s=="acquire_wait"?7U:5U));finish_and_restore();return 0;
+        assert(accepted==std::vector<uint64_t>({0,1,2})&&game.reads==4&&game.captures==4);
+        assert(kernel_calls==(s=="acquire_wait"?8U:6U));finish_and_restore();return 0;
     }
     if(s=="world_lost_before_tick"){
         world_owned=false;job.stage=Stage::retiring;job.terminal_cancel=true;
@@ -677,7 +723,7 @@ def boundary_binary(tmp_path_factory):
     source = (NATIVE / "mp4_runtime.hpp").read_text()
     types = "\n".join(definition(source, name) for name in (
         "struct Configuration", "struct Options", "struct PublicStatus", "struct EncoderApi",
-        "enum class Stage", "struct NativeSceneControl"))
+        "enum class Stage", "struct NativeSceneControl", "struct FreshSceneApi"))
     types += source.split("// BEGIN_MP4_NATIVE_FRAME_SCHEDULE", 1)[1].split("// END_MP4_NATIVE_FRAME_SCHEDULE", 1)[0]
     types += definition(source, "struct Job")
     functions = "\n".join(definition(source, name) for name in (
@@ -698,6 +744,7 @@ def boundary_binary(tmp_path_factory):
 @pytest.mark.parametrize("scenario", [
     "post_playing_progress", "post_paused", "post_resource_wait", "post_long_resource_wait", "post_direct_service_reentry", "post_detach_wait", "post_verify_wait", "post_source_change", "post_verify_timeout", "post_ready_after_timeout", "post_verify_throw", "post_release_throw", "post_release_retry", "post_reentry", "post_error_precedence", "post_partial_acquire",
     "acquire_then_render", "acquire_then_render120", "acquire_wait", "admission_failure", "world_lost_before_tick", "prewarm_wait", "prewarm_resource_wait", "render_wait", "outer_render_failure", "handoff_failure", "foreign_handoff_failure",
+    "prep_pending", "prep_pending120", "prep_request_wait", "prep_readback_wait", "prep_readback_wait120", "prep_throw", "prep_identity",
     "partial_grant_failure", "partial_grant_owner_lost", "partial_grant_clock_lost", "throw_prepare", "throw_shader", "throw_grant", "throw_after_grant", "throw_kernel", "throw_readback", "throw_append", "throw_restore",
     "throw_after_camera", "throw_validate", "throw_capture_pass", "throw_scene_witness", "throw_observation", "idle_observer_failure",
     "sixty", "thirty", "one_twenty", "retry120", "pause120", "f8_after_accept120", "start_wait", "prepare_wait", "capture_wait", "camera_wait", "wrong_camera", "wrong_time",

@@ -4949,3 +4949,235 @@ public:
 };
 } // namespace idoly_mp4_video_frame
 // END_MP4_VIDEO_FRAME
+
+// BEGIN_MP4_FRESH_VIDEO_FRAME
+// A disposable original MV owns these players until its original End returns.
+// Only Video decoder work is serviced while a frame waits. No Timeline/Actor
+// callback, clock tick, old-source snapshot or synthetic GPU fence is replayed.
+namespace idoly_mp4_fresh_video {
+enum class Result { ready, waiting, invalid, stale, failed };
+struct StepBinding {uintptr_t rva;uint8_t prefix[16];uintptr_t registration_slot;};
+// Original instance bool get_canStep(void*,Method*), distinct from StepForward.
+inline constexpr StepBinding android_can_step={0x91fcd44,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x14,0x74,0x00,0xb0,0x81,0xe2,0x47,0xf9},0xa046e28};
+inline constexpr StepBinding ios_can_step={0x7b7507c,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0x73,0x6d,0x01,0x90},0xa7b11d8};
+struct Identity {
+    void* player=nullptr;void* clip=nullptr;
+    uintptr_t player_native=0,clip_native=0;
+    uint64_t source=0,job=0;
+};
+inline bool same(const Identity&a,const Identity&b) noexcept {
+    return a.player==b.player&&a.clip==b.clip&&a.player_native==b.player_native
+        &&a.clip_native==b.clip_native&&a.source==b.source&&a.job==b.job;
+}
+struct Clip {
+    double rate=0,length=0;
+    uint64_t frames=0;
+    bool loop=false;
+};
+struct State {
+    Identity identity{};
+    void* texture=nullptr;uintptr_t texture_native=0;
+    int64_t frame=-1;
+    bool configured=false,prepared=false,paused=false,playing=false;
+};
+struct Api {
+    void* context=nullptr;
+    bool (*current)(void*,const Identity&)=nullptr;
+    bool (*read)(void*,const Identity&,State*)=nullptr;
+    // Detach only this fresh UIImage texture, original Stop, then original
+    // setters: APIOnly, AudioNone, ExternalTime, GameTime, sendFrames=true,
+    // skipOnDrop=false, playOnAwake=false, speed=1 and the admitted loop mode.
+    // Drain the actual stopped player's pending callbacks before Prepare.
+    bool (*configure)(void*,const Identity&,const Clip&)=nullptr;
+    bool (*prepare)(void*,const Identity&)=nullptr;
+    bool (*pause)(void*,const Identity&)=nullptr;
+    bool (*reference_time)(void*,const Identity&,double)=nullptr;
+    bool (*set_frame)(void*,const Identity&,int64_t)=nullptr;
+    // Invoke the unchanged pinned native per-player Update(native,&changed),
+    // wait for that call to RETURN, then require its actual scripting queue
+    // begin==end. The audited original orders transfer/render binding before
+    // frame-ready enqueue and this drain. A get_frame poll alone is insufficient.
+    bool (*pump)(void*,const Identity&)=nullptr;
+    // Publish the actual accepted VP texture to its same retained fresh image;
+    // normal original rendering/readback owns GPU command ordering afterwards.
+    bool (*publish)(void*,const Identity&,void*,uintptr_t)=nullptr;
+    // Optional original canStep/StepForward pair. A genuine sequential step
+    // requires FrameReady plus returned native drain, but no fictitious seek.
+    bool (*can_step)(void*,const Identity&)=nullptr;
+    bool (*step)(void*,const Identity&)=nullptr;
+    bool valid()const noexcept {
+        return current&&read&&configure&&prepare&&pause&&reference_time&&set_frame&&pump&&publish;
+    }
+};
+class Scope {
+    Api api_{};Identity identity_{};Clip clip_{};
+    bool bound_=false,configured_=false,prepare_issued_=false,prepared_event_=false;
+    bool inflight_=false,failed_=false,issuing_=false,pumping_=false;
+    bool initial_ready_=false,priming_=false,request_needs_seek_=true;
+    uint64_t events_=0,drained_=0,frame_event_=0,seek_event_=0,request_start_=0,receipt_=0;
+    uint64_t prime_start_=0;int64_t prime_wanted_=-1;
+    int64_t event_frame_=-1,wanted_=-1,accepted_=-1;
+    void* accepted_texture_=nullptr;uintptr_t accepted_native_=0;
+    const char*error_="none";
+    Result fail(Result result,const char*error) noexcept {
+        error_=error;
+        if(result!=Result::waiting)failed_=true;
+        return result;
+    }
+    bool state(State&out) {
+        return api_.current(api_.context,identity_)&&api_.read(api_.context,identity_,&out)
+            &&same(out.identity,identity_)&&api_.current(api_.context,identity_);
+    }
+    bool event() noexcept {
+        if(events_==~uint64_t(0)){failed_=true;error_="fresh_video_event_exhausted";return false;}
+        ++events_;return true;
+    }
+    Result pump(State&out) {
+        if(pumping_||issuing_)return fail(Result::invalid,"fresh_video_reentrant_pump");
+        if(!api_.current(api_.context,identity_))return fail(Result::stale,"fresh_video_source_changed");
+        pumping_=true;
+        bool returned=false;
+        try{returned=api_.pump(api_.context,identity_);}catch(...){pumping_=false;throw;}
+        pumping_=false;
+        if(!returned)return fail(Result::failed,"fresh_video_native_update_unclosed");
+        // Only the actual returned original Update plus its empty native
+        // invocation queue closes events. An event counter is not a fence.
+        drained_=events_;
+        if(!api_.pause(api_.context,identity_)||!state(out))return fail(Result::stale,"fresh_video_source_changed");
+        if(!out.configured)return fail(Result::stale,"fresh_video_configuration_changed");
+        return Result::ready;
+    }
+    static bool usable(const State&s)noexcept {
+        return s.configured&&s.prepared&&s.paused&&!s.playing&&s.texture&&s.texture_native&&s.frame>=0;
+    }
+    Result publish(const State&now) {
+        if(!api_.publish(api_.context,identity_,now.texture,now.texture_native)
+            ||!api_.current(api_.context,identity_))return fail(Result::stale,"fresh_video_image_publish_failed");
+        error_="none";return Result::ready;
+    }
+public:
+    Scope()=default;
+    Scope(const Scope&)=delete;
+    Scope&operator=(const Scope&)=delete;
+    bool bind(Api api,const Identity&identity,const Clip&clip)noexcept {
+        if(bound_||!api.valid()||!identity.player||!identity.clip||!identity.player_native||!identity.clip_native
+            ||!identity.source||!identity.job||!std::isfinite(clip.rate)||clip.rate<=0||clip.rate>240
+            ||!std::isfinite(clip.length)||clip.length<=0||clip.length>900||!clip.frames
+            ||clip.frames>(~uint64_t(0)>>1))return false;
+        api_=api;identity_=identity;clip_=clip;bound_=true;return true;
+    }
+    const Identity&identity()const noexcept{return identity_;}
+    const char*error()const noexcept{return error_;}
+    uint64_t receipt()const noexcept{return receipt_;}
+    int64_t accepted_frame()const noexcept{return accepted_;}
+    bool inflight()const noexcept{return inflight_;}
+    bool on_prepared(const Identity&id)noexcept {
+        if(!bound_||failed_||!prepare_issued_||!same(id,identity_)||!event())return false;
+        prepared_event_=true;return true;
+    }
+    bool on_seek_completed(const Identity&id)noexcept {
+        if(!bound_||failed_||!prepare_issued_||!same(id,identity_)||!event())return false;
+        seek_event_=events_;return true;
+    }
+    bool on_frame_ready(const Identity&id,int64_t frame)noexcept {
+        if(!bound_||failed_||!prepare_issued_||!same(id,identity_)||frame<0
+            ||static_cast<uint64_t>(frame)>=clip_.frames||!event())return false;
+        event_frame_=frame;frame_event_=events_;return true;
+    }
+    Result prepare()noexcept {
+        if(!bound_||failed_)return Result::invalid;
+        try {
+            if(!api_.current(api_.context,identity_))return fail(Result::stale,"fresh_video_source_changed");
+            if(!configured_){
+                // Partial original mutations still belong to disposable End.
+                configured_=true;
+                if(!api_.configure(api_.context,identity_,clip_))return fail(Result::failed,"fresh_video_configuration_failed");
+            }
+            if(!prepare_issued_){
+                prepare_issued_=true;events_=drained_=frame_event_=seek_event_=0;event_frame_=-1;
+                if(!api_.prepare(api_.context,identity_))return fail(Result::failed,"fresh_video_prepare_failed");
+            }
+            if(!api_.pause(api_.context,identity_))return fail(Result::stale,"fresh_video_source_changed");
+            State now{};const auto result=pump(now);if(result!=Result::ready)return result;
+            if(!prepared_event_||!now.prepared||!now.paused||now.playing)
+                return fail(Result::waiting,"fresh_video_prepare_wait");
+            // Some backends can already expose frame zero before this bank
+            // observes a FrameReady. Never synthesize an initial receipt from
+            // get_frame/get_texture. Prime another actual index, then the
+            // ordinary request seeks back to zero with real callbacks.
+            if(!initial_ready_){
+                if(usable(now)&&frame_event_&&frame_event_<=drained_&&event_frame_==now.frame
+                    &&(!priming_||(frame_event_>prime_start_&&seek_event_>prime_start_&&now.frame==prime_wanted_))){
+                    initial_ready_=true;priming_=false;
+                }else{
+                    if(!priming_){
+                        if(clip_.frames<2)return fail(Result::failed,"fresh_video_initial_frame_unproven");
+                        prime_wanted_=now.frame==0?1:0;prime_start_=events_;priming_=issuing_=true;
+                        bool issued=false;
+                        try{issued=api_.set_frame(api_.context,identity_,prime_wanted_);}catch(...){issuing_=false;throw;}
+                        issuing_=false;
+                        if(!issued)return fail(Result::failed,"fresh_video_prime_issue_failed");
+                    }
+                    return fail(Result::waiting,"fresh_video_prime_wait");
+                }
+            }
+            error_="none";return Result::ready;
+        }catch(...){return fail(Result::failed,"fresh_video_prepare_exception");}
+    }
+    // Called AFTER the one actual granted Timeline phase, using its admitted
+    // clip-local time. While waiting call this same method/time again only;
+    // never repeat PrepareFrame, ProcessFrame, actor evaluation or a grant.
+    Result request(double clip_time)noexcept {
+        if(!bound_||failed_||!std::isfinite(clip_time)||clip_time<0)return Result::invalid;
+        double normalized=__builtin_fmod(clip_time,clip_.length);
+        int64_t wanted=-1;
+        if(!clip_.loop&&clip_time>=clip_.length){
+            wanted=static_cast<int64_t>(clip_.frames)-1;
+            normalized=static_cast<double>(wanted)/clip_.rate;
+        }
+        else if(!idoly_mp4_video_frame::frame_for_normalized_time(normalized,clip_.rate,clip_.frames,&wanted))return Result::invalid;
+        if(inflight_&&wanted!=wanted_)return fail(Result::invalid,"fresh_video_request_changed_while_waiting");
+        try {
+            const auto prepared=prepare();if(prepared!=Result::ready)return prepared;
+            if(!api_.pause(api_.context,identity_)
+                ||!api_.reference_time(api_.context,identity_,normalized))return fail(Result::stale,"fresh_video_reference_failed");
+            State now{};const auto pumped=pump(now);if(pumped!=Result::ready)return pumped;
+            if(!usable(now))return fail(Result::waiting,"fresh_video_texture_wait");
+            // Actual initial Prepare can already have transferred frame zero.
+            // Reuse of a 30 Hz frame at 60/120 Hz likewise needs no new seek.
+            // Unity intentionally suppresses FrameReady for a same-index copy.
+            if(!inflight_&&now.frame==wanted&&((receipt_&&accepted_==wanted
+                &&now.texture==accepted_texture_&&now.texture_native==accepted_native_)
+                ||(frame_event_&&frame_event_<=drained_&&event_frame_==wanted))){
+                if(!receipt_||accepted_!=wanted||now.texture!=accepted_texture_||now.texture_native!=accepted_native_){
+                    if(receipt_==~uint64_t(0))return fail(Result::failed,"fresh_video_receipt_exhausted");
+                    ++receipt_;accepted_=wanted;accepted_texture_=now.texture;accepted_native_=now.texture_native;
+                }
+                return publish(now);
+            }
+            if(!inflight_){
+                wanted_=wanted;request_start_=events_;inflight_=issuing_=true;
+                const bool sequential=api_.can_step&&api_.step&&receipt_&&accepted_>=0&&wanted==accepted_+1
+                    &&now.frame==accepted_&&now.texture==accepted_texture_&&now.texture_native==accepted_native_
+                    &&api_.can_step(api_.context,identity_);
+                request_needs_seek_=!sequential;
+                bool issued=false;
+                try{issued=sequential?api_.step(api_.context,identity_):api_.set_frame(api_.context,identity_,wanted);}catch(...){issuing_=false;throw;}
+                issuing_=false;
+                if(!issued)return fail(Result::failed,"fresh_video_seek_issue_failed");
+                return fail(Result::waiting,"fresh_video_seek_wait");
+            }
+            if(frame_event_<=request_start_||(request_needs_seek_&&seek_event_<=request_start_)||drained_<frame_event_
+                ||(request_needs_seek_&&drained_<seek_event_)||event_frame_!=wanted||now.frame!=wanted)
+                return fail(Result::waiting,"fresh_video_seek_wait");
+            if(receipt_==~uint64_t(0))return fail(Result::failed,"fresh_video_receipt_exhausted");
+            ++receipt_;accepted_=wanted;accepted_texture_=now.texture;accepted_native_=now.texture_native;inflight_=false;
+            return publish(now);
+        }catch(...){issuing_=false;return fail(Result::failed,"fresh_video_request_exception");}
+    }
+    // Scalar withdrawal only. The Bridge retains its managed roots until the
+    // real disposable original End closes the player/image/decoder lifetime.
+    void abandon()noexcept{failed_=true;error_="fresh_video_source_abandoned";}
+};
+} // namespace idoly_mp4_fresh_video
+// END_MP4_FRESH_VIDEO_FRAME
