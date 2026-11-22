@@ -52,6 +52,7 @@ static NSString *mp4PersistentExportDirectory, *mp4ConfiguredDirectory, *mp4Conf
 static uint64_t mp4ConfiguredEpoch;
 static NSDictionary *mp4TitleCatalog;
 static IDMP4LifecyclePolicy mp4Lifecycle = ID_MP4_LIFECYCLE_POLICY_INITIALIZER;
+static NSDictionary *mp4DiagnosticSnapshot(void);
 
 // Resolve only our bundled presentation bridge. Python has released the GIL
 // before this worker-side configuration; game callbacks never call Python.
@@ -622,7 +623,7 @@ NSString *IdolyEmbeddedServerStatusJSON(void) {
     void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@((BOOL)(hookInstalled && earlyHostInstalled)),
         @"keyboard_lifecycle":IDKeyboardLifecycleInfo(), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
         @"octo_budget":IDOctoBudgetInfo(), @"unity_host":IDUnityHostInfo(),
-        @"shared_resources":sharedResourcesInfo(),
+        @"shared_resources":sharedResourcesInfo(), @"mp4":mp4DiagnosticSnapshot(),
         @"late_startup_calls":@(lateStartupCalls),
         @"http_readiness":lastHTTPReadiness ?: (id)NSNull.null,
         @"phase":@(gate.phase), @"captured":@(gate.captured), @"forwarded":@(gate.forwarded),
@@ -750,6 +751,109 @@ void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *
     };
     if (NSThread.isMainThread) dispatchRequest(); else dispatch_async(dispatch_get_main_queue(), dispatchRequest);
 }
+// BEGIN_IDMP4_DIAGNOSTIC_POLICY
+// The same byte policy executes in the portable regression fixture. No path,
+// URL, whitespace, control character or non-ASCII text is a diagnostic code.
+static bool IDMP4DiagnosticCodeBytes(const unsigned char *bytes, size_t count) {
+    if (count > 95 || (!bytes && count)) return false;
+    for (size_t i=0; i<count; ++i) {
+        unsigned char c=bytes[i];
+        if (!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='.'||c=='_'||c=='-')) return false;
+    }
+    return true;
+}
+// END_IDMP4_DIAGNOSTIC_POLICY
+// BEGIN_IDMP4_DIAGNOSTIC_SANITIZER
+static NSString *mp4DiagnosticCode(id value) {
+    if (![value isKindOfClass:NSString.class] || [value length]>95) return nil;
+    NSData *bytes=[value dataUsingEncoding:NSASCIIStringEncoding allowLossyConversion:NO];
+    return bytes && IDMP4DiagnosticCodeBytes(bytes.bytes,bytes.length) ? value : nil;
+}
+static BOOL mp4DiagnosticInteger(id value) {
+    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value)!=CFBooleanGetTypeID()
+        && [value doubleValue]>=0 && [value doubleValue]<=9007199254740991.0
+        && [value doubleValue]==[value unsignedLongLongValue];
+}
+static NSDictionary *mp4SanitizeExportTrace(id value) {
+    if (![value isKindOfClass:NSDictionary.class] || !mp4DiagnosticInteger(value[@"schema"])
+            || [value[@"schema"] unsignedIntValue]!=1) return nil;
+    NSMutableDictionary *trace=[@{@"schema":@1} mutableCopy];
+    for (NSString *key in @[@"current_stage",@"last_error"]) {
+        NSString *code=mp4DiagnosticCode(value[key]); if (code) trace[key]=code;
+    }
+    NSMutableArray *events=[NSMutableArray new];
+    NSArray *rows=[value[@"events"] isKindOfClass:NSArray.class] ? value[@"events"] : @[];
+    NSUInteger begin=rows.count>16 ? rows.count-16 : 0; uint64_t previous=0;
+    for (NSUInteger i=begin; i<rows.count; ++i) {
+        id row=rows[i]; if (![row isKindOfClass:NSDictionary.class]) continue;
+        NSString *stage=mp4DiagnosticCode(row[@"stage"]), *code=mp4DiagnosticCode(row[@"code"]);
+        if (!stage||!code||!mp4DiagnosticInteger(row[@"sequence"])||!mp4DiagnosticInteger(row[@"frame"])
+                ||!mp4DiagnosticInteger(row[@"tick"])||[row[@"sequence"] unsignedLongLongValue]<=previous) continue;
+        previous=[row[@"sequence"] unsignedLongLongValue];
+        [events addObject:@{@"sequence":row[@"sequence"],@"stage":stage,@"code":code,@"frame":row[@"frame"],@"tick":row[@"tick"]}];
+    }
+    trace[@"events"]=events;
+    NSDictionary *rawModules=[value[@"modules"] isKindOfClass:NSDictionary.class] ? value[@"modules"] : @{};
+    NSMutableDictionary *modules=[NSMutableDictionary new];
+    NSArray *names=@[@"native_scene_control",@"scene_parts",@"final_playback_handoff",@"pending_journal",@"frame_coordinator",@"default_images",@"monitor_ui",@"video_coordinator",@"proflare_source",@"particle_renderer",@"graphics_program",@"srp_mutations",@"audio_frontends",@"managed_observers",@"native_director_gateway",@"capture_queue",@"initial_gpu_fence",@"render_hold",@"native_clock",@"game_api"];
+    for (NSString *key in names) {
+        id flag=rawModules[key];
+        if ([flag isKindOfClass:NSNumber.class]&&CFGetTypeID((__bridge CFTypeRef)flag)==CFBooleanGetTypeID()) modules[key]=flag;
+    }
+    trace[@"modules"]=modules; return trace;
+}
+static NSDictionary *mp4DiagnosticSummary(id value) {
+    if (![value isKindOfClass:NSDictionary.class]) return @{};
+    NSMutableDictionary *result=[NSMutableDictionary new];
+    for (NSString *key in @[@"phase",@"error_code",@"readiness_error"]) {
+        NSString *code=mp4DiagnosticCode(value[key]); if(code)result[key]=code;
+    }
+    for (NSString *key in @[@"frames",@"total_frames",@"unity_ticks",@"capture_acks"])
+        if(mp4DiagnosticInteger(value[key]))result[key]=value[key];
+    NSDictionary *trace=mp4SanitizeExportTrace(value[@"export_trace"]);if(trace)result[@"export_trace"]=trace;
+    return result;
+}
+static NSString *const mp4DiagnosticDefaultsKey=@"IdolyMP4Diagnostics.v1";
+static NSDictionary *mp4DiagnosticSaved(void) {
+    id raw=[NSUserDefaults.standardUserDefaults objectForKey:mp4DiagnosticDefaultsKey];
+    if(![raw isKindOfClass:NSDictionary.class])return @{};
+    NSMutableDictionary *saved=[NSMutableDictionary new];
+    for(NSString *key in @[@"latest",@"last_failure"]){NSDictionary *row=mp4DiagnosticSummary(raw[key]);if(row.count)saved[key]=row;}
+    NSMutableArray *events=[NSMutableArray new];NSArray *rows=[raw[@"host_events"]isKindOfClass:NSArray.class]?raw[@"host_events"]:@[];
+    for(NSUInteger i=rows.count>8?rows.count-8:0;i<rows.count;++i){id row=rows[i];
+        if(![row isKindOfClass:NSDictionary.class])continue;
+        NSString *stage=mp4DiagnosticCode(row[@"stage"]),*code=mp4DiagnosticCode(row[@"code"]);
+        if(stage&&code)[events addObject:@{@"stage":stage,@"code":code}];}
+    saved[@"host_events"]=events;return saved;
+}
+static void mp4DiagnosticWrite(NSDictionary *saved) {
+    NSData *bytes=[NSJSONSerialization dataWithJSONObject:saved options:0 error:NULL];
+    if(bytes&&bytes.length<=16384)[NSUserDefaults.standardUserDefaults setObject:saved forKey:mp4DiagnosticDefaultsKey];
+}
+static void mp4DiagnosticHostEvent(NSString *stage,NSString *code) {
+    if(!mp4DiagnosticCode(stage)||!mp4DiagnosticCode(code))return;
+    @synchronized(NSUserDefaults.class){NSMutableDictionary *saved=[mp4DiagnosticSaved() mutableCopy];
+        NSMutableArray *events=[saved[@"host_events"]mutableCopy]?:[NSMutableArray new];
+        [events addObject:@{@"stage":stage,@"code":code}];while(events.count>8)[events removeObjectAtIndex:0];
+        saved[@"host_events"]=events;mp4DiagnosticWrite(saved);}
+}
+static void mp4DiagnosticRemember(NSDictionary *status) {
+    NSDictionary *summary=mp4DiagnosticSummary(status);if(!summary.count)return;
+    @synchronized(NSUserDefaults.class){NSMutableDictionary *saved=[mp4DiagnosticSaved() mutableCopy];
+        NSDictionary *old=saved[@"latest"],*trace=summary[@"export_trace"],*oldTrace=old[@"export_trace"];
+        // Persist stage/error transitions, not every rendered frame or timer.
+        BOOL changed=!old||![old[@"phase"]isEqual:summary[@"phase"]]
+            ||![(oldTrace[@"current_stage"]?:@"")isEqual:(trace[@"current_stage"]?:@"")]
+            ||![(oldTrace[@"last_error"]?:@"")isEqual:(trace[@"last_error"]?:@"")]
+            ||![(old[@"error_code"]?:@"")isEqual:(summary[@"error_code"]?:@"")]
+            ||![(old[@"readiness_error"]?:@"")isEqual:(summary[@"readiness_error"]?:@"")];
+        BOOL failure=[summary[@"phase"]isEqual:@"failed"];
+        // An idle readiness poll after relaunch must not replace the previous
+        // export failure with a generic "open an MV" or unavailable-API state.
+        for(id code in @[summary[@"error_code"]?:@"",trace[@"last_error"]?:@""])
+            if([code length]&&![code isEqual:@"none"]&&![code isEqual:@"unknown"])failure=YES;
+        if(changed){saved[@"latest"]=summary;if(failure)saved[@"last_failure"]=summary;mp4DiagnosticWrite(saved);}}
+}
 static NSDictionary *mp4SessionStatus(void) {
     typedef size_t (*Copy)(char *, size_t);
     typedef int (*Ready)(void);
@@ -779,8 +883,23 @@ static NSDictionary *mp4SessionStatus(void) {
         NSNumber *value = [raw[key] isKindOfClass:NSNumber.class] ? raw[key] : nil;
         if (value && CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) status[key] = value;
     }
+    // Optional diagnostics have a separate ABI/buffer so legacy 2KiB native
+    // SessionStatus clients keep their original bounded response contract.
+    status[@"diagnostics_available"]=@NO;
+    Copy diagnostics=(Copy)dlsym(RTLD_DEFAULT,"IDMP4SessionDiagnostics");
+    char diagnosticBuffer[32768]={0};size_t diagnosticCount=diagnostics?diagnostics(diagnosticBuffer,sizeof diagnosticBuffer):0;
+    if(diagnosticCount>0&&diagnosticCount<sizeof diagnosticBuffer){
+        NSData *bytes=[NSData dataWithBytes:diagnosticBuffer length:diagnosticCount];
+        id envelope=[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL];
+        NSDictionary *trace=[envelope isKindOfClass:NSDictionary.class]?mp4SanitizeExportTrace(envelope[@"export_trace"]):nil;
+        if(trace){status[@"export_trace"]=trace;status[@"diagnostics_available"]=@YES;}
+    }
+    mp4DiagnosticRemember(status);
+    @synchronized(NSUserDefaults.class){status[@"diagnostic_history"]=mp4DiagnosticSaved();}
     return status;
 }
+static NSDictionary *mp4DiagnosticSnapshot(void) { return mp4SessionStatus(); }
+// END_IDMP4_DIAGNOSTIC_SANITIZER
 BOOL IdolyEmbeddedServerMP4IsFinishing(void) {
     return [mp4SessionStatus()[@"phase"] isEqual:@"finishing"];
 }
@@ -1041,12 +1160,16 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
     BOOL valid = identifier && CFGetTypeID((__bridge CFTypeRef)identifier) != CFBooleanGetTypeID()
         && identifier.longLongValue >= 1 && identifier.longLongValue <= INT32_MAX && identifier.doubleValue == identifier.longLongValue
         && (preset || optionsRead || optionsSave || completedStatus || noFields || jobAction || deleteCompleted || move);
+    NSArray *diagnosticActions=@[@"mp4_start",@"mp4_enqueue",@"mp4_queue_run",@"mp4_queue_resume",@"mp4_queue_retry",@"mp4_cancel",@"mp4_queue_cancel",@"mp4_queue_remove"];
+    NSString *diagnosticAction=[diagnosticActions containsObject:action] ? action : @"request";
     void (^reply)(BOOL,NSDictionary *,NSString *) = ^(BOOL ok,NSDictionary *status,NSString *error) {
+        if(!ok){mp4DiagnosticHostEvent(diagnosticAction,mp4DiagnosticCode(error)?:@"mp4_unavailable");(void)mp4SessionStatus();}
         NSString *json = JSON(ok ? @{@"id":identifier ?: @1,@"ok":@YES,@"result":status ?: @{}}
             : @{@"id":identifier ?: @1,@"ok":@NO,@"error":@{@"code":error ?: @"mp4_unavailable",@"message":error ?: @"mp4_unavailable"}});
         dispatch_async(dispatch_get_main_queue(), ^{ completion(json); });
     };
     if (!valid) { reply(NO,nil,@"invalid_request"); return; }
+    if([diagnosticActions containsObject:action])mp4DiagnosticHostEvent(diagnosticAction,@"attempt");
     // This app-owned preference survives the intentionally in-memory WebKit
     // data store. It never contains an output path or a queue identity.
     if (optionsRead || optionsSave) {
@@ -1141,14 +1264,17 @@ static void mp4ExportResolved(NSString *jobID,NSString *exportID,void (^completi
 void IdolyEmbeddedServerMP4ExportJob(NSString *jobID,void (^completion)(NSURL *,NSString *)) { mp4ExportResolved(jobID,nil,completion); }
 void IdolyEmbeddedServerMP4ExportRecord(NSString *exportID,void (^completion)(NSURL *,NSString *)) { mp4ExportResolved(nil,exportID,completion); }
 void IdolyEmbeddedServerMP4BeginSave(NSString *jobID,NSString *exportID,void (^completion)(NSURL *,NSString *,uint64_t)) {
+    mp4DiagnosticHostEvent(@"mp4_save",@"attempt");
     if(!worker||(jobID&&!mp4Identifier(jobID))||(exportID&&!mp4Identifier(exportID))||(jobID&&exportID)){
+        mp4DiagnosticHostEvent(@"mp4_save",@"mp4_export_not_ready");
         dispatch_async(dispatch_get_main_queue(),^{completion(nil,@"mp4_export_not_ready",0);});return;
     }
     [worker enqueue:^{
-        if(mp4SaveLease){dispatch_async(dispatch_get_main_queue(),^{completion(nil,@"mp4_save_busy",0);});return;}
+        if(mp4SaveLease){mp4DiagnosticHostEvent(@"mp4_save",@"mp4_save_busy");dispatch_async(dispatch_get_main_queue(),^{completion(nil,@"mp4_save_busy",0);});return;}
         NSString *error=nil,*job=nil;NSURL *file=mp4ResolveCompleted(jobID,exportID,&error,&job);
         uint64_t lease=0;
         if(file){if(++mp4SaveLeaseGeneration==0)++mp4SaveLeaseGeneration;lease=mp4SaveLeaseGeneration;mp4SaveLease=lease;mp4SaveLeaseJob=job;}
+        mp4DiagnosticHostEvent(@"mp4_save",file?@"output_resolved":(mp4DiagnosticCode(error)?:@"mp4_export_not_ready"));
         dispatch_async(dispatch_get_main_queue(),^{completion(file,file?nil:error ?: @"mp4_export_not_ready",lease);});
     }];
 }

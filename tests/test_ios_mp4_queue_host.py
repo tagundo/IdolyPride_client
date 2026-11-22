@@ -109,7 +109,7 @@ def test_real_foundation_host_validates_queue_commands_and_private_configuration
     if platform.system() != "Darwin" or not shutil.which("xcrun"):
         pytest.skip("Actual Apple Foundation SDK required")
     host = HOST.read_text()
-    section = host[host.index("static NSDictionary *mp4SessionStatus(void)"):host.index("void IdolyEmbeddedServerCryptoSelfTest(")]
+    section = host[host.index("// BEGIN_IDMP4_DIAGNOSTIC_POLICY"):host.index("void IdolyEmbeddedServerCryptoSelfTest(")]
     source, output = tmp_path / "queue-host.m", tmp_path / "queue-host"
     source.write_text(r'''
 #import <Foundation/Foundation.h>
@@ -208,6 +208,7 @@ int main(int argc,char**argv){@autoreleasepool{
    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"IdolyMP4ExportOptions.v1"];puts("PASS persistent MP4 preferences relaunch");return 0;
  }
  worker=[TestWorker new];atomic_store(&pythonReady,true);
+ assert([mp4DiagnosticSnapshot()[@"diagnostics_available"]isEqual:@NO]);
  NSString *session=[rootDirectory stringByAppendingPathComponent:@".idoly-mp4-audio-0123456789abcdef0123456789abcdef"];
  NSString *exports=[session stringByAppendingPathComponent:@"exports"],*library=[rootDirectory stringByAppendingPathComponent:@".idoly-mp4-library"];
  NSString *queue=[library stringByAppendingPathComponent:@"queue"],*persistent=[library stringByAppendingPathComponent:@"exports"];
