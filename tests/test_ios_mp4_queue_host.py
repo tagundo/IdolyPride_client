@@ -141,7 +141,7 @@ static bool nativeSceneReady=true;
 static size_t fakeStatus(char *p,size_t cap){int n=snprintf(p,cap,"{\"phase\":\"%s\",\"frames\":5,\"total_frames\":100,\"ready\":false,\"selected_mv\":true,\"selection_error\":\"none\",\"source_width\":1921,\"source_height\":1081,\"video_bitrate\":17420000,\"readiness_error\":\"scene_surface_pending\",\"unity_ticks\":9,\"capture_acks\":5}",nativeSessionPhase.UTF8String);return n>0&&(size_t)n<cap?(size_t)n:0;}
 static int fakeReady(void){return nativeSceneReady?1:0;}
 static NSString *JSON(id value){return [[NSString alloc]initWithData:[NSJSONSerialization dataWithJSONObject:value options:0 error:NULL] encoding:NSUTF8StringEncoding];}
-static size_t fakeQueueStatus(char*p,size_t cap){NSData*d=[JSON(nativeQueue)dataUsingEncoding:NSUTF8StringEncoding];if(d.length>=cap)return 0;memcpy(p,d.bytes,d.length);p[d.length]=0;return d.length;}
+static size_t fakeQueueStatus(char*p,size_t cap){if(!nativeQueue)return 0;NSData*d=[JSON(nativeQueue)dataUsingEncoding:NSUTF8StringEncoding];if(d.length>=cap)return 0;memcpy(p,d.bytes,d.length);p[d.length]=0;return d.length;}
 static int fakeConfigure(const char*b,uint64_t e,const char*c,const char*o,int p){assert(b&&e&&c&&o&&p==2);++configurations;return 0;}
 static int fakeConfigureQueue(const char*q,const char*o){assert(q&&o);++queueConfigurations;return 0;}
 static int fakeEnqueue(uint32_t f,uint32_t d,uint32_t c,uint32_t v,uint32_t a,uint32_t w,uint32_t h){assert(f==60&&d==1&&c==2&&a==192000);lastVideoBitrate=v;lastWidth=w;lastHeight=h;++enqueues;return 0;}
@@ -216,6 +216,8 @@ int main(int argc,char**argv){@autoreleasepool{
  descriptor=@{@"schema":@1,@"available":@YES,@"directory":session,@"export_directory":exports,@"capability":@"cccccccccccccccccccccccccccccccc",@"epoch":@7,@"queue_directory":queue,@"persistent_export_directory":persistent,
  @"title_catalog":@{@"ko":@{@"tln_live_tri-004":@"한국어 노래"},@"ja":@{@"tln_live_tri-004":@"日本語の歌"},@"en":@{@"tln_live_tri-004":@"English song"},@"fr":@{@"tln_live_tri-004":@"Ignored language"}}};
  nativeQueue=@{@"schema":@1,@"available":@YES,@"can_run":@YES,@"command_pending":@NO,@"running":@NO,@"paused":@NO,@"phase":@"idle",@"error_code":@"none",@"capacity":@8,@"last_added_job_id":@"",@"current_job_id":@"",@"jobs":@[],@"directory":@"/private/secret-must-not-leak"};
+ NSDictionary *queueDiagnostics=mp4DiagnosticSnapshot();
+ assert([queueDiagnostics[@"queue_phase"]isEqual:@"idle"]&&[queueDiagnostics[@"queue_job_count"]isEqual:@0]&&[queueDiagnostics[@"queue_job_states"]count]==0);
  // No progress timer runs in this harness: Hide/new-job transitions must use
  // the current native phase, not the previous visible overlay's cached phase.
  assert(!IdolyEmbeddedServerMP4IsFinishing());nativeSessionPhase=@"finishing";assert(IdolyEmbeddedServerMP4IsFinishing());
