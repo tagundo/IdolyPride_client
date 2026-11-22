@@ -568,6 +568,9 @@ class ParticleScope {
  void cleanup(){for(size_t i=0;i<count_;++i){auto&e=entries_[i];for(auto&s:e.trail_lists)if(s.root)api_.release(s.root);for(auto&s:e.custom)if(s.root)api_.release(s.root);for(auto&box:e.custom_boxes)if(box.root)api_.release(box.root);if(e.trail_box.root)api_.release(e.trail_box.root);if(e.particles)::free(e.particles);if(e.producer_root)api_.release(e.producer_root);if(e.root)api_.release(e.root);e={};owners_[i]={};}count_=bytes_=0;context_=nullptr;epoch_=0;configured_=prepared_=reset_=advancing_=have_tick_=pending_=zero_evaluating_=false;pending_tick_=0;initializing_system_=nullptr;}
 public:
  const char* error()const{return error_;}bool active()const{return configured_;}
+
+ // Actual typed mutation windows only; no job or lifecycle fence is implied.
+ bool mutation_quiet()const{return configured_&&current()&&!advancing_&&!pending_&&!zero_evaluating_&&!initializing_system_;}
  // Read-only exact saved-image witness. This reports completed Scope restore,
  // not permission for native activation or proof against a later native write.
  // Callers must join their own actual lifecycle/final-checkpoint receipt.

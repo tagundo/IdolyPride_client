@@ -58,7 +58,7 @@ void*get_type(mp4actor::Handle*h,Method*){auto n=nodes.find(h->handle);return n!
 bool mp4_control_passive_graph(mp4ctl::Handle graph,mp4ctl::Handle node){auto n=nodes.find(node.handle);return graph.handle==42&&graph.version==2&&n!=nodes.end()&&n->second.h.version==node.version;}
 bool mp4_control_passive_native(void*p,uintptr_t&native){native=0;return p&&mp4_alive(p)&&mp4_actor_field(p,16,native)&&native;}
 bool mp4_director_node_schema(void*){return false;}bool mp4_activation_node_schema(void*){return false;}
-struct Mp4SceneWitness{uint64_t epoch=1;};enum class Mp4TimelineProofPhase:uint8_t{admission,active,source_restore_plan,source_restored};enum class Mp4TimelineVerdict:uint8_t{unrecognized,closed,unclosed};
+struct Mp4SceneWitness{uint64_t epoch=1;};enum class Mp4TimelineProofPhase:uint8_t{admission,active,source_restore_plan,source_restored,source_bootstrap_plan};bool mp4_timeline_source_plan_phase(Mp4TimelineProofPhase p){return p==Mp4TimelineProofPhase::admission||p==Mp4TimelineProofPhase::source_bootstrap_plan;}enum class Mp4TimelineVerdict:uint8_t{unrecognized,closed,unclosed};
 struct Mp4TimelineRuntime{void*element=nullptr,*clip=nullptr,*track=nullptr;mp4actor::Handle playable{},mixer{};uint8_t kind=0;};
 struct Mp4TimelineContext{struct Identity{uintptr_t native=0x9090;uint32_t version=2;}identity{};mp4actor::Handle root{100,2,0};Mp4TimelineProofPhase phase=Mp4TimelineProofPhase::admission;Mp4SceneWitness witness{};void*director=nullptr,*asset=nullptr;mp4actor::Handle graph{};void*clips[4]{},*clip_tracks[4]{},*tracks[4]{},*elements[4]{};mp4actor::Handle compiled[4]{},nodes[8]{};size_t clip_count=1,track_count=1,element_count=1,node_count=0;};
 bool mp4_timeline_current(const Mp4TimelineContext&){return source&&main_thread;}
@@ -67,6 +67,9 @@ bool mp4_stage_other_same_graph(const Mp4TimelineContext&c,mp4actor::Handle node
 struct Mp4ControlPassiveImage{void*values[8]{};uintptr_t native[4]{};mp4ctl::Input input{};mp4ctl::Cache before{},after{};mp4ctl::Handle graph{},result{};const void*method=nullptr;};
 Mp4ControlPassiveImage original{};uint64_t raw_receipt=9;
 thread_local const Mp4ControlPassiveImage*mp4_control_passive_publishing=nullptr;thread_local uint64_t mp4_control_passive_publishing_receipt=0;
+struct Mp4ControlSourceLeaf;
+bool mp4_source_control_director_plan(const Mp4TimelineContext&,const Mp4ControlPassiveImage&,const Mp4ControlSourceLeaf&){return false;}
+bool mp4_source_control_particle_plan(const Mp4TimelineContext&,const Mp4ControlPassiveImage&,const Mp4ControlSourceLeaf&){return false;}
 bool mp4_control_passive_raw_receipted(void*asset,void*director,void*owner,mp4ctl::Handle graph,mp4ctl::Handle result,uint64_t*out,Mp4ControlPassiveImage*raw=nullptr){if(out)*out=0;bool ok=raw_current&&asset==original.values[0]&&director==original.values[1]&&owner==original.values[2]&&mp4_actor_same_handle(graph,original.graph)&&mp4_actor_same_handle(result,original.result);if(ok){if(out)*out=raw_receipt;if(raw)*raw=original;}return ok;}
 bool mp4_control_passive_receipted(void*a,void*d,void*o,mp4ctl::Handle g,mp4ctl::Handle r){uint64_t x=0;return cache_current&&mp4_control_passive_raw_receipted(a,d,o,g,r,&x);}
 bool mp4_control_passive_same_input(const mp4ctl::Input&a,const mp4ctl::Input&b){return a.source_name==b.source_name&&a.source_default==b.source_default&&a.prefab==b.prefab&&a.seed==b.seed&&a.particles==b.particles&&a.time_control==b.time_control&&a.hierarchy==b.hierarchy&&a.post==b.post;}

@@ -435,11 +435,52 @@ inline constexpr DirectorRegistryProfile ios_director_registry_profile={0xa8a8e0
 namespace idoly_mp4_world {
 using Method=void;
 enum class Result:int {ok=0,waiting=1,unsupported=-1,invalid=-2,failed=-3,stale=-4};
+
+// BEGIN_MP4_SOURCE_GATE_LEASE
+class FixedGate;class AnimationGate;
+inline uint64_t source_gate_lease_sequence=0;
+inline uint64_t source_gate_lease_next(){uint64_t old=__atomic_load_n(&source_gate_lease_sequence,__ATOMIC_ACQUIRE);
+ for(;;){if(old==~uint64_t(0))return 0;const auto next=old+1;if(__atomic_compare_exchange_n(&source_gate_lease_sequence,&old,next,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return next;}}
+class SourceGateLease{
+ friend class FixedGate;friend class AnimationGate;
+ void*gate_=nullptr;void*owner_=nullptr;void*origin_=nullptr;uint64_t epoch_=0,serial_=0;uint8_t family_=0;
+ SourceGateLease(void*gate,void*owner,uint64_t epoch,uint64_t serial,uint8_t family):gate_(gate),owner_(owner),origin_(owner),epoch_(epoch),serial_(serial),family_(family){}
+ void clear(){gate_=owner_=origin_=nullptr;epoch_=serial_=0;family_=0;}
+ public:
+ SourceGateLease()=default;SourceGateLease(const SourceGateLease&)=delete;SourceGateLease&operator=(const SourceGateLease&)=delete;SourceGateLease&operator=(SourceGateLease&&)=delete;
+ SourceGateLease(SourceGateLease&&other)noexcept{take(static_cast<SourceGateLease&&>(other));}
+ // No destructor releases a physical gate: actual pending-job cleanup must
+ // finish first. The concrete holder bank keeps the lease until explicit release.
+ bool empty()const{return !gate_;}uint64_t serial()const{return serial_;}uint64_t epoch()const{return epoch_;}void*owner()const{return owner_;}void*origin()const{return origin_;}
+ bool take(SourceGateLease&&other)noexcept{if(!empty())return false;if(this==&other)return false;gate_=other.gate_;owner_=other.owner_;origin_=other.origin_;epoch_=other.epoch_;serial_=other.serial_;family_=other.family_;other.clear();return true;}
+};
+// END_MP4_SOURCE_GATE_LEASE
+
+// BEGIN_MP4_SOURCE_GATE_ORIGINAL_ENTRY_COUNTER
+// Entry lifetime is distinct from owned phase permission. Ordinary originals
+// can reenter acquisition; their stack must unwind before any lease is issued.
+struct SourceOriginalEntries {
+ alignas(8) uint64_t readers=0;
+ bool enter()noexcept{uint64_t value=__atomic_load_n(&readers,__ATOMIC_ACQUIRE);
+  while(value!=~uint64_t(0)){if(__atomic_compare_exchange_n(&readers,&value,value+1,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return true;}return false;}
+ void leave()noexcept{__atomic_fetch_sub(&readers,uint64_t(1),__ATOMIC_RELEASE);}
+ bool empty()const noexcept{return !__atomic_load_n(&readers,__ATOMIC_ACQUIRE);}
+};
+struct SourceOriginalEntry {
+ SourceOriginalEntries&entries;bool entered;
+ explicit SourceOriginalEntry(SourceOriginalEntries&e)noexcept:entries(e),entered(e.enter()){}
+ ~SourceOriginalEntry(){if(entered)entries.leave();}
+ SourceOriginalEntry(const SourceOriginalEntry&)=delete;SourceOriginalEntry&operator=(const SourceOriginalEntry&)=delete;
+};
+// END_MP4_SOURCE_GATE_ORIGINAL_ENTRY_COUNTER
 struct FixedApi { bool(*original)()=nullptr;bool(*owner_thread)()=nullptr; };
 class FixedGate {
     FixedApi api_{};
     alignas(8) uint64_t epoch_=0;
     alignas(4) uint32_t dirty_=0;
+    SourceOriginalEntries ordinary_{};
+    void*lease_owner_=nullptr;void*lease_origin_=nullptr;uint64_t lease_serial_=0;
+
 public:
     bool install(FixedApi api){
         if(installed()||__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)||!api.original||!api.owner_thread)return false;
@@ -447,25 +488,60 @@ public:
     }
     bool installed()const{return api_.original&&api_.owner_thread;}
     bool acquire(uint64_t epoch){
-        if(!epoch||!installed()||!api_.owner_thread()||__atomic_load_n(&dirty_,__ATOMIC_ACQUIRE))return false;
+        if(!epoch||!installed()||!api_.owner_thread()||!ordinary_.empty()||__atomic_load_n(&dirty_,__ATOMIC_ACQUIRE))return false;
         uint64_t empty=0;
         if(!__atomic_compare_exchange_n(&epoch_,&empty,epoch,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return false;
         return true;
     }
     bool healthy(uint64_t epoch)const{return epoch&&__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)==epoch
         &&!__atomic_load_n(&dirty_,__ATOMIC_ACQUIRE);}
+    // BEGIN_MP4_FIXEDGATE_SOURCE_LEASE
+    bool owns_lease(const SourceGateLease&lease,void*owner)const{return owner&&api_.owner_thread&&api_.owner_thread()
+        &&lease.gate_==this&&lease.family_==1&&lease.owner_==owner&&lease.origin_&&lease.epoch_&&lease.serial_
+        &&lease_owner_==owner&&lease_origin_==lease.origin_&&__atomic_load_n(&lease_serial_,__ATOMIC_ACQUIRE)==lease.serial_
+        &&__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)==lease.epoch_;}
+    bool lease_current(const SourceGateLease&lease,void*owner)const{return owns_lease(lease,owner)&&healthy(lease.epoch_);}
+    bool lease_retained(uint64_t epoch,uint64_t serial,void*origin)const{return origin&&serial&&api_.owner_thread&&api_.owner_thread()
+        &&lease_owner_&&lease_origin_==origin&&__atomic_load_n(&lease_serial_,__ATOMIC_ACQUIRE)==serial&&__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)==epoch;}
+    bool lease_continuity(uint64_t epoch,uint64_t serial,void*origin)const{return lease_retained(epoch,serial,origin)&&healthy(epoch);}
+    SourceGateLease acquire_lease(uint64_t epoch,void*owner){
+        if(!owner||!api_.owner_thread||!api_.owner_thread()||__atomic_load_n(&lease_serial_,__ATOMIC_ACQUIRE))return {};
+        const auto serial=source_gate_lease_next();
+        if(!serial||!acquire(epoch))return {};
+        lease_owner_=lease_origin_=owner;__atomic_store_n(&lease_serial_,serial,__ATOMIC_RELEASE);return SourceGateLease(this,owner,epoch,serial,1);
+    }
+    bool transfer_lease(SourceGateLease&source,void*owner,void*target,SourceGateLease&out){
+        if(!target||!out.empty()||!lease_current(source,owner))return false;
+        if(!out.take(static_cast<SourceGateLease&&>(source)))return false;
+        out.owner_=target;lease_owner_=target;return true;
+    }
+    bool release_lease(SourceGateLease&lease,void*owner){
+        if(!owns_lease(lease,owner)||!ordinary_.empty())return false;
+        uint64_t held=lease.epoch_;
+        if(!__atomic_compare_exchange_n(&epoch_,&held,uint64_t(0),false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return false;
+
+        lease_owner_=lease_origin_=nullptr;__atomic_store_n(&lease_serial_,uint64_t(0),__ATOMIC_RELEASE);lease.clear();return true;
+    }
+    // END_MP4_FIXEDGATE_SOURCE_LEASE
     void release(uint64_t epoch){
+        if(__atomic_load_n(&lease_serial_,__ATOMIC_ACQUIRE)){if(epoch==__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE))__atomic_store_n(&dirty_,1u,__ATOMIC_RELEASE);return;}
+
         uint64_t owned=epoch;
         if(epoch)__atomic_compare_exchange_n(&epoch_,&owned,uint64_t(0),false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE);
     }
+    bool forward_unpublished(bool(*original)()){
+        if(!original){return false;}
+        SourceOriginalEntry entry(ordinary_);
+        if(!entry.entered||__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE))__atomic_store_n(&dirty_,1u,__ATOMIC_RELEASE);
+        return original();
+    }
     bool native_condition(){
         if(!api_.original)return false;
-        if(__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)){
-            if(api_.owner_thread())return false;
-            // Unexpected entry must retain ordinary engine behavior, while
-            // invalidating permission to rewind a now-unclosed physics world.
-            __atomic_store_n(&dirty_,1u,__ATOMIC_RELEASE);
-        }
+        const bool owner=api_.owner_thread&&api_.owner_thread();
+        if(owner&&__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE))return false;
+        SourceOriginalEntry entry(ordinary_);
+        // Foreign ordinary work must not overlap a later acquisition unnoticed.
+        if(!owner||!entry.entered)__atomic_store_n(&dirty_,1u,__ATOMIC_RELEASE);
         return api_.original();
     }
 };
@@ -500,7 +576,7 @@ struct LoopEntry {void*type;void*delegate;uintptr_t update,condition;int32_t chi
 static_assert(sizeof(LoopEntry)==40,"Original ARM64 PlayerLoop entry layout");
 struct Registry {uintptr_t manager=0,buckets=0;uint32_t mask=0,count=0,empty=0;};
 class Scope {
-    Api api_{};FixedGate* gate_=nullptr;void* context_=nullptr;
+    Api api_{};FixedGate* gate_=nullptr;void* context_=nullptr;SourceGateLease adopted_fixed_{};bool fixed_detached_=false;
     uint64_t epoch_=0;uintptr_t condition_=0;Registry saved_{};bool acquired_=false;
     const char*error_="none";
     Result fail(Result r,const char*e){error_=e;return r;}
@@ -637,16 +713,43 @@ public:
         if(!api_.clock_held(context_))return fail(Result::waiting,"world_clock_not_held");
         Registry state{};const Result r=measure(state);if(r!=Result::ok)return r;
         if(!acquired_){if(!gate_->acquire(epoch_))return fail(Result::unsupported,"world_fixed_gate_busy");saved_=state;acquired_=true;}
-        if(!same(saved_,state)||!gate_->healthy(epoch_))return fail(Result::stale,"world_fixed_gate_lost");
+        if(!same(saved_,state)||fixed_detached_||!gate_->healthy(epoch_)||(!adopted_fixed_.empty()&&!gate_->lease_current(adopted_fixed_,this)))return fail(Result::stale,"world_fixed_gate_lost");
         return Result::ok;
     }
+    // BEGIN_MP4_WORLD_CHECKED_EARLY_FIXED_ADOPTION
+    Result capture_adopting_fixed(SourceGateLease&early,void*expected_owner){
+        if(acquired_)return capture();
+        if(!gate_||!epoch_||!valid_api()||!expected_owner||!adopted_fixed_.empty())return fail(Result::invalid,"world_early_fixed_configuration");
+        if(!api_.clock_held(context_))return fail(Result::waiting,"world_clock_not_held");
+        if(!gate_->lease_current(early,expected_owner)||early.origin()!=expected_owner||early.epoch()!=epoch_)return fail(Result::stale,"world_early_fixed_lease_changed");
+        // All original current/fence/registry/output measurement precedes the
+        // ownership transfer. Failure here leaves the exact early lease held.
+        Registry state{};const Result measured=measure(state);if(measured!=Result::ok)return measured;
+        if(!api_.source_current(context_)||!api_.clock_held(context_)||!gate_->lease_current(early,expected_owner))return fail(Result::stale,"world_early_fixed_measurement_changed");
+        if(!gate_->transfer_lease(early,expected_owner,this,adopted_fixed_))return fail(Result::stale,"world_early_fixed_transfer_failed");
+        saved_=state;acquired_=true;
+        // Dirty admission after the plain no-callback transfer retains this
+        // Scope's real cleanup duty; it never publishes positive capture.
+        if(!gate_->lease_current(adopted_fixed_,this))return fail(Result::stale,"world_early_fixed_transfer_dirty");
+        return Result::ok;
+    }
+    bool adopted_fixed_current()const{return gate_&&!adopted_fixed_.empty()&&gate_->lease_current(adopted_fixed_,const_cast<Scope*>(this));}
+    uint64_t adopted_fixed_serial()const{return adopted_fixed_.serial();}
+    Result detach_fixed_gate(){
+        if(fixed_detached_)return Result::ok;
+        if(!gate_||!acquired_)return fail(Result::invalid,"world_fixed_detach_not_owned");
+        if(!adopted_fixed_.empty()){if(!gate_->release_lease(adopted_fixed_,this))return fail(Result::waiting,"world_early_fixed_cleanup_pending");}
+        else gate_->release(epoch_);
+        fixed_detached_=true;return Result::ok;
+    }
+    // END_MP4_WORLD_CHECKED_EARLY_FIXED_ADOPTION
     Result quiesce(){
         // The empty-world measurement proves there is no native dynamics state
         // to read or fence. Close our fixed-subtree gate before scene setup.
         return capture();
     }
     Result validate(){
-        if(!acquired_||!gate_||!gate_->healthy(epoch_))return fail(Result::stale,"world_fixed_gate_lost");
+        if(!acquired_||!gate_||fixed_detached_||!gate_->healthy(epoch_)||(!adopted_fixed_.empty()&&!gate_->lease_current(adopted_fixed_,this)))return fail(Result::stale,"world_fixed_gate_lost");
         Registry state{};const Result r=measure(state);if(r!=Result::ok)return r;
         return same(saved_,state)?Result::ok:fail(Result::stale,"world_native_registry_changed");
     }
@@ -660,8 +763,11 @@ public:
     Result release(bool){
         // Only our global gate lease is released. No old physics object or
         // scene pointer is touched, including source replacement cleanup.
-        if(gate_&&acquired_)gate_->release(epoch_);
-        acquired_=false;epoch_=0;gate_=nullptr;context_=nullptr;
+        if(gate_&&acquired_&&!fixed_detached_){
+            if(!adopted_fixed_.empty()){if(!gate_->release_lease(adopted_fixed_,this))return fail(Result::waiting,"world_early_fixed_cleanup_pending");}
+            else gate_->release(epoch_);
+        }
+        acquired_=false;fixed_detached_=false;epoch_=0;gate_=nullptr;context_=nullptr;
         return Result::ok;
     }
 };
@@ -712,6 +818,7 @@ class AnimationGate {
     AnimationApi api_{};
     alignas(8) uint64_t epoch_=0;
     alignas(4) uint32_t dirty_=0;
+    SourceOriginalEntries ordinary_{};
     uint64_t tick_=0;
     uint8_t next_=0,seen_=0;
     alignas(8) uint64_t permission_=0;
@@ -726,6 +833,8 @@ class AnimationGate {
         } boundary{*this};
         inside_=true;api_.original[phase]();boundary.complete=true;return true;
     }
+    void*lease_owner_=nullptr;void*lease_origin_=nullptr;uint64_t lease_serial_=0;
+
 public:
     bool installed()const{
         if(!api_.owner_thread)return false;
@@ -738,7 +847,7 @@ public:
         api_=api;return true;
     }
     bool acquire(uint64_t epoch){
-        if(!epoch||!installed()||!api_.owner_thread()||__atomic_load_n(&dirty_,__ATOMIC_ACQUIRE))return false;
+        if(!epoch||!installed()||!api_.owner_thread()||!ordinary_.empty()||__atomic_load_n(&dirty_,__ATOMIC_ACQUIRE))return false;
         uint64_t empty=0;
         if(!__atomic_compare_exchange_n(&epoch_,&empty,epoch,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return false;
         have_tick_=pair_=inside_=maintenance_=false;close();tick_=0;next_=seen_=0;return true;
@@ -819,14 +928,23 @@ public:
         uint64_t expected=epoch;
         if(epoch)(void)__atomic_compare_exchange_n(&permission_,&expected,uint64_t(0),false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE);
     }
+    bool forward_unpublished(void(*original)()){
+        if(!original){return false;}
+        SourceOriginalEntry entry(ordinary_);
+        if(!entry.entered||__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE))poison();
+        original();return true;
+    }
     bool invoke(unsigned phase){
         if(phase>=8||!installed())return false;
+        const bool owner=api_.owner_thread();
         const uint64_t epoch=__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE);
-        if(!epoch){api_.original[phase]();return true;}
-        if(!api_.owner_thread()){
-            // Preserve ordinary engine behavior on an unexpected thread and
-            // permanently remove permission to rewind this global schedule.
-            __atomic_store_n(&dirty_,1u,__ATOMIC_RELEASE);api_.original[phase]();return true;
+        if(!epoch||!owner){
+            SourceOriginalEntry entry(ordinary_);
+            // Every ordinary call still forwards once. The entry reader stops
+            // reentrant acquisition and retains cleanup while a foreign body
+            // runs; foreign withdrawal is sticky across a later job boundary.
+            if(!owner||!entry.entered)poison();
+            api_.original[phase]();return true;
         }
         if(inside_){poison();return false;}
         // If a broken/incomplete cycle already entered animation Begin, its
@@ -846,8 +964,38 @@ public:
         if(phase==7)close();
         return called;
     }
+    // BEGIN_MP4_ANIMATIONGATE_SOURCE_LEASE
+    bool owns_lease(const SourceGateLease&lease,void*owner)const{return owner&&api_.owner_thread&&api_.owner_thread()
+        &&lease.gate_==this&&lease.family_==2&&lease.owner_==owner&&lease.origin_&&lease.epoch_&&lease.serial_
+        &&lease_owner_==owner&&lease_origin_==lease.origin_&&__atomic_load_n(&lease_serial_,__ATOMIC_ACQUIRE)==lease.serial_
+        &&__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)==lease.epoch_;}
+    bool lease_current(const SourceGateLease&lease,void*owner)const{return owns_lease(lease,owner)&&healthy(lease.epoch_);}
+    bool lease_retained(uint64_t epoch,uint64_t serial,void*origin)const{return origin&&serial&&api_.owner_thread&&api_.owner_thread()
+        &&lease_owner_&&lease_origin_==origin&&__atomic_load_n(&lease_serial_,__ATOMIC_ACQUIRE)==serial&&__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)==epoch;}
+    bool lease_continuity(uint64_t epoch,uint64_t serial,void*origin)const{return lease_retained(epoch,serial,origin)&&healthy(epoch);}
+    SourceGateLease acquire_lease(uint64_t epoch,void*owner){
+        if(!owner||!api_.owner_thread||!api_.owner_thread()||__atomic_load_n(&lease_serial_,__ATOMIC_ACQUIRE))return {};
+        const auto serial=source_gate_lease_next();
+        if(!serial||!acquire(epoch))return {};
+        lease_owner_=lease_origin_=owner;__atomic_store_n(&lease_serial_,serial,__ATOMIC_RELEASE);return SourceGateLease(this,owner,epoch,serial,2);
+    }
+    bool transfer_lease(SourceGateLease&source,void*owner,void*target,SourceGateLease&out){
+        if(!target||!out.empty()||!lease_current(source,owner)||!closed(source.epoch_))return false;
+        if(!out.take(static_cast<SourceGateLease&&>(source)))return false;
+        out.owner_=target;lease_owner_=target;return true;
+    }
+    bool release_lease(SourceGateLease&lease,void*owner){
+        if(!owns_lease(lease,owner)||pair_||inside_||maintenance_||!ordinary_.empty())return false;
+        uint64_t held=lease.epoch_;
+        if(!__atomic_compare_exchange_n(&epoch_,&held,uint64_t(0),false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return false;
+        close();have_tick_=false;next_=seen_=0;
+        lease_owner_=lease_origin_=nullptr;__atomic_store_n(&lease_serial_,uint64_t(0),__ATOMIC_RELEASE);lease.clear();return true;
+    }
+    // END_MP4_ANIMATIONGATE_SOURCE_LEASE
     bool release(uint64_t epoch){
-        if(!epoch||!installed()||!api_.owner_thread()||pair_||inside_)return false;
+        if(__atomic_load_n(&lease_serial_,__ATOMIC_ACQUIRE)){if(epoch==__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE))poison();return false;}
+
+        if(!epoch||!installed()||!api_.owner_thread()||pair_||inside_||!ordinary_.empty())return false;
         uint64_t owned=epoch;
         if(!__atomic_compare_exchange_n(&epoch_,&owned,uint64_t(0),false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return false;
         close();have_tick_=false;next_=seen_=0;return true;

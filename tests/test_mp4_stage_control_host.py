@@ -88,6 +88,8 @@ def _write_shipping_bodies(destination: Path) -> None:
     }
     for name, body in bodies.items():
         (destination / name).write_text(body)
+    for model in FIXTURES.glob("node-*-model.inc"):
+        shutil.copyfile(model, destination / model.name)
 
 
 def test_shipping_stage_control_models(tmp_path: Path) -> None:
@@ -95,6 +97,8 @@ def test_shipping_stage_control_models(tmp_path: Path) -> None:
     assert compiler, "host C++ compiler required"
     _write_shipping_bodies(tmp_path)
     explicit = {
+        "director-batch": ["normal", "unaffected", "unaffected_changed", "expect_stale", "call_lost", "wrong_target", "wrong_round", "read_failure", "wait_retry", "partial_finish", "finish_after_call", "repeat_same_round", "retiring_latest"],
+        "activation-batch": ["normal", "unaffected", "unaffected_changed", "expect_stale", "call_lost", "wrong_target", "wrong_round", "read_failure", "wait_retry", "partial_finish", "finish_after_call", "repeat_same_round", "retiring_latest"],
         "particle-admission-wiring": ["normal", "no_attempt", "collect_throw", "collect_failed",
             "particles_failed", "psyllium_failed", "palette_wait", "equipment_configure_failed",
             "equipment_failed", "equipment_throw", "observe_failed", "observe_throw", "cleanup_failed",

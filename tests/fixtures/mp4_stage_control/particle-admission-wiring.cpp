@@ -36,6 +36,7 @@ bool mp4_stage_refresh_inventory(){events.push_back("inventory");return mode!="c
 bool mp4_stage_refresh_controls(){events.push_back("controls");return mode!="capture_controls";}
 bool mp4_stage_admission_before_capture(const Mp4SceneWitness&){events.push_back("before_capture");assert(!capture_calls);return sealed&&mode!="capture_receipt";}
 struct Capture{mp4stage::Result capture(){events.push_back("capture");++capture_calls;return mp4stage::Result::ok;}}mp4_stage_equipment,mp4_stage_particles,mp4_stage_psyllium;
+Mp4SceneResult mp4_particle_native_capture(){events.push_back("native_capture");assert(capture_calls==2);return Mp4SceneResult::ok;}
 #include "particle-admission-wiring.cpp.inc"
 int main(int argc,char**argv){assert(argc==2);mode=argv[1];Mp4SceneWitness w;auto result=mp4_stage_admit(nullptr,w);
  if(mode=="no_attempt"){assert(result==Mp4SceneResult::unsupported&&!release_calls&&!drop_calls&&!observe_calls&&!seal_calls);return 0;}

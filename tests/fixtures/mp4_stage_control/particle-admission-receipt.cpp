@@ -28,6 +28,7 @@ bool game=true,source_ok=true,held=true,stage_owner=true,controls_ok=true,roots_
 bool mp4_source_verified=true,mp4_stage_source_verified=true;
 uint64_t fingerprints[2]{61,62};size_t old_graph_queries=0;uint32_t root_sequence=0;std::map<uint32_t,void*>roots;
 bool game_call(){return game;}
+bool mp4_particle_source_only_retire(){assert(game);return true;}
 bool mp4_scene_same_source(const Mp4SceneWitness&a,const Mp4SceneWitness&b){return a.generation&&a.generation==b.generation&&a.presenter==b.presenter&&a.player==b.player&&a.director==b.director&&a.controller==b.controller&&a.camera==b.camera&&a.brain==b.brain&&a.bgm==b.bgm&&a.voice==b.voice&&a.environment==b.environment&&a.camera_director==b.camera_director&&a.camera_asset==b.camera_asset&&a.camera_track==b.camera_track;}
 namespace idoly_mp4_runtime{struct Game{bool selected_scene_witness(Mp4SceneWitness&w){w=selected;return source_ok;}}game;}
 void mp4_stage_admission_withdraw() noexcept;

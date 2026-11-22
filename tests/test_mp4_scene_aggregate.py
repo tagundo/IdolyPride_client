@@ -50,6 +50,8 @@ void mp4_shader_lease_abandon(void*)noexcept{}
 void mp4_audio_abandon_globals()noexcept{}
 void mp4_stage_withdraw_interception()noexcept{}
 unsigned admission_drops=0,admission_withdrawals=0;bool admission_receipt=true;int admission_throw=-1;
+void mp4_source_director_plan_withdraw()noexcept{}
+bool mp4_source_director_plan_drop(){return true;}
 void mp4_stage_admission_drop()noexcept{++admission_drops;admission_receipt=false;}
 void mp4_stage_admission_withdraw()noexcept{++admission_withdrawals;admission_receipt=false;}
 void mp4_camera_abandon_globals_before_source_change()noexcept{++camera_globals;}
@@ -59,10 +61,14 @@ uint32_t mp4_retain(void* p){if(allocation_fail_after==0)return 0;if(allocation_
 void* weak_get(uint32_t h){auto i=roots.find(h);return i==roots.end()?nullptr:i->second;}
 void weak_free(uint32_t h){roots.erase(h);}
 namespace idoly_mp4_runtime {
-struct Game{uint64_t owned_scene_generation(){return live.generation;}bool selected_scene_witness(W& w){++witness_calls;if(!witness_available)return false;w=live;return true;}bool automatic(){return ::automatic;}}game;
+struct Game{idoly_mp4_playback::Phase automatic_rebuild_phase(){return idoly_mp4_playback::Phase::held;}uint64_t owned_scene_generation(){return live.generation;}bool selected_scene_witness(W& w){++witness_calls;if(!witness_available)return false;w=live;return true;}bool automatic(){return ::automatic;}}game;
 struct Clock{bool held(){return ::held;}}clock;
 Clock& native_clock_scope(){return clock;}
 }
+bool mp4_root_history_initial_sealed(uint64_t){return false;}
+idoly_mp4_playback::Result mp4_scene_source_bootstrap_quiesce(){return idoly_mp4_playback::Result::unsupported;}
+idoly_mp4_playback::Result mp4_scene_source_bootstrap_release(){return idoly_mp4_playback::Result::ok;}
+idoly_mp4_playback::Result mp4_scene_source_bootstrap_before_part_release(bool){return idoly_mp4_playback::Result::ok;}
 // PRODUCTION
 struct ScopeWitness{bool active(){return true;}bool frame_granted(){return true;}};
 struct WorldHost{W source{};uint64_t epoch=7;bool invalidated=false;ScopeWitness scope;}mp4_world_host;

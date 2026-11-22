@@ -2222,11 +2222,13 @@ struct Api {
  bool(*set_texture)(void*,void*,void*)=nullptr;bool(*set_uv)(void*,void*,Rect)=nullptr;bool(*set_enabled)(void*,void*,bool)=nullptr;bool(*set_color)(void*,void*,Color)=nullptr;
  uint32_t(*retain)(void*)=nullptr;void*(*retained)(uint32_t)=nullptr;void(*release_root)(uint32_t)=nullptr;
 };
+struct CapturedImage {Owner owner{};Program program{};Image image{};uint64_t receipt=0;bool has_image=false;};
+inline uint64_t completed_capture_sequence=0;
 class Scope {
  static constexpr size_t tracks_max=64,images_max=64,roots_max=tracks_max*5+images_max*3;
  struct Track {Owner owner{};Program saved{};};struct Root{void*object=nullptr;uint32_t token=0;};
  Api api_{};void*ctx_=nullptr;uint64_t epoch_=0,job_=0;Track tracks_[tracks_max]{};Image images_[images_max]{};Root roots_[roots_max]{};
- size_t track_count_=0,image_count_=0,root_count_=0;bool captured_=false,restored_=false;const char*error_="none";
+ uint64_t capture_receipt_=0;size_t track_count_=0,image_count_=0,root_count_=0;bool captured_=false,restored_=false;const char*error_="none";
  Result fail(Result r,const char*s){error_=s;return r;}
  bool keep(void*object){if(!object)return true;for(size_t i=0;i<root_count_;++i)if(roots_[i].object==object)return api_.retained(roots_[i].token)==object;
   if(root_count_==roots_max)return false;
@@ -2276,8 +2278,30 @@ public:
    if(!keep(value.texture)||!keep(value.rect_transform))return fail(Result::failed,"target_image_value_root");
    images_[image_count_++]=value;
   }
-  captured_=true;return current()?Result::ok:fail(Result::stale,"target_image_source_changed");
+  captured_=true;if(!current())return fail(Result::stale,"target_image_source_changed");
+  if(completed_capture_sequence==~uint64_t(0))return fail(Result::unsupported,"target_image_receipt_exhausted");
+  capture_receipt_=++completed_capture_sequence;return Result::ok;
  }
+ // Read-only exact saved image. A completed capture receipt is separate from
+ // captured_, which may remain true after a failed final source recheck.
+ bool captured_image(const Owner&expected,CapturedImage*out)const noexcept{try{
+  if(out)*out={};
+  if(!out||!capture_receipt_||!current()||!api_.held(ctx_)||expected.epoch!=epoch_||expected.job!=job_)return false;
+  const Track*track=nullptr;size_t matches=0;
+  for(size_t i=0;i<track_count_;++i){const auto&o=tracks_[i].owner;
+   if(o.director==expected.director&&o.asset==expected.asset&&o.track==expected.track&&o.image==expected.image
+    &&o.epoch==expected.epoch&&o.job==expected.job){track=&tracks_[i];++matches;}}
+  if(matches!=1||!track)return false;
+  CapturedImage saved{};saved.owner=track->owner;saved.program=track->saved;saved.receipt=capture_receipt_;
+  if(track->owner.image){size_t images=0;for(size_t i=0;i<image_count_;++i)if(images_[i].object==track->owner.image){
+    Image now{};if(!image_identity(images_[i],now)||!api_.image_admitted(ctx_,track->owner,now))return false;saved.image=images_[i];++images;}
+   if(images!=1)return false;
+   saved.has_image=true;}
+  if(!current()||!api_.held(ctx_)||saved.receipt!=capture_receipt_)return false;
+  *out=saved;return true;
+ }catch(...){if(out)*out={};return false;}}
+ bool capture_current()const noexcept{try{return capture_receipt_&&current()&&api_.held(ctx_);}catch(...){return false;}}
+ uint64_t capture_receipt_raw()const noexcept{return captured_?capture_receipt_:0;}
  bool owns_image_raw(void*object)const noexcept {for(size_t i=0;i<image_count_;++i)if(images_[i].object==object)return true;return false;}
  Result restore(){
   if(!captured_)return fail(Result::invalid,"target_image_not_captured");
@@ -2302,7 +2326,7 @@ public:
  // CPU roots/storage may retire. Never re-query old scene/flags/history here.
  Result release(){if(!api_.release_root&&root_count_)return Result::failed;
   for(size_t i=0;i<root_count_;++i){if(roots_[i].token)api_.release_root(roots_[i].token);roots_[i]={};}
-  root_count_=track_count_=image_count_=0;captured_=restored_=false;ctx_=nullptr;epoch_=job_=0;return Result::ok;}
+  root_count_=track_count_=image_count_=0;capture_receipt_=0;captured_=restored_=false;ctx_=nullptr;epoch_=job_=0;return Result::ok;}
 };
 } // namespace idoly_mp4_target_image
 // END_MP4_TARGET_IMAGE_SCOPE

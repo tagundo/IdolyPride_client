@@ -58,7 +58,8 @@ bool mp4_scene_same_source(const Mp4SceneWitness&a,const Mp4SceneWitness&b){retu
 struct {Mp4SceneWitness source{};bool active=true;}mp4_scene_host;
 bool mp4_scene_source_current(){return source_current;}
 namespace idoly_mp4_runtime{struct Game{bool selected_scene_witness(Mp4SceneWitness&out){if(!source_current)return false;out=mp4_scene_host.source;return true;}}game;struct Clock{bool held(){return clock_held;}};Clock clock;Clock&native_clock_scope(){return clock;}}
-enum class Mp4TimelineProofPhase:uint8_t{admission,active,source_restore_plan,source_restore=source_restore_plan,source_restored};
+enum class Mp4TimelineProofPhase:uint8_t{admission,active,source_restore_plan,source_restore=source_restore_plan,source_restored,source_bootstrap_plan};
+bool mp4_timeline_source_plan_phase(Mp4TimelineProofPhase phase){return phase==Mp4TimelineProofPhase::admission||phase==Mp4TimelineProofPhase::source_bootstrap_plan;}
 enum class Mp4TimelineVerdict:uint8_t{unrecognized,closed,unclosed};
 struct Mp4TimelineContext{Mp4TimelineProofPhase phase=Mp4TimelineProofPhase::admission;Mp4SceneWitness witness{};void*director=nullptr,*asset=nullptr;
  void*tracks[8]{};mp4actor::Handle compiled[8]{};size_t track_count=0;void*elements[8]{};mp4actor::Handle runtime_playables[8]{},runtime_mixers[8]{};size_t element_count=0;
