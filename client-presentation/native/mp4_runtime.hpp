@@ -271,10 +271,11 @@ public:
     struct Proposal { bool advance=false;uint64_t tick=0;int64_t frame=-1; };
     bool reset(uint64_t generation,uint32_t fps,uint64_t frames){
         *this=FrameSchedule{};
-        if(!generation||(fps!=30&&fps!=60)||!frames||frames>0x7fffffffffffffffULL)return false;
-        const uint64_t step=60/fps;
+        if(!generation||!idoly_mp4_output::supported_fps(fps)||!frames||frames>0x7fffffffffffffffULL)return false;
+        const uint32_t hz=idoly_mp4_output::simulation_hz(fps);
+        const uint64_t step=hz/fps;
         if(frames-1>~uint64_t(0)/step)return false;
-        generation_=generation;frames_=frames;step_=step;last_tick_=(frames-1)*step;return true;
+        generation_=generation;frames_=frames;step_=step;simulation_hz_=hz;last_tick_=(frames-1)*step;return true;
     }
     Proposal propose(uint64_t generation)const{
         if(generation!=generation_||!generation_||pending_||accepted_==frames_||next_tick_>last_tick_)return {};
@@ -301,8 +302,11 @@ public:
     uint64_t accepted_frames()const{return accepted_;}
     uint64_t next_tick()const{return next_tick_;}
     uint64_t generation()const{return generation_;}
+    uint32_t simulation_hz()const{return simulation_hz_;}
+    double tick_seconds(uint64_t tick)const{return simulation_hz_?static_cast<double>(tick)/simulation_hz_:0.;}
 private:
     uint64_t generation_=0,frames_=0,step_=0,last_tick_=0,next_tick_=0,accepted_=0,pending_frame_=0;
+    uint32_t simulation_hz_=0;
     bool pending_=false,pixels_=false;
 };
 // END_MP4_NATIVE_FRAME_SCHEDULE
@@ -455,7 +459,7 @@ inline void terminal(const char* error,bool cancelled=false) {
     if(job.encoder)job.api.cancel(job.encoder);
     job.stage=Stage::retiring;phase(cancelled?"cancelling":"failed");
 }
-inline bool valid_options(const Options& o){return o.fps_den==1&&(o.fps_num==30||o.fps_num==60)&&(o.codec==1||o.codec==2)&&idoly_mp4_output::bitrate(o.bitrate)&&o.audio_bitrate==192000&&idoly_mp4_output::requested_dimensions(o.output_width,o.output_height);}
+inline bool valid_options(const Options& o){return o.fps_den==1&&idoly_mp4_output::supported_fps(o.fps_num)&&(o.codec==1||o.codec==2)&&idoly_mp4_output::bitrate(o.bitrate)&&o.audio_bitrate==192000&&idoly_mp4_output::requested_dimensions(o.output_width,o.output_height);}
 // Typed outer URP hooks call these on Unity only. Neither CapturePass nor an
 // arbitrary end-camera notification can consume a render ticket. An output
 // tick waits for its capture request before its FIRST draw; held retries reuse
@@ -1123,7 +1127,7 @@ inline bool native_render_boundary_impl(void* manager,double wall){
             last_admission_verified=admission==Result::ok;
             if(admission==Result::waiting)return native_boundary_clock_tick(manager,wall);
             if(admission!=Result::ok){terminal(native_scene_error("selected_scene_admission_failed"));return native_boundary_clock_tick(manager,wall);}
-            if(!clock.acquire(manager,wall,60)){
+            if(!clock.acquire(manager,wall,idoly_mp4_output::simulation_hz(job.options.fps_num))){
                 if(!strcmp(clock.error(),"engine_clock_engine_paused"))return native_boundary_clock_tick(manager,wall);
                 terminal(clock.error());return native_boundary_clock_tick(manager,wall);
             }
@@ -1171,7 +1175,7 @@ inline bool native_render_boundary_impl(void* manager,double wall){
         job.auto_started=true;progress();
     }
     if(job.schedule.next_tick()){
-        const double previous=static_cast<double>(job.schedule.next_tick()-1)/60.;
+        const double previous=job.schedule.tick_seconds(job.schedule.next_tick()-1);
         if(game.validate_automatic_frame(previous)!=Result::ok){terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
         const uint64_t tick=job.schedule.next_tick()-1;
         if(!job.have_rendered_tick||job.last_rendered_tick!=tick){
@@ -1216,7 +1220,7 @@ inline bool native_render_boundary_impl(void* manager,double wall){
     if(native_command_hold())return native_boundary_clock_tick(manager,wall);
     const auto proposal=job.schedule.propose(job.generation);
     if(!proposal.advance)return native_boundary_clock_tick(manager,wall);
-    const double seconds=static_cast<double>(proposal.tick)/60.;
+    const double seconds=job.schedule.tick_seconds(proposal.tick);
     if(!native_scene_control.source_clock_restorable(native_scene_context)){
         terminal("native_world_ownership_lost");return native_boundary_clock_tick(manager,wall);
     }

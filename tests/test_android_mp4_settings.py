@@ -90,6 +90,9 @@ public final class Mp4ActivitySettingsHarness {
     Mp4ActivitySettingsHarness rotated=new Mp4ActivitySettingsHarness();rotated.restoreMp4Options();
     need(rotated.mp4Fps.selected==1&&rotated.mp4Codec.selected==1&&rotated.mp4Bitrate.selected==1&&rotated.mp4Resolution.selected==1,"Activity recreation restores all four selectors");
     need(rotated.mp4BitrateValue.value.equals("17.25")&&rotated.mp4Width.value.equals("3840")&&rotated.mp4Height.value.equals("2160"),"recreation retains raw numeric values despite immediate Spinner callbacks");
+    rotated.mp4Fps.setSelection(2);
+    Mp4ActivitySettingsHarness highRate=new Mp4ActivitySettingsHarness();highRate.restoreMp4Options();
+    need(highRate.mp4Fps.selected==2&&highRate.mp4Settings.fps==120,"actual120fps spinner survives Activity recreation without30fps coercion");
     rotated.mp4BitrateValue.setText("");rotated.mp4Width.setText("3841");
     Mp4ActivitySettingsHarness reopened=new Mp4ActivitySettingsHarness();reopened.restoreMp4Options();
     need(reopened.mp4BitrateValue.value.isEmpty()&&reopened.mp4Width.value.equals("3841")&&!reopened.mp4Settings.valid(),"menu reopen retains an unfinished draft and rejects it rather than restoring old valid values");
@@ -135,6 +138,10 @@ public final class Mp4SettingsHarness {
     need(settings.fps==60&&settings.codec==2&&settings.customBitrate&&settings.customResolution,"new Activity restores selectors after recreation or language change");
     need(settings.valid()&&settings.requestBitrate()==17250000&&settings.requestWidth()==3840&&settings.requestHeight()==2160,"numeric preferences reach native request without preset coercion");
     need(disk.writes==1&&disk.values.size()==7,"one edit writes a complete independent editor snapshot");
+    new Mp4ExportSettings(120,2,false,"17.25",true,"3840","2160").save(disk);
+    settings=Mp4ExportSettings.load(disk);need(settings.fps==120&&settings.codec==2,"120fps survives durable reload");
+    need(Mp4ExportSettings.fpsAt(Mp4ExportSettings.fpsPosition(120))==120,"120fps spinner round trip");
+    need(Mp4ExportSettings.recommendedBitrate(1920,1080,120,1)==34840000,"120fps recommendation uses twice60fps rate");
     new Mp4ExportSettings(60,2,true,"",true,"3841","").save(disk);
     settings=Mp4ExportSettings.load(disk);
     need(!settings.valid()&&!settings.bitrateValid()&&!settings.resolutionValid(),"unfinished and odd drafts block export");
@@ -155,7 +162,7 @@ public final class Mp4SettingsHarness {
     need(Mp4ExportSettings.recommendedBitrate(1920,1080,60,2)==11200000,"HEVC uses Elichika .09 with selected frame rate");
     need(Mp4ExportSettings.recommendedBitrate(16,16,30,1)==250000,"recommendation minimum is 0.25 Mbps");
     need(Mp4ExportSettings.recommendedBitrate(4096,4096,60,1)==140930000,"largest supported frame stays within native encoder limits");
-    need(Mp4ExportSettings.recommendedBitrate(4097,2160,30,1)==-1&&Mp4ExportSettings.recommendedBitrate(1920,1080,120,1)==-1,"unsupported geometry/clock cannot invent a recommendation");
+    need(Mp4ExportSettings.recommendedBitrate(4097,2160,30,1)==-1&&Mp4ExportSettings.recommendedBitrate(1920,1080,90,1)==-1,"unsupported geometry/clock cannot invent a recommendation");
     System.out.println("PASS durable MP4 settings and exact option contract");
   }
 }''')

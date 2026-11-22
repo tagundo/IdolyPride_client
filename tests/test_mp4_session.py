@@ -424,7 +424,7 @@ def run_session(tmp_path, session_executable, monkeypatch):
         eventually(lambda broker=broker: not broker._fds)
 
 
-@pytest.mark.parametrize("rate,fps,platform", [(48000,30,"android"),(44100,60,"android"),(48000,60,"ios")])
+@pytest.mark.parametrize("rate,fps,platform", [(48000,30,"android"),(44100,60,"android"),(48000,60,"ios"),(48000,120,"android"),(44100,120,"ios")])
 def test_actual_session_ipc_offsets_lead_tail_rational_clock_and_backpressure(run_session, rate, fps, platform):
     observed = run_session(rate=rate, fps=fps, platform=platform)
     session, configuration = observed["session"], observed["configuration"]

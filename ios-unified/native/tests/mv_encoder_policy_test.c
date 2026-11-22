@@ -17,11 +17,17 @@ int main(void) {
     assert(!IDMVFrameBytes(7680, 4320, &bytes));
     assert(!IDMVFrameBytes(UINT32_MAX, UINT32_MAX, &bytes));
     assert(!IDMVFrameBytes(0, 0, &bytes));
+    uint64_t covering120 = 0;
     int64_t value = 0; int32_t scale = 0;
     assert(IDMVRationalFrameTime(1000000, 30000, 1001, &value, &scale));
     assert(value == INT64_C(1001000000) && scale == 30000);
     assert(IDMVRationalFrameTime(720000, 120, 1, &value, &scale));
     assert(value == 720000 && scale == 120);
+    for(uint64_t frame=0;frame<=120;++frame){
+        assert(IDMVRationalFrameTime(frame,120,1,&value,&scale));
+        assert(value==(int64_t)frame&&scale==120);
+    }
+    assert(IDMVAudioFramesCoveringVideo(120,120,1,44100,&covering120) && covering120==44100);
     assert(!IDMVRationalFrameTime(UINT64_MAX, 30000, 1001, &value, &scale));
     assert(!IDMVRationalFrameTime(1, 121, 1, &value, &scale));
     assert(!IDMVRationalFrameTime(1, 0, 1, &value, &scale));

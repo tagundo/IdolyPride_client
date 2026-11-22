@@ -630,12 +630,12 @@
   const mp4Dimension = value => integer(value) && value >= 16 && value <= 4096 && value % 2 === 0;
   function validMP4ExportOptions(value) {
     return exact(value,["schema","fps","video_codec","bitrate_mode","video_bitrate","resolution_mode","width","height"])
-      && value.schema === 1 && choice(value.fps,[30,60]) && choice(value.video_codec,[1,2])
+      && value.schema === 1 && choice(value.fps,[30,60,120]) && choice(value.video_codec,[1,2])
       && choice(value.bitrate_mode,["recommended","custom"]) && integer(value.video_bitrate) && value.video_bitrate >= 100000 && value.video_bitrate <= 200000000
       && choice(value.resolution_mode,["current","custom"]) && mp4Dimension(value.width) && mp4Dimension(value.height);
   }
   function recommendedMP4Bitrate(width,height,fps,codec) {
-    if (!integer(width) || !integer(height) || width < 16 || height < 16 || width > 4096 || height > 4096 || !choice(fps,[30,60]) || !choice(codec,[1,2])) return null;
+    if (!integer(width) || !integer(height) || width < 16 || height < 16 || width > 4096 || height > 4096 || !choice(fps,[30,60,120]) || !choice(codec,[1,2])) return null;
     width -= width % 2;height -= height % 2;
     return Math.max(250000,Math.min(200000000,Math.floor((width*height*fps*(codec === 1 ? 14 : 9)+500000)/1000000)*10000));
   }
@@ -654,7 +654,7 @@
     if (action === "mp4_options_save") return exact(payload,["options"]) && validMP4ExportOptions(payload.options);
     if (action === "mp4_start" || action === "mp4_enqueue") return (exact(payload,["fps","video_bitrate","video_codec"])
       || exact(payload,["fps","video_bitrate","video_codec","width","height"]) && ((payload.width === 0 && payload.height === 0) || mp4Dimension(payload.width) && mp4Dimension(payload.height)))
-      && choice(payload.fps,[30,60]) && integer(payload.video_bitrate) && (payload.video_bitrate === 0 || payload.video_bitrate >= 100000 && payload.video_bitrate <= 200000000) && choice(payload.video_codec,[1,2]);
+      && choice(payload.fps,[30,60,120]) && integer(payload.video_bitrate) && (payload.video_bitrate === 0 || payload.video_bitrate >= 100000 && payload.video_bitrate <= 200000000) && choice(payload.video_codec,[1,2]);
     if (["status", "official_status", "official_inspect"].includes(action)) return exact(payload, []);
     if (action === "events_status") return exact(payload, []) || (exact(payload, ["mode"]) && choice(payload.mode, ["normal", "media"]));
     if (action === "events_save") return (exact(payload, ["settings", "expected_revision"]) || (exact(payload, ["settings", "expected_revision", "mode"]) && choice(payload.mode, ["normal", "media"]))) && validEvents(payload.settings, payload.mode === "media")
@@ -1065,7 +1065,7 @@
             || !integer(row.bytes) || row.bytes === 0 || !integer(row.created_ms)
             || row.job_id !== undefined && (typeof row.job_id !== "string" || !/^[0-9a-f]{32}$/.test(row.job_id))
             || row.width !== undefined && !mp4Dimension(row.width) || row.height !== undefined && !mp4Dimension(row.height)
-            || row.fps_num !== undefined && !choice(row.fps_num,[30,60])) return false;
+            || row.fps_num !== undefined && !choice(row.fps_num,[30,60,120])) return false;
         seen.add(row.export_id);return true;
       });
     }

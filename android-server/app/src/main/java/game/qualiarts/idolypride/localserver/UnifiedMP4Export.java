@@ -251,7 +251,7 @@ public final class UnifiedMP4Export {
         return requestEnqueue(caller, fps, codec, bitrate, 0, 0);
     }
     static boolean requestEnqueue(Activity caller, int fps, int codec, int bitrate, int outputWidth, int outputHeight) {
-        if (!queueConfigured || !ready() || (fps != 30 && fps != 60) || (codec != 1 && codec != 2)
+        if (!queueConfigured || !ready() || (fps != 30 && fps != 60 && fps != 120) || (codec != 1 && codec != 2)
                 || !Mp4ExportSettings.validBitrate(bitrate)
                 || !Mp4ExportSettings.validResolution(outputWidth, outputHeight)) return false;
         Activity current = game.get();
@@ -341,7 +341,7 @@ public final class UnifiedMP4Export {
         return requestStart(caller, fps, codec, bitrate, 0, 0);
     }
     static boolean requestStart(Activity caller, int fps, int codec, int bitrate, int outputWidth, int outputHeight) {
-        if (!ready() || (fps != 30 && fps != 60) || (codec != 1 && codec != 2)
+        if (!ready() || (fps != 30 && fps != 60 && fps != 120) || (codec != 1 && codec != 2)
                 || !Mp4ExportSettings.validBitrate(bitrate)
                 || !Mp4ExportSettings.validResolution(outputWidth, outputHeight) || !oneShotCompletionReady()) return false;
         Activity current = game.get();

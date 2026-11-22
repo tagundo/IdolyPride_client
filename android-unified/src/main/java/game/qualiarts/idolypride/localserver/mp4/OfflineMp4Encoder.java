@@ -364,12 +364,19 @@ public final class OfflineMp4Encoder {
                 boolean flexible = false;
                 for (int color : caps.colorFormats) if (color == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) flexible = true;
                 if (!flexible) continue;
-                if (caps.getVideoCapabilities().isSizeSupported(config.width, config.height)) preferred.add(info.getName());
+                MediaCodecInfo.VideoCapabilities video = caps.getVideoCapabilities();
+                // 120 fps must be admitted as this exact size/rate. An encoder
+                // advertised only for a lower mode is not a 120 fps fallback.
+                // This checks mode support, not offline wall-clock throughput.
+                if (config.fpsNumerator == 120 * config.fpsDenominator
+                        && !video.areSizeAndRateSupported(config.width, config.height, 120.0)) continue;
+                if (video.isSizeSupported(config.width, config.height)) preferred.add(info.getName());
                 else others.add(info.getName());
             } catch (IllegalArgumentException ignored) {}
         }
-        // Offline throughput is not real-time playback. Advertised fps is advisory; configure/start
-        // and the verified output clock decide support, with no resolution, codec or fps fallback.
+        // Offline throughput is not real-time playback. Keep existing 30/60
+        // configure/start admission; 120 also passed the exact capability check.
+        // The verified output clock forbids resolution, codec or fps fallback.
         preferred.addAll(others);
         StringBuilder errors = new StringBuilder();
         for (String name : preferred) {
@@ -382,7 +389,7 @@ public final class OfflineMp4Encoder {
                 AacPrimingProbe.close(candidate); errors.append(name).append(": ").append(error.getMessage()).append("; ");
             }
         }
-        throw new IOException("No encoder accepted " + config.mime() + " " + config.width + "x" + config.height + ": " + errors);
+        throw new IOException("No encoder accepted " + config.mime() + " " + config.width + "x" + config.height + " at " + config.fpsNumerator + "/" + config.fpsDenominator + " fps: " + errors);
     }
 
     private String chooseAudioEncoder() throws IOException {

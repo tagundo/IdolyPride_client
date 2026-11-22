@@ -83,11 +83,12 @@ app.dispose();
 def test_recommended_bitrate_tracks_source_output_fps_and_codec_without_storing_a_stale_number():
     run_js(r"""
 assert.equal(api.recommendedMP4Bitrate(1920,1080,60,1),17420000);
+assert.equal(api.recommendedMP4Bitrate(1920,1080,120,1),34840000);
 assert.equal(api.recommendedMP4Bitrate(1920,1080,60,2),11200000);
 assert.equal(api.recommendedMP4Bitrate(3840,2160,60,1),69670000);
 assert.equal(api.recommendedMP4Bitrate(1921,1081,60,1),17420000);
 assert.equal(api.recommendedMP4Bitrate(16,16,30,1),250000);
-for(const args of [[0,1080,60,1],[1920,5000,60,1],[1920,1080,120,1],[1920,1080,60,true]])assert.equal(api.recommendedMP4Bitrate(...args),null);
+for(const args of [[0,1080,60,1],[1920,5000,60,1],[1920,1080,90,1],[1920,1080,60,true]])assert.equal(api.recommendedMP4Bitrate(...args),null);
 const e=environment(),app=api.createSettingsApp(e.scope,e.document,e.timers);
 e.respond(e.posted.find(x=>x.action==='status'),status());await flush();e.elements.get('category-graphics').fire('click');await flush();
 e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
@@ -108,7 +109,7 @@ const e=environment(),bridge=api.createBridge(e.scope,e.timers);
 const base={fps:60,video_codec:2,video_bitrate:0,width:1280,height:720};
 for(const patch of [{width:0},{height:0},{width:17},{height:4098},{width:true},{video_bitrate:99999},{video_bitrate:200000001},{video_bitrate:0.1},{output_path:'/tmp/movie.mp4'}])await assert.rejects(bridge.request('mp4_start',{...base,...patch}));
 const options={schema:1,fps:30,video_codec:2,bitrate_mode:'custom',video_bitrate:100000,resolution_mode:'custom',width:1280,height:720};
-for(const patch of [{fps:true},{fps:120},{width:0},{height:17},{video_bitrate:0},{video_bitrate:200000001},{bitrate_mode:'other'},{path:'/tmp/movie.mp4'}])await assert.rejects(bridge.request('mp4_options_save',{options:{...options,...patch}}));
+for(const patch of [{fps:true},{fps:90},{width:0},{height:17},{video_bitrate:0},{video_bitrate:200000001},{bitrate_mode:'other'},{path:'/tmp/movie.mp4'}])await assert.rejects(bridge.request('mp4_options_save',{options:{...options,...patch}}));
 assert.equal(e.posted.length,0);bridge.dispose();
 for(const source of ['출력 크기','권장값 자동 계산','가로 (픽셀)','세로 (픽셀)','비트레이트는 0.1~200 Mbps로 입력해 주세요.','선택한 크기와 화면비로 여백 없이 촬영합니다.']){
  assert.notEqual(api.translateUI(source,'en'),source);assert.notEqual(api.translateUI(source,'ja'),source);
@@ -129,5 +130,20 @@ e.respond(retry,{options:saved});await flush();
 assert.equal(e.elements.get('mp4-fps').value,'30');assert.equal(e.elements.get('mp4-bitrate').value,'22');
 assert.equal(e.elements.get('mp4-width').value,'1280');assert.equal(e.elements.get('mp4-options-feedback').textContent,'');
 e.respond(first,{options:{...saved,fps:60}});await flush();assert.equal(e.elements.get('mp4-fps').value,'30');
+app.dispose();
+""")
+
+
+def test_120fps_editor_reload_and_queue_request_preserve_rate():
+    run_js(r"""
+const e=environment(),app=api.createSettingsApp(e.scope,e.document,e.timers);
+e.respond(e.posted.find(x=>x.action==='status'),status());await flush();e.elements.get('category-graphics').fire('click');await flush();
+const saved={schema:1,fps:120,video_codec:2,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'custom',width:1280,height:720};
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:saved});await flush();
+assert.equal(e.elements.get('mp4-fps').value,'120');
+e.respond(e.posted.find(x=>x.action==='mp4_status'),{phase:'idle',ready:true,source_width:1920,source_height:1080});
+e.respond(e.posted.find(x=>x.action==='mp4_queue_status'),{available:true,can_run:true,running:false,phase:'idle',jobs:[]});await flush();
+e.elements.get('mp4-enqueue').fire('click');await flush();
+const add=e.posted.find(x=>x.action==='mp4_enqueue');assert.deepEqual(add,{id:add.id,action:'mp4_enqueue',fps:120,video_codec:2,video_bitrate:0,width:1280,height:720});
 app.dispose();
 """)

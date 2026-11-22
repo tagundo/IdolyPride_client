@@ -35,6 +35,9 @@ public final class MathHarness {
         equal(OfflineMp4Math.videoFramesForAudio(1602,30000,1001,48000),2);
         equal(OfflineMp4Math.videoFramesForAudio(1601,30000,1001,48000),1);
         equal(OfflineMp4Math.videoFramesForAudio(44100,60,1,44100),60);
+        equal(OfflineMp4Math.videoFramesForAudio(44100,120,1,44100),120);
+        for(int frame=1;frame<=120;frame++)if(OfflineMp4Math.timestampUs(frame,120,1)<=OfflineMp4Math.timestampUs(frame-1,120,1))throw new AssertionError("120fps distinct PTS");
+        equal(OfflineMp4Math.timestampUs(120,120,1),1000000);
         rejects(()->OfflineMp4Math.timestampUs(Long.MAX_VALUE,1,10000));
         rejects(()->OfflineMp4Math.timestampUs(-1,30,1));
         rejects(()->OfflineMp4Math.audioBoundary(1,0,1,48000));
@@ -109,7 +112,7 @@ public final class ConfigHarness {
   public static void main(String[] args)throws Exception {
     File dir=new File(args[0]);dir.mkdirs();
     try(RandomAccessFile f=new RandomAccessFile(new File(dir,"audio.f32"),"rw")) { f.setLength(48000*2*4); }
-    config(dir,30,1,30);
+    config(dir,30,1,30);config(dir,120,1,120);
     rejects(()->config(dir,30,1,29));rejects(()->config(dir,30,1,31));rejects(()->config(dir,300,1,300));
     new File(dir,"final.mp4").createNewFile();rejects(()->config(dir,30,1,30));new File(dir,"final.mp4").delete();
     new File(dir,"partial.mp4").createNewFile();rejects(()->config(dir,30,1,30));new File(dir,"partial.mp4").delete();

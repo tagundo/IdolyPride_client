@@ -177,7 +177,8 @@ void abandon_globals(void* ctx){assert(ctx==native_scene_context);events.push_ba
 Result prepare_render(void* ctx,uint64_t tick){assert(ctx==native_scene_context&&native_engine_clock.have_tick()&&native_engine_clock.tick()==tick);render_armed=true;events.push_back("arm-render");return Result::ok;}
 Result hold(void* ctx){assert(ctx==native_scene_context&&native_engine_clock.held());if(!world_owned)return Result::stale;prepared_tick=published_tick=~uint64_t(0);events.push_back("hold");return Result::ok;}
 Result prepare(void* ctx,uint64_t tick,double seconds){
-    assert(ctx==native_scene_context&&native_engine_clock.held());assert(seconds==tick/60.);
+    assert(ctx==native_scene_context&&native_engine_clock.held());assert(seconds==tick/double(native_engine_clock.simulation_hz()));
+    assert(native_engine_clock.simulation_hz()==idoly_mp4_output::simulation_hz(job.options.fps_num));
     events.push_back("prepare:"+std::to_string(tick));if(prepare_wait)return Result::waiting;prepared_tick=tick;original_fault("prepare");return Result::ok;
 }
 Result grant(void* ctx,uint64_t tick){
@@ -250,7 +251,7 @@ void seed_manager(Manager& manager){
 }
 void initialize(unsigned fps){
     seed_manager(first_manager);seed_manager(second_manager);assert(native_engine_clock.install({current,original_kernel}));
-    assert(native_engine_clock.acquire(current_manager,wall,60));
+    assert(native_engine_clock.acquire(current_manager,wall,idoly_mp4_output::simulation_hz(fps)));
     job.options.fps_num=fps;job.automatic=job.scene_acquired=true;job.stage=Stage::frame_request;
     job.generation=19;job.source_generation=game.generation;job.total_frames=3;job.rate=48000;job.total_audio=4800;
     job.acquired_source_valid=true;job.acquired_source_identity=selected_identity;
@@ -277,7 +278,7 @@ bool boundary(bool acknowledge=true){
         if(game.source&&!game.paused)game.time+=.01;
     }
     if(grants.size()!=before&&published_tick!=~uint64_t(0)){
-        body_ticks.push_back(published_tick);game.time=published_tick/60.;gpu_pixel=uint8_t(published_tick+10);events.push_back("player-loop");
+        body_ticks.push_back(published_tick);game.time=published_tick/double(native_engine_clock.simulation_hz());gpu_pixel=uint8_t(published_tick+10);events.push_back("player-loop");
     }
     if(const uint64_t generation=claim_native_prewarm_render()){
         if(!defer_prewarm)complete_native_prewarm_render(generation,true);
@@ -303,7 +304,8 @@ void finish_and_restore(){
 
 DRIVER = r'''
 int main(int argc,char**argv){
-    assert(argc==2);const std::string s=argv[1];const unsigned fps=s=="thirty"?30:60;initialize(fps);
+    assert(argc==2);const std::string raw=argv[1];const bool fast=raw=="one_twenty"||raw.find("120")!=std::string::npos;
+    const std::string s=raw=="one_twenty"?"sixty":fast?raw.substr(0,raw.size()-3):raw;const unsigned fps=fast?120:s=="thirty"?30:60;initialize(fps);
     if(s.rfind("post_",0)==0){
         job.stage=Stage::retiring;job.terminal_success=true;finish_file_exists=true;
         job.encoder=&context_token;job.rgba=static_cast<uint8_t*>(std::calloc(1024,1));job.rgba_capacity=1024;
@@ -695,10 +697,10 @@ def boundary_binary(tmp_path_factory):
 
 @pytest.mark.parametrize("scenario", [
     "post_playing_progress", "post_paused", "post_resource_wait", "post_long_resource_wait", "post_direct_service_reentry", "post_detach_wait", "post_verify_wait", "post_source_change", "post_verify_timeout", "post_ready_after_timeout", "post_verify_throw", "post_release_throw", "post_release_retry", "post_reentry", "post_error_precedence", "post_partial_acquire",
-    "acquire_then_render", "acquire_wait", "admission_failure", "world_lost_before_tick", "prewarm_wait", "prewarm_resource_wait", "render_wait", "outer_render_failure", "handoff_failure", "foreign_handoff_failure",
+    "acquire_then_render", "acquire_then_render120", "acquire_wait", "admission_failure", "world_lost_before_tick", "prewarm_wait", "prewarm_resource_wait", "render_wait", "outer_render_failure", "handoff_failure", "foreign_handoff_failure",
     "partial_grant_failure", "partial_grant_owner_lost", "partial_grant_clock_lost", "throw_prepare", "throw_shader", "throw_grant", "throw_after_grant", "throw_kernel", "throw_readback", "throw_append", "throw_restore",
     "throw_after_camera", "throw_validate", "throw_capture_pass", "throw_scene_witness", "throw_observation", "idle_observer_failure",
-    "sixty", "thirty", "start_wait", "prepare_wait", "capture_wait", "camera_wait", "wrong_camera", "wrong_time",
+    "sixty", "thirty", "one_twenty", "retry120", "pause120", "f8_after_accept120", "start_wait", "prepare_wait", "capture_wait", "camera_wait", "wrong_camera", "wrong_time",
     "generation_changed", "source_changed", "manager_changed", "settings_changed", "abandon_wait", "cancel", "pause",
     "cancel_during_append", "pause_during_append",
     "readback_wait", "retry", "f8_after_accept", "restore_wait", "restore_time_mismatch", "restore_fence_wait", "world_lost_before_restore", "async_cleanup",

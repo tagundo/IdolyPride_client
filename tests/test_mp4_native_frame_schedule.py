@@ -11,15 +11,18 @@ HARNESS = r'''
 #include <cstdint>
 #include <cassert>
 #include <string>
+#include <cmath>
+#include "mp4_output_policy.hpp"
 // PRODUCTION
 int main(int argc,char**argv){
     assert(argc==2);std::string mode=argv[1];FrameSchedule schedule;
     if(mode=="invalid"){
-        for(auto fps:{0U,24U,120U})assert(!schedule.reset(1,fps,2));
+        for(auto fps:{0U,24U,90U,240U})assert(!schedule.reset(1,fps,2));
         assert(!schedule.reset(0,30,2));assert(!schedule.reset(1,30,0));
         assert(!schedule.reset(1,30,~uint64_t(0)));assert(!schedule.propose(1).advance);return 0;
     }
-    const uint32_t fps=mode=="thirty"?30:60;assert(schedule.reset(37,fps,3));
+    const uint32_t fps=mode.find("120")!=std::string::npos?120:mode=="thirty"?30:60;assert(schedule.reset(37,fps,3));
+    assert(schedule.simulation_hz()==(fps==120?120:60));
     auto first=schedule.propose(37);assert(first.advance&&first.tick==0&&first.frame==0);
     if(mode=="rejected_clock"){
         // Clock rejection is not a commit; retry the same exact proposal.
@@ -35,7 +38,7 @@ int main(int argc,char**argv){
     assert(!schedule.propose(37).advance);assert(!schedule.encoder_accepted(37,0));
     assert(!schedule.readback_received(36,0));assert(!schedule.readback_received(37,1));
     assert(schedule.readback_received(37,0));assert(!schedule.readback_received(37,0));
-    if(mode=="retry")for(int i=0;i<20;++i){
+    if(mode=="retry"||mode=="retry120"||mode=="pause120")for(int i=0;i<20;++i){
         assert(!schedule.propose(37).advance);assert(schedule.next_tick()==1);
         assert(schedule.pixels_received()&&schedule.accepted_frames()==0);
     }
@@ -52,11 +55,22 @@ int main(int argc,char**argv){
         auto proposal=schedule.propose(37);assert(proposal.advance);assert(schedule.commit(37,proposal));
         if(proposal.frame<0){assert(fps==30&&proposal.tick%2==1);continue;}
         assert(static_cast<uint64_t>(proposal.frame)==output);
-        assert(proposal.tick==output*(60/fps));
+        assert(proposal.tick==output*(schedule.simulation_hz()/fps));
+        assert(std::fabs(schedule.tick_seconds(proposal.tick)-output/double(fps))<1e-12);
         assert(schedule.readback_received(37,output));assert(schedule.encoder_accepted(37,output));++output;
     }
     assert(output==3&&schedule.accepted_frames()==3&&!schedule.awaiting_frame());
-    assert(!schedule.propose(37).advance);assert(schedule.next_tick()==1+2*(60/fps));
+    assert(!schedule.propose(37).advance);assert(schedule.next_tick()==1+2*(schedule.simulation_hz()/fps));
+    if(mode=="distinct120"){
+        assert(schedule.reset(38,120,121));double previous=-1;
+        for(uint64_t frame=0;frame<=120;++frame){
+            auto p=schedule.propose(38);assert(p.advance&&p.tick==frame&&p.frame==int64_t(frame));
+            const double time=schedule.tick_seconds(p.tick);assert(time>previous);previous=time;
+            assert(schedule.commit(38,p));for(int retry=0;retry<3;++retry)assert(!schedule.propose(38).advance);
+            assert(schedule.readback_received(38,frame)&&schedule.encoder_accepted(38,frame));
+        }
+        assert(schedule.complete()&&previous==1.);
+    }
     if(mode=="reset"){
         assert(schedule.reset(38,30,1));assert(!schedule.propose(37).advance);
         assert(!schedule.readback_received(37,0));assert(!schedule.encoder_accepted(37,0));
@@ -74,12 +88,12 @@ def schedule_binary(tmp_path_factory):
     body=source.split("// BEGIN_MP4_NATIVE_FRAME_SCHEDULE",1)[1].split("// END_MP4_NATIVE_FRAME_SCHEDULE",1)[0]
     root=tmp_path_factory.mktemp("native-frame-schedule");code=root/"schedule.cpp";binary=root/"schedule"
     code.write_text(HARNESS.replace("// PRODUCTION",body))
-    built=subprocess.run([compiler,"-std=c++17","-Wall","-Wextra","-Werror",str(code),"-o",str(binary)],capture_output=True,text=True,timeout=30)
+    built=subprocess.run([compiler,"-std=c++17","-I",str(ROOT/"client-presentation/native"),"-Wall","-Wextra","-Werror",str(code),"-o",str(binary)],capture_output=True,text=True,timeout=30)
     assert built.returncode==0,built.stderr
     return binary
 
 
-@pytest.mark.parametrize("mode",["invalid","thirty","sixty","stale","retry","rejected_clock","accept_then_reject","reset"])
+@pytest.mark.parametrize("mode",["invalid","thirty","sixty","stale","retry","rejected_clock","accept_then_reject","reset","120","retry120","pause120","distinct120"])
 def test_native_simulation_and_encoder_commits(schedule_binary,mode):
     result=subprocess.run([str(schedule_binary),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

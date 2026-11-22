@@ -152,7 +152,7 @@ inline bool graphics(const Graphics&g){return g.revision>=0&&g.custom_graphics<=
     &&__builtin_isfinite(g.render_scale)&&g.render_scale>=.25f&&g.render_scale<=2.f
     &&g.max_buffer_pixel>=256&&g.max_buffer_pixel<=4096&&!(g.max_buffer_pixel&1)&&g.aa_mode>=-1&&g.aa_mode<=2
     &&(g.shadow_resolution==0||g.shadow_resolution==512||g.shadow_resolution==1024||g.shadow_resolution==2048||g.shadow_resolution==4096);}
-inline bool options(const Options& o){return o.fps_den==1&&(o.fps_num==30||o.fps_num==60)&&(o.codec==1||o.codec==2)
+inline bool options(const Options& o){return o.fps_den==1&&idoly_mp4_output::supported_fps(o.fps_num)&&(o.codec==1||o.codec==2)
     &&o.video_bitrate>=100000&&o.video_bitrate<=200000000&&o.audio_bitrate==192000
     &&o.width>=16&&o.height>=16&&o.width<=16384&&o.height<=16384
     &&idoly_mp4_output::requested_dimensions(o.output_width,o.output_height)&&graphics(o.graphics);}

@@ -10,6 +10,10 @@
 
 namespace idoly_mp4_output {
 constexpr uint32_t maximum_dimension=4096;
+inline bool supported_fps(uint32_t fps) { return fps==30||fps==60||fps==120; }
+// 30 fps retains the original 60 Hz simulation and samples every other tick.
+// 120 fps advances the owned original loop at 120 Hz, one distinct step per frame.
+inline uint32_t simulation_hz(uint32_t fps) { return !supported_fps(fps)?0:fps==120?120:60; }
 inline bool source_dimensions(uint32_t width,uint32_t height) {
     return width>=16&&height>=16&&width<=maximum_dimension&&height<=maximum_dimension;
 }
@@ -21,7 +25,7 @@ inline bool requested_dimensions(uint32_t width,uint32_t height) {
 }
 inline bool bitrate(uint32_t value) { return !value||(value>=100000&&value<=200000000); }
 inline uint32_t recommended_bitrate(uint32_t width,uint32_t height,uint32_t fps,uint32_t codec) {
-    if(!dimensions(width,height)||(fps!=30&&fps!=60)||(codec!=1&&codec!=2))return 0;
+    if(!dimensions(width,height)||!supported_fps(fps)||(codec!=1&&codec!=2))return 0;
     // Elichika's bits/pixel/frame factors (.14 H.264, .09 HEVC), rounded
     // half-up to 0.01 Mbps so the displayed and encoded recommendation agree.
     const uint64_t numerator=static_cast<uint64_t>(width)*height*fps*(codec==1?14:9);

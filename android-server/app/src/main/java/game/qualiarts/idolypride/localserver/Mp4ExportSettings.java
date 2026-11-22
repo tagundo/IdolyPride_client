@@ -23,7 +23,7 @@ final class Mp4ExportSettings {
 
     Mp4ExportSettings(int fps, int codec, boolean customBitrate, String bitrateMbps,
             boolean customResolution, String width, String height) {
-        this.fps = fps == 60 ? 60 : 30;
+        this.fps = supportedFps(fps) ? fps : 30;
         this.codec = codec == 2 ? 2 : 1;
         this.customBitrate = customBitrate;
         this.bitrateMbps = bounded(bitrateMbps);
@@ -32,13 +32,18 @@ final class Mp4ExportSettings {
         this.height = bounded(height);
     }
 
+    static boolean supportedFps(int value) { return value == 30 || value == 60 || value == 120; }
+    static int fpsPosition(int value) { return value == 120 ? 2 : value == 60 ? 1 : 0; }
+    static int fpsAt(int position) { return position == 2 ? 120 : position == 1 ? 60 : 30; }
+    private static int parseFps(String value) { return "120".equals(value) ? 120 : "60".equals(value) ? 60 : 30; }
+
     static Mp4ExportSettings defaults() {
         return new Mp4ExportSettings(30, 1, false, "16", false, "1920", "1080");
     }
 
     static Mp4ExportSettings load(Store store) {
         Mp4ExportSettings defaults = defaults();
-        return new Mp4ExportSettings("60".equals(store.read(PREFIX + "fps", "30")) ? 60 : 30,
+        return new Mp4ExportSettings(parseFps(store.read(PREFIX + "fps", "30")),
                 "2".equals(store.read(PREFIX + "codec", "1")) ? 2 : 1,
                 "custom".equals(store.read(PREFIX + "bitrate_mode", "recommended")),
                 store.read(PREFIX + "bitrate_mbps", defaults.bitrateMbps),
@@ -89,7 +94,7 @@ final class Mp4ExportSettings {
         } catch (ArithmeticException | NumberFormatException invalid) { return -1; }
     }
     static int recommendedBitrate(int width, int height, int fps, int codec) {
-        if (!validEdge(width) || !validEdge(height) || (fps != 30 && fps != 60) || (codec != 1 && codec != 2)) return -1;
+        if (!validEdge(width) || !validEdge(height) || !supportedFps(fps) || (codec != 1 && codec != 2)) return -1;
         long suggested = (((long) width * height * fps * (codec == 1 ? 14 : 9) + 500_000) / 1_000_000) * 10_000;
         return (int) Math.max(250_000, Math.min(MAX_BITRATE, suggested));
     }

@@ -188,12 +188,12 @@ int main(int argc,char**argv){@autoreleasepool{
  assert(argc==2||argc==3);rootDirectory=[[NSString stringWithUTF8String:argv[1]]stringByResolvingSymlinksInPath];
  if(argc==3){
    NSString *phase=[NSString stringWithUTF8String:argv[2]];
-   NSDictionary *options=@{@"schema":@1,@"fps":@30,@"video_codec":@2,@"bitrate_mode":@"custom",@"video_bitrate":@12345678,@"resolution_mode":@"custom",@"width":@1280,@"height":@720};
+   NSDictionary *options=@{@"schema":@1,@"fps":@120,@"video_codec":@2,@"bitrate_mode":@"custom",@"video_bitrate":@12345678,@"resolution_mode":@"custom",@"width":@1280,@"height":@720};
    if([phase isEqual:@"prefs-write"]){
      [NSUserDefaults.standardUserDefaults removeObjectForKey:@"IdolyMP4ExportOptions.v1"];
      assert([request(@{@"id":@1,@"action":@"mp4_options"})[@"result"][@"options"]isEqual:mp4DefaultOptions()]);
      NSDictionary *r=request(@{@"id":@2,@"action":@"mp4_options_save",@"options":options});assert([r[@"ok"]isEqual:@YES]&&[r[@"result"][@"options"]isEqual:options]);
-     for(NSDictionary *change in @[@{@"width":@17},@{@"height":@YES},@{@"video_bitrate":@99999},@{@"video_bitrate":@200000001},@{@"fps":@120},@{@"path":@"/private/forbidden"}]){
+     for(NSDictionary *change in @[@{@"width":@17},@{@"height":@YES},@{@"video_bitrate":@99999},@{@"video_bitrate":@200000001},@{@"fps":@90},@{@"path":@"/private/forbidden"}]){
        NSMutableDictionary *bad=[options mutableCopy];[bad addEntriesFromDictionary:change];assert([request(@{@"id":@3,@"action":@"mp4_options_save",@"options":bad})[@"ok"]isEqual:@NO]);
      }
      assert([request(@{@"id":@4,@"action":@"mp4_options"})[@"result"][@"options"]isEqual:options]);

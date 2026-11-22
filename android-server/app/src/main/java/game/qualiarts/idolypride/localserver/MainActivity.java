@@ -2280,7 +2280,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private void addMp4Controls(LinearLayout body) {
         TextView title = text(R.string.mp4_title, 17, TEXT_PRIMARY); title.setPadding(0, dp(20), 0, dp(6)); body.addView(title);
         body.addView(text(R.string.mp4_queue_hint, 13, TEXT_MUTED));
-        mp4Fps = mp4Spinner(body, R.string.mp4_fps, new String[] {"30", "60"});
+        mp4Fps = mp4Spinner(body, R.string.mp4_fps, new String[] {"30", "60", "120"});
         mp4Codec = mp4Spinner(body, R.string.mp4_codec, new String[] {"H.264", "HEVC"});
         mp4Bitrate = mp4Spinner(body, R.string.mp4_bitrate,
                 new String[] {getString(R.string.mp4_bitrate_recommended), getString(R.string.mp4_custom)});
@@ -2392,7 +2392,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private void restoreMp4Options() {
         mp4OptionsLoading = true;
         mp4Settings = Mp4ExportSettings.load(mp4OptionsStore());
-        mp4Fps.setSelection(mp4Settings.fps == 60 ? 1 : 0); mp4Codec.setSelection(mp4Settings.codec - 1);
+        mp4Fps.setSelection(Mp4ExportSettings.fpsPosition(mp4Settings.fps)); mp4Codec.setSelection(mp4Settings.codec - 1);
         mp4Bitrate.setSelection(mp4Settings.customBitrate ? 1 : 0);
         mp4Resolution.setSelection(mp4Settings.customResolution ? 1 : 0);
         mp4BitrateValue.setText(mp4Settings.bitrateMbps); mp4Width.setText(mp4Settings.width); mp4Height.setText(mp4Settings.height);
@@ -2413,7 +2413,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     private void saveMp4Options() {
         if (mp4OptionsLoading || mp4Settings == null) return;
-        mp4Settings = new Mp4ExportSettings(mp4Fps.getSelectedItemPosition() == 1 ? 60 : 30,
+        mp4Settings = new Mp4ExportSettings(Mp4ExportSettings.fpsAt(mp4Fps.getSelectedItemPosition()),
                 mp4Codec.getSelectedItemPosition() + 1, mp4Bitrate.getSelectedItemPosition() == 1,
                 mp4BitrateValue.getText().toString(), mp4Resolution.getSelectedItemPosition() == 1,
                 mp4Width.getText().toString(), mp4Height.getText().toString());
@@ -2571,7 +2571,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             TextView details = text(mp4QueueStateLabel(state), 14, "failed".equals(state) || "interrupted".equals(state) ? WARNING : TEXT_MUTED);
             int width = job.optInt("width"), height = job.optInt("height"), fps = job.optInt("fps_num");
             String description = getString(mp4QueueStateLabel(state));
-            if (width > 0 && width <= 16384 && height > 0 && height <= 16384 && (fps == 30 || fps == 60))
+            if (width > 0 && width <= 16384 && height > 0 && height <= 16384 && Mp4ExportSettings.supportedFps(fps))
                 description += " · " + getString(R.string.mp4_geometry, width, height, fps);
             int codec = job.optInt("video_codec"), bitrate = job.optInt("video_bitrate");
             if ((codec == 1 || codec == 2) && bitrate >= Mp4ExportSettings.MIN_BITRATE && bitrate <= Mp4ExportSettings.MAX_BITRATE)

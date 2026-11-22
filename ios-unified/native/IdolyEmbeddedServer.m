@@ -902,7 +902,7 @@ static NSDictionary *mp4QueueStatus(void) {
                 || !(mp4Identifier(output) || [output isEqual:@""]) || !mp4Code(row[@"timeline"],192)
                 || !mp4Code(errorCode,128) || !mp4Integer(row[@"actor_count"],32)
                 || !mp4Integer(row[@"width"],16384) || !mp4Integer(row[@"height"],16384)
-                || !mp4Choice(row[@"fps_num"],@[@30,@60]) || !mp4Choice(row[@"video_codec"],@[@1,@2])) return invalid;
+                || !mp4Choice(row[@"fps_num"],@[@30,@60,@120]) || !mp4Choice(row[@"video_codec"],@[@1,@2])) return invalid;
         if (output.length && [outputs containsObject:output]) return invalid;
         if ([row[@"state"] isEqual:@"completed"] && !output.length) return invalid;
         [identifiers addObject:identifier]; if (output.length) [outputs addObject:output];
@@ -997,7 +997,7 @@ static BOOL mp4ValidOptions(id candidate) {
     NSDictionary *value = candidate;
     NSSet *keys = [NSSet setWithArray:@[@"schema",@"fps",@"video_codec",@"bitrate_mode",@"video_bitrate",@"resolution_mode",@"width",@"height"]];
     return value.count == keys.count && [[NSSet setWithArray:value.allKeys] isEqual:keys]
-        && mp4Choice(value[@"schema"],@[@1]) && mp4Choice(value[@"fps"],@[@30,@60]) && mp4Choice(value[@"video_codec"],@[@1,@2])
+        && mp4Choice(value[@"schema"],@[@1]) && mp4Choice(value[@"fps"],@[@30,@60,@120]) && mp4Choice(value[@"video_codec"],@[@1,@2])
         && [@[@"recommended",@"custom"] containsObject:value[@"bitrate_mode"] ?: @""]
         && mp4Integer(value[@"video_bitrate"],200000000) && [value[@"video_bitrate"] unsignedIntValue] >= 100000
         && [@[@"current",@"custom"] containsObject:value[@"resolution_mode"] ?: @""]
@@ -1022,7 +1022,7 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
         && (([object[@"width"] unsignedIntValue] == 0 && [object[@"height"] unsignedIntValue] == 0)
             || ([object[@"width"] unsignedIntValue] >= 16 && [object[@"width"] unsignedIntValue] % 2 == 0
                 && [object[@"height"] unsignedIntValue] >= 16 && [object[@"height"] unsignedIntValue] % 2 == 0));
-    BOOL preset = (start || enqueue) && (object.count == 5 || dimensions) && mp4Choice(object[@"fps"],@[@30,@60])
+    BOOL preset = (start || enqueue) && (object.count == 5 || dimensions) && mp4Choice(object[@"fps"],@[@30,@60,@120])
         && mp4Integer(object[@"video_bitrate"],200000000)
         && ([object[@"video_bitrate"] unsignedIntValue] == 0 || [object[@"video_bitrate"] unsignedIntValue] >= 100000)
         && mp4Choice(object[@"video_codec"],@[@1,@2]);

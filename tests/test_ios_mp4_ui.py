@@ -11,7 +11,7 @@ for(const [action,payload] of [
  ['mp4_save',{path:'/private/song.mp4'}],['mp4_save',{export_id:'other-job'}],
  ['mp4_status',{directory:'/private'}],['mp4_cancel',{id:3}],
  ['mp4_pause',{reason:'lifecycle_background'}],['mp4_resume',{export_id:'foreign'}],
- ['mp4_start',{fps:120,video_bitrate:16000000,video_codec:1}],
+ ['mp4_start',{fps:90,video_bitrate:16000000,video_codec:1}],
  ['mp4_start',{fps:60,video_bitrate:16000000,video_codec:1,output_path:'/tmp/a.mp4'}],
  ['mp4_start',{fps:true,video_bitrate:16000000,video_codec:1}]
 ])await assert.rejects(bridge.request(action,payload));
