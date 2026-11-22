@@ -137,7 +137,10 @@ int main(int argc,char** argv){
         assert(!s.released_owned&&s.time==77&&s.history==88);return 0;
     }
     if(scenario=="rebuild_wait"){
-        assert(result==p::Result::waiting&&s.rebuilds==1&&s.resets==0);s.rebuild_ready=true;result=scope.start({true,true});assert(s.rebuilds==2);
+        assert(result==p::Result::waiting&&s.rebuilds==1&&s.resets==0);
+        // The original has returned. Later publication completes that exact
+        // issued rebuild; retry must not execute another destructive original.
+        ++s.version;s.history=0;s.rebuild_ready=true;result=scope.start({true,true});assert(s.rebuilds==1);
     }
     if(scenario=="reset_wait"){
         assert(result==p::Result::waiting&&s.rebuilds==1&&s.sets==0);s.reset_ready=true;result=scope.start({true,true});assert(s.rebuilds==1);
@@ -244,6 +247,111 @@ int main(int argc,char** argv){
     assert(scope.restore({false,false})==p::Result::ok);
 }
 '''
+
+CONTROL_HARNESS = HARNESS.split("int main(int argc,char** argv){", 1)[0] + r'''
+struct ControlledHost {
+    p::OriginalApi<Graph> original{};p::OperationReceipt calls[8]{};
+    unsigned entries[8]{},actual[8]{};uint64_t serial=0;
+    p::OperationStep target=p::OperationStep::start_rebuild;
+    bool before=false,after=false,waited=false,bad_empty=false,bad_returned=false,bad_serial=false,throwing=false;
+} host;
+void throwing_rebuild(void*,void*){primary();++s.rebuilds;++s.version;event("rebuild");throw 42;}
+p::Result controlled(void*context,p::OperationStep step,p::OperationKind kind,void*director,const p::Snapshot<Graph>&saved,p::OperationReceipt*out){
+    assert(context==&host&&director==&s.director&&saved.time==13.25);
+    const auto i=static_cast<unsigned>(step);assert(i<8);++host.entries[i];
+    if(host.bad_empty)return p::Result::ok;
+    if(host.bad_returned){*out={0,false,true};return p::Result::waiting;}
+    auto&receipt=host.calls[i];
+    if(step==host.target&&host.before&&!host.waited){host.waited=true;return p::Result::waiting;}
+    if(!receipt.issued){
+        receipt={++host.serial,true,false};*out=receipt;++host.actual[i];
+        if(kind==p::OperationKind::pause)host.original.director_pause(director,nullptr);
+        else if(kind==p::OperationKind::resume)host.original.director_resume(director,nullptr);
+        else if(kind==p::OperationKind::play)host.original.director_play(director,nullptr);
+        else if(kind==p::OperationKind::rebuild)host.original.director_rebuild(director,nullptr);
+        else host.original.director_evaluate(director,nullptr);
+        receipt.returned=true;
+    }
+    *out=receipt;
+    if(host.bad_serial&&step==host.target&&host.waited){++out->serial;return p::Result::ok;}
+    if(step==host.target&&host.after&&!host.waited){host.waited=true;return p::Result::waiting;}
+    return p::Result::ok;
+}
+int main(int argc,char**argv){
+    assert(argc==2);const std::string scenario=argv[1];p::Scope<Graph> scope;verifying_scope=&scope;
+    if(scenario=="after_restore_state_paused"){s.state=0;s.paused=true;}
+    const int source_state=s.state;
+    if(scenario.find("acquire")!=std::string::npos)host.target=p::OperationStep::acquire_pause;
+    if(scenario.find("start_rebuild")!=std::string::npos)host.target=p::OperationStep::start_rebuild;
+    if(scenario.find("start_play")!=std::string::npos)host.target=p::OperationStep::start_play;
+    if(scenario.find("restore_pause")!=std::string::npos)host.target=p::OperationStep::restore_pause;
+    if(scenario.find("restore_rebuild")!=std::string::npos)host.target=p::OperationStep::restore_rebuild;
+    if(scenario.find("restore_evaluate")!=std::string::npos)host.target=p::OperationStep::restore_evaluate;
+    if(scenario.find("restore_state")!=std::string::npos)host.target=p::OperationStep::restore_state;
+    host.before=scenario.rfind("before_",0)==0;host.after=scenario.rfind("after_",0)==0;
+    if(scenario=="bad_empty_ok")host.bad_empty=true;
+    if(scenario=="bad_returned")host.bad_returned=true;
+    if(scenario=="bad_serial_change"){host.after=true;host.bad_serial=true;}
+    if(scenario=="abort_wait_start")host.after=true;
+    auto a=api();if(scenario=="throw_once")a.director_rebuild=throwing_rebuild;
+    host.original=a;a.operation=controlled;a.operation_context=&host;
+    assert(scope.install(a,dependents()));
+    auto result=scope.acquire(&s.player,&s.director,&s,{true,true});
+    if(host.bad_empty||host.bad_returned){assert(result==p::Result::failed&&s.state==1&&host.actual[0]==0);s.owner=false;assert(scope.abandon()==p::Result::stale);return 0;}
+    if(result==p::Result::waiting){assert(host.target==p::OperationStep::acquire_pause);const auto captures=s.captures;result=scope.acquire(&s.player,&s.director,&s,{true,true});assert(captures==s.captures&&host.actual[0]==1);}
+    assert(result==p::Result::ok);
+    if(scenario=="throw_once"){
+        bool caught=false;try{scope.start({true,true});}catch(int value){caught=value==42;}
+        assert(caught&&host.actual[1]==1&&s.rebuilds==1&&scope.restorable_owner_current());
+        assert(scope.start({true,true})==p::Result::failed&&host.actual[1]==1&&s.rebuilds==1);
+        s.owner=false;assert(scope.abandon()==p::Result::stale);return 0;
+    }
+    result=scope.start({true,true});
+    if(scenario=="bad_serial_change"){assert(result==p::Result::waiting&&host.actual[1]==1);assert(scope.start({true,true})==p::Result::failed&&host.actual[1]==1);s.owner=false;scope.abandon();return 0;}
+    if(scenario=="abort_wait_start"){assert(result==p::Result::waiting&&host.actual[1]==1);host.after=false;assert(scope.restore({true,true})==p::Result::ok&&!scope.active()&&s.rebuilds==2);return 0;}
+    if(result==p::Result::waiting){
+        assert(scope.restorable_owner_current());const auto rebuilds=s.rebuilds,sets=s.sets,resets=s.resets;
+        result=scope.start({true,true});assert(result==p::Result::ok);
+        if(host.after){assert(s.rebuilds==rebuilds);if(host.target==p::OperationStep::start_play)assert(s.sets==sets&&s.resets==resets);}
+    }
+    assert(result==p::Result::ok&&scope.playing());s.time=5;
+    if(scenario=="owner_after_call"){s.switch_on="evaluate";assert(scope.restore({true,true})==p::Result::stale&&!scope.active()&&!s.released_owned);return 0;}
+    if(scenario=="verify_wait_after_state")s.source_ready=false;
+    result=scope.restore({true,true});
+    if(result==p::Result::waiting){
+        const auto rebuilds=s.rebuilds,evaluates=s.evaluates,sets=s.sets,restores=s.restores;
+        if(scenario=="verify_wait_after_state"){assert(scope.source_playback_state_restored());s.source_ready=true;}
+        result=scope.restore({true,true});assert(result==p::Result::ok);
+        if(host.after){if(host.target!=p::OperationStep::restore_pause)assert(s.rebuilds==rebuilds);if(host.target==p::OperationStep::restore_evaluate||host.target==p::OperationStep::restore_state)assert(s.evaluates==evaluates&&s.sets==sets);if(host.target==p::OperationStep::restore_state)assert(s.restores==restores);}
+    }
+    assert(result==p::Result::ok&&!scope.active()&&s.state==source_state&&s.time==13.25);
+    for(unsigned i=0;i<8;++i)assert(host.actual[i]<=1);
+    if(scenario=="reuse"){
+        host.calls[0]=host.calls[1]=host.calls[2]=host.calls[3]=host.calls[4]=host.calls[5]=host.calls[6]=p::OperationReceipt{};
+        assert(scope.install(a,dependents())&&scope.acquire(&s.player,&s.director,&s,{true,true})==p::Result::ok&&scope.start({true,true})==p::Result::ok&&scope.restore({true,true})==p::Result::ok);
+        assert(s.rebuilds==4&&host.actual[1]==2&&host.actual[4]==2);
+    }
+}
+'''
+
+
+@pytest.fixture(scope="module")
+def controlled_binary(tmp_path_factory):
+    compiler=shutil.which("c++")
+    if not compiler:
+        pytest.skip("A host C++ compiler is required")
+    folder=tmp_path_factory.mktemp("mp4-playback-controlled")
+    source,binary=folder/"controlled.cpp",folder/"controlled"
+    source.write_text(CONTROL_HARNESS)
+    built=subprocess.run([compiler,"-std=c++17","-O1","-g","-Wall","-Wextra","-Werror","-fsanitize=address,undefined","-fno-omit-frame-pointer","-I",str(NATIVE),str(source),"-o",str(binary)],capture_output=True,text=True,timeout=30)
+    assert built.returncode==0,built.stderr
+    return binary
+
+
+@pytest.mark.parametrize("scenario", "before_acquire after_acquire before_start_rebuild after_start_rebuild before_start_play after_start_play before_restore_pause after_restore_pause before_restore_rebuild after_restore_rebuild before_restore_evaluate after_restore_evaluate before_restore_state after_restore_state after_restore_state_paused bad_empty_ok bad_returned bad_serial_change throw_once owner_after_call abort_wait_start reuse verify_wait_after_state".split())
+def test_resultful_original_operations_are_once_across_wait_and_restore(controlled_binary,scenario):
+    result=subprocess.run([str(controlled_binary),scenario],capture_output=True,text=True,timeout=5)
+    assert result.returncode==0,result.stdout+result.stderr
 
 
 @pytest.fixture(scope="module")
