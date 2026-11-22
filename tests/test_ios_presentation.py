@@ -12,6 +12,74 @@ from idoly_local import ios_presentation as p
 SCENE_APPENDED=('mp4_psyllium_execute','mp4_fixed_loop_condition','mp4_particle_simulate','mp4_live_particle_simulate','mp4_presenter_end','mp4_actor_update','mp4_actor_late','mp4_actor_eye_late','mp4_actor_face_late','mp4_actor_foot_apply','mp4_particle_control_simulate','mp4_actor_derived_late_ref','mp4_actor_derived_late_shared','mp4_equipment_late','mp4_photography_is_end','mp4_player_is_end','mp4_render_stack','mp4_render_camera','mp4_vlb_draw','mp4_selected_renderer','mp4_volume_update','mp4_material_ctor_shader','mp4_render_library_ctor','mp4_cine_apply','mp4_cine_game_object_ctor','mp4_cine_volume_enable','mp4_mirror_late','mp4_mirror_parameters','mp4_mirror_destroy','mp4_fog_enable','mp4_fog_disable','mp4_fog_late','mp4_context_submit','mp4_control_create','mp4_srp_add_precull','mp4_srp_invoke_precull','mp4_srp_begin_frame','mp4_shader_memory_sync','mp4_shader_memory_async','mp4_shader_file_async','mp4_shader_bundle_result','mp4_capture_update','mp4_capture_wrapper_ctor','mp4_capture_texture_ctor','mp4_capture_request','mp4_source_timeline_factory')
 SCENE_APPENDED += ('mp4_scene_shader_load','mp4_scene_shader_loaded',
                    'mp4_scene_shader_unloaded','mp4_scene_shader_bundle_unload')
+SCENE_APPENDED += ('mp4_source_game_object_active','mp4_animation_root_factory',
+                   'mp4_animation_clips_factory','mp4_animation_infinite_factory','mp4_animation_clip_factory',
+                   'mp4_capture_add_target','mp4_capture_request_target',
+                   'mp4_capture_native_publication','mp4_animation_output_target','mp4_animation_output_create')
+SCENE_APPENDED += ('mp4_audio_canonical_target','mp4_audio_source_process_target','mp4_animation_interval_add')
+
+SCENE_APPENDED += ('mp4_director_enqueue', 'mp4_director_append_a', 'mp4_director_append_b', 'mp4_director_collect', 'mp4_director_deferred_a', 'mp4_director_deferred_b', 'mp4_director_graph_create')
+SCENE_APPENDED += ('mp4_animation_binding_build','mp4_gobo_late_update','mp4_gobo_disable','mp4_camera_manual_render')
+SCENE_APPENDED += ('mp4_proflare_start','mp4_proflare_enable','mp4_proflare_disable',
+                   'mp4_proflare_try','mp4_proflare_initialize','mp4_proflare_batch_late','mp4_proflare_batch_disable')
+SCENE_APPENDED += ('mp4_monitor_tv_update_texture','mp4_monitor_tv_disable')
+SCENE_APPENDED += ('mp4_monitor_image_apply','mp4_monitor_graphic_rebuild')
+SCENE_APPENDED += ('mp4_monitor_pool_get','mp4_monitor_pool_release','mp4_monitor_pool_clear')
+SCENE_APPENDED += ('mp4_video_mixer_create', 'mp4_video_playable_create', 'mp4_video_playable_destroy', 'mp4_video_update', 'mp4_video_sync', 'mp4_video_set_skip', 'mp4_video_set_wait_first', 'mp4_video_set_play_on_awake', 'mp4_video_set_loop', 'mp4_video_set_time', 'mp4_video_set_external_reference_time', 'mp4_video_step', 'mp4_video_loop', 'mp4_video_prepared', 'mp4_video_seek', 'mp4_video_error', 'mp4_video_frame_ready', 'mp4_video_image_enable', 'mp4_video_image_late')
+
+
+def test_animation_interval_add_uses_real_reference_generic_registration_slot():
+    """The open declaration and the fully-shared value body are different roles."""
+    ios=p.load_profile()['aliases']['mp4_animation_interval_add']
+    import json
+    android=json.loads((p.PROFILE.parent.parent/'native/profile.json').read_text())['aliases']['mp4_animation_interval_add']
+    for row,rva,slot,spec,pointer,generic in (
+        (android,'0x686c3ec','0x96002b8',147438,137831,5824),
+        (ios,0x4626bbc,0x9b40588,147455,137868,5823),
+    ):
+        assert row['name']=='UnityEngine.Timeline.IntervalTree`1.Add'
+        assert row['rva']==rva and row['registration_pointer_slot_rva']==slot
+        assert row['parameter_count']==1 and not row['method_flags']&0x10
+        assert row['native_abi']=='void(void*,void*,const MethodInfo*)'
+        param=row['parameters'][0]
+        assert param['name']=='item' and param.get('type',param.get('type_name'))=='generic-parameter:'+str(generic)
+        source=row['generic_source']
+        assert source['generic_arguments']==['System.Object']
+        assert source['method_spec_index']==spec and source['method_pointer_index']==pointer
+        assert int(source['pointer_slot'],16)==int(source['pointer_table'],16)+8*pointer
+
+
+def test_monitor_pool_hooks_use_actual_shared_reference_generic_slots():
+    import json
+    android = json.loads((p.PROFILE.parent.parent / 'native/profile.json').read_text())['aliases']
+    ios = p.load_profile()['aliases']
+    for aliases, rows in (
+        (android, (('get', 0x6f04f60, 165887, 196619, 172995),
+                   ('release', 0x6f05080, 165889, 196621, 172997),
+                   ('clear', 0x6f05164, 165890, 196617, 172993))),
+        (ios, (('get', 0x4e7ab14, 166316, 196786, 173184),
+               ('release', 0x4e7ac48, 166318, 196788, 173186),
+               ('clear', 0x4e7ad40, 166319, 196784, 173182))),
+    ):
+        for name, rva, method, spec, pointer in rows:
+            row = aliases['mp4_monitor_pool_' + name]
+            assert row['name'] == 'UnityEngine.Pool.ObjectPool`1.' + name.capitalize()
+            assert int(row['rva'], 16) == rva if isinstance(row['rva'], str) else row['rva'] == rva
+            assert row['metadata_method_index'] == method and not row['method_flags'] & 0x10
+            generic = row['generic_source']
+            assert generic['generic_arguments'] == ['System.Object']
+            assert generic['method_spec_index'] == spec and generic['method_pointer_index'] == pointer
+            assert int(generic['pointer_slot'], 16) == int(generic['pointer_table'], 16) + 8 * pointer
+            if name == 'get':
+                assert row['parameter_count'] == 0 and row['return_type'].startswith('generic-parameter:')
+                assert row['native_abi'] == 'void*(void*,const MethodInfo*)'
+            elif name == 'release':
+                assert row['parameter_count'] == 1 and row['return_type'] == 'System.Void'
+                param = row['parameters'][0]
+                assert param.get('type', param.get('type_name')).startswith('generic-parameter:')
+                assert row['native_abi'] == 'void(void*,void*,const MethodInfo*)'
+            else:
+                assert row['parameter_count'] == 0 and row['return_type'] == 'System.Void'
 
 
 def signed_branch_target(source, instruction):
@@ -96,9 +164,9 @@ def test_original_cache_conditional_gateway_executes_both_paths(item_pointer):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "d7a83220479a765971b1f6c558f39235d94b20d0cd01aad88a914e229018bdc1"
+    assert hashlib.sha256(header).hexdigest() == "246b64171b065d16c86a94850adbed427b0959c5d7e2151953cf1889e6e6c860"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 187 and len(plan["entries"]) == 112
+    assert len(profile["aliases"]) == 244 and len(plan["entries"]) == 169
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -109,6 +177,11 @@ def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
         if name == "shared_is_cached":
             assert len(code) == 32 and words[5] == 0xB4000043
             assert signed_branch_target(entry["gateway"] + 28, words[7]) == entry["rva"] + 16
+        elif name == "mp4_video_frame_ready":
+            # The real static callback begins CBZ X0,+40. Its relocated
+            # zero-target and ordinary continuation occupy distinct branches.
+            assert len(code) == 32 and words[5] == 0xB4000040
+            assert signed_branch_target(entry["gateway"] + 28, words[7]) == entry["rva"] + 40
         else:
             assert len(code) == 28
             assert struct.pack("<I", words[5]).hex() == entry["original16"][:8]
@@ -201,6 +274,45 @@ def relay_macho_fixture():
 def test_native_relay_requires_original_uuid_rx_mapping_and_excluded_zero_gap():
     raw, profile = relay_macho_fixture()
     p._validate_native_relay(raw, profile)
+
+
+@pytest.mark.parametrize('name,rva,relay,abi', [
+    ('mp4_capture_native_publication', 0xb04424, 0x8610a54, 'void(int32_t,void*)'),
+    ('mp4_animation_output_target', 0xf3f980, 0x8610a5c, 'void(void*,void*)'),
+    ('mp4_animation_output_create', 0xb576b8, 0x8610a64, 'bool(PlayableGraph16*,void*,PlayableOutput16*)'),
+    ('mp4_audio_canonical_target', 0xfa3394, 0x8610a6c, 'void(void*)'),
+    ('mp4_audio_source_process_target', 0xf91db8, 0x8610a74, 'void(void*)'),
+    ('mp4_director_enqueue', 0xdc6448, 0x8610a7c, 'void(void*,uint32_t,const AnimationGraph16*)'),
+    ('mp4_director_append_a', 0xdc66c0, 0x8610a84, 'void(void*,const AnimationGraph16*)'),
+    ('mp4_director_append_b', 0xdc64ac, 0x8610a8c, 'void(void*,const AnimationGraph16*)'),
+    ('mp4_director_collect', 0xdc5e4c, 0x8610a94, 'void(void*,void*)'),
+    ('mp4_director_deferred_a', 0xdc65a4, 0x8610a9c, 'void(void*)'),
+    ('mp4_director_deferred_b', 0xdc6520, 0x8610aa4, 'void(void*)'),
+    ('mp4_director_graph_create', 0xdc6870, 0x8610aac, 'void*(void*,uintptr_t)'),
+    ('mp4_animation_binding_build', 0xf0e458, 0x8610ab4, 'void(void*)'),
+])
+def test_exact_engine_hooks_have_native_abis_and_distinct_checked_relays(name, rva, relay, abi):
+    profile, plan = p.load_profile(), p.make_plan()
+    row, entry = profile['aliases'][name], plan['entries'][name]
+    assert row['rva'] == rva and row['native_abi'] == abi
+    assert row['module'] is None and row['registration_pointer_slot_rva'] is None
+    assert {'metadata_method_index', 'type_definition_index', 'token_row', 'method_flags'}.isdisjoint(row)
+    assert (entry['relay_in'], entry['relay_out']) == (relay, relay + 4)
+    for key, target in (('relay_in', entry['gateway']), ('relay_out', rva + 4)):
+        assert signed_branch_target(entry[key], int.from_bytes(bytes.fromhex(entry[key + '_hex']), 'little')) == target
+
+
+@pytest.mark.parametrize('change', ['unknown', 'reorder', 'extra', 'gap', 'offset', 'overlap'])
+def test_only_fourteen_named_ordered_native_extra_roles_are_accepted(change):
+    profile = copy.deepcopy(p.load_profile())
+    extra = profile['native_extra_relay_regions']
+    if change == 'unknown': extra[1]['name'] = 'any_native_hook'
+    elif change == 'reorder': extra[1], extra[2] = extra[2], extra[1]
+    elif change == 'extra': extra.append(copy.deepcopy(extra[-1]))
+    elif change == 'gap': extra[1]['gap_end'] += 4
+    elif change == 'offset': extra[1]['rva'] += 4
+    else: extra[2]['rva'] = extra[1]['rva']
+    with pytest.raises(ValueError): p._profile_native_relays(profile)
 
 
 @pytest.mark.parametrize('kind', ['uuid', 'protection', 'overlap', 'gap_boundary', 'nonzero', 'sections_bound', 'command_bound'])
@@ -326,8 +438,8 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 112 * 32
-    assert profile["slot_region"]["bytes"] == 112 * 8
+    assert profile["gateway_region"]["bytes"] == 169 * 32
+    assert profile["slot_region"]["bytes"] == 169 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
@@ -358,8 +470,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 112 * 32
-    assert original["slot_region"]["bytes"] == 112 * 8
+    assert original["gateway_region"]["bytes"] == 169 * 32
+    assert original["slot_region"]["bytes"] == 169 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length
@@ -462,7 +574,7 @@ def test_selected_stage_and_fixed_gateways_preserve_actual_native_argument_regis
     handler=0x10001000;stack=0x10010000
     machine=unicorn.Uc(unicorn.UC_ARCH_ARM64,unicorn.UC_MODE_ARM)
     machine.ctl_set_tcg_buffer_size(16*1024*1024)
-    pages={entry['rva']&~4095,entry['gateway']&~4095,entry['slot']&~4095,handler&~4095,stack}
+    pages={entry['rva']&~4095,entry['gateway']&~4095,(entry['gateway']+len(bytes.fromhex(entry['gateway_hex']))-1)&~4095,entry['slot']&~4095,handler&~4095,stack}
     if 'relay_in' in entry:pages.add(entry['relay_in']&~4095)
     for page in pages:machine.mem_map(page,4096)
     machine.mem_write(entry['rva'],bytes.fromhex(entry['patched_entry']))
@@ -485,3 +597,107 @@ def test_selected_stage_and_fixed_gateways_preserve_actual_native_argument_regis
     for index,value in enumerate(pointers):assert machine.reg_read(getattr(r,'UC_ARM64_REG_X'+str(index)))==value
     for index,value in enumerate(vectors):assert machine.reg_read(getattr(r,'UC_ARM64_REG_Q'+str(index)))==value
     assert machine.reg_read(r.UC_ARM64_REG_SP)==stack+4096
+
+
+CHILD_NATIVE_ROLES = (
+    ('mp4_director_enqueue', {'manager': 'X0', 'operation': 'W1', 'graphPointer': 'X2'}),
+    ('mp4_director_append_a', {'manager': 'X0', 'graphPointer': 'X1'}),
+    ('mp4_director_append_b', {'manager': 'X0', 'graphPointer': 'X1'}),
+    ('mp4_director_collect', {'temporary': 'X0', 'queue': 'X1'}),
+    ('mp4_director_deferred_a', {'manager': 'X0'}),
+    ('mp4_director_deferred_b', {'manager': 'X0'}),
+    ('mp4_director_graph_create', {'manager': 'X0', 'name': 'X1'}),
+)
+
+
+def test_required_child_native_roles_extend_only_ios_and_keep_exact_relay_order():
+    import json
+    profile = p.load_profile()
+    android = json.loads((p.PROFILE.parent.parent / 'native/profile.json').read_text())
+    assert len(android['aliases']) == 250
+    relays = p._profile_native_relays(profile)
+    assert len(relays) == 15
+    assert relays[0]['rva'] == 0x8610a44 and relays[-1]['rva'] + 8 == 0x8610abc
+    assert [row['name'] for row in relays[7:14]] == [name for name, _ in CHILD_NATIVE_ROLES]
+    for name, registers in CHILD_NATIVE_ROLES:
+        assert name not in android['aliases']
+        row = profile['aliases'][name]
+        assert row['native_parameter_registers'] == registers
+        assert row['source'] == 'pinned_original_engine_native'
+        assert row['module'] is None and row['registration_pointer_slot_rva'] is None
+        assert 'parameter_count' not in row and 'return_type_index' not in row
+
+
+def test_fresh_binding_builder_uses_actual_native_animator_only_and_last_relay():
+    import json
+    profile = p.load_profile()
+    row = profile['aliases']['mp4_animation_binding_build']
+    android = json.loads((p.PROFILE.parent.parent / 'native/profile.json').read_text())
+    assert 'mp4_animation_binding_build' not in android['aliases']
+    assert row['rva'] == 0xf0e458
+    assert row['prefix16'] == 'ff4302d1fa6704a9f85f05a9f65706a9'
+    assert row['native_abi'] == 'void(void*)'
+    assert row['native_parameter_registers'] == {'nativeAnimator': 'X0'}
+    assert row['source'] == 'pinned_original_engine_native'
+    assert row['module'] is None and row['registration_pointer_slot_rva'] is None
+    assert 'parameter_count' not in row and 'return_type_index' not in row
+    assert p._profile_native_relays(profile)[-1]['name'] == 'mp4_animation_binding_build'
+
+
+@pytest.mark.parametrize('index', range(14))
+def test_every_native_extra_role_rejects_an_unapproved_identity(index):
+    profile = copy.deepcopy(p.load_profile())
+    profile['native_extra_relay_regions'][index]['name'] = 'unapproved_native_role'
+    with pytest.raises(ValueError, match='identity'):
+        p._profile_native_relays(profile)
+
+
+@pytest.mark.parametrize('name', [name for name, _ in CHILD_NATIVE_ROLES] + ['mp4_animation_binding_build'])
+def test_required_child_native_original_fallback_executes_one_displaced_prologue(name):
+    """Execute ordinary null-slot dispatch through the real range relay pair."""
+    unicorn = pytest.importorskip('unicorn')
+    from unicorn import arm64_const as r
+    entry = p.make_plan()['entries'][name]
+    machine = unicorn.Uc(unicorn.UC_ARCH_ARM64, unicorn.UC_MODE_ARM)
+    machine.ctl_set_tcg_buffer_size(16 * 1024 * 1024)
+    stack = 0x10010000
+    code = bytes.fromhex(entry['gateway_hex'])
+    pages = {entry['rva'] & ~4095, entry['gateway'] & ~4095,
+             (entry['gateway'] + len(code) - 1) & ~4095,
+             entry['slot'] & ~4095, entry['relay_in'] & ~4095, stack}
+    for page in pages:
+        machine.mem_map(page, 4096)
+    machine.mem_write(entry['rva'], bytes.fromhex(entry['patched_entry']))
+    machine.mem_write(entry['gateway'], code)
+    machine.mem_write(entry['slot'], bytes(8))
+    for key in ('relay_in', 'relay_out'):
+        machine.mem_write(entry[key], bytes.fromhex(entry[key + '_hex']))
+    initial = [0x22334400 + index * 0x100 for index in range(31)]
+    for index, value in enumerate(initial):
+        machine.reg_write(getattr(r, 'UC_ARM64_REG_X' + str(index)), value)
+    machine.reg_write(r.UC_ARM64_REG_SP, stack + 4096)
+    trace = []
+    def observe(current, pc, _size, _data):
+        trace.append(pc)
+        if pc == entry['rva'] + 4:
+            current.emu_stop()
+    machine.hook_add(unicorn.UC_HOOK_CODE, observe)
+    machine.emu_start(entry['rva'], 0, count=20)
+    assert trace.count(entry['rva']) == trace.count(entry['gateway'] + 20) == trace.count(entry['rva'] + 4) == 1
+    word = int.from_bytes(bytes.fromhex(entry['original16'][:8]), 'little')
+    if name == 'mp4_animation_binding_build':
+        assert word == 0xd10243ff  # SUB SP,SP,#0x90, no pointer/MI adaptation
+        assert p._displaced_allowed(word)
+        assert machine.reg_read(r.UC_ARM64_REG_SP) == stack + 4096 - 0x90
+    else:
+        assert word & 0xffc003e0 == 0xa98003e0  # STP Xt,Xt2,[SP,#negative]!
+        immediate = (word >> 15) & 127
+        if immediate & 64:
+            immediate -= 128
+        expected_sp = stack + 4096 + immediate * 8
+        assert machine.reg_read(r.UC_ARM64_REG_SP) == expected_sp
+        left, right = word & 31, (word >> 10) & 31
+        assert struct.unpack('<QQ', machine.mem_read(expected_sp, 16)) == (initial[left], initial[right])
+    for index, value in enumerate(initial):
+        if index != 16:  # gateway scratch register, never a native7 ABI input
+            assert machine.reg_read(getattr(r, 'UC_ARM64_REG_X' + str(index))) == value

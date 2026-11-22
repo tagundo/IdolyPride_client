@@ -11,9 +11,9 @@ import tempfile
 from zipfile import ZipFile
 
 PROFILE = Path(__file__).resolve().parents[2] / "client-presentation/ios/profile.json"
-PROFILE_SHA256 = "d0ec1180c0cc780101b03a0361aa04c43e27cc57e22559d2139181ab175256f8"
-PROFILE_ENTRY_COUNT = 187
-PROFILE_HOOK_COUNT = 112
+PROFILE_SHA256 = "dc69bd4d7129346f7e7ae8427a0e42120909db60adc407cf5ac2606436fef427"
+PROFILE_ENTRY_COUNT = 244
+PROFILE_HOOK_COUNT = 169
 SOURCE_SHA256 = "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
 BOOTSTRAP_SHA256 = "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce"
 IPA_SHA256 = "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848"
@@ -116,15 +116,32 @@ def _profile_native_relays(profile):
         if extra:
             raise ValueError("Extra native relays require the original clock relay")
         return []
-    if type(primary) is not dict or primary.get("name") != "mp4_native_time" or type(extra) is not list or len(extra) > 1:
+    approved_extra = ("mp4_fixed_loop_condition", "mp4_capture_native_publication",
+                      "mp4_animation_output_target", "mp4_animation_output_create",
+                      "mp4_audio_canonical_target", "mp4_audio_source_process_target",
+                      "mp4_director_enqueue",
+                      "mp4_director_append_a",
+                      "mp4_director_append_b",
+                      "mp4_director_collect",
+                      "mp4_director_deferred_a",
+                      "mp4_director_deferred_b",
+                      "mp4_director_graph_create",
+                      "mp4_animation_binding_build")
+    if (type(primary) is not dict or primary.get("name") != "mp4_native_time"
+            or type(extra) is not list or len(extra) > len(approved_extra)):
         raise ValueError("Native relay identities differ")
     result = [primary, *extra]
-    if extra and (type(extra[0]) is not dict or extra[0].get("name") != "mp4_fixed_loop_condition"):
-        raise ValueError("Fixed-loop native relay identity differs")
+    if any(type(item) is not dict or item.get("name") != approved_extra[index]
+           for index, item in enumerate(extra)):
+        raise ValueError("Approved native relay identity differs")
     fields = {"name", "rva", "bytes", "original_zero", "gap_begin", "gap_end", "after_section", "before_section"}
     for item in result:
         if set(item) != fields or any(type(item.get(key)) is not int for key in ("rva", "bytes", "gap_begin", "gap_end")):
             raise ValueError("Native relay schema differs")
+    for index, item in enumerate(result):
+        if (item["rva"] != primary["rva"] + 8 * index
+                or any(item[key] != primary[key] for key in ("gap_begin", "gap_end", "after_section", "before_section"))):
+            raise ValueError("Native relay gap layout differs")
     spans = sorted((item["rva"], item["rva"] + item["bytes"]) for item in result)
     if any(a[1] > b[0] for a, b in zip(spans, spans[1:])):
         raise ValueError("Native relays overlap")
