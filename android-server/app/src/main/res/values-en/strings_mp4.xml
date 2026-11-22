@@ -50,4 +50,6 @@
     <string name="mp4_bitrate_recommendation">Recommended: %1$s Mbps</string>
     <string name="mp4_bitrate_recommended_waiting">Recommended · waiting for MV size</string>
     <string name="mp4_not_ready_reason">MV readiness could not be verified. (%1$s)</string>
+    <string name="mp4_selected_not_ready">MV detected. Export is not ready yet.</string>
+    <string name="mp4_selected_not_ready_reason">MV detected. Export is not ready yet. (%1$s)</string>
 </resources>

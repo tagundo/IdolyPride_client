@@ -50,4 +50,6 @@
     <string name="mp4_bitrate_recommendation">추천 %1$s Mbps</string>
     <string name="mp4_bitrate_recommended_waiting">추천값 · MV 크기 확인 대기</string>
     <string name="mp4_not_ready_reason">MV 준비를 확인하지 못했습니다. (%1$s)</string>
+    <string name="mp4_selected_not_ready">MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다.</string>
+    <string name="mp4_selected_not_ready_reason">MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다. (%1$s)</string>
 </resources>

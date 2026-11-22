@@ -33,16 +33,20 @@ final class Mp4QueueUiState {
 
         Controls(boolean available, boolean commandPending, boolean running, boolean paused,
                  boolean exportBusy, boolean mvReady, boolean canRunWorld, int pendingJobs, int totalJobs) {
+            this(available, commandPending, running, paused, exportBusy, mvReady, mvReady, canRunWorld, pendingJobs, totalJobs);
+        }
+        Controls(boolean available, boolean commandPending, boolean running, boolean paused,
+                 boolean exportBusy, boolean canAddSelection, boolean exportReady, boolean canRunWorld, int pendingJobs, int totalJobs) {
             boolean valid = available && !commandPending && totalJobs >= 0 && totalJobs <= CAPACITY
                     && pendingJobs >= 0 && pendingJobs <= totalJobs;
-            enqueue = valid && totalJobs < CAPACITY && mvReady && !exportBusy && !running;
+            enqueue = valid && totalJobs < CAPACITY && canAddSelection && !exportBusy && !running;
             run = valid && canRunWorld && pendingJobs > 0 && !running && !paused && !exportBusy;
             pause = valid && running && !paused;
             resume = valid && canRunWorld && paused;
             // The existing single export remains usable if only the journal
-            // is unavailable. mvReady may retain the current Activity's verified
+            // is unavailable. exportReady may retain the current Activity's verified
             // foreground selection; capture is rechecked after Unity resumes.
-            immediate = !commandPending && mvReady && !running && !paused && !exportBusy;
+            immediate = !commandPending && exportReady && !running && !paused && !exportBusy;
         }
     }
 

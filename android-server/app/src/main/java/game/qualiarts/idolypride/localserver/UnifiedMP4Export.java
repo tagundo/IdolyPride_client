@@ -52,6 +52,7 @@ public final class UnifiedMP4Export {
     private static boolean resumed, stopped = true, userPaused, polling;
     private static boolean gameFocused;
     private static volatile boolean foregroundSelectionReady;
+    private static volatile boolean foregroundMvSelected;
     private static volatile long menuHandoffDeadline;
     private static long pendingDeadline;
     private static int[] pending;
@@ -78,6 +79,7 @@ public final class UnifiedMP4Export {
     private static native void nativeSuspend(int reason);
     private static native void nativeResume();
     private static native boolean nativeReady();
+    private static native boolean nativeSelectionReady();
     private static native int nativeQueueConfigure(String queueRoot, String exportsRoot);
     private static native int nativeQueueEnqueue(int fpsNum, int fpsDen, int codec, int videoBitrate, int audioBitrate);
     private static native int nativeQueueEnqueueV2(int fpsNum, int fpsDen, int codec, int videoBitrate,
@@ -93,7 +95,7 @@ public final class UnifiedMP4Export {
     static boolean prepare(Context context, String descriptor) {
         restoreCompleted(context);
         configured = false;
-        foregroundSelectionReady = false; menuHandoffDeadline = 0;
+        foregroundSelectionReady = false; foregroundMvSelected = false; menuHandoffDeadline = 0;
         titleCatalog = Mp4TitleCatalog.empty();
         if (!UnifiedRuntime.isEnabled(context)) return false;
         try {
@@ -138,11 +140,11 @@ public final class UnifiedMP4Export {
         if (initialized && queueConfigured) try { nativeQueuePause(); }
         catch (LinkageError unavailable) { /* Optional addon; still retire the session below. */ }
         invalidateQueueSelection();
-        configured = false; queueConfigured = false; foregroundSelectionReady = false; menuHandoffDeadline = 0;
+        configured = false; queueConfigured = false; foregroundSelectionReady = false; foregroundMvSelected = false; menuHandoffDeadline = 0;
         MAIN.post(() -> { cancel(); pending = null; wake(); });
     }
     private static void invalidateQueueSelection() {
-        foregroundSelectionReady = false;
+        foregroundSelectionReady = false; foregroundMvSelected = false;
         if (initialized) try { nativeInvalidateQueueSelection(); }
         catch (LinkageError unavailable) { /* Optional addon; eligibility is still retired locally. */ }
     }
@@ -157,6 +159,24 @@ public final class UnifiedMP4Export {
         // resuming Unity; immediate capture revalidates after player resume.
         if ((!resumed || !gameFocused) && foregroundSelectionReady) return true;
         try { return nativeReady(); } catch (LinkageError unavailable) { return false; }
+    }
+    static boolean selectedMv() {
+        if (!configured) return false;
+        Activity current = game.get();
+        if (current == null || current.isDestroyed() || current.isFinishing()) return false;
+        if ((!resumed || !gameFocused) && foregroundMvSelected) return true;
+        try { return nativeSelectionReady(); } catch (LinkageError unavailable) { return false; }
+    }
+    static boolean canEnqueueSelection() {
+        Activity current = game.get();
+        return configured && queueConfigured && selectedMv() && pending == null && !busy() && !saving
+                && current != null && !current.isDestroyed() && !current.isFinishing()
+                && Boolean.TRUE.equals(queueSnapshot().opt("can_add"));
+    }
+    private static void observeForegroundSelection(boolean selected) {
+        boolean menuHandoff = menuHandoffDeadline > 0
+                && android.os.SystemClock.uptimeMillis() <= menuHandoffDeadline;
+        if (resumed && gameFocused && !busy() && (selected || !menuHandoff)) foregroundMvSelected = selected;
     }
     private static void observeForegroundReadiness(boolean nativeReady) {
         boolean menuHandoff = menuHandoffDeadline > 0
@@ -273,7 +293,8 @@ public final class UnifiedMP4Export {
             result.put("schema", 1).put("available", configured).put("initialized", initialized)
                     .put("game_attached", owner != null && !owner.isDestroyed() && !owner.isFinishing())
                     .put("game_resumed", resumed).put("game_focused", gameFocused).put("game_stopped", stopped)
-                    .put("verified_foreground_selection", foregroundSelectionReady);
+                    .put("verified_foreground_selection", foregroundMvSelected)
+                    .put("verified_foreground_export_ready", foregroundSelectionReady);
             Context context = application;
             if (context != null) {
                 String stage = context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).getString("last_save_failure_stage", "none");
@@ -293,8 +314,8 @@ public final class UnifiedMP4Export {
             if (trace != null) result.put("export_trace", trace);
             JSONObject previousFailure = savedNativeTrace("last_failed_native_trace");
             if (previousFailure != null) result.put("last_failed_export_trace", previousFailure);
-            result.put("ready", state.optBoolean("ready"));
-            for (String key : new String[] {"phase", "readiness_error", "error_code", "pause_reason"}) {
+            result.put("ready", state.optBoolean("ready")).put("selected_mv", Boolean.TRUE.equals(state.opt("selected_mv")));
+            for (String key : new String[] {"phase", "readiness_error", "selection_error", "error_code", "pause_reason"}) {
                 String value = state.optString(key, "unknown");
                 result.put(key, value.matches("[A-Za-z0-9_]{1,96}") ? value : "unknown");
             }
@@ -308,7 +329,10 @@ public final class UnifiedMP4Export {
             result.put("queue_available", queueConfigured && queue.optBoolean("available"))
                     .put("queue_running", queue.optBoolean("running"))
                     .put("queue_paused", queue.optBoolean("paused"))
-                    .put("queue_job_count", jobs == null ? 0 : Math.min(8, jobs.length()));
+                    .put("queue_job_count", jobs == null ? 0 : Math.min(8, jobs.length()))
+                    .put("queue_can_add", Boolean.TRUE.equals(queue.opt("can_add")));
+            String addError = queue.optString("add_error", "unknown");
+            result.put("queue_add_error", addError.matches("[A-Za-z0-9_]{1,96}") ? addError : "unknown");
             String queueError = queue.optString("error_code", "unknown");
             result.put("queue_error_code", queueError.matches("[A-Za-z0-9_]{1,96}") ? queueError : "unknown");
             String storageStage = queue.optString("storage_stage", "none");
@@ -335,7 +359,7 @@ public final class UnifiedMP4Export {
         return requestEnqueue(caller, fps, codec, bitrate, 0, 0);
     }
     static boolean requestEnqueue(Activity caller, int fps, int codec, int bitrate, int outputWidth, int outputHeight) {
-        if (!queueConfigured || !ready() || (fps != 30 && fps != 60 && fps != 120) || (codec != 1 && codec != 2)
+        if (!canEnqueueSelection() || (fps != 30 && fps != 60 && fps != 120) || (codec != 1 && codec != 2)
                 || !Mp4ExportSettings.validBitrate(bitrate)
                 || !Mp4ExportSettings.validResolution(outputWidth, outputHeight)) return false;
         Activity current = game.get();
@@ -474,7 +498,7 @@ public final class UnifiedMP4Export {
             invalidateQueueSelection(); resumed = false; stopped = true;
         }
         game = new WeakReference<>(activity);
-        foregroundSelectionReady = false; gameFocused = false; menuHandoffDeadline = 0;
+        foregroundSelectionReady = false; foregroundMvSelected = false; gameFocused = false; menuHandoffDeadline = 0;
     }
     static void attachGame(Activity activity) {
         observeGameOwner(activity);
@@ -517,7 +541,10 @@ public final class UnifiedMP4Export {
         // Called before super.onPause: preserve a positive native observation.
         // A focus-loss frame may already report not-ready; it must not erase a
         // verified MV just because the server menu is being opened.
-        if (initialized) try { if (nativeReady()) foregroundSelectionReady = true; }
+        if (initialized) try {
+            if (nativeReady()) foregroundSelectionReady = true;
+            if (nativeSelectionReady()) foregroundMvSelected = true;
+        }
         catch (LinkageError unavailable) { /* Optional addon. */ }
         resumed = false; gameFocused = false;
         // Original Unity keeps a visible multi-window player running onPause.
@@ -575,7 +602,10 @@ public final class UnifiedMP4Export {
         // Android may deliver the landscape -> server-menu portrait config
         // before onPause. Bind this short handoff to the existing Unity owner.
         menuHandoffDeadline = android.os.SystemClock.uptimeMillis() + 8000;
-        if (initialized) try { if (nativeReady()) foregroundSelectionReady = true; }
+        if (initialized) try {
+            if (nativeReady()) foregroundSelectionReady = true;
+            if (nativeSelectionReady()) foregroundMvSelected = true;
+        }
         catch (LinkageError unavailable) { /* Only retain an actually verified selection. */ }
     }
     static void serverMenuOpenFailed(Activity activity) {
@@ -606,7 +636,7 @@ public final class UnifiedMP4Export {
         if (game.get() != activity) return;
         invalidateQueueSelection();
         cancel(); pending = null; game.clear(); resumed = false; stopped = true;
-        foregroundSelectionReady = false; gameFocused = false; menuHandoffDeadline = 0;
+        foregroundSelectionReady = false; foregroundMvSelected = false; gameFocused = false; menuHandoffDeadline = 0;
         if (overlay != null && overlay.getParent() instanceof ViewGroup) ((ViewGroup) overlay.getParent()).removeView(overlay);
         overlay = null; overlayText = null; overlaySave = null; overlayCancel = null; overlayPause = null; overlayDismiss = null;
     }
@@ -633,7 +663,10 @@ public final class UnifiedMP4Export {
         rememberCompletedOutputs();
         UnifiedMP4Background.sample(last);
         Activity activity = game.get();
-        if (activity != null) observeForegroundReadiness(last.optBoolean("ready"));
+        if (activity != null) {
+            observeForegroundReadiness(last.optBoolean("ready"));
+            observeForegroundSelection(Boolean.TRUE.equals(last.opt("selected_mv")));
+        }
         if (activity != null && resumed && !userPaused && (busy() || backgroundQueueHasWork())
                 && UnifiedMP4Background.snapshot().optString("state").equals("off")) prepareBackground(activity);
         if (overlay != null && activity != null) {
@@ -660,6 +693,12 @@ public final class UnifiedMP4Export {
                 || UnifiedMP4Background.expectsService() || saving) {
             polling = true; MAIN.postDelayed(POLL, 400);
         }
+    }
+    static String enqueueFailureText(Context context) {
+        String reason = queueSnapshot().optString("add_error", "");
+        if (reason.matches("[A-Za-z0-9_]{1,96}") && !reason.equals("none") && !reason.equals("unknown"))
+            return context.getString(R.string.mp4_queue_error, reason);
+        return statusText(context);
     }
     static String statusText(Context context) {
         if (saving) return context.getString(R.string.mp4_finishing);
@@ -689,6 +728,11 @@ public final class UnifiedMP4Export {
                 if (!configured) return context.getString(R.string.mp4_unavailable);
                 if (ready()) return context.getString(R.string.mp4_idle);
                 String reason = last.optString("readiness_error");
+                if (selectedMv()) return reason.matches("[A-Za-z0-9_]{1,96}") && !reason.equals("none")
+                        ? context.getString(R.string.mp4_selected_not_ready_reason, reason)
+                        : context.getString(R.string.mp4_selected_not_ready);
+                String selectionError = last.optString("selection_error");
+                if (!selectionError.isEmpty() && !selectionError.equals("none")) reason = selectionError;
                 return reason.matches("[A-Za-z0-9_]{1,96}") && !reason.equals("none")
                         && !reason.equals("open_selected_mv_first")
                         ? context.getString(R.string.mp4_not_ready_reason, reason)

@@ -49,6 +49,10 @@ public final class QueueUiHarness {
     need(!full.enqueue&&full.run,"capacity is enforced without disabling existing jobs");
     Mp4QueueUiState.Controls journalUnavailable=new Mp4QueueUiState.Controls(false,false,false,false,false,true,true,0,0);
     need(!journalUnavailable.enqueue&&!journalUnavailable.run&&journalUnavailable.immediate,"single export survives a journal-only error");
+    Mp4QueueUiState.Controls selectedButUnbound=new Mp4QueueUiState.Controls(true,false,false,false,false,true,false,false,0,0);
+    need(selectedButUnbound.enqueue&&!selectedButUnbound.immediate&&!selectedButUnbound.run,"real selection can join the list while export stays unbound");
+    Mp4QueueUiState.Controls selectedButRefused=new Mp4QueueUiState.Controls(true,false,false,false,false,false,false,false,0,0);
+    need(!selectedButRefused.enqueue&&!selectedButRefused.immediate,"selection existence alone cannot override a refused immutable Add candidate");
     Mp4QueueUiState.Controls cold=new Mp4QueueUiState.Controls(true,false,false,false,false,false,false,2,2);
     need(!cold.run&&!cold.resume&&!cold.enqueue&&!cold.immediate,"persisted jobs are inspectable before game start without reopening a blank player");
     Mp4QueueUiState.Controls unavailableWorld=new Mp4QueueUiState.Controls(true,false,true,true,true,false,false,1,2);

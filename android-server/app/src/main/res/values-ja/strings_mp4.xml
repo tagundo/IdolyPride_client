@@ -50,4 +50,6 @@
     <string name="mp4_bitrate_recommendation">推奨 %1$s Mbps</string>
     <string name="mp4_bitrate_recommended_waiting">推奨値 · MVサイズの確認待ち</string>
     <string name="mp4_not_ready_reason">MVの準備状態を確認できません。(%1$s)</string>
+    <string name="mp4_selected_not_ready">MVを確認しました。書き出しの準備はまだ完了していません。</string>
+    <string name="mp4_selected_not_ready_reason">MVを確認しました。書き出しの準備はまだ完了していません。(%1$s)</string>
 </resources>

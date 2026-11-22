@@ -90,7 +90,7 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
     if not javac or not java:
         pytest.skip("JDK required")
     source = SOURCE.read_text()
-    selected = [method(source, name) for name in ["privateDirectory", "completedFile", "busy", "ready", "observeForegroundReadiness", "requestStart", "requestEnqueue",
+    selected = [method(source, name) for name in ["privateDirectory", "completedFile", "busy", "ready", "selectedMv", "canEnqueueSelection", "observeForegroundReadiness", "observeForegroundSelection", "requestStart", "requestEnqueue",
                 "beginPending", "gameResumed", "gamePaused", "gameStarted", "gameStopped", "suspendForLifecycle",
                 "resumeForLifecycle", "togglePause", "requestPause", "requestResume", "focusChanged", "gameDestroyed", "cancel",
                 "requestQueueRun", "bringQueueToForeground", "serverMenuOpening", "serverMenuOpenFailed", "geometryChanged",
@@ -99,13 +99,14 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
     prefix = r'''package game.qualiarts.idolypride.localserver;
 import java.io.*;import java.nio.file.*;import java.lang.ref.WeakReference;import java.util.*;
 public final class ControllerHarness {
-  static boolean configured=true,initialized=true,queueConfigured=true,saving,resumed,stopped=true,userPaused,allowNative=true,dismissed=true,pendingQueueRun,gameFocused,foregroundSelectionReady,completionStorageReady=true;
+  static boolean configured=true,initialized=true,queueConfigured=true,saving,resumed,stopped=true,userPaused,allowNative=true,dismissed=true,pendingQueueRun,gameFocused,foregroundSelectionReady,foregroundMvSelected,completionStorageReady=true;
   static int[] pending,startedOptions,enqueuedOptions;static long pendingDeadline,menuHandoffDeadline;static int starts,cancels,suspends,resumes,reason,wakes,enqueues,queueRuns,backgroundPrepares,invalidations,enqueueCalls;static boolean enqueueWasResumed,allowQueueRun=true,allowEnqueue=true,backgroundOwns;
   static WeakReference<Activity> game=new WeakReference<>(null);
   static JSONObject last=new JSONObject(),lastQueue=new JSONObject();static final Handler MAIN=new Handler();static final Runnable BEGIN=()->{};
   static ViewGroup overlay;static Object overlayText,overlaySave,overlayCancel,overlayPause,overlayDismiss;
   static class JSONObject {Map<String,Object> map=new HashMap<>();JSONObject put(String k,Object v){map.put(k,v);return this;}
     String optString(String k){return optString(k,"");}
+    Object opt(String k){return map.get(k);}
     boolean optBoolean(String k){return Boolean.TRUE.equals(map.get(k));}
     String optString(String k,String d){return map.containsKey(k)?map.get(k).toString():d;}}
   static class Handler {int scheduled;void postDelayed(Runnable r,long delay){scheduled++;}void removeCallbacks(Runnable r){}}
@@ -118,6 +119,8 @@ public final class ControllerHarness {
   static class R {static class string {static final int mp4_not_ready=1,mp4_unavailable=2;}}
   static class Toast {static final int LENGTH_LONG=1;static Toast makeText(Activity a,int s,int l){return new Toast();}void show(){}}
   static boolean nativeReady(){return allowNative;}
+  static boolean nativeSelectionReady(){return allowNative;}
+  static JSONObject queueSnapshot(){return lastQueue;}
   static boolean oneShotCompletionReady(){return completionStorageReady;}
   static int nativeStartV2(int n,int d,int c,int v,int a,int width,int height){starts++;startedOptions=new int[]{n,d,c,v,a,width,height};return 0;}
   static void nativeCancel(){cancels++;}static void nativeSuspend(int value){suspends++;reason=value;}
@@ -169,6 +172,7 @@ public final class ControllerHarness {
     require(ready(),"opening server menu preserves a verified paused MV selection");
     Mp4QueueUiState.Controls menuControls=new Mp4QueueUiState.Controls(true,false,false,false,false,ready(),true,0,0);
     require(menuControls.immediate&&menuControls.enqueue,"both real server-menu buttons stay enabled for paused MV");
+    lastQueue.put("can_add",true);
     menu.intent=null;int resumesBeforeAdd=resumes,preparesBeforeAdd=backgroundPrepares;long deadlineBeforeAdd=pendingDeadline;
     completionStorageReady=false;
     require(requestEnqueue(menu,30,1,8000000)&&enqueues==1&&!enqueueWasResumed,"queue admission remains independent of one-shot recovery admission");
@@ -180,7 +184,7 @@ public final class ControllerHarness {
     beginPending();require(starts==1&&pending!=null,"do not capture before original Activity resume");
     gameResumed(selected);beginPending();require(starts==1&&pending!=null,"foreground cache cannot bypass genuine resumed native readiness");
     allowNative=true;beginPending();require(starts==2&&pending==null,"capture starts only after resumed native revalidation");
-    last=new JSONObject();allowNative=false;gameFocused=true;observeForegroundReadiness(false);
+    last=new JSONObject();allowNative=false;gameFocused=true;observeForegroundReadiness(false);observeForegroundSelection(false);
     require(!foregroundSelectionReady&&!ready(),"leaving MV while focused invalidates cached eligibility");
     resumed=false;require(!ready()&&!requestEnqueue(menu,30,1,8000000)&&enqueues==1,"cold or invalid selections remain disabled");
     gameDestroyed(selected);require(!foregroundSelectionReady&&!ready(),"destroyed owner cannot keep MV eligibility");
@@ -265,7 +269,9 @@ public final class ControllerHarness {
     split.destroyed=true;calls=enqueueCalls;
     require(!requestEnqueue(menu,30,1,16000000)&&enqueueCalls==calls&&menu.intent==null,"destroyed owner rejects before JNI");split.destroyed=false;
     split.finishing=true;require(!requestEnqueue(menu,30,1,16000000)&&enqueueCalls==calls,"finishing owner rejects before JNI");split.finishing=false;
-    foregroundSelectionReady=false;require(!requestEnqueue(menu,30,1,16000000)&&enqueueCalls==calls,"unverified owner cannot add a snapshot");
+    foregroundSelectionReady=false;lastQueue.put("can_add",false);
+    require(!requestEnqueue(menu,30,1,16000000)&&enqueueCalls==calls,"a rejected native immutable candidate cannot be overridden by a detected source");
+    lastQueue.put("can_add",true);
     foregroundSelectionReady=true;
     require(!requestEnqueue(menu,24,1,16000000)&&!requestEnqueue(menu,30,3,16000000)
       &&!requestEnqueue(menu,30,1,1)&&!requestEnqueue(menu,30,1,16000000,1919,1080)&&enqueueCalls==calls,"invalid options do not reach JNI");
@@ -283,6 +289,15 @@ public final class ControllerHarness {
     backgroundOwns=true;foregroundSelectionReady=true;int beforeOwnedGeometry=invalidations;
     geometryChanged(replacement);require(invalidations==beforeOwnedGeometry&&foregroundSelectionReady,"owned offscreen transport geometry is not replaced by a UI-window resize");backgroundOwns=false;
     gameDestroyed(replacement);require(invalidations==beforeOwnedGeometry+1,"current owner destruction retires the native snapshot");
+    Activity found=new Activity();observeGameOwner(found);resumed=false;stopped=true;gameFocused=false;
+    foregroundMvSelected=true;foregroundSelectionReady=false;allowNative=false;lastQueue.put("can_add",true);menu.intent=null;
+    int recognitionStarts=starts,recognitionResumes=resumes,recognitionAdds=enqueues;
+    require(selectedMv()&&!ready()&&canEnqueueSelection(),"a real selected MV remains recognized while offline export is unbound");
+    require(requestEnqueue(menu,30,1,16000000)&&enqueues==recognitionAdds+1&&menu.intent==null&&starts==recognitionStarts&&resumes==recognitionResumes,"selection-only Add preserves the server menu and cannot start or resume rendering");
+    for(Object invalid:new Object[]{"true",1,true==false,null}){
+      lastQueue.put("can_add",invalid);require(!canEnqueueSelection(),"only a native Boolean true can authorize Add");
+    }
+    gameDestroyed(found);require(!selectedMv()&&!foregroundMvSelected,"destroyed owner retires recognition independently from export readiness");
     File root=new File(args[0]).getCanonicalFile();root.mkdirs();File out=new File(root,"exports");out.mkdir();
     require(privateDirectory(root,out.getPath()).equals(out),"private output root");
     rejects(()->privateDirectory(root,new File(root,"../elsewhere").getPath()));
@@ -329,7 +344,7 @@ public class DiagnosticsHarness {
  static class Activity {boolean isDestroyed(){return false;}boolean isFinishing(){return false;}}
  static WeakReference<Activity> game=new WeakReference<>(new Activity());static boolean queueConfigured=true;
  static JSONObject last=new JSONObject(),queue=new JSONObject(),nativeValue=new JSONObject();
- static JSONObject lastNativeTrace;static Context application;
+ static JSONObject lastNativeTrace;static Context application;static boolean foregroundMvSelected=true;
  static class Context {static final int MODE_PRIVATE=0;Preferences getSharedPreferences(String k,int mode){return new Preferences();}}
  static class Preferences {String getString(String k,String fallback){return fallback;}}
  static JSONObject readNativeTrace(){return null;}static JSONObject savedNativeTrace(String key){return null;}
@@ -446,17 +461,18 @@ def test_status_keeps_queue_handoffs_distinct_from_idle_or_previous_completion(t
     if not javac or not java:
         pytest.skip("JDK required")
     source = SOURCE.read_text()
-    production = "\n".join(method(source, name) for name in ("backgroundQueueHasWork", "statusText"))
+    production = "\n".join(method(source, name) for name in ("backgroundQueueHasWork", "statusText", "enqueueFailureText"))
     resources = sorted(set(re.findall(r"R\.string\.([a-z0-9_]+)", production)))
     declarations = "".join(f"static final int {name}={index};" for index, name in enumerate(resources, 1))
     harness = tmp_path / "QueueStatusHarness.java"
     harness.write_text(r'''import java.util.*;
 public final class QueueStatusHarness {
- static boolean configured=true,saving,pendingQueueRun,mvReady,completedOutput;static int[] pending;static int readyCalls;
+ static boolean configured=true,saving,pendingQueueRun,mvReady,mvSelected,completedOutput;static int[] pending;static int readyCalls;
  static JSONObject last=new JSONObject(),lastQueue=new JSONObject();
  static final class JSONObject {
   final Map<String,Object> values=new HashMap<>();
   JSONObject put(String key,Object value){values.put(key,value);return this;}
+  Object remove(String key){return values.remove(key);}
   boolean optBoolean(String key){return Boolean.TRUE.equals(values.get(key));}
   long optLong(String key){Object value=values.get(key);return value instanceof Number?((Number)value).longValue():0;}
   String optString(String key){return optString(key,"");}
@@ -465,6 +481,8 @@ public final class QueueStatusHarness {
  static final class Context {String getString(int resource,Object...args){return "resource="+resource+Arrays.toString(args);}}
  static final class R {static final class string {''' + declarations + r'''}}
  static boolean ready(){readyCalls++;return mvReady;}
+ static boolean selectedMv(){return mvSelected;}
+ static JSONObject queueSnapshot(){return lastQueue;}
  static boolean hasCompletedOutput(){return completedOutput;}
  static void need(boolean condition,String message){if(!condition)throw new AssertionError(message);}
  static void expect(Context context,int resource,String message){need(statusText(context).startsWith("resource="+resource+"["),message);}
@@ -499,6 +517,16 @@ public final class QueueStatusHarness {
   last.put("phase","idle");expect(context,R.string.mp4_not_ready,"an ordinary idle scene still requests the MV");
   completedOutput=true;expect(context,R.string.mp4_completed,"a retained completed output remains discoverable after native idle");
   completedOutput=false;
+  mvSelected=true;last.put("readiness_error","offline_pipeline_not_verified");
+  expect(context,R.string.mp4_selected_not_ready_reason,"a detected MV with an unbound renderer must never ask the user to reopen it");
+  last.put("readiness_error","none");expect(context,R.string.mp4_selected_not_ready,"a selected source remains visible independently of export readiness");
+  lastQueue.put("add_error","selected_snapshot_changed");
+  need(enqueueFailureText(context).startsWith("resource="+R.string.mp4_queue_error+"["),"stale Add rejection names its actual immutable snapshot error");
+  lastQueue.put("add_error","/private/path");
+  need(enqueueFailureText(context).startsWith("resource="+R.string.mp4_selected_not_ready+"["),"malformed Add details cannot turn a detected MV into the open-MV instruction or leak a path");
+  lastQueue.remove("add_error");
+  mvSelected=false;last.put("selection_error","native_bridge_init_failed");expect(context,R.string.mp4_not_ready_reason,"initialization failure remains an explicit selection error");
+  last.remove("selection_error");
   mvReady=true;expect(context,R.string.mp4_idle,"a genuinely ready idle MV retains the idle message");
   configured=false;expect(context,R.string.mp4_unavailable,"an unavailable idle exporter retains its existing status");
   System.out.println("PASS queue-aware Android MP4 status");
@@ -522,7 +550,7 @@ def test_server_stop_parks_native_queue_before_disabling_it_and_cancelling_sessi
     harness = tmp_path / "ServerStopHarness.java"
     harness.write_text(r'''import java.util.*;
 public final class ServerStopHarness {
- static boolean configured,initialized,queueConfigured,foregroundSelectionReady,throwPause,throwInvalidate,queueParked;
+ static boolean configured,initialized,queueConfigured,foregroundSelectionReady,foregroundMvSelected,throwPause,throwInvalidate,queueParked;
  static long menuHandoffDeadline;static int[] pending;static int pauseResult;
  static final List<String> events=new ArrayList<>();static final Handler MAIN=new Handler();
  static final class Handler {

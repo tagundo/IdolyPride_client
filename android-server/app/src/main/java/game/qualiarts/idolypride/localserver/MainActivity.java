@@ -2335,7 +2335,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         mp4Enqueue.setOnClickListener(view -> {
             if (!UnifiedMP4Export.requestEnqueue(this, mp4Settings.fps, mp4Settings.codec, mp4Settings.requestBitrate(),
                     mp4Settings.requestWidth(), mp4Settings.requestHeight()))
-                Toast.makeText(this, R.string.mp4_not_ready, Toast.LENGTH_LONG).show();
+                Toast.makeText(this, UnifiedMP4Export.enqueueFailureText(this), Toast.LENGTH_LONG).show();
             refreshMp4();
         });
         mp4QueueRun.setOnClickListener(view -> {
@@ -2469,7 +2469,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         boolean commandPending = queue.optBoolean("command_pending"), busy = UnifiedMP4Export.busy();
         boolean running = queue.optBoolean("running"), paused = queue.optBoolean("paused");
         Mp4QueueUiState.Controls controls = new Mp4QueueUiState.Controls(queue.optBoolean("available"), commandPending,
-                running, paused, busy, UnifiedMP4Export.ready(), queue.optBoolean("can_run", false), pending, count);
+                running, paused, busy, UnifiedMP4Export.canEnqueueSelection(), UnifiedMP4Export.ready(), queue.optBoolean("can_run", false), pending, count);
         boolean optionsValid = mp4Settings != null && mp4Settings.valid();
         mp4Enqueue.setEnabled(controls.enqueue && optionsValid); mp4QueueRun.setEnabled(controls.run);
         mp4QueuePause.setEnabled(controls.pause); mp4QueueResume.setEnabled(controls.resume);
