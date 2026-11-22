@@ -30,6 +30,8 @@ bool mp4_child_call_same(const Call&a,const Call&b){return a.kind==b.kind&&a.epo
 bool mp4_child_graph_same(mp4child::Graph a,mp4child::Graph b){return a.handle==b.handle&&a.version==b.version;}
 bool mp4_child_tuple_same(const mp4_director_birth::SourceTuple&a,const mp4_director_birth::SourceTuple&b){return a.director==b.director&&a.asset==b.asset&&a.epoch==b.epoch&&a.capture==b.capture;}
 mp4child::Result mp4_child_lineage(void*,const mp4child::State&,mp4child::Graph g){return source_live&&mp4_child_graph_same(g,current_graph)?mp4child::Result::ok:mp4child::Result::stale;}
+// These held-only fixtures explicitly refuse native-frame authority.
+bool mp4_native_phase_origin(uint64_t,void*,uintptr_t){return false;}
 // ACTUAL_RAW_SCOPE
 // ACTUAL_RAW_QUERY
 void*mp4_scene_root_asset_receipt(uint64_t epoch){return epoch==7?mp4_scene_host.root_asset:nullptr;}

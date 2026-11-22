@@ -749,6 +749,29 @@ public:
     // Read-only receipt for lifecycle caused by an actually executing accepted
     // native phase. Cleanup End after scalar revoke deliberately returns false.
     bool granted_inflight(uint64_t epoch)const{return healthy(epoch)&&inside_&&!maintenance_&&open(epoch);}
+    // Scalar-only observation of that SAME original's accepted position. This
+    // cannot grant a frame or adopt a callback entered outside invoke(). The
+    // owner-thread caller keeps the native original stack alive while reading.
+    bool granted_phase(uint64_t epoch,uint64_t*tick,uint8_t*phase)const{
+        if(tick){*tick=0;}
+        if(phase){*phase=0;}
+        if(!tick||!phase||!granted_inflight(epoch)||!have_tick_||!next_||next_>8
+            ||seen_!=static_cast<uint8_t>((uint16_t(1)<<next_)-1))return false;
+        *tick=tick_;*phase=static_cast<uint8_t>(next_-1);return true;
+    }
+    // Unlike closed(), a completed frame requires all eight actual originals
+    // to have returned under the same healthy grant. Revoked/partial/Deferred-
+    // only cycles cannot produce this receipt.
+    bool completed_frame(uint64_t epoch,uint64_t tick)const{
+        return healthy(epoch)&&have_tick_&&tick_==tick&&!inside_&&!maintenance_
+            &&!pair_&&!open(epoch)&&next_==8&&seen_==255;
+    }
+    // A failed receipt during an actual accepted original invalidates this
+    // frame even if its native cleanup still has to return normally.
+    bool reject_inflight(uint64_t epoch)noexcept{
+        if(!epoch||__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)!=epoch||!inside_||maintenance_)return false;
+        poison();return true;
+    }
     bool maintenance_inflight(uint64_t epoch)const{return healthy(epoch)&&inside_&&maintenance_&&!open(epoch)&&!pair_;}
     // Runs exactly the original DeferredEvaluate (phase5). Does not grant Time,
     // sample a frame, touch tick/seen/next, or create an animation Begin/End pair.

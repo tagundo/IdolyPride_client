@@ -58,7 +58,7 @@ def child_binaries(tmp_path_factory):
     for fixture in FIXTURES.glob("mp4_child_*_model.cpp.inc"):
         shutil.copyfile(fixture, folder / fixture.name)
     binaries = {}
-    for kind, fixture in [("execution", "mp4_child_execution_model.cpp.inc"), ("lineage", "mp4_child_lineage_model.cpp.inc"), ("factory", "mp4_birth_factory_context_model.cpp.inc"), ("main", "mp4_main_control_model.cpp.inc"), ("deferred", "mp4_child_deferred_model.cpp.inc")]:
+    for kind, fixture in [("execution", "mp4_child_execution_model.cpp.inc"), ("lineage", "mp4_child_lineage_model.cpp.inc"), ("factory", "mp4_birth_factory_context_model.cpp.inc"), ("main", "mp4_main_control_model.cpp.inc"), ("deferred", "mp4_child_deferred_model.cpp.inc"), ("journal", "mp4_child_journal_model.cpp.inc"), ("native", "mp4_child_native_model.cpp.inc"), ("scope", "mp4_child_scope_model.cpp.inc")]:
         source = (FIXTURES / fixture).read_text()
         if kind in ("execution", "main", "deferred"):
             raw = "struct Mp4RawOriginalOperation" + text.split("struct Mp4RawOriginalOperation", 1)[1].split("struct Mp4OriginalEvaluationScope", 1)[0]
@@ -72,7 +72,7 @@ def child_binaries(tmp_path_factory):
     return binaries
 
 
-@pytest.mark.parametrize("kind,mode", [("execution", i) for i in range(22)] + [("lineage", i) for i in range(29)] + [("factory", i) for i in range(6)] + [("main", i) for i in (0, 1, 6, 7, 9, 22, 23, 24, 25)] + [("deferred", mode) for mode in "normal no_work reappend physical active_grant unreturned unfinished unclosed_output unowned_queue sourcechange throws budget".split()])
+@pytest.mark.parametrize("kind,mode", [("execution", i) for i in range(22)] + [("lineage", i) for i in range(29)] + [("factory", i) for i in range(6)] + [("main", i) for i in (0, 1, 6, 7, 9, 22, 23, 24, 25)] + [("journal", i) for i in range(35)] + [("native", i) for i in range(12) if i != 7] + [("scope", i) for i in range(39)] + [("deferred", mode) for mode in "normal no_work reappend physical active_grant unreturned unfinished unclosed_output unowned_queue sourcechange throws budget".split()])
 def test_actual_child_execution_lineage_and_factory_stack(child_binaries, kind, mode):
     result = subprocess.run([str(child_binaries[kind]), str(mode)], capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr

@@ -9,7 +9,7 @@ using namespace mp4_director_maintenance;
 using world::AnimationGraph;using world::DirectorAuthorization;using world::DirectorPending;
 struct Host{
  alignas(16) unsigned char manager[0x500]{},queue[16]{},graphs[2][0xf8]{},slots[2][0x40]{},nodes[32][32]{},vectors[2][2][512]{},temporary[32]{},data[32*24]{};
- Journal journal;bool current=true,origin=true,source_closed=true,owns[2]={true,true},before_output=true;size_t next_node=0;uint64_t serial=0;
+ Journal journal;bool frame_exact=true;unsigned frame_phase=5;bool current=true,origin=true,source_closed=true,owns[2]={true,true},before_output=true;size_t next_node=0;uint64_t serial=0;
  struct Span{void*p;size_t n;};std::vector<Span>spans;
  Host(){spans={{manager,sizeof manager},{queue,sizeof queue},{graphs,sizeof graphs},{slots,sizeof slots},{nodes,sizeof nodes},{vectors,sizeof vectors},{temporary,sizeof temporary},{data,sizeof data}};
   put(manager,0x478,ptr(queue));for(unsigned i=0;i<2;++i){put(slots[i],0x20,uint32_t(20));put(slots[i],0x28,ptr(graphs[i]));put(graphs[i],16,ptr(slots[i]));put(manager,i?0x3a8:0x388,ptr(vectors[i][0]));put(manager,(i?0x3a8:0x388)+24,uint64_t(32*2));}assert(journal.configure(api()));}
@@ -21,10 +21,11 @@ struct Host{
   a.call_origin=[](void*p,const Call&c){return static_cast<Host*>(p)->origin&&c.receiver==0x55&&c.method==0x66;};
   a.hook_origin=[](void*p,Hook,uintptr_t,const Call&){return static_cast<Host*>(p)->origin;};
   a.future_producers_closed=[](void*p,const Call&){return static_cast<Host*>(p)->source_closed;};
+  a.frame_deferred_current=[](void*p,const Call&c){auto&h=*static_cast<Host*>(p);return h.frame_exact&&h.frame_phase==5&&c.kind==Kind::native_phase&&c.serial==h.serial&&c.original_receipt==1000+c.serial&&c.method==0x66;};
   a.retired_output=[](void*p,uint64_t e,uintptr_t n,uintptr_t s,uint32_t v,uint64_t r,uintptr_t o){auto&h=*static_cast<Host*>(p);return h.before_output&&e==7&&n==ptr(h.graphs[0])&&s==ptr(h.slots[0])&&v==20&&r==1001&&o==0x700;};
   a.read=[](void*p,uintptr_t at,void*out,size_t n){auto&h=*static_cast<Host*>(p);for(auto s:h.spans){auto b=ptr(s.p);if(at>=b&&n<=s.n&&at-b<=s.n-n){memcpy(out,reinterpret_cast<void*>(at),n);return true;}}return false;};
   a.basis=[](void*p,const Call&c,AnimationGraph g,uint32_t,Basis*out){auto&h=*static_cast<Host*>(p);for(unsigned i=0;i<2;++i)if(g.handle==ptr(h.slots[i])&&h.owns[i]){*out={h.id(i),7,c.serial,0x91,0x92,0xabc};return true;}return false;};return a;}
- bool begin(Kind k=Kind::play){Call c{k,7,++serial,0xabc,0x55,0x66,k==Kind::rebuild?1000+serial:0};return journal.begin(c)&&journal.invoked();}
+ bool begin(Kind k=Kind::play){Call c{k,7,++serial,0xabc,0x55,0x66,(k==Kind::rebuild||k==Kind::native_phase)?1000+serial:0};return journal.begin(c)&&journal.invoked();}
  void push(unsigned i,unsigned op,uint32_t version=20){assert(next_node<32);void*n=nodes[next_node++];put(n,0,get<uintptr_t>(queue,0));put(n,8,ptr(slots[i]));put(n,16,version);put(n,24,uint32_t(op));put(queue,0,ptr(n));put(queue,8,get<uint64_t>(queue,8)+1);}
  void append(unsigned i,unsigned which,bool relocate=false,uint32_t version=20){const size_t at=which?0x3a8:0x388;auto base=get<uintptr_t>(manager,at);auto n=get<uint64_t>(manager,at+16);if(relocate){memcpy(vectors[which][1],reinterpret_cast<void*>(base),size_t(n)*16);base=ptr(vectors[which][1]);put(manager,at,base);}put(reinterpret_cast<void*>(base),size_t(n)*16,handle(i,version));put(manager,at+16,n+1);}
  bool produce(unsigned i,unsigned op,bool relocate=false,uint32_t version=20){Ticket t{};auto kind=op<7?Hook::enqueue:op==7?Hook::append_a:Hook::append_b;if(!journal.native_begin(kind,ptr(manager),op,handle(i,version),t))return false;if(op<7)push(i,op,version);else append(i,op==8,relocate,version);return journal.native_end(t);}
@@ -55,5 +56,15 @@ int main(int argc,char**argv){assert(argc==2);int mode=std::atoi(argv[1]);Host h
  if(mode==19){assert(h.begin(Kind::rebuild)&&h.produce(0,7)&&h.journal.end());h.source_closed=false;assert(!h.begin(Kind::maintenance));assert(Host::get<uint64_t>(h.manager,0x398)==1);return 0;}
  if(mode==20){assert(h.begin()&&h.produce(0,0)&&h.journal.end());Call c{Kind::maintenance,7,1,0xabc,0x55,0x66};assert(!h.journal.begin(c));return 0;}
  if(mode==21){assert(h.begin());h.journal.detach();h.current=false;DirectorAuthorization out{};assert(!h.journal.authorization(h.pending(),out));return 0;}
+ if(mode==22){assert(h.begin(Kind::native_phase)&&h.produce(0,7)&&h.journal.end());assert(h.begin(Kind::native_phase)&&!h.journal.maintenance_closed()&&h.journal.deferred_closed()&&h.journal.deferred_begin(0));Host::put(h.manager,0x398,uint64_t(0));assert(h.journal.deferred_end(0)&&h.journal.end());return 0;}
+ if(mode==23){assert(h.begin(Kind::native_phase)&&h.produce(0,8)&&h.journal.end());assert(h.begin(Kind::native_phase)&&h.journal.deferred_begin(1));Host::put(h.manager,0x3b8,uint64_t(0));assert(h.journal.deferred_end(1)&&h.journal.end());return 0;}
+ if(mode>=24&&mode<=28){if(mode==27){auto api=h.api();api.frame_deferred_current=nullptr;h.journal=Journal{};assert(h.journal.configure(api));}assert(h.begin(Kind::rebuild)&&h.produce(0,7)&&h.journal.end());
+  assert(h.begin(mode==28?Kind::play:Kind::native_phase));if(mode==24)h.frame_phase=0;if(mode==25)++h.serial;if(mode==26)h.frame_exact=false;assert(!h.journal.deferred_begin(0)&&Host::get<uint64_t>(h.manager,0x398)==1);return 0;}
+ if(mode==29){assert(h.begin(Kind::rebuild)&&h.produce(0,7)&&h.journal.end());h.frame_phase=0;assert(h.begin(Kind::maintenance)&&h.journal.maintenance_closed()&&h.journal.deferred_closed()&&h.journal.deferred_begin(0));return 0;}
+ if(mode==30){Call call{Kind::native_phase,7,++h.serial,0xabc,0x55,0x66,1000+h.serial};assert(h.journal.begin(call)&&!h.journal.current_call(call));assert(h.journal.invoked()&&h.journal.current_call(call));auto wrong=call;++wrong.original_receipt;assert(!h.journal.current_call(wrong));assert(h.journal.end()&&!h.journal.current_call(call));return 0;}
+ if(mode==31){assert(h.begin(Kind::native_phase)&&h.produce(0,7)&&h.journal.end());assert(h.begin(Kind::native_phase)&&h.journal.deferred_begin(0)&&h.produce(1,7));Host::put(h.manager,0x398,uint64_t(0));assert(h.journal.deferred_end(0)&&h.journal.end());return 0;}
+ if(mode==32){assert(h.begin(Kind::native_phase)&&h.produce(0,7)&&h.journal.end());assert(h.begin(Kind::native_phase));h.source_closed=false;assert(!h.journal.deferred_begin(0)&&Host::get<uint64_t>(h.manager,0x398)==1);return 0;}
+ if(mode==33){Call call{Kind::native_phase,7,++h.serial,0xabc,0x55,0x66,0};assert(h.journal.begin(call)&&h.journal.invoked());assert(!h.journal.deferred_closed());return 0;}
+ if(mode==34){assert(h.begin(Kind::native_phase));h.current=false;assert(!h.journal.deferred_closed()&&!h.journal.current_call(h.journal.call()));return 0;}
  return 2;
 }

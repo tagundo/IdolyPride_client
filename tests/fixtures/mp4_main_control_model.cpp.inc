@@ -31,43 +31,10 @@ bool mp4_child_call_same(const Call&a,const Call&b){return a.kind==b.kind&&a.epo
 bool mp4_child_graph_same(mp4child::Graph a,mp4child::Graph b){return a.handle==b.handle&&a.version==b.version;}
 bool mp4_child_tuple_same(const mp4_director_birth::SourceTuple&a,const mp4_director_birth::SourceTuple&b){return a.director==b.director&&a.asset==b.asset&&a.epoch==b.epoch&&a.capture==b.capture;}
 mp4child::Result mp4_child_lineage(void*,const mp4child::State&,mp4child::Graph g){return source_live&&mp4_child_graph_same(g,current_graph)?mp4child::Result::ok:mp4child::Result::stale;}
-struct Mp4RawOriginalOperation {
-    uint64_t epoch=0,serial=0,receipt=0;
-    uintptr_t root_asset=0,director=0,method=0;
-    uint8_t kind=0;unsigned depth=0;bool invoked=false;
-} mp4_raw_original_operation;
-uint64_t mp4_raw_original_sequence=0,mp4_raw_evaluate_sequence=0;
-void* mp4_scene_root_asset_receipt(uint64_t);
-struct Mp4OriginalOperationScope {
-    Mp4RawOriginalOperation previous=mp4_raw_original_operation;
-    bool valid=false;
-    Mp4OriginalOperationScope(uint64_t epoch,uint8_t kind,void* director,uintptr_t method,uint64_t receipt){
-        void* asset=mp4_scene_root_asset_receipt(epoch);
-        if(!epoch||!asset||!director||!method||mp4_raw_original_sequence==~uint64_t(0)
-            ||previous.depth>=8||kind<1||kind>6||(kind==3&&!receipt))return;
-        if(!receipt){if(mp4_raw_evaluate_sequence==~uint64_t(0))return;receipt=++mp4_raw_evaluate_sequence;}
-        mp4_raw_original_operation={epoch,++mp4_raw_original_sequence,receipt,
-            reinterpret_cast<uintptr_t>(asset),reinterpret_cast<uintptr_t>(director),method,kind,previous.depth+1,false};
-        valid=true;
-    }
-    void invoked(){if(valid)mp4_raw_original_operation.invoked=true;}
-    ~Mp4OriginalOperationScope(){if(valid)mp4_raw_original_operation=previous;}
-};
-
-[[maybe_unused]] bool mp4_director_actual_operation(mp4_director_maintenance::Call* out){
-    if(!out)return false;
-    *out={};const auto& raw=mp4_raw_original_operation;
-    if(!game_call()||!raw.depth||!raw.invoked||!raw.epoch||!raw.serial||!raw.receipt
-        ||!mp4_scene_host.active||!mp4_scene_source_current()
-        ||mp4_scene_host.source.generation!=raw.epoch||!mp4_scene_host.root_asset_handle
-        ||reinterpret_cast<uintptr_t>(mp4_scene_host.root_asset)!=raw.root_asset)return false;
-    using Kind=mp4_director_maintenance::Kind;
-    const auto kind=static_cast<Kind>(raw.kind);
-    if(kind!=Kind::play&&kind!=Kind::stop&&kind!=Kind::rebuild&&kind!=Kind::zero_evaluate&&kind!=Kind::saved_evaluate&&kind!=Kind::maintenance)return false;
-    *out={kind,raw.epoch,raw.serial,raw.root_asset,raw.director,raw.method,raw.receipt};
-    return true;
-}
-
+// These held-only fixtures explicitly refuse native-frame authority.
+bool mp4_native_phase_origin(uint64_t,void*,uintptr_t){return false;}
+// ACTUAL_RAW_SCOPE
+// ACTUAL_RAW_QUERY
 void*mp4_scene_root_asset_receipt(uint64_t epoch){return epoch==7?mp4_scene_host.root_asset:nullptr;}
 void rebuild(void*,const void*){++raw_calls;assert(mp4_raw_original_operation.invoked);if(mode==9)throw 42;if(mode==8)source_live=f->current=false;auto old=current_graph;unsigned next=old.handle==QueueFixture::ptr(f->slots[0])?1:0;QueueFixture::put(reinterpret_cast<void*>(old.handle),0x20,old.version+2);current_graph=f->handle(next,QueueFixture::get<uint32_t>(f->slots[next],0x20));}
 void evaluate(void*,const void*){++raw_calls;}

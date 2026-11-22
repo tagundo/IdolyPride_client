@@ -24,12 +24,13 @@ def original_operation(tmp_path_factory):
 #include <stdexcept>
 #include <string>
 namespace mp4_director_maintenance{
-enum class Kind:uint8_t{play=1,stop=2,rebuild=3,zero_evaluate=4,saved_evaluate=5,maintenance=6};
+enum class Kind:uint8_t{play=1,stop=2,rebuild=3,zero_evaluate=4,saved_evaluate=5,maintenance=6,native_phase=7};
 struct Call{Kind kind=Kind::play;uint64_t epoch=0,serial=0;uintptr_t source_asset=0,receiver=0,method=0;uint64_t original_receipt=0;};
 }
 bool thread=true,current=true;
 bool game_call(){return thread;}
 bool mp4_scene_source_current(){return current;}
+bool mp4_native_phase_origin(uint64_t,void*,uintptr_t){return false;}
 struct SceneHost{bool active=true;void*root_asset=reinterpret_cast<void*>(11);uint32_t root_asset_handle=1;struct Source{uint64_t generation=7;}source;}mp4_scene_host;
 struct Ledger{uint64_t epoch=7;void*asset=reinterpret_cast<void*>(11);}mp4_rebuild_ledger;
 void* mp4_scene_root_asset_receipt(uint64_t epoch){return epoch==mp4_rebuild_ledger.epoch?mp4_rebuild_ledger.asset:nullptr;}

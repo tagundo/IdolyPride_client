@@ -1228,14 +1228,17 @@ void mp4_animation_render_hook(){
 extern idoly_mp4_actor::MonoGate mp4_actor_mono_gate;
 bool mp4_animation_owned_source();
 void mp4_animation_isolation_failed();
+void mp4_animation_journal_original(unsigned);
+void mp4_animation_unowned_original(unsigned);
+bool mp4_native_phase_routes_ready();
 void mp4_animation_owned_original(unsigned phase){
-    if(!mp4_animation_owned_source()){mp4_animation_original[phase]();return;}
+    if(!mp4_animation_owned_source()){mp4_animation_unowned_original(phase);return;}
     bool called=false;
-    if(!mp4_actor_mono_gate.isolate([&]{called=true;mp4_animation_original[phase]();})){
+    if(!mp4_actor_mono_gate.isolate([&]{called=true;mp4_animation_journal_original(phase);})){
         mp4_animation_isolation_failed();
         // Aborted ownership must still preserve the real native Begin/End
         // lifecycle. This is ordinary cleanup, never an accepted export step.
-        if(!called)mp4_animation_original[phase]();
+        if(!called)mp4_animation_unowned_original(phase);
     }
 }
 void mp4_animation_sample_original(){mp4_animation_owned_original(0);}
@@ -2686,13 +2689,15 @@ struct Mp4RawOriginalOperation {
 } mp4_raw_original_operation;
 uint64_t mp4_raw_original_sequence=0,mp4_raw_evaluate_sequence=0;
 void* mp4_scene_root_asset_receipt(uint64_t);
+bool mp4_native_phase_origin(uint64_t,void*,uintptr_t);
 struct Mp4OriginalOperationScope {
     Mp4RawOriginalOperation previous=mp4_raw_original_operation;
     bool valid=false;
     Mp4OriginalOperationScope(uint64_t epoch,uint8_t kind,void* director,uintptr_t method,uint64_t receipt){
         void* asset=mp4_scene_root_asset_receipt(epoch);
         if(!epoch||!asset||!director||!method||mp4_raw_original_sequence==~uint64_t(0)
-            ||previous.depth>=8||kind<1||kind>6||(kind==3&&!receipt))return;
+            ||previous.depth>=8||kind<1||kind>7||(kind==3&&!receipt)
+            ||(kind==7&&(previous.depth||!mp4_native_phase_origin(epoch,director,method))))return;
         if(!receipt){if(mp4_raw_evaluate_sequence==~uint64_t(0))return;receipt=++mp4_raw_evaluate_sequence;}
         mp4_raw_original_operation={epoch,++mp4_raw_original_sequence,receipt,
             reinterpret_cast<uintptr_t>(asset),reinterpret_cast<uintptr_t>(director),method,kind,previous.depth+1,false};
@@ -5779,11 +5784,15 @@ bool mp4_world_clock_restorable(void*){
 }
 Mp4SceneResult mp4_world_prepare_step(void*,uint64_t tick,double){
     auto& host=mp4_world_host;
+    if(!mp4_native_phase_routes_ready()){
+        host.error="world_native_phase_routes_unverified";return Mp4SceneResult::unsupported;}
     if(!host.animation_owned||!mp4_animation_gate.prepare(host.epoch,tick)){
         host.error="world_animation_step_not_closed";return Mp4SceneResult::stale;}
     return mp4_world_result(host.scope.validate());
 }
 Mp4SceneResult mp4_world_grant(void*,uint64_t tick){
+    if(!mp4_native_phase_routes_ready()){
+        mp4_world_host.error="world_native_phase_routes_unverified";return Mp4SceneResult::unsupported;}
     if(!mp4_animation_gate.grant(mp4_world_host.epoch,tick)){
         mp4_world_host.error="world_animation_grant_failed";return Mp4SceneResult::stale;}
     return Mp4SceneResult::ok;
@@ -17300,6 +17309,11 @@ struct Api {
  bool(*provisional_play)(void*,const Call&,world::AnimationGraph,Provisional*)=nullptr;
  bool(*provisional_current)(void*,const Provisional&)=nullptr;
  world::Result(*promote)(void*,const Call&,const Provisional&,Basis*)=nullptr;
+ // Actual accepted native phase5 original-stack witness for this SAME Kind7
+ // Call/serial/method/tick. Optional for legacy held-only service; NULL can
+ // never authorize frame deferred consumption.
+ bool(*frame_deferred_current)(void*,const Call&)=nullptr;
+
 };
 struct Ticket {uint64_t call=0,sequence=0;
 Hook hook=Hook::enqueue;
@@ -17514,6 +17528,13 @@ public:
  }
  const Call&call()const{return call_;
  }
+ // Exact read-only witness for the already-entered actual operation. This
+ // grants no producer/output/native callback permission of its own.
+ bool current_call(const Call&c)const{return current()&&invoked_&&call_.kind==c.kind&&call_.epoch==c.epoch
+  &&call_.serial==c.serial&&call_.source_asset==c.source_asset&&call_.receiver==c.receiver
+  &&call_.method==c.method&&call_.original_receipt==c.original_receipt;
+ }
+
  // Call only from the actual selected wrapper BEFORE its original invocation.
  // Existing valid work must already have a concrete earlier producer receipt;
  // taking a snapshot does not promote arbitrary preexisting requests.
@@ -17647,6 +17668,12 @@ public:
  }
  bool maintenance_closed()const {return call_.kind==Kind::maintenance&&consumption_closed();
  }
+ bool deferred_closed()const {
+  if(call_.kind==Kind::maintenance)return maintenance_closed();
+  return call_.kind==Kind::native_phase&&api_.frame_deferred_current&&consumption_closed()
+   &&api_.frame_deferred_current(api_.context,call_);
+ }
+
 
  // Called before EACH original collect (including nested16th batch). On false,
  // wrapper invokes exact original TEMPORARY reset and leaves native queue alone.
@@ -17681,7 +17708,7 @@ public:
   return current();
  }
  bool deferred_begin(unsigned index) {
-  if(index>1||!origin(index?Hook::deferred_b:Hook::deferred_a,api_.manager)||!maintenance_closed()
+  if(index>1||!origin(index?Hook::deferred_b:Hook::deferred_a,api_.manager)||!deferred_closed()
    ||!deferred(index,before_)||!all(before_))return fail("director_deferred_pending_unowned");
   return true;
  }
@@ -17734,7 +17761,8 @@ void* mp4_scene_root_asset_receipt(uint64_t epoch){
         ||reinterpret_cast<uintptr_t>(mp4_scene_host.root_asset)!=raw.root_asset)return false;
     using Kind=mp4_director_maintenance::Kind;
     const auto kind=static_cast<Kind>(raw.kind);
-    if(kind!=Kind::play&&kind!=Kind::stop&&kind!=Kind::rebuild&&kind!=Kind::zero_evaluate&&kind!=Kind::saved_evaluate&&kind!=Kind::maintenance)return false;
+    if(kind!=Kind::play&&kind!=Kind::stop&&kind!=Kind::rebuild&&kind!=Kind::zero_evaluate&&kind!=Kind::saved_evaluate&&kind!=Kind::maintenance
+        &&(kind!=Kind::native_phase||!mp4_native_phase_origin(raw.epoch,reinterpret_cast<void*>(raw.director),raw.method)))return false;
     *out={kind,raw.epoch,raw.serial,raw.root_asset,raw.director,raw.method,raw.receipt};
     return true;
 }
@@ -22936,7 +22964,6 @@ inline thread_local Host::FactoryEntry Host::factory_entry_{};
 
 // Shared-only typed native adapter. Actual verified hooks/gateways and finite
 // source basis providers must be bound by Bridge before publication.
-
 namespace mp4_director_maintenance {
 using EnqueueFn=void(*)(void*,uint32_t,const world::AnimationGraph*);
 using AppendFn=void(*)(void*,const world::AnimationGraph*);
@@ -22968,6 +22995,10 @@ public:
   original_=originals;api_=api;installed_=true;return true;
  }
  Journal&journal(){return journal_;}
+ // Actual installed typed Originals/gateway/publication receipts only. This
+ // grants no scene, pending producer or frame permission.
+ bool routes_current()const{return bindings();}
+
  bool native_entry(Hook hook,uintptr_t receiver)const {
   return bindings()&&origin_.host==this&&origin_.hook==hook&&origin_.receiver==receiver;
  }
@@ -23075,7 +23106,7 @@ struct Api {
 };
 class Scope {
  struct Progress {Graph before{};Mutation mutation{};bool complete=false;};
- struct Node {State source{};Graph checkpoint_graph{};birth::Playable restored_root{};bool speed_set=false;Progress rebuild[2]{},evaluate{},mode_pause{},state_change{};bool time_set=false,mode_set=false,state_set=false;};
+ struct Node {State source{};Graph checkpoint_graph{};birth::Playable restored_root{};bool speed_set=false;Progress rebuild_pause[2]{},rebuild[2]{},evaluate{},mode_pause{},state_change{};bool rebuild_manual[2]{},time_set=false,mode_set=false,state_set=false;};
  Api api_{};Node nodes_[max_directors]{};Edge edges_[max_edges]{};
  size_t count_=0,edge_count_=0,order_[max_directors]{},master_=0;
  uint64_t epoch_=0,recipe_=0;uintptr_t asset_=0;
@@ -23178,6 +23209,24 @@ public:
    auto&p=nodes_[i].rebuild[unsigned(round)];
    if(!tuple(i))return fail(Result::stale,"child_source_changed");
    if(p.complete)continue;
+   auto&pause=nodes_[i].rebuild_pause[unsigned(round)];
+   if(!pause.mutation.issued){pause.before=graph(i);
+    auto ready=api_.lineage(api_.context,nodes_[i].source,pause.before);if(ready!=Result::ok)return ready;
+    ready=api_.preflight(api_.context,round,dm::Kind::stop,nodes_[i].source,pause.before);if(ready!=Result::ok)return ready;
+    ready=api_.invoke(api_.context,dm::Kind::stop,nodes_[i].source,&pause.mutation);if(ready!=Result::ok)return ready;
+   }
+   if(!pause.complete){const auto ready=complete(i,dm::Kind::stop,pause);if(ready!=Result::ok)return ready;}
+   void*director=reinterpret_cast<void*>(nodes_[i].source.owner.director);
+   if(!nodes_[i].rebuild_manual[unsigned(round)]){
+    if(api_.state(director,nullptr)!=0)return fail(Result::failed,"child_rebuild_pause_not_settled");
+    const auto before=graph(i);auto ready=api_.preflight(api_.context,round,dm::Kind::rebuild,nodes_[i].source,before);if(ready!=Result::ok)return ready;
+    // Source role admission happened during capture. Manual is private setup,
+    // never a source ownership/driving proof. Clear/settle play first because
+    // the actual native Manual setter otherwise enqueues an unjournaled stop.
+    nodes_[i].rebuild_manual[unsigned(round)]=true;api_.set_mode(director,3,nullptr);
+    if(!current()||!tuple(i))return fail(Result::stale,"child_source_changed");
+   }
+   if(api_.mode(director,nullptr)!=3||api_.state(director,nullptr)!=0)return fail(Result::failed,"child_private_rebuild_mode_unverified");
    if(!p.mutation.issued){p.before=graph(i);
     auto result=api_.lineage(api_.context,nodes_[i].source,p.before);if(result!=Result::ok)return result;
     result=api_.preflight(api_.context,round,dm::Kind::rebuild,nodes_[i].source,p.before);if(result!=Result::ok)return result;
@@ -23855,6 +23904,94 @@ void mp4_child_execution_release()noexcept{
  b=Mp4ChildExecutionBank{};
 }
 // END_MP4_CHILD_EXECUTION_HOST
+
+// BEGIN_MP4_NATIVE_PHASE_JOURNAL_HOST
+// The accepted original native callback is the operation boundary. A frame
+// receipt cannot be minted from a configured clock, held retry or phase name.
+bool mp4_native_phase_routes_ready(){
+ return game_call()&&mp4_animation_routes_ready()&&mp4_child_pending_host.routes_current();
+}
+bool mp4_native_phase_origin(uint64_t epoch,void*director,uintptr_t method){
+ uint64_t tick=0;uint8_t phase=0;
+ return game_call()&&epoch&&mp4_world_host.animation_owned&&mp4_world_host.epoch==epoch
+  &&mp4_animation_gate.granted_phase(epoch,&tick,&phase)&&phase<8
+  &&mp4_native_phase_routes_ready()&&mp4_world_source_current(nullptr)
+  &&mp4_scene_host.active&&mp4_scene_host.source.generation==epoch&&mp4_scene_source_current()
+  &&director==mp4_scene_host.source.director
+  &&method==reinterpret_cast<uintptr_t>(mp4_animation_original[phase])
+  &&method==mp4_native_base+mp4_animation_profile.phases[phase].callback.rva;
+}
+void mp4_native_phase_reject(uint64_t epoch,const char*why)noexcept{
+ (void)mp4_animation_gate.reject_inflight(epoch);
+ mp4_world_host.invalidated=true;mp4_world_host.error=why;
+}
+void mp4_animation_unowned_original(unsigned phase){
+ if(phase>=8){return;}
+ uint64_t tick=0;uint8_t actual=0;
+ if(mp4_animation_gate.granted_phase(mp4_world_host.epoch,&tick,&actual))
+  mp4_native_phase_reject(mp4_world_host.epoch,"world_native_phase_source_withdrawn");
+ // Ordinary callbacks and the real cleanup End retain their native behavior,
+ // but an earlier failed ownership check cannot regain authority on requery.
+ mp4_animation_original[phase]();
+}
+// This joins an entered raw Call to the SAME active journal and accepted
+// phase. Api.current/call_origin use the nonrecursive raw/source predicates;
+// they must not call this observer back through Journal.current_call().
+[[maybe_unused]] bool mp4_native_phase_call_current(const mp4_director_maintenance::Call&call,
+    uint64_t*tick,uint8_t*phase){
+ if(tick){*tick=0;}
+ if(phase){*phase=0;}
+ mp4_director_maintenance::Call actual{};
+ if(!tick||!phase||call.kind!=mp4_director_maintenance::Kind::native_phase
+  ||!mp4_director_actual_operation(&actual)||!mp4_child_call_same(call,actual)
+  ||!mp4_child_pending_host.journal().current_call(call))return false;
+ return mp4_animation_gate.granted_phase(call.epoch,tick,phase);
+}
+[[maybe_unused]] bool mp4_native_phase_deferred_current(void*,const mp4_director_maintenance::Call&call){
+ uint64_t tick=0;uint8_t phase=0;
+ return mp4_native_phase_call_current(call,&tick,&phase)&&phase==5;
+}
+void mp4_animation_journal_original(unsigned phase){
+ if(phase>=8){mp4_native_phase_reject(mp4_world_host.epoch,"world_native_phase_index_invalid");return;}
+ const uint64_t epoch=mp4_world_host.epoch;uint64_t tick=0;uint8_t actual_phase=0;
+ if(!mp4_animation_gate.granted_phase(epoch,&tick,&actual_phase)){
+  // Deferred-only maintenance already has its own Kind6 raw/journal. Revoked
+  // End must also preserve the actual native Begin/End cleanup without Kind7.
+  mp4_animation_original[phase]();return;
+ }
+ const uintptr_t method=reinterpret_cast<uintptr_t>(mp4_animation_original[phase]);
+ Mp4OriginalOperationScope operation(epoch,7,mp4_scene_host.source.director,method,0);
+ auto&journal=mp4_child_pending_host.journal();
+ if(actual_phase!=phase||!operation.valid){
+  mp4_native_phase_reject(epoch,"world_native_phase_origin_unverified");
+  mp4_animation_original[phase]();return;
+ }
+ const auto&raw=mp4_raw_original_operation;namespace dm=mp4_director_maintenance;
+ const dm::Call call{dm::Kind::native_phase,raw.epoch,raw.serial,raw.root_asset,raw.director,raw.method,raw.receipt};
+ if(!journal.begin(call)){
+  mp4_native_phase_reject(epoch,"world_native_phase_baseline_unowned");
+  mp4_animation_original[phase]();return;
+ }
+ operation.invoked();
+ if(!journal.invoked()){
+  journal.detach();mp4_native_phase_reject(epoch,"world_native_phase_entry_unverified");
+  mp4_animation_original[phase]();return;
+ }
+ try{
+  mp4_animation_original[phase]();
+  // Observation only: neither an AFTER failure nor a held retry repeats the
+  // original. Future producers and native hooks still owe each concrete basis.
+  const bool ended=journal.end();
+  if(!ended||!mp4_native_phase_origin(epoch,reinterpret_cast<void*>(call.receiver),call.method))
+   mp4_native_phase_reject(epoch,"world_native_phase_delta_unowned");
+ }catch(...){
+  // Original exceptions retain the ordinary caller's exception. Detach only
+  // scalar authorization; quarantined native/resource duties retire elsewhere.
+  journal.detach();mp4_native_phase_reject(epoch,"world_native_phase_original_threw");throw;
+ }
+}
+// END_MP4_NATIVE_PHASE_JOURNAL_HOST
+
 
 // BEGIN_MP4_CHILD_BIRTH_API_HOST
 // Embed after factory-context host and original Birth source pins. Wrappers
