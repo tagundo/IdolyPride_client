@@ -136,7 +136,11 @@ public final class UnifiedRuntime {
     private static File resourceFile(Context context, JSONObject value) throws Exception {
         JSONObject pack = value.getJSONObject("resource_pack");
         String expected = pack.getString("sha256");
-        File directory = new File(context.getCodeCacheDir(), "idoly-unified-resources");
+        // Android's trusted app root can use /data/user/0 while its canonical
+        // path uses /data/data. Normalize that root before checking our child;
+        // an existing child symlink must still fail the checks below.
+        File cacheRoot = context.getCodeCacheDir().getCanonicalFile();
+        File directory = new File(cacheRoot, "idoly-unified-resources");
         if (!directory.isDirectory() && !directory.mkdirs()) throw invalid("unified_resource_directory_invalid");
         if (!directory.getCanonicalFile().equals(directory.getAbsoluteFile())
                 || !OsConstants.S_ISDIR(Os.lstat(directory.getAbsolutePath()).st_mode))
