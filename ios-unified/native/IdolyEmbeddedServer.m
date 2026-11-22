@@ -805,11 +805,13 @@ static NSDictionary *mp4SanitizeExportTrace(id value) {
 static NSDictionary *mp4DiagnosticSummary(id value) {
     if (![value isKindOfClass:NSDictionary.class]) return @{};
     NSMutableDictionary *result=[NSMutableDictionary new];
-    for (NSString *key in @[@"phase",@"error_code",@"readiness_error"]) {
+    for (NSString *key in @[@"phase",@"error_code",@"readiness_error",@"selection_error"]) {
         NSString *code=mp4DiagnosticCode(value[key]); if(code)result[key]=code;
     }
     for (NSString *key in @[@"frames",@"total_frames",@"unity_ticks",@"capture_acks"])
         if(mp4DiagnosticInteger(value[key]))result[key]=value[key];
+    id selected=value[@"selected_mv"];
+    if([selected isKindOfClass:NSNumber.class]&&CFGetTypeID((__bridge CFTypeRef)selected)==CFBooleanGetTypeID())result[@"selected_mv"]=selected;
     NSDictionary *trace=mp4SanitizeExportTrace(value[@"export_trace"]);if(trace)result[@"export_trace"]=trace;
     return result;
 }
@@ -846,7 +848,9 @@ static void mp4DiagnosticRemember(NSDictionary *status) {
             ||![(oldTrace[@"current_stage"]?:@"")isEqual:(trace[@"current_stage"]?:@"")]
             ||![(oldTrace[@"last_error"]?:@"")isEqual:(trace[@"last_error"]?:@"")]
             ||![(old[@"error_code"]?:@"")isEqual:(summary[@"error_code"]?:@"")]
-            ||![(old[@"readiness_error"]?:@"")isEqual:(summary[@"readiness_error"]?:@"")];
+            ||![(old[@"readiness_error"]?:@"")isEqual:(summary[@"readiness_error"]?:@"")]
+            ||![(old[@"selection_error"]?:@"")isEqual:(summary[@"selection_error"]?:@"")]
+            ||![(old[@"selected_mv"]?:NSNull.null)isEqual:(summary[@"selected_mv"]?:NSNull.null)];
         BOOL failure=[summary[@"phase"]isEqual:@"failed"];
         // An idle readiness poll after relaunch must not replace the previous
         // export failure with a generic "open an MV" or unavailable-API state.
@@ -874,12 +878,12 @@ static NSDictionary *mp4SessionStatus(void) {
                 && value.doubleValue == value.unsignedLongLongValue) status[key] = value;
     }
     NSRegularExpression *code = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" options:0 error:NULL];
-    for (NSString *key in @[@"export_id",@"error_code",@"readiness_error",@"pause_reason",@"resume_phase"]) {
+    for (NSString *key in @[@"export_id",@"error_code",@"readiness_error",@"selection_error",@"pause_reason",@"resume_phase"]) {
         NSString *value = [raw[key] isKindOfClass:NSString.class] ? raw[key] : nil;
         if (value && [code numberOfMatchesInString:value options:0 range:NSMakeRange(0,value.length)] == 1)
             status[key] = value;
     }
-    for (NSString *key in @[@"paused",@"pause_requested"]) {
+    for (NSString *key in @[@"paused",@"pause_requested",@"selected_mv"]) {
         NSNumber *value = [raw[key] isKindOfClass:NSNumber.class] ? raw[key] : nil;
         if (value && CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) status[key] = value;
     }
@@ -992,7 +996,7 @@ static NSDictionary *mp4QueueStatus(void) {
     NSData *bytes = count > 0 && count < sizeof buffer ? [NSData dataWithBytes:buffer length:count] : nil;
     id decoded = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
     NSDictionary *raw = [decoded isKindOfClass:NSDictionary.class] ? decoded : nil;
-    NSDictionary *invalid = @{@"schema":@1,@"available":@NO,@"can_run":@NO,@"command_pending":@NO,@"running":@NO,@"paused":@NO,
+    NSDictionary *invalid = @{@"schema":@1,@"available":@NO,@"can_run":@NO,@"can_add":@NO,@"command_pending":@NO,@"running":@NO,@"paused":@NO,
         @"phase":@"unavailable",@"error_code":@"mp4_queue_unavailable",@"capacity":@8,@"jobs":@[],@"session":mp4SessionStatus()};
     if (!mp4Choice(raw[@"schema"],@[@1]) || ![raw[@"jobs"] isKindOfClass:NSArray.class] || [raw[@"jobs"] count] > 8) return invalid;
     NSMutableDictionary *status = [@{@"schema":@1,@"capacity":@8,@"session":mp4SessionStatus()} mutableCopy];
@@ -1000,6 +1004,18 @@ static NSDictionary *mp4QueueStatus(void) {
         id value = raw[key];
         if (![value isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID()) return invalid;
         status[key] = value;
+    }
+    // Queue addition captures an observed MV recipe; it does not acquire the
+    // full offline export pipeline. Older bridges omit this separate field.
+    if(raw[@"can_add"]){
+        id value=raw[@"can_add"];
+        if(![value isKindOfClass:NSNumber.class]||CFGetTypeID((__bridge CFTypeRef)value)!=CFBooleanGetTypeID())return invalid;
+        status[@"can_add"]=value;
+    }
+    if(raw[@"add_error"]){
+        id value=[raw[@"add_error"]isEqual:@""]?@"none":raw[@"add_error"];
+        if(!mp4Code(value,128))return invalid;
+        status[@"add_error"]=value;
     }
     for (NSString *key in @[@"phase",@"error_code"]) {
         id value = [key isEqual:@"error_code"] && [raw[key] isEqual:@""] ? @"none" : raw[key];

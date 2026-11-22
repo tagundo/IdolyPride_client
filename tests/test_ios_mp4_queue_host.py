@@ -138,7 +138,7 @@ static int operationCode,operationPosition,lastSuspend;
 static NSString *operationJob;
 static NSString *nativeSessionPhase=@"rendering";
 static bool nativeSceneReady=true;
-static size_t fakeStatus(char *p,size_t cap){int n=snprintf(p,cap,"{\"phase\":\"%s\",\"frames\":5,\"total_frames\":100,\"ready\":false,\"source_width\":1921,\"source_height\":1081,\"video_bitrate\":17420000,\"readiness_error\":\"scene_surface_pending\",\"unity_ticks\":9,\"capture_acks\":5}",nativeSessionPhase.UTF8String);return n>0&&(size_t)n<cap?(size_t)n:0;}
+static size_t fakeStatus(char *p,size_t cap){int n=snprintf(p,cap,"{\"phase\":\"%s\",\"frames\":5,\"total_frames\":100,\"ready\":false,\"selected_mv\":true,\"selection_error\":\"none\",\"source_width\":1921,\"source_height\":1081,\"video_bitrate\":17420000,\"readiness_error\":\"scene_surface_pending\",\"unity_ticks\":9,\"capture_acks\":5}",nativeSessionPhase.UTF8String);return n>0&&(size_t)n<cap?(size_t)n:0;}
 static int fakeReady(void){return nativeSceneReady?1:0;}
 static NSString *JSON(id value){return [[NSString alloc]initWithData:[NSJSONSerialization dataWithJSONObject:value options:0 error:NULL] encoding:NSUTF8StringEncoding];}
 static size_t fakeQueueStatus(char*p,size_t cap){NSData*d=[JSON(nativeQueue)dataUsingEncoding:NSUTF8StringEncoding];if(d.length>=cap)return 0;memcpy(p,d.bytes,d.length);p[d.length]=0;return d.length;}
@@ -221,8 +221,15 @@ int main(int argc,char**argv){@autoreleasepool{
  assert(!IdolyEmbeddedServerMP4IsFinishing());nativeSessionPhase=@"finishing";assert(IdolyEmbeddedServerMP4IsFinishing());
  nativeSessionPhase=@"completed";assert(!IdolyEmbeddedServerMP4IsFinishing());nativeSessionPhase=@"preparing_audio";assert(!IdolyEmbeddedServerMP4IsFinishing());
  nativeSessionPhase=@"finishing";assert(IdolyEmbeddedServerMP4IsFinishing());nativeSessionPhase=@"rendering";
+ // Actual selected-MV observation and queue capture remain independent of
+ // export admission. Adding a recipe must never resume the paused source.
+ nativeSceneReady=false;NSMutableDictionary *split=[nativeQueue mutableCopy];split[@"can_add"]=@YES;split[@"add_error"]=@"none";split[@"can_run"]=@NO;nativeQueue=split;
+ NSDictionary *splitStatus=mp4QueueStatus();assert([splitStatus[@"can_add"]isEqual:@YES]&&[splitStatus[@"can_run"]isEqual:@NO]);
+ assert([splitStatus[@"session"][@"selected_mv"]isEqual:@YES]&&[splitStatus[@"session"][@"ready"]isEqual:@NO]);
+ unsigned resumeBeforeAdd=nativeResumes;
  NSDictionary*r=request(@{@"id":@1,@"action":@"mp4_enqueue",@"fps":@60,@"video_codec":@2,@"video_bitrate":@16000000});
  assert([r[@"ok"]isEqual:@YES]&&enqueues==1&&configurations==1&&queueConfigurations==1);assert([JSON(r)rangeOfString:@"secret-must-not-leak"].location==NSNotFound);
+ assert(nativeResumes==resumeBeforeAdd);split[@"can_add"]=@1;assert([mp4QueueStatus()[@"available"]isEqual:@NO]);split[@"can_add"]=@YES;
  assert(lastVideoBitrate==16000000&&lastWidth==0&&lastHeight==0);
  assert([request(@{@"id":@2,@"action":@"mp4_queue_status"})[@"ok"]isEqual:@YES]);assert(configurations==1&&queueConfigurations==1);
  // The native host forwards a ready paused source MV. It must not override a
@@ -233,6 +240,7 @@ int main(int argc,char**argv){@autoreleasepool{
  assert([preview[@"source_width"]isEqual:@1921]&&[preview[@"source_height"]isEqual:@1081]&&[preview[@"video_bitrate"]isEqual:@17420000]&&[preview[@"readiness_error"]isEqual:@"scene_surface_pending"]);
  r=request(@{@"id":@2,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@16000000});assert([r[@"ok"]isEqual:@NO]&&[r[@"error"][@"code"]isEqual:@"mp4_scene_not_ready"]&&starts==1);
  nativeSceneReady=true;
+ split[@"can_run"]=@YES;
  assert([request(@{@"id":@2,@"action":@"mp4_status"})[@"result"][@"ready"]isEqual:@YES]);
  r=request(@{@"id":@2,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@16000000});assert([r[@"ok"]isEqual:@YES]&&starts==2);
  r=request(@{@"id":@2,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@0,@"width":@1280,@"height":@720});assert([r[@"ok"]isEqual:@YES]&&starts==3&&lastVideoBitrate==0&&lastWidth==1280&&lastHeight==720);

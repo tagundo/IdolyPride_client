@@ -569,6 +569,7 @@
   Object.assign(UI_TRANSLATIONS.ja, {"일시 정지":"一時停止","계속하기":"再開","MP4 일시 정지":"MP4を一時停止中","MP4 일시 정지 중…":"MP4を一時停止しています…","앱으로 돌아오면 이어서 처리합니다.":"アプリに戻ると処理を再開します。","게임 화면이 준비되면 계속할 수 있습니다.":"ゲーム画面の準備ができたら再開できます。","계속하기를 누르면 이어서 처리합니다.":"再開を押すと処理を続けます。"});
 
   Object.assign(UI_TRANSLATIONS.en, {
+    "MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다.":"MV detected. Export is not ready yet.",
     "MV를 모은 뒤 큐를 실행하세요.":"Add MVs, then run the queue.",
     "게임 화면을 준비하고 있습니다.":"Preparing the game scene.",
     "큐 실행":"Run queue","현재 MV 추가":"Add current MV","큐 일시 정지":"Pause queue","큐 계속하기":"Resume queue",
@@ -581,6 +582,7 @@
     "MP4 작업을 처리하지 못했습니다. 다시 시도해 주세요.":"Couldn't process this MP4 job. Please try again."
   });
   Object.assign(UI_TRANSLATIONS.ja, {
+    "MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다.":"MVを確認しました。書き出しはまだ準備できていません。",
     "MV를 모은 뒤 큐를 실행하세요.":"MVを追加してからキューを実行してください。",
     "게임 화면을 준비하고 있습니다.":"ゲーム画面を準備しています。",
     "큐 실행":"キューを実行","현재 MV 추가":"現在のMVを追加","큐 일시 정지":"キューを一時停止","큐 계속하기":"キューを再開",
@@ -1022,6 +1024,9 @@
       return {fps:options.fps,video_codec:options.video_codec,video_bitrate:options.bitrate_mode === "recommended" ? 0 : options.video_bitrate,
         width:options.resolution_mode === "current" ? 0 : options.width,height:options.resolution_mode === "current" ? 0 : options.height};
     }
+    function mp4SelectedMV() {
+      return mp4Status.selected_mv === true || mp4Status.selected_mv === undefined && mp4QueueStatus.can_add === true;
+    }
     function renderMP4() {
       const validOptions = renderMP4Options();
       const phase = mp4Status.phase, paused = phase === "paused" || phase === "pausing", active = ["preparing_audio","rendering","finishing","cancelling","pausing","paused"].includes(phase);
@@ -1029,14 +1034,19 @@
       const queueOwnsScene = mp4QueueStatus.running === true || mp4QueueStatus.paused === true || Boolean(mp4QueueStatus.current_job_id);
       const queuePreparing = (mp4QueueStatus.running === true || mp4QueueStatus.command_pending === true)
         && ["","idle","completed","failed","cancelled"].includes(phase || "");
+      const selectedMV = mp4SelectedMV();
+      const exportBlocked = selectedMV && mp4Status.ready !== true && !active && phase !== "completed" && phase !== "failed";
       const label = queuePreparing ? "게임 화면을 준비하고 있습니다."
+        : exportBlocked ? "MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다."
         : {idle:"3D MV 준비 대기",preparing_audio:"음원 준비 중",rendering:"MP4 렌더링",finishing:"MP4 마무리 중",completed:"MP4 완료",cancelling:"취소 중",cancelled:"취소됨",failed:"MP4 실패",pausing:"MP4 일시 정지 중…",paused:"MP4 일시 정지"}[phase] || "3D MV 준비 대기";
       const frames = count(mp4Status.frames), total = count(mp4Status.total_frames);
       const geometry = integer(mp4Status.width) && integer(mp4Status.height) && mp4Status.width && mp4Status.height ? " · "+mp4Status.width+" × "+mp4Status.height : "";
-      text("mp4-summary",t(label)+(queuePreparing ? "" : (total ? " · "+frames+" / "+total : "")+geometry),false);
+      text("mp4-summary",t(label)+(queuePreparing || exportBlocked ? "" : (total ? " · "+frames+" / "+total : "")+geometry),false);
       const pauseHint = mp4Status.pause_reason === "lifecycle_background" ? "앱으로 돌아오면 이어서 처리합니다."
         : mp4Status.pause_reason === "surface_unavailable" ? "게임 화면이 준비되면 계속할 수 있습니다." : "계속하기를 누르면 이어서 처리합니다.";
-      text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : paused ? t(pauseHint) : phase === "failed" ? plain(mp4Status.error_code,128) : "",false);
+      text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : paused ? t(pauseHint) : phase === "failed" ? plain(mp4Status.error_code,128)
+        : exportBlocked && mp4Status.readiness_error !== "none" ? plain(mp4Status.readiness_error,128)
+        : !active && mp4Status.selected_mv === false && mp4Status.selection_error !== "none" ? plain(mp4Status.selection_error,128) : "",false);
       el("mp4-progress").hidden = queuePreparing || !active && phase !== "completed";
       el("mp4-progress").value = total ? Math.min(1,frames/total) : 0;
       el("mp4-fields").disabled = !mp4OptionsLoaded || mp4Mutating || active;
@@ -1118,8 +1128,11 @@
       const locked = mp4QueuePending || q.command_pending === true || launchFlushing;
       const paused = q.phase === "paused";
       text("mp4-queue-summary",jobs.length ? t(paused ? "큐 일시 정지" : q.running ? "큐 실행 중" : "작업 목록")+" · "+jobs.length+" / 8" : t("등록한 작업이 없습니다."),false);
-      text("mp4-queue-feedback",mp4QueueFeedback ? t(mp4QueueFeedback) : q.error_code && q.error_code !== "none" ? plain(q.error_code,128) : "",false);
-      el("mp4-enqueue").disabled = !mp4OptionsLoaded || Boolean(mp4DraftOptions().error) || locked || q.available !== true || q.running === true || jobs.length >= 8 || mp4Status.ready !== true;
+      text("mp4-queue-feedback",mp4QueueFeedback ? t(mp4QueueFeedback) : q.error_code && q.error_code !== "none" ? plain(q.error_code,128)
+        : q.can_add === false && q.add_error && q.add_error !== "none" ? plain(q.add_error,128) : "",false);
+      const canAdd = Object.prototype.hasOwnProperty.call(q,"can_add") ? q.can_add === true : mp4Status.ready === true;
+      const exportOwnsSource = ["preparing_audio","rendering","finishing","cancelling","pausing","paused"].includes(mp4Status.phase);
+      el("mp4-enqueue").disabled = !mp4OptionsLoaded || Boolean(mp4DraftOptions().error) || locked || mp4Mutating || exportOwnsSource || q.available !== true || q.running === true || jobs.length >= 8 || !canAdd;
       el("mp4-queue-run").disabled = locked || q.available !== true || q.can_run !== true || q.running === true || !pending;
       el("mp4-queue-pause").hidden = q.running !== true || paused;
       el("mp4-queue-pause").disabled = locked;
@@ -1202,7 +1215,8 @@
         mp4Feedback = "";
       } catch (error) {
         if (visible && !disposed && visibility === visibilityVersion && action !== "status")
-          mp4Feedback = error.code === "mp4_scene_not_ready" ? "3D MV 재생 화면에서 다시 시도해 주세요." : error.code === "mp4_busy" ? "다른 MP4 작업을 마친 뒤 다시 시도해 주세요." : "MP4 기능을 사용할 수 없습니다.";
+          mp4Feedback = error.code === "mp4_scene_not_ready" ? (mp4SelectedMV() ? "MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다." : "3D MV 재생 화면에서 다시 시도해 주세요.")
+            : error.code === "mp4_busy" ? "다른 MP4 작업을 마친 뒤 다시 시도해 주세요." : "MP4 기능을 사용할 수 없습니다.";
       } finally {
         mp4Pending = false;mp4Mutating = false;if (!disposed) renderMP4();
       }
