@@ -43,7 +43,7 @@ Api api(){Api a{};
  a.capture_slot=[](void*,void*old,void*replacement){assert(live&&held);if(image.captured_wrapper!=old)return false;image.captured_wrapper=replacement;++slot_writes;return true;};
  a.export_capture_owned=[](void*,void*p){return !foreign&&p==ptr(7);};
  a.capture_unreferenced=[](void*,void*){return !external_alias;};
- a.preserve_detached_capture=[](void*,void*p){assert(p==ptr(5));if(!preservation_ready)return false;++preserved;return true;};
+ a.preserve_detached_capture=[](void*,void*p){assert(p==ptr(5)||p==ptr(7));if(!preservation_ready)return false;++preserved;return true;};
  a.destroy_capture=[](void*,void*p){assert(p==ptr(7)&&!foreign);++destroyed_capture;return true;};
  a.destroy_texture=[](void*,Texture&t){assert(t.object==ptr(6));++destroyed_rt;t={};return true;};
  a.retain=[](void*p){if(root_fail)return uint32_t(0);const auto n=++roots;assert(n<32);tokens[n]=n;token_values[n]=reinterpret_cast<uintptr_t>(p);return uint32_t(n);};
@@ -81,9 +81,24 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
  done=true;assert(s.prepare()==Result::ok&&s.ready()&&slot_writes==1&&!image.captured_wrapper&&retired==1);
  assert(s.prepare()==Result::ok&&copies==1&&slot_writes==1);
  if(mode=="preserve_detached_wait"){live=false;s.abandon();preservation_ready=false;assert(s.release()==Result::waiting&&!destroyed_rt&&!preserved);preservation_ready=true;assert(s.release()==Result::ok&&preserved==1&&destroyed_rt==1);return 0;}
+ if(mode=="observed_then_handoff"||mode=="observed_handoff_alias"||mode=="observed_handoff_transfer_wait"){
+  image.captured_wrapper=ptr(7);assert(s.observe_export_capture(ptr(7))==Result::ok);
+  assert(s.observe_export_capture(ptr(7))==Result::ok);
+  live=false;s.abandon();
+  if(mode!="observed_then_handoff")external_alias=true;
+  if(mode=="observed_handoff_transfer_wait"){
+   preservation_ready=false;assert(s.release()==Result::waiting&&!destroyed_capture&&!destroyed_rt);
+   preservation_ready=true;
+  }
+  assert(s.release()==Result::ok&&preserved==(external_alias?2:1)&&destroyed_capture==(external_alias?0:1)&&destroyed_rt==1&&release_roots==roots);return 0;
+ }
  if(mode=="source_lost_ready"){live=false;s.abandon();assert(s.release()==Result::ok&&slot_writes==1&&destroyed_rt==1);return 0;}
  if(mode=="restore_owed"){assert(s.release()==Result::invalid&&!destroyed_rt);s.abandon();assert(s.release()==Result::ok);return 0;}
  image.target_wrapper=ptr(9);image.target=final_target;image.captured_wrapper=ptr(7);
+ if(mode=="observed_root_failure"){
+  root_fail=true;assert(s.observe_export_capture(ptr(7))==Result::failed);
+  root_fail=false;assert(s.observe_export_capture(ptr(7))==Result::ok);
+ }
  if(mode=="foreign_capture")foreign=true;
  if(mode=="foreign_capture"){assert(s.restore()==Result::stale&&slot_writes==1&&copies==1);s.abandon();assert(s.release()==Result::ok&&!destroyed_capture);return 0;}
  if(mode=="restore_shape")++image.target.descriptor.width;
@@ -115,7 +130,7 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];
     assert proc.returncode==0,proc.stdout+proc.stderr
     return binary
 
-@pytest.mark.parametrize('mode',['normal','missing_api','msaa','memoryless','pending_capture','root_failure','before_prepare_cancel','allocation_failure','shape_changed','copy_throws','start_wait','source_lost_copying','source_lost_ready','restore_owed','foreign_capture','restore_shape','restore_start_wait','changed_after_restore_copy','changed_wrapper_after_copy','bad_begin_ticket','complete_wait','second_job','external_identical_alias','preserve_detached_wait','final_checkpoint_image_change','final_checkpoint_slot_change'])
+@pytest.mark.parametrize('mode',['normal','missing_api','msaa','memoryless','pending_capture','root_failure','before_prepare_cancel','allocation_failure','shape_changed','copy_throws','start_wait','source_lost_copying','source_lost_ready','restore_owed','foreign_capture','restore_shape','restore_start_wait','changed_after_restore_copy','changed_wrapper_after_copy','bad_begin_ticket','complete_wait','second_job','external_identical_alias','preserve_detached_wait','final_checkpoint_image_change','final_checkpoint_slot_change','observed_then_handoff','observed_handoff_alias','observed_handoff_transfer_wait','observed_root_failure'])
 def test_shipping_paused_frame_copy_protocol(paused_frame,mode):
     result=subprocess.run([str(paused_frame),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

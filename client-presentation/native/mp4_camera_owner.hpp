@@ -2338,8 +2338,10 @@ struct Api {
  // Independent retained-resource proof covers global/material/UI aliases,
  // including a superseding identical write that preserves the private image.
  bool(*capture_unreferenced)(void*,void*)=nullptr;
- // On source handoff, transfer the detached ORIGINAL screenshot wrapper and
- // its native/GC preservation duty to a real retirement owner. No old fields.
+ // On source handoff, transfer either the detached ORIGINAL screenshot or
+ // this job's observed private capture and its native/GC duty to a real
+ // retirement owner. The callback distinguishes actual retained provenance;
+ // it must not discover an old controller's current fields after handoff.
  bool(*preserve_detached_capture)(void*,void*)=nullptr;
  // Destroy requires this transaction's actual GPU and alias retirement proof.
  bool(*destroy_capture)(void*,void*)=nullptr;bool(*destroy_texture)(void*,Texture&)=nullptr;
@@ -2354,7 +2356,9 @@ class Scope {
  Result fail(Result r,const char*s){error_=s;return r;}
  bool keep(void*object){if(!object)return true;for(size_t i=0;i<root_count_;++i)if(roots_[i].object==object)return api_.retained(roots_[i].handle)==object;
   if(root_count_==10)return false;
-  auto&r=roots_[root_count_++];r.object=object;r.handle=api_.retain(object);return r.handle&&api_.retained(r.handle)==object;}
+  const uint32_t handle=api_.retain(object);
+  if(!handle||api_.retained(handle)!=object){if(handle)api_.release_root(handle);return false;}
+  roots_[root_count_++]={object,handle};return true;}
  bool current()const{if(!captured_||abandoned_||!api_.thread()||!api_.current(ctx_,epoch_,job_))return false;
   for(size_t i=0;i<root_count_;++i)if(!roots_[i].handle||api_.retained(roots_[i].handle)!=roots_[i].object)return false;
   return true;}
@@ -2388,9 +2392,9 @@ public:
   if(!complete()||!api_.thread()||!api_.current(ctx,epoch,job)||!api_.held(ctx))return fail(Result::unsupported,"paused_frame_api_or_phase");
   if(!api_.image(ctx,&saved_)||!saved_.controller||!saved_.camera||!saved_.target_wrapper||!saved_.capture_idle||!usable(saved_.target))
    return fail(Result::unsupported,"paused_frame_source_image");
-  captured_=true;
   for(void*object:{saved_.controller,saved_.camera,saved_.target_wrapper,saved_.target.object,saved_.captured_wrapper})
    if(!keep(object))return fail(Result::failed,"paused_frame_source_root");
+  captured_=true;
   return current()?Result::ok:fail(Result::stale,"paused_frame_source_changed");
  }
  // Must finish before source geometry can destroy target98 or CaptureRequest
@@ -2416,6 +2420,19 @@ public:
   if(!current()||!api_.capture_slot(ctx_,saved_.captured_wrapper,nullptr))return fail(Result::stale,"paused_frame_capture_detach");
   slot_detached_=true;return Result::ok;
  }
+ // Called immediately by the real capture-production owner, including a
+ // partially completed original request. Never defer discovery until restore:
+ // a source handoff may happen first. This receipt is not a capture-pass or
+ // GPU completion receipt and cannot authorize destruction on its own.
+ Result observe_export_capture(void*wrapper){
+  if(!wrapper||wrapper==saved_.captured_wrapper)return fail(Result::invalid,"paused_frame_private_capture_identity");
+  if(!current()||!api_.held(ctx_)||(!slot_detached_&&!restore_started_))return fail(Result::stale,"paused_frame_private_capture_phase");
+  if(export_capture_&&export_capture_!=wrapper)return fail(Result::stale,"paused_frame_private_capture_replaced");
+  if(!api_.export_capture_owned(ctx_,wrapper))return fail(Result::stale,"paused_frame_private_capture_provenance");
+  export_capture_=wrapper; // Retain cleanup duty even if this extra root fails.
+  if(!keep(wrapper))return fail(Result::failed,"paused_frame_private_capture_root");
+  return Result::ok;
+ }
  // Called after the original saved geometry has been recreated, while held.
  Result restore(){
   if(restored_)return Result::ok;
@@ -2437,8 +2454,10 @@ public:
   if(!restore_started_){
    if(now.captured_wrapper&&now.captured_wrapper!=saved_.captured_wrapper&&!api_.export_capture_owned(ctx_,now.captured_wrapper))
     return fail(Result::stale,"paused_frame_foreign_capture");
-   export_capture_=now.captured_wrapper==saved_.captured_wrapper?nullptr:now.captured_wrapper;
-   if(!keep(export_capture_)||!keep(now.target.object))return fail(Result::failed,"paused_frame_restore_root");
+   if(now.captured_wrapper&&now.captured_wrapper!=saved_.captured_wrapper){
+    const Result observed=observe_export_capture(now.captured_wrapper);if(observed!=Result::ok)return observed;
+   }
+   if(!keep(now.target.object))return fail(Result::failed,"paused_frame_restore_root");
    restored_target_=now.target;restored_wrapper_=now.target_wrapper;
    // Clear only the captured slot actually owned by this transaction. Keep
    // its native image alive until the real copy fence retires.
@@ -2477,8 +2496,12 @@ public:
    if(saved_.captured_wrapper&&!api_.preserve_detached_capture(ctx_,saved_.captured_wrapper))return Result::waiting;
    slot_detached_=false;
   }
-  if(export_capture_&&(!api_.capture_unreferenced(ctx_,export_capture_)||!api_.destroy_capture(ctx_,export_capture_)))return Result::waiting;
-  export_capture_=nullptr;
+  if(export_capture_){
+   if(!api_.capture_unreferenced(ctx_,export_capture_)){
+    if(!abandoned_||!api_.preserve_detached_capture(ctx_,export_capture_))return Result::waiting;
+   }else if(!api_.destroy_capture(ctx_,export_capture_))return Result::waiting;
+   export_capture_=nullptr;
+  }
   if(backup_.object&&!api_.destroy_texture(ctx_,backup_))return Result::waiting;
   for(size_t i=0;i<root_count_;++i){if(roots_[i].handle)api_.release_root(roots_[i].handle);roots_[i]={};}
   *this=Scope{};return Result::ok;
