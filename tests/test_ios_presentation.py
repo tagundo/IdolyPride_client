@@ -25,6 +25,8 @@ SCENE_APPENDED += ('mp4_proflare_start','mp4_proflare_enable','mp4_proflare_disa
 SCENE_APPENDED += ('mp4_monitor_tv_update_texture','mp4_monitor_tv_disable')
 SCENE_APPENDED += ('mp4_monitor_image_apply','mp4_monitor_graphic_rebuild')
 SCENE_APPENDED += ('mp4_monitor_pool_get','mp4_monitor_pool_release','mp4_monitor_pool_clear')
+SCENE_APPENDED += ('mp4_video_prepare_frame','mp4_video_process_frame')
+SCENE_SOURCE_ONLY = set()
 SCENE_APPENDED += ('mp4_video_mixer_create', 'mp4_video_playable_create', 'mp4_video_playable_destroy', 'mp4_video_update', 'mp4_video_sync', 'mp4_video_set_skip', 'mp4_video_set_wait_first', 'mp4_video_set_play_on_awake', 'mp4_video_set_loop', 'mp4_video_set_time', 'mp4_video_set_external_reference_time', 'mp4_video_step', 'mp4_video_loop', 'mp4_video_prepared', 'mp4_video_seek', 'mp4_video_error', 'mp4_video_frame_ready', 'mp4_video_image_enable', 'mp4_video_image_late')
 
 
@@ -164,9 +166,9 @@ def test_original_cache_conditional_gateway_executes_both_paths(item_pointer):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "246b64171b065d16c86a94850adbed427b0959c5d7e2151953cf1889e6e6c860"
+    assert hashlib.sha256(header).hexdigest() == "f3b04228764ee2a7da999218b64ff4c96c6590e646e2cd1c8d969d270b4a4209"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 244 and len(plan["entries"]) == 169
+    assert len(profile["aliases"]) == 246 and len(plan["entries"]) == 171
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -195,7 +197,9 @@ def test_scene_origin_and_source_factory_observers_arm_before_font_startup():
     hooks = re.findall(r"HOOK\((\w+),", installer.split("Hook hooks[]={", 1)[1].split("};", 1)[0])
     early = ["mp4_scene_shader_loaded", "mp4_scene_shader_unloaded", "mp4_scene_shader_bundle_unload",
              "mp4_scene_shader_load", "mp4_shader_memory_sync", "mp4_shader_memory_async",
-             "mp4_shader_file_async", "mp4_shader_bundle_result", "mp4_source_timeline_factory"]
+             "mp4_shader_file_async", "mp4_shader_bundle_result", "mp4_control_create",
+             "mp4_animation_root_factory", "mp4_animation_clips_factory", "mp4_animation_infinite_factory",
+             "mp4_animation_clip_factory", "mp4_animation_interval_add", "mp4_source_timeline_factory"]
     assert hooks[:len(early)] == early
     assert hooks.index("mp4_source_timeline_factory") < hooks.index("font_awake")
     publication = installer[installer.index("// All originals are valid"):]
@@ -206,13 +210,15 @@ def test_scene_origin_and_source_factory_observers_arm_before_font_startup():
 def test_two_new_gateways_preserve_every_previous_profile_byte_and_mapping():
     profile, plan = p.load_profile(), p.make_plan()
     appended=('mp4_native_time','mp4_brain_update','mp4_shader_set','mp4_shader_reset','mp4_actor_process','mp4_actor_burst',*SCENE_APPENDED)
-    assert set(appended).issubset(profile['hook_names'])
+    assert (set(appended) - SCENE_SOURCE_ONLY).issubset(profile['hook_names'])
+    assert SCENE_SOURCE_ONLY.isdisjoint(profile['hook_names'])
     old = copy.deepcopy(profile)
     for name in appended:
         del old['aliases'][name]
-        old['hook_names'].remove(name)
-    old['gateway_region']['bytes'] -= len(appended)*32
-    old['slot_region']['bytes'] -= len(appended)*8
+        if name not in SCENE_SOURCE_ONLY:old['hook_names'].remove(name)
+    hook_count = len(appended) - len(SCENE_SOURCE_ONLY)
+    old['gateway_region']['bytes'] -= hook_count*32
+    old['slot_region']['bytes'] -= hook_count*8
     del old['native_relay_region']
     del old['native_extra_relay_regions']
     import json
@@ -438,8 +444,8 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 169 * 32
-    assert profile["slot_region"]["bytes"] == 169 * 8
+    assert profile["gateway_region"]["bytes"] == 171 * 32
+    assert profile["slot_region"]["bytes"] == 171 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
@@ -470,8 +476,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 169 * 32
-    assert original["slot_region"]["bytes"] == 169 * 8
+    assert original["gateway_region"]["bytes"] == 171 * 32
+    assert original["slot_region"]["bytes"] == 171 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length
@@ -549,8 +555,10 @@ def test_in_place_requires_explicit_boolean_and_owned_bytearray_before_validatio
 def test_new_stage_and_fixed_aliases_preserve_previous_sixty_two_mappings():
     profile,plan=p.load_profile(),p.make_plan();old=copy.deepcopy(profile)
     for name in SCENE_APPENDED:
-        del old['aliases'][name];old['hook_names'].remove(name)
-    old['gateway_region']['bytes']-=len(SCENE_APPENDED)*32;old['slot_region']['bytes']-=len(SCENE_APPENDED)*8
+        del old['aliases'][name]
+        if name not in SCENE_SOURCE_ONLY:old['hook_names'].remove(name)
+    hook_count = len(SCENE_APPENDED) - len(SCENE_SOURCE_ONLY)
+    old['gateway_region']['bytes']-=hook_count*32;old['slot_region']['bytes']-=hook_count*8
     del old['native_extra_relay_regions']
     import json
     assert hashlib.sha256((json.dumps(old,indent=2)+'\n').encode()).hexdigest()=='60ecc264edd253ed482519c1035264647c8e67b960fe5b3b99e1c909d9a309b0'
@@ -565,7 +573,21 @@ def test_new_stage_and_fixed_aliases_preserve_previous_sixty_two_mappings():
     assert profile['aliases']['mp4_particle_simulate']['native_abi']=='void(void*,float,bool,bool,bool,const MethodInfo*)'
 
 
-@pytest.mark.parametrize('alias', list(SCENE_APPENDED))
+def test_video_frame_callbacks_and_update_observer_keep_actual_typed_roles():
+    profile, plan = p.load_profile(), p.make_plan()
+    assert 'mp4_video_update' in profile['hook_names']
+    assert 'mp4_video_update' in plan['entries']
+    assert profile['aliases']['mp4_video_update']['name'].endswith('.UpdateVideo')
+    for name, count in (('mp4_video_prepare_frame', 2), ('mp4_video_process_frame', 3)):
+        row = profile['aliases'][name]
+        assert row['parameter_count'] == count
+        assert [param['type_name'] for param in row['parameters'][:2]] == [
+            'UnityEngine.Playables.Playable', 'UnityEngine.Playables.FrameData']
+        assert 'Playable16,FrameData64' in row['native_abi']
+        assert name in plan['entries']
+
+
+@pytest.mark.parametrize('alias', [name for name in SCENE_APPENDED if name not in SCENE_SOURCE_ONLY])
 def test_selected_stage_and_fixed_gateways_preserve_actual_native_argument_registers(alias):
     """Execute packaged replacement dispatch with real pointer/float ABI lanes."""
     unicorn=pytest.importorskip('unicorn')
@@ -614,7 +636,7 @@ def test_required_child_native_roles_extend_only_ios_and_keep_exact_relay_order(
     import json
     profile = p.load_profile()
     android = json.loads((p.PROFILE.parent.parent / 'native/profile.json').read_text())
-    assert len(android['aliases']) == 250
+    assert len(android['aliases']) == 252
     relays = p._profile_native_relays(profile)
     assert len(relays) == 15
     assert relays[0]['rva'] == 0x8610a44 and relays[-1]['rva'] + 8 == 0x8610abc

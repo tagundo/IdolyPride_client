@@ -4825,6 +4825,65 @@
         "pointer_table": "0x9a33128",
         "pointer_slot": "0x9b85518"
       }
+    },
+    "mp4_video_process_frame": {
+      "name": "Solis.Timeline.SolisVideoPlayerTrackBehaviour.ProcessFrame",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23114,
+      "metadata_method_index": 158835,
+      "token_row": 818,
+      "rva": 116792288,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "playable",
+          "metadata_type_index": 68357,
+          "type_name": "UnityEngine.Playables.Playable"
+        },
+        {
+          "name": "info",
+          "metadata_type_index": 57437,
+          "type_name": "UnityEngine.Playables.FrameData"
+        },
+        {
+          "name": "playerData",
+          "metadata_type_index": 66318,
+          "type_name": "System.Object"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 198,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175299032,
+      "prefix16": "fa67bba9f85f01a9f65702a9f44f03a9",
+      "native_abi": "void(void*,Playable16,FrameData64,void*,const MethodInfo*)"
+    },
+    "mp4_video_prepare_frame": {
+      "name": "Solis.Timeline.SolisVideoPlayerTrackBehaviour.PrepareFrame",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23114,
+      "metadata_method_index": 158834,
+      "token_row": 817,
+      "rva": 116791548,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "playable",
+          "metadata_type_index": 68357,
+          "type_name": "UnityEngine.Playables.Playable"
+        },
+        {
+          "name": "info",
+          "metadata_type_index": 57437,
+          "type_name": "UnityEngine.Playables.FrameData"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 198,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175299024,
+      "prefix16": "e923ba6dfa6701a9f85f02a9f65703a9",
+      "native_abi": "void(void*,Playable16,FrameData64,const MethodInfo*)"
     }
   },
   "hook_names": [
@@ -4978,7 +5037,6 @@
     "mp4_video_mixer_create",
     "mp4_video_playable_create",
     "mp4_video_playable_destroy",
-    "mp4_video_update",
     "mp4_video_sync",
     "mp4_video_set_skip",
     "mp4_video_set_wait_first",
@@ -4996,7 +5054,10 @@
     "mp4_video_image_late",
     "mp4_monitor_pool_get",
     "mp4_monitor_pool_release",
-    "mp4_monitor_pool_clear"
+    "mp4_monitor_pool_clear",
+    "mp4_video_process_frame",
+    "mp4_video_prepare_frame",
+    "mp4_video_update"
   ],
   "segments": {
     "__TEXT": {
@@ -5038,12 +5099,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 5408,
+    "bytes": 5472,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 1352,
+    "bytes": 1368,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {

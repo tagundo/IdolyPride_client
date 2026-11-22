@@ -21,7 +21,7 @@ def test_pinned_profile_matches_original_function_bytes():
         entry_size, count = struct.unpack_from("<HH", data, 54)
         segments = [struct.unpack("<II6Q", os.pread(source.fileno(), 56, offset + i * entry_size)) for i in range(count)]
         aliases = profile["aliases"]
-        assert len(aliases) == 250
+        assert len(aliases) == 252
         # The additional fresh-builder observer is an engine-native role;
         # Android managed registration/profile entries remain unchanged.
         assert "mp4_animation_binding_build" not in aliases

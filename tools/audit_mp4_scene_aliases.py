@@ -110,6 +110,8 @@ SELECTIONS={'mp4_context_submit':('UnityEngine.Rendering.ScriptableRenderContext
     'mp4_actor_eye_late':('VL.VLActorEye','LateUpdate',0),'mp4_actor_face_late':('VL.VLActorFaceTargetCorrection','LateUpdate',0),
     'mp4_actor_foot_apply':('VL.VLActorFootShadow','ApplyJob',0)}
 SELECTIONS.update({
+ 'mp4_video_process_frame':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'ProcessFrame', 3, ('UnityEngine.Playables.Playable', 'UnityEngine.Playables.FrameData', 'System.Object')),
+ 'mp4_video_prepare_frame':('Solis.Timeline.SolisVideoPlayerTrackBehaviour', 'PrepareFrame', 2, ('UnityEngine.Playables.Playable', 'UnityEngine.Playables.FrameData')),
  'mp4_capture_request':('VL.Rendering.VLSRPCameraController','CaptureRequest',0),
  'mp4_capture_update':('VL.Rendering.VLSRPCameraController','UpdateCapturedTexture',0),
  'mp4_capture_wrapper_ctor':('VL.VLRenderTexture','.ctor',2,tuple(TYPED_PARAMETERS['mp4_capture_wrapper_ctor'])),
@@ -152,6 +154,8 @@ SELECTIONS.update({
 })
 # Typed Video Timeline/decoder observations from both immutable originals.
 TYPED_PARAMETERS.update({
+ 'mp4_video_process_frame':['UnityEngine.Playables.Playable', 'UnityEngine.Playables.FrameData', 'System.Object'],
+ 'mp4_video_prepare_frame':['UnityEngine.Playables.Playable', 'UnityEngine.Playables.FrameData'],
  'mp4_video_mixer_create':['UnityEngine.Playables.PlayableGraph', 'UnityEngine.GameObject', 'System.Int32'],
  'mp4_video_playable_create':['UnityEngine.Playables.Playable'],
  'mp4_video_playable_destroy':['UnityEngine.Playables.Playable'],
@@ -173,6 +177,8 @@ TYPED_PARAMETERS.update({
  'mp4_video_image_late':[],
 })
 TYPED_ABIS.update({
+ 'mp4_video_process_frame':'void(void*,Playable16,FrameData64,void*,const MethodInfo*)',
+ 'mp4_video_prepare_frame':'void(void*,Playable16,FrameData64,const MethodInfo*)',
  'mp4_video_mixer_create':'Playable16(void*,PlayableGraph16,void*,int32_t,const MethodInfo*)',
  'mp4_video_playable_create':'void(void*,Playable16,const MethodInfo*)',
  'mp4_video_playable_destroy':'void(void*,Playable16,const MethodInfo*)',
@@ -418,7 +424,7 @@ def stripped(profile,platform):
     for alias in (*SELECTIONS,*DERIVED_ALIASES):
         if alias in old['aliases']:
             del old['aliases'][alias]
-            if platform=='ios':
+            if platform=='ios' and alias in old['hook_names']:
                 old['hook_names'].remove(alias);old['gateway_region']['bytes']-=32;old['slot_region']['bytes']-=8
     if platform=='ios':
         for alias in ANIMATION_ALIASES:
@@ -464,7 +470,10 @@ def profiles(originals):
                 old['native_extra_relay_regions']=[r for r in old['native_extra_relay_regions']if r['name']==FIXED_ALIAS]
         for alias in (*SELECTIONS,*DERIVED_ALIASES):
             row=derive(original,platform,alias)
-            if alias in old['aliases']:assert old['aliases'][alias]==row,(platform,alias,old['aliases'][alias],row)
+            if alias in old['aliases']:
+                assert old['aliases'][alias]==row,(platform,alias,old['aliases'][alias],row)
+                if platform=='ios' and alias not in old['hook_names']:
+                    old['hook_names'].append(alias);old['gateway_region']['bytes']+=32;old['slot_region']['bytes']+=8
             else:
                 old['aliases'][alias]=row
                 if platform=='ios':old['hook_names'].append(alias);old['gateway_region']['bytes']+=32;old['slot_region']['bytes']+=8
