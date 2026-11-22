@@ -48,6 +48,39 @@ def test_old_bridge_receipt_cannot_replace_current_common_cache_code(tmp_path, m
         candidate.validate_library(library, plan, source_root=root)
 
 
+@pytest.mark.parametrize("size", [2 * 1024**2 + 1, 4 * 1024**2])
+def test_large_generated_bridge_keeps_exact_source_hash_validation(tmp_path, monkeypatch, size):
+    root, library, plan, receipt = library_fixture(tmp_path, monkeypatch)
+    name = "client-presentation/native/bridge.cpp"
+    path = root / name
+    path.write_bytes(b"A" * size)
+    receipt["source_sha256"][name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    library.with_suffix(".build.json").write_text(json.dumps(receipt))
+    assert candidate.validate_library(library, plan, source_root=root)["fresh_source_build"]
+    with path.open("r+b") as output:
+        output.seek(size - 1)
+        output.write(b"B")
+    with pytest.raises(ValueError, match="sources changed"):
+        candidate.validate_library(library, plan, source_root=root)
+
+
+@pytest.mark.parametrize("name,size", [
+    ("client-presentation/native/bridge.cpp", 4 * 1024**2 + 1),
+    ("client-presentation/native/shared_cache_core.hpp", 2 * 1024**2 + 1),
+    ("client-presentation/ios/bridge.cpp", 2 * 1024**2 + 1),
+    ("client-presentation/native/other/bridge.cpp", 2 * 1024**2 + 1),
+])
+def test_generated_bridge_exception_does_not_widen_other_source_limits(tmp_path, monkeypatch, name, size):
+    root, library, plan, receipt = library_fixture(tmp_path, monkeypatch)
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"A" * size)
+    receipt["source_sha256"][name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    library.with_suffix(".build.json").write_text(json.dumps(receipt))
+    with pytest.raises(ValueError, match="Input exceeds size bound"):
+        candidate.validate_library(library, plan, source_root=root)
+
+
 @pytest.mark.parametrize("mutation", [
     lambda receipt: receipt["source_sha256"].pop("client-presentation/native/shared_cache_hooks.hpp"),
     lambda receipt: receipt.update(profile_header_sha256="b" * 64),

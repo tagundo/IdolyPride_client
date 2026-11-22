@@ -83,8 +83,12 @@ def validate_library(library, plan, *, source_root=ROOT):
                 and type(wanted) is str and re.fullmatch("[0-9a-f]{64}", wanted),
                 "Presentation source receipt path differs")
         path = source_root / name
+        # The generated bridge translation unit contains the finite native
+        # adapters; every other checked source retains its existing limit.
+        maximum = (4 * 1024**2 if name == "client-presentation/native/bridge.cpp"
+                   else 2 * 1024**2)
         require(path.resolve().is_relative_to(source_root)
-                and sha_file(path, 2 * 1024**2) == wanted,
+                and sha_file(path, maximum) == wanted,
                 "Presentation sources changed after native compilation")
     image = audit_macho(library, "device", require_signature=True, maximum=MAX_LIBRARY)
     require(len(image["slices"]) == 1
