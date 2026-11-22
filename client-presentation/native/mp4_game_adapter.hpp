@@ -178,7 +178,7 @@ public:
     GameAdapter& operator=(const GameAdapter&)=delete;
     bool set_api(Api api) { if(manual_||audio_request_||audio_bundle_||audio_clip_)return false;api_=api;return true; }
     bool set_api(Api api,Layout layout) { if(!set_api(api))return false;layout_=layout;return true; }
-    bool install_fresh_audio_validation(void*context,const char*(*check)(void*,void*)){
+    bool install_fresh_audio_validation(void*context,const char*(*check)(void*,void*,float*)){
         if(manual_||!context||!check)return false;
         fresh_audio_context_=context;fresh_audio_check_=check;return true;
     }
@@ -423,7 +423,7 @@ private:
     Result fail(Result code,const char* message) { error_=message;return code; }
     bool valid_api() const;
     Result snapshot_selected(Snapshot& output);
-    Result append_track(void* track,const char* track_name,AudioProgram& output);
+    Result append_track(void* track,const char* track_name,AudioProgram& output,float mixer_gain=1);
     Result collect_audio_tracks(void* timeline,double duration,AudioProgram& output);
     void drop_audio_scope();
     bool audio_scope_current(void* timeline) const;
@@ -461,7 +461,7 @@ private:
     AudioClipProgram expected_audio_{};
     uint32_t camera_timeline_director_=0,camera_timeline_asset_=0,camera_timeline_track_=0;
     uint64_t camera_scope_identity_=0;
-    struct AudioScope {uint32_t director=0,asset=0,track=0,source=0;const char* name=nullptr;float source_gain=0;};
+    struct AudioScope {uint32_t director=0,asset=0,track=0,source=0;const char* name=nullptr;float source_gain=0,mixer_gain=1;};
     AudioScope audio_scope_[idoly_mp4_timeline_audio::max_audio_tracks]{};
     size_t audio_scope_count_=0;double audio_scope_duration_=0;
     struct SnapshotAttempt {
@@ -488,7 +488,7 @@ private:
     bool automatic_=false,automatic_geometry_restored_=true,fresh_=false,fresh_playing_=false,complete_audio_=false;
     uint64_t fresh_capture_sequence_=0;
     void*fresh_audio_context_=nullptr;
-    const char*(*fresh_audio_check_)(void*,void*)=nullptr;
+    const char*(*fresh_audio_check_)(void*,void*,float*)=nullptr;
     bool shader_lease_active_=false;
     bool shader_lease_superseded_=false;
     idoly_mp4_playback::Scope<PlayableGraph> automatic_scope_;
@@ -592,7 +592,7 @@ inline void* GameAdapter::resolve_selected_player(bool require_ready,void** mode
     if(data)*data=selected_data;
     return player;
 }
-inline Result GameAdapter::append_track(void* track,const char* track_name,AudioProgram& output) {
+inline Result GameAdapter::append_track(void* track,const char* track_name,AudioProgram& output,float mixer_gain) {
     void* props=field<void*>(track,layout_.audio_track_properties);
     if(!type(props,"UnityEngine.Timeline.AudioMixerProperties"))return fail(Result::invalid,"invalid_audio_track_properties");
     const float gain=field<float>(props,layout_.properties_gain);
@@ -640,7 +640,7 @@ inline Result GameAdapter::append_track(void* track,const char* track_name,Audio
             blend_in=field<double>(clip,layout_.clip_blend_in),blend_out=field<double>(clip,layout_.clip_blend_out);
         entry.loop=field<uint8_t>(asset,layout_.audio_asset_loop)!=0;
         entry.muted=muted;
-        entry.track_gain=gain;entry.source_gain=source_gain;entry.stereo_pan=pan;entry.spatial_blend=spatial;
+        entry.track_gain=gain;entry.source_gain=source_gain*mixer_gain;entry.stereo_pan=pan;entry.spatial_blend=spatial;
         entry.clip_gain=clip_gain;
         entry.samples=api_.audio_clip_samples(audio,nullptr);
         entry.channels=api_.audio_clip_channels(audio,nullptr);
@@ -726,11 +726,13 @@ inline Result GameAdapter::collect_audio_tracks(void* timeline,double duration,A
         void* source=api_.director_get_binding(ref.director,ref.track,nullptr);
         if(complete_audio_&&source!=get(std::strcmp(ref.name,"BGM")==0?bgm_source_:voice_source_))
             return fail(Result::unsupported,"selected_audio_binding_mismatch");
+        scope.mixer_gain=1;
         if(complete_audio_){
             if(!source||!fresh_audio_check_)return fail(Result::unsupported,"fresh_audio_source_verifier_missing");
-            if(const char*error=fresh_audio_check_(fresh_audio_context_,source))return fail(Result::unsupported,error);
+            if(const char*error=fresh_audio_check_(fresh_audio_context_,source,&scope.mixer_gain))return fail(Result::unsupported,error);
             scope.source_gain=api_.audio_source_get_volume(source,nullptr);
-            if(!std::isfinite(scope.source_gain)||scope.source_gain<0||scope.source_gain>1)
+            if(!std::isfinite(scope.source_gain)||scope.source_gain<0||scope.source_gain>1
+                ||!std::isfinite(scope.mixer_gain)||scope.mixer_gain<0||!std::isfinite(scope.source_gain*scope.mixer_gain))
                 return fail(Result::unsupported,"fresh_audio_source_gain_invalid");
         }
         if(source&&(!type(source,"UnityEngine.AudioSource")||!live(source)))
@@ -739,7 +741,7 @@ inline Result GameAdapter::collect_audio_tracks(void* timeline,double duration,A
         else drop(scope.source); // Explicitly unbound is different from a lost retained source.
         if(api_.director_get_binding(ref.director,ref.track,nullptr)!=source)
             return fail(Result::stale,"selected_audio_binding_changed");
-        const Result appended=append_track(ref.track,ref.name,output);
+        const Result appended=append_track(ref.track,ref.name,output,scope.mixer_gain);
         if(appended!=Result::ok)return appended;
     }
     return output.count?Result::ok:fail(Result::unsupported,"selected_music_not_found");
@@ -756,7 +758,9 @@ inline bool GameAdapter::audio_scope_current(void* timeline) const {
             ||(scope.source&&(!get(scope.source)||!live(get(scope.source))))
             ||!scope.name||std::strcmp(ref.name,scope.name))return false;
         if(complete_audio_){
-            if(!fresh_audio_check_||fresh_audio_check_(fresh_audio_context_,get(scope.source)))return false;
+            float mixer_gain=1;
+            if(!fresh_audio_check_||fresh_audio_check_(fresh_audio_context_,get(scope.source),&mixer_gain)
+                ||!std::isfinite(mixer_gain)||mixer_gain<0||std::fabs(mixer_gain-scope.mixer_gain)>1e-6f)return false;
             const float gain=api_.audio_source_get_volume(get(scope.source),nullptr);
             if(!std::isfinite(gain)||std::fabs(gain-scope.source_gain)>1e-6f)return false;
         }

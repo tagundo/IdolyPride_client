@@ -5,7 +5,7 @@
   "bootstrap_unity_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
   "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
   "uuid": "cd2fb04c5a5b3c298383bbc20b923b91",
-  "profile_sha256": "9ca80b8802e138e30047cace2d0ce44ef5e452c2a1a23ffebfc768eeaf96186d",
+  "profile_sha256": "720032331d9300b003993d98d0fc1678ef309772072f0c33a9c8b4f493779dc7",
   "hook_names": [
     "q_set",
     "q_apply",
@@ -178,7 +178,10 @@
     "mp4_video_process_frame",
     "mp4_video_prepare_frame",
     "mp4_video_update",
-    "mp4_video_behaviour_play"
+    "mp4_video_behaviour_play",
+    "mp4_timeline_play",
+    "mp4_reset_actor_model",
+    "mp4_director_play"
   ],
   "entries": {
     "q_set": {
@@ -1960,7 +1963,37 @@
       "patched_entry": "fd9ba014",
       "gateway_hex": "30a000901042389110fedfc8500000b400021fd6f657bda9fe635f17",
       "registration_pointer_slot": 175299088
+    },
+    "mp4_timeline_play": {
+      "rva": 129794564,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158897616,
+      "slot": 179887640,
+      "original_callable": 158897636,
+      "patched_entry": "f3046f14",
+      "gateway_hex": "30a000901062389110fedfc8500000b400021fd6f657bda908fb9017",
+      "registration_pointer_slot": 175853072
+    },
+    "mp4_reset_actor_model": {
+      "rva": 117366236,
+      "original16": "ff8301d1f65703a9f44f04a9fd7b05a9",
+      "gateway": 158897648,
+      "slot": 179887648,
+      "original_callable": 158897668,
+      "patched_entry": "056e9e14",
+      "gateway_hex": "30a000901082389110fedfc8500000b400021fd6ff8301d1f6916117",
+      "registration_pointer_slot": 175321128
+    },
+    "mp4_director_play": {
+      "rva": 126471904,
+      "original16": "f44fbea9fd7b01a9fd430091138401b0",
+      "gateway": 158897680,
+      "slot": 179887656,
+      "original_callable": 158897700,
+      "patched_entry": "ccb17b14",
+      "gateway_hex": "30a0009010a2389110fedfc8500000b400021fd6f44fbea92f4e8417",
+      "registration_pointer_slot": 175705256
     }
   },
-  "profile_header_sha256": "c594e50131bc72476f85899a2ca52bf8f829adbc20e46765f7ef08f48e222f62"
+  "profile_header_sha256": "58532ccb2a282e49fe16fef236ddb6c501f0c99007a189d907f9ad4ca6f5b2b8"
 }

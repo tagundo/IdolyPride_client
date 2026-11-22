@@ -60,19 +60,19 @@ bool mp4_android_managed_source_prepare(const Image&){return mode!="managed_prep
 bool mp4_child_native_install_android(){return mp4_source_verified&&mode.rfind("director_",0)!=0;}
 bool mp4_capture_native_install_android(){return mp4_source_verified&&mode!="capture_native";}
 bool mp4_audio_native_install_android(){return mp4_source_verified&&mode!="audio_native";}
-namespace mp4_bootstrap {struct Pin{uintptr_t rva;};constexpr size_t managed_source_count=21;
+namespace mp4_bootstrap {struct Pin{uintptr_t rva;};constexpr size_t managed_source_count=24;
 const Pin*android_managed_source_pin(size_t i){static const Pin p[]={// SOURCE_ROWS
-};return i<21?&p[i]:nullptr;}}
+};return i<24?&p[i]:nullptr;}}
 bool source_failure(size_t i,const char*stage){return mode==std::string("source_")+stage+"_"+std::to_string(i);}
 void*publish(uintptr_t address,void**original){assert(original&&!*original);*original=reinterpret_cast<void*>(address+1);void*stub=reinterpret_cast<void*>(address+2);stub_targets[stub]=address;live_hooks.insert(address);return stub;}
 struct Backend{
- void*stubs[21]{};
+ void*stubs[24]{};
  bool install(size_t i,uintptr_t replacement,void**original){assert(replacement);++backend_calls[mp4_bootstrap::android_managed_source_pin(i)->rva];if(source_failure(i,"before"))return false;stubs[i]=publish(image_base+mp4_bootstrap::android_managed_source_pin(i)->rva,original);return !source_failure(i,"after");}
  void*installed_stub(size_t i){return stubs[i];}
 }mp4_managed_source_backend;
 void*shadowhook_hook_func_addr(void*target,void*replacement,void**original){assert(target&&replacement);const auto address=reinterpret_cast<uintptr_t>(target);++ordinary_calls[address];if((mode=="primary_hook"&&address==image_base+pin::q_set.rva)||(mode=="selection_hook"&&address==image_base+pin::mp4_photography_initialize.rva)||(mode=="optional_hook"&&address==image_base+pin::mp4_volume_update.rva)||(mode=="clock_hook"&&address==mp4_native_base+256)||(mode=="fixed_hook"&&address==mp4_native_base+512))return nullptr;return publish(address,original);}
 int shadowhook_unhook(void*stub){if(stub)live_hooks.erase(stub_targets.at(stub));return 0;}
-bool mp4_record_managed_hook(const pin::Entry*entry,void*stub,void**original,void*replacement){assert(entry&&stub&&original&&*original&&replacement);if((mode=="primary_receipt"&&entry==&pin::q_set)||(mode=="optional_receipt"&&entry==&pin::mp4_volume_update))return false;for(size_t i=0;i<21;++i)if(source_failure(i,"after")&&entry->rva==mp4_bootstrap::android_managed_source_pin(i)->rva)return false;++mp4_managed_hook_count;return true;}
+bool mp4_record_managed_hook(const pin::Entry*entry,void*stub,void**original,void*replacement){assert(entry&&stub&&original&&*original&&replacement);if((mode=="primary_receipt"&&entry==&pin::q_set)||(mode=="optional_receipt"&&entry==&pin::mp4_volume_update))return false;for(size_t i=0;i<24;++i)if(source_failure(i,"after")&&entry->rva==mp4_bootstrap::android_managed_source_pin(i)->rva)return false;++mp4_managed_hook_count;return true;}
 bool mp4_scene_shader_frontends_current(){return mode!="scene_frontends";}
 bool mp4_scene_shader_origin_install(){return mode!="scene_origin";}
 bool mp4_capture_queue_frontends_bind(const pin::Entry&,const pin::Entry&){return mode!="queue_bind";}
@@ -117,7 +117,7 @@ int main(int argc,char**argv){assert(argc==2);mode=argv[1];
   assert(live_hooks.count(image_base+entry->rva));assert(ordinary_calls[image_base+entry->rva]==1);
  }
  assert(mp4_photography_initialize_original&&mp4_photography_player_initialize_original&&mp4_presenter_update_original&&mp4_presenter_end_original);
- for(size_t i=0;i<21;++i){const auto rva=mp4_bootstrap::android_managed_source_pin(i)->rva;
+ for(size_t i=0;i<24;++i){const auto rva=mp4_bootstrap::android_managed_source_pin(i)->rva;
   if(source_failure(i,"after")){assert(ordinary_calls[image_base+rva]==0);assert(backend_calls[rva]==1);assert(live_hooks.count(image_base+rva));}
   if(source_failure(i,"before")){assert(ordinary_calls[image_base+rva]==1);assert(backend_calls[rva]==1);assert(live_hooks.count(image_base+rva));}
  }

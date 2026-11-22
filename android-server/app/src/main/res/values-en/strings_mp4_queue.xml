@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="mp4_queue_hint">Open an MV and add it to the queue. Songs, cast, outfits and graphics settings are saved for sequential export.</string>
+    <string name="mp4_queue_hint">Export saved queue entries without playing the MV again.</string>
+    <string name="mp4_queue_ready">The saved queue is ready to export.</string>
     <string name="mp4_queue_add">Add current MV to queue</string>
     <string name="mp4_queue_run">Start export queue</string>
     <string name="mp4_queue_pause">Pause queue</string>

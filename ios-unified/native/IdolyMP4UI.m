@@ -200,7 +200,6 @@ static IDMP4Progress *IDMP4ActiveProgress;
     CGFloat scale = MIN(64.0,MAX(16.0,MAX(window.bounds.size.width,window.bounds.size.height)*0.0105))/16.0;
     _panel = [UIView new]; _panel.translatesAutoresizingMaskIntoConstraints = NO;
     _panel.backgroundColor = UIColor.secondarySystemBackgroundColor;
-    _panel.layer.cornerRadius = 12*scale; _panel.layer.shadowOpacity = 0.2f; _panel.layer.shadowRadius = 6*scale;
     _panel.accessibilityIdentifier = @"idoly.mp4-progress";
     _label = [UILabel new]; _label.numberOfLines = 2;
     _label.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline]
@@ -231,15 +230,16 @@ static IDMP4Progress *IDMP4ActiveProgress;
     [_panel addSubview:stack]; [window addSubview:_panel];
     UILayoutGuide *safe = window.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [_panel.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12*scale],
-        [_panel.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12*scale],
-        [_panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:safe.leadingAnchor constant:12*scale],
-        [_panel.widthAnchor constraintLessThanOrEqualToConstant:440*scale],
-        [stack.topAnchor constraintEqualToAnchor:_panel.topAnchor constant:12*scale],
-        [stack.bottomAnchor constraintEqualToAnchor:_panel.bottomAnchor constant:-8*scale],
-        [stack.leadingAnchor constraintEqualToAnchor:_panel.leadingAnchor constant:12*scale],
-        [stack.trailingAnchor constraintEqualToAnchor:_panel.trailingAnchor constant:-12*scale]]];
-    NSLayoutConstraint *width = [_panel.widthAnchor constraintEqualToConstant:360*scale]; width.priority = UILayoutPriorityDefaultHigh; width.active = YES;
+        [_panel.topAnchor constraintEqualToAnchor:window.topAnchor],
+        [_panel.bottomAnchor constraintEqualToAnchor:window.bottomAnchor],
+        [_panel.leadingAnchor constraintEqualToAnchor:window.leadingAnchor],
+        [_panel.trailingAnchor constraintEqualToAnchor:window.trailingAnchor],
+        [stack.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor],
+        [stack.centerYAnchor constraintEqualToAnchor:safe.centerYAnchor],
+        [stack.leadingAnchor constraintGreaterThanOrEqualToAnchor:safe.leadingAnchor constant:12*scale],
+        [stack.trailingAnchor constraintLessThanOrEqualToAnchor:safe.trailingAnchor constant:-12*scale],
+        [stack.widthAnchor constraintLessThanOrEqualToConstant:440*scale]]];
+    NSLayoutConstraint *width = [stack.widthAnchor constraintEqualToConstant:360*scale]; width.priority = UILayoutPriorityDefaultHigh; width.active = YES;
     __weak IDMP4Progress *weakSelf = self;
     _timer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) { (void)timer; [weakSelf tick]; }];
     [self tick];
@@ -289,6 +289,11 @@ static IDMP4Progress *IDMP4ActiveProgress;
         if (owner.queueMode) {
             owner.label.numberOfLines = 3;
             owner.label.text = [owner.label.text stringByAppendingFormat:@"\n%@ · %lu / %lu MV",IDMP4Text(@"작업 목록",@"処理リスト",@"Queue"),(unsigned long)done,(unsigned long)[result[@"jobs"] count]];
+            NSString *preparationError=[result[@"error_code"]isKindOfClass:NSString.class]?result[@"error_code"]:nil;
+            if([status[@"phase"]isEqual:@"failed"]&&preparationError.length&&![preparationError isEqual:@"none"]&&[preparationError isEqual:status[@"error_code"]]){
+                owner.label.numberOfLines=4;
+                owner.label.text=[NSString stringWithFormat:@"%@\n%@\n%@",IDMP4Text(@"MP4 실패",@"MP4に失敗",@"MP4 failed"),preparationError,IDMP4Text(@"MP4 마무리 중",@"MP4を仕上げ中",@"Finalizing MP4")];
+            }
             [owner.button setTitle:owner.terminal ? IDMP4Text(@"닫기",@"閉じる",@"Close") : IDMP4Text(@"숨기기",@"非表示",@"Hide") forState:UIControlStateNormal];
         }
         owner.progress.progress = total ? (float)MIN(1.0,(double)frames/(double)total) : 0;

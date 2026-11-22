@@ -511,6 +511,8 @@
   Object.assign(UI_TRANSLATIONS.ja, {"콘솔": "コンソール", "유저 관리": "ユーザー管理", "콘텐츠": "コンテンツ", "그래픽": "グラフィック", "설정 분류": "設定カテゴリ", "서버 메뉴 안내": "サーバーメニューの使い方", "서버 연결·자료 검사·진단": "接続・データ検査・診断", "모두 활성화": "すべて有効", "모두 비활성화": "すべて無効", "모시코이 여러 이벤트 선택": "もし恋イベントの複数選択", "이벤트별 기간 조정": "イベント別の期間設定", "설정할 계정 종류": "設定するアカウント種別", "여러 이벤트를 한 번에 선택할 수 있습니다. 끄더라도 저장된 진행은 유지됩니다.": "複数のイベントを一度に選べます。無効にしても保存済みの進行は保持します。", "감상 계정은 처음에 지원되는 모시코이를 모두 활성화합니다. 원하는 이벤트만 남기거나 모두 끌 수 있습니다.": "鑑賞アカウントは最初から対応するもし恋をすべて有効にします。必要なイベントのみ残したり、すべて無効にしたりできます。", "최신 설정에 선택한 변경을 합쳐 저장합니다.": "最新の設定に選択した変更を反映して保存します。"});
   Object.assign(UI_TRANSLATIONS.en, {"도움말": "Help", "감상 계정은 처음에 모든 이벤트가 켜집니다.": "Viewing accounts start with all events enabled.", "끄더라도 진행은 유지됩니다.": "Disabling keeps saved progress.", "일본 공식 계정 가져오기는 현재 작동하지 않습니다.": "Japanese official account import is currently unavailable.", "검사 후 가져오기를 눌러야 계정이 바뀝니다.": "The account changes only after you choose Import.", "현재 적용: ": "Active: ", "현재 적용: 대기": "Active: waiting", "다음 실행: ": "Next start: ", "다음 실행: 대기": "Next start: waiting"});
   Object.assign(UI_TRANSLATIONS.ja, {"도움말": "ヘルプ", "감상 계정은 처음에 모든 이벤트가 켜집니다.": "鑑賞アカウントは最初からすべてのイベントが有効です。", "끄더라도 진행은 유지됩니다.": "無効にしても進行は保持します。", "일본 공식 계정 가져오기는 현재 작동하지 않습니다.": "日本公式アカウントの取り込みは現在利用できません。", "검사 후 가져오기를 눌러야 계정이 바뀝니다.": "検査後に「取り込み」を押すまでアカウントは変更しません。", "현재 적용: ": "適用中: ", "현재 적용: 대기": "適用中: 待機", "다음 실행: ": "次回起動: ", "다음 실행: 대기": "次回起動: 待機"});
+  Object.assign(UI_TRANSLATIONS.en, {"목록에 보관한 MV는 다시 재생하지 않고 내보낼 수 있습니다.": "Export saved queue entries without playing the MV again.", "저장된 목록을 내보낼 수 있습니다.": "The saved queue is ready to export."});
+  Object.assign(UI_TRANSLATIONS.ja, {"목록에 보관한 MV는 다시 재생하지 않고 내보낼 수 있습니다.": "保存したリストのMVは、再生し直さずに書き出せます。", "저장된 목록을 내보낼 수 있습니다.": "保存したリストを書き出せます。"});
   const integer = value => Number.isSafeInteger(value) && value >= 0;
   const choice = (value, values) => values.includes(value);
   const exact = (value, keys) => object(value) && Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
@@ -1035,18 +1037,21 @@
       const queuePreparing = (mp4QueueStatus.running === true || mp4QueueStatus.command_pending === true)
         && ["","idle","completed","failed","cancelled"].includes(phase || "");
       const selectedMV = mp4SelectedMV();
-      const exportBlocked = selectedMV && mp4Status.ready !== true && !active && phase !== "completed" && phase !== "failed";
+      const queuedReady = !queueOwnsScene && !active && (!phase || phase === "idle")
+        && mp4QueueStatus.can_run === true && mp4QueueStatus.jobs.some(job => job.state === "pending");
+      const exportBlocked = !queuedReady && selectedMV && mp4Status.ready !== true && !active && phase !== "completed" && phase !== "failed";
       const label = queuePreparing ? "게임 화면을 준비하고 있습니다."
+        : queuedReady ? "저장된 목록을 내보낼 수 있습니다."
         : exportBlocked ? "MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다."
         : {idle:"3D MV 준비 대기",preparing_audio:"음원 준비 중",rendering:"MP4 렌더링",finishing:"MP4 마무리 중",completed:"MP4 완료",cancelling:"취소 중",cancelled:"취소됨",failed:"MP4 실패",pausing:"MP4 일시 정지 중…",paused:"MP4 일시 정지"}[phase] || "3D MV 준비 대기";
       const frames = count(mp4Status.frames), total = count(mp4Status.total_frames);
       const geometry = integer(mp4Status.width) && integer(mp4Status.height) && mp4Status.width && mp4Status.height ? " · "+mp4Status.width+" × "+mp4Status.height : "";
-      text("mp4-summary",t(label)+(queuePreparing || exportBlocked ? "" : (total ? " · "+frames+" / "+total : "")+geometry),false);
+      text("mp4-summary",t(label)+(queuePreparing || queuedReady || exportBlocked ? "" : (total ? " · "+frames+" / "+total : "")+geometry),false);
       const pauseHint = mp4Status.pause_reason === "lifecycle_background" ? "앱으로 돌아오면 이어서 처리합니다."
         : mp4Status.pause_reason === "surface_unavailable" ? "게임 화면이 준비되면 계속할 수 있습니다." : "계속하기를 누르면 이어서 처리합니다.";
       text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : paused ? t(pauseHint) : phase === "failed" ? plain(mp4Status.error_code,128)
         : exportBlocked && mp4Status.readiness_error !== "none" ? plain(mp4Status.readiness_error,128)
-        : !active && mp4Status.selected_mv === false && mp4Status.selection_error !== "none" ? plain(mp4Status.selection_error,128) : "",false);
+        : !queuedReady && !active && mp4Status.selected_mv === false && mp4Status.selection_error !== "none" ? plain(mp4Status.selection_error,128) : "",false);
       el("mp4-progress").hidden = queuePreparing || !active && phase !== "completed";
       el("mp4-progress").value = total ? Math.min(1,frames/total) : 0;
       el("mp4-fields").disabled = !mp4OptionsLoaded || mp4Mutating || active;

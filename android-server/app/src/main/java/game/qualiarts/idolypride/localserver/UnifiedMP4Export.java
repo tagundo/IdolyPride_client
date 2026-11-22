@@ -338,6 +338,19 @@ public final class UnifiedMP4Export {
             result.put("queue_add_error", addError.matches("[A-Za-z0-9_]{1,96}") ? addError : "unknown");
             String queueError = queue.optString("error_code", "unknown");
             result.put("queue_error_code", queueError.matches("[A-Za-z0-9_]{1,96}") ? queueError : "unknown");
+            String queuePhase = queue.optString("phase", "unknown");
+            result.put("queue_phase", queuePhase.matches("[A-Za-z0-9_]{1,96}") ? queuePhase : "unknown");
+            JSONArray jobStates = new JSONArray();
+            for (int index = 0; jobs != null && index < Math.min(8, jobs.length()); index++) {
+                JSONObject job = jobs.optJSONObject(index);
+                if (job == null) continue;
+                String stateCode = job.optString("state", "unknown");
+                String failureCode = job.optString("error_code", "unknown");
+                jobStates.put(new JSONObject().put("position", index)
+                        .put("state", stateCode.matches("[A-Za-z0-9_]{1,96}") ? stateCode : "unknown")
+                        .put("error_code", failureCode.matches("[A-Za-z0-9_]{1,96}") ? failureCode : "unknown"));
+            }
+            result.put("queue_job_states", jobStates);
             String storageStage = queue.optString("storage_stage", "none");
             if (java.util.Arrays.asList("none", "allocate_state", "allocate_store", "allocate_wire",
                     "open_temp", "stat_temp", "write_temp", "sync_temp", "validate_temp",
@@ -438,7 +451,8 @@ public final class UnifiedMP4Export {
     }
     static boolean busy() {
         String phase = last.optString("phase", "idle");
-        return pending != null || pendingQueueRun || phase.equals("preparing_audio") || phase.equals("rendering")
+        return pending != null || pendingQueueRun || lastQueue.optBoolean("running") || lastQueue.optBoolean("command_pending")
+                || phase.equals("preparing_audio") || phase.equals("rendering")
                 || phase.equals("finishing") || phase.equals("cancelling")
                 || phase.equals("pausing") || phase.equals("paused");
     }
@@ -507,7 +521,8 @@ public final class UnifiedMP4Export {
         observeGameOwner(activity);
         restoreCompleted(activity);
         LinearLayout bar = new LinearLayout(activity); bar.setOrientation(LinearLayout.VERTICAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL); bar.setBackgroundColor(0xe6222630);
+        bar.setGravity(Gravity.CENTER_VERTICAL); bar.setBackgroundColor(0xff222630);
+        bar.setOnClickListener(view -> { /* Export controls own input while the internal scene is rendered. */ });
         int padding = Math.round(10 * activity.getResources().getDisplayMetrics().density);
         bar.setPadding(padding, padding / 2, padding, padding / 2);
         TextView message = new TextView(activity); message.setTextColor(Color.WHITE); message.setTextSize(14);
@@ -522,7 +537,7 @@ public final class UnifiedMP4Export {
         Button save = new Button(activity); save.setText(R.string.mp4_save); actions.addView(save, new LinearLayout.LayoutParams(0, -2, 1));
         Button dismiss = new Button(activity); dismiss.setText(R.string.mp4_dismiss);
         dismiss.setOnClickListener(view -> { dismissed = true; bar.setVisibility(View.GONE); }); actions.addView(dismiss, new LinearLayout.LayoutParams(0, -2, 1));
-        FrameLayout.LayoutParams layout = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        FrameLayout.LayoutParams layout = new FrameLayout.LayoutParams(-1, -1, Gravity.BOTTOM);
         activity.addContentView(bar, layout);
         overlay = bar; overlayText = message; overlaySave = save; overlayCancel = stop; overlayPause = pause; overlayDismiss = dismiss; bar.setVisibility(View.GONE);
         // Android views are outside the original Unity render target captured by the exporter.
@@ -707,6 +722,10 @@ public final class UnifiedMP4Export {
         if (saving) return context.getString(R.string.mp4_finishing);
         if (pending != null) return context.getString(R.string.mp4_preparing_audio);
         String phase = last.optString("phase", "idle");
+        String preparationError = lastQueue.optString("error_code", "none");
+        if (phase.equals("failed") && backgroundQueueHasWork() && !preparationError.equals("none")
+                && preparationError.matches("[A-Za-z0-9_]{1,96}") && preparationError.equals(last.optString("error_code")))
+            return context.getString(R.string.mp4_failed, preparationError) + "\n" + context.getString(R.string.mp4_finishing);
         if (backgroundQueueHasWork() && (phase.isEmpty() || phase.equals("idle") || phase.equals("completed")
                 || phase.equals("failed") || phase.equals("cancelled")))
             return context.getString(R.string.mp4_queue_waiting_scene);
@@ -729,6 +748,13 @@ public final class UnifiedMP4Export {
             default:
                 if (hasCompletedOutput()) return context.getString(R.string.mp4_completed);
                 if (!configured) return context.getString(R.string.mp4_unavailable);
+                JSONArray queued = lastQueue.optJSONArray("jobs");
+                if (lastQueue.optBoolean("can_run") && queued != null)
+                    for (int index = 0; index < Math.min(8, queued.length()); index++) {
+                        JSONObject item = queued.optJSONObject(index);
+                        if (item != null && item.optString("state").equals("pending"))
+                            return context.getString(R.string.mp4_queue_ready);
+                    }
                 if (ready()) return context.getString(R.string.mp4_idle);
                 String reason = last.optString("readiness_error");
                 if (selectedMv()) return reason.matches("[A-Za-z0-9_]{1,96}") && !reason.equals("none")

@@ -272,6 +272,84 @@ inline constexpr SourcePcmProfile ios_source_pcm_profile = {
 enum class ListenerResult { ok, waiting, stale, failed, invalid };
 // Read-only admission for the supported direct, two-dimensional Timeline mix.
 // Source volume is captured separately in AudioProgram before output muting.
+// SetupLiveBinder assigns the actual DefaultMixer BGM/Voice groups after the
+// scene's serialized AudioSources load. Both original DefaultMixer assets have
+// one Master -> SE/Voice/BGM hierarchy, unity pitch and no effects/sidechains.
+// The similarly named ADV BGMAudioMixer/VoiceAudioMixer have effects and are
+// deliberately outside this contract. Identity comes from these actual typed
+// original getters; a group name is never sufficient.
+struct DefaultMixerProfile {
+    ListenerBinding mixer, bgm, voice, get_float, group_mixer, volume_from_db;
+};
+// BEGIN_MP4_FRESH_DEFAULT_MIXER_PINS
+inline constexpr DefaultMixerProfile android_default_mixer_profile = {
+    {0x87a394c,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x73,0xc6,0x00,0xb0,0x94,0x8a,0x00,0x90},0x9fbb4c8,217211}, // mixer
+    {0x87a3e98,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x73,0xc6,0x00,0xb0,0x94,0x8a,0x00,0x90},0x9fbb4e8,217215}, // bgm
+    {0x87a4090,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x73,0xc6,0x00,0x90,0x74,0x8a,0x00,0xf0},0x9fbb500,217218}, // voice
+    {0x8f332d0,{0xfe,0x0f,0x1d,0xf8,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x16,0x8a,0x00,0xf0},0xa0187b8,218311}, // get_float
+    {0x8f3337c,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x14,0x8a,0x00,0xf0,0x81,0x02,0x43,0xf9},0xa0187c8,218313}, // group_mixer
+    {0x87a4290,{0xe8,0x0f,0x1e,0xfc,0xfe,0x4f,0x01,0xa9,0x73,0xc5,0x00,0x90,0x68,0x06,0x68,0x39},0x9fbb790,217300}, // volume_from_db
+};
+inline constexpr DefaultMixerProfile ios_default_mixer_profile = {
+    {0x6eddae8,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91},0xa725610,217955}, // mixer
+    {0x6ede2f8,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb4,0xd1,0x01,0xd0},0xa725630,217959}, // bgm
+    {0x6ede6d8,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb4,0xd1,0x01,0xd0},0xa725648,217962}, // voice
+    {0x77e4bb0,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91},0xa7826b8,218858}, // get_float
+    {0x77e4ca4,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xb3,0x89,0x01,0xb0},0xa7826c8,218860}, // group_mixer
+    {0x6edeb58,{0xe9,0x23,0xbd,0x6d,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91},0xa7258d8,218044}, // volume_from_db
+};
+// END_MP4_FRESH_DEFAULT_MIXER_PINS
+struct DefaultMixerApi {
+    void* context = nullptr;
+    bool (*current)(void*) = nullptr;
+    void* (*mixer)(void*) = nullptr;
+    void* (*bgm)(void*) = nullptr;
+    void* (*voice)(void*) = nullptr;
+    void* (*group_mixer)(void*,void*) = nullptr;
+    bool (*get_float)(void*,void*,const char*,float*) = nullptr;
+    // Original Qua.Sound.Utility.VolumeUtility.LoudnessToVolume: original
+    // mute-floor convention, otherwise 10^(dB/20). No private DSP model.
+    float (*volume_from_db)(void*,float) = nullptr;
+    bool valid() const {
+        return current&&mixer&&bgm&&voice&&group_mixer&&get_float&&volume_from_db;
+    }
+};
+inline const char* default_mixer_gain(const DefaultMixerApi& api,void* group,float* gain) noexcept {
+    if(!group||!gain||!api.valid())return "fresh_audio_source_mixer_api_unavailable";
+    try {
+        if(!api.current(api.context))return "fresh_audio_source_mixer_unavailable";
+        void* mixer=api.mixer(api.context);
+        void* bgm=api.bgm(api.context);void* voice=api.voice(api.context);
+        if(!mixer||!bgm||!voice||bgm==voice||api.group_mixer(api.context,group)!=mixer)
+            return "fresh_audio_source_mixer_unsupported";
+        const char* parameter=group==bgm?"BGM_Volume":group==voice?"Voice_Volume":nullptr;
+        if(!parameter)return "fresh_audio_source_mixer_unsupported";
+        float master=0,bus=0;
+        if(!api.get_float(api.context,mixer,"Master_Volume",&master)
+            ||!api.get_float(api.context,mixer,parameter,&bus))
+            return "fresh_audio_source_mixer_parameter_unavailable";
+        // Actual game setters clamp public settings to <= 1, represented as
+        // [-80,0] dB. Reject unsupported gain changes instead of clipping PCM.
+        if(!std::isfinite(master)||master < -80||master>0
+            ||!std::isfinite(bus)||bus < -80||bus>0)
+            return "fresh_audio_source_mixer_gain_unsupported";
+        const float master_gain=api.volume_from_db(api.context,master);
+        const float bus_gain=api.volume_from_db(api.context,bus);
+        if(!std::isfinite(master_gain)||master_gain<0||master_gain>1
+            ||!std::isfinite(bus_gain)||bus_gain<0||bus_gain>1)
+            return "fresh_audio_source_mixer_gain_unsupported";
+        float master_after=0,bus_after=0;
+        if(!api.current(api.context)||api.mixer(api.context)!=mixer
+            ||api.bgm(api.context)!=bgm||api.voice(api.context)!=voice
+            ||api.group_mixer(api.context,group)!=mixer
+            ||!api.get_float(api.context,mixer,"Master_Volume",&master_after)
+            ||!api.get_float(api.context,mixer,parameter,&bus_after)
+            ||master_after!=master||bus_after!=bus)
+            return "fresh_audio_source_mixer_changed";
+        *gain=master_gain*bus_gain;
+        return nullptr;
+    } catch(...) {return "fresh_audio_source_mixer_probe_exception";}
+}
 // A custom mixer, pitch/pan/spatialisation, direct clip or muted/disabled source
 // cannot silently become a different soundtrack in the private PCM mix.
 struct SourcePcmApi {
@@ -285,17 +363,27 @@ struct SourcePcmApi {
     void* (*output_mixer)(void*,void*) = nullptr;
     void* (*clip)(void*,void*) = nullptr;
     bool (*enabled)(void*,void*) = nullptr;
+    // Optional only for direct (null-group) output. A nonnull route requires
+    // exact supported group identity plus its actual live gain.
+    const char* (*mixer_gain)(void*,void*,float*) = nullptr;
     bool valid() const {
         return current&&pitch&&mute&&loop&&spatial_blend&&pan_stereo&&output_mixer&&clip&&enabled;
     }
 };
-inline const char* source_pcm_error(const SourcePcmApi& api,void* source) noexcept {
+inline const char* source_pcm_error(const SourcePcmApi& api,void* source,float* mixer_gain=nullptr) noexcept {
     if (!source || !api.valid()) return "fresh_audio_source_api_unavailable";
     try {
         if (!api.current(api.context,source)) return "fresh_audio_source_unavailable";
         if (!api.enabled(api.context,source)) return "fresh_audio_source_disabled";
         if (api.clip(api.context,source)) return "fresh_audio_source_direct_clip_unsupported";
-        if (api.output_mixer(api.context,source)) return "fresh_audio_source_mixer_unsupported";
+        void* group=api.output_mixer(api.context,source);
+        float route_gain=group?-1.f:1.f;
+        if(group){
+            if(!api.mixer_gain)return "fresh_audio_source_mixer_unsupported";
+            if(const char* error=api.mixer_gain(api.context,group,&route_gain))return error;
+            if(!std::isfinite(route_gain)||route_gain<0||route_gain>1)
+                return "fresh_audio_source_mixer_gain_unsupported";
+        }
         if (api.mute(api.context,source)) return "fresh_audio_source_muted_unsupported";
         if (api.loop(api.context,source)) return "fresh_audio_source_loop_unsupported";
         const float pitch=api.pitch(api.context,source);
@@ -304,7 +392,10 @@ inline const char* source_pcm_error(const SourcePcmApi& api,void* source) noexce
         if (!std::isfinite(spatial) || spatial!=0) return "fresh_audio_source_spatial_unsupported";
         const float pan=api.pan_stereo(api.context,source);
         if (!std::isfinite(pan) || pan!=0) return "fresh_audio_source_pan_unsupported";
-        return api.current(api.context,source) ? nullptr : "fresh_audio_source_changed";
+        if(!api.current(api.context,source)||api.output_mixer(api.context,source)!=group)
+            return "fresh_audio_source_changed";
+        if(mixer_gain)*mixer_gain=route_gain;
+        return nullptr;
     } catch (...) { return "fresh_audio_source_probe_exception"; }
 }
 struct ListenerApi {

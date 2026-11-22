@@ -150,3 +150,22 @@ assert.equal(e.elements.get('mp4-summary').textContent,'MP4 완료 · 100 / 100'
 await sample({phase:'idle',frames:0,total_frames:0},{running:false,command_pending:false,phase:'idle'});
 assert.equal(e.elements.get('mp4-summary').textContent,'3D MV 준비 대기');app.dispose();
 """)
+
+
+def test_saved_runnable_queue_does_not_request_current_mv_playback():
+    run_js(r"""
+const e=environment(),app=api.createSettingsApp(e.scope,e.document,e.timers);
+e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
+e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_status'),{phase:'idle',ready:false,selected_mv:false,selection_error:'selected_mv_not_loaded'});
+e.respond(e.posted.find(x=>x.action==='mp4_queue_status'),{available:true,can_run:true,running:false,phase:'idle',jobs:[{job_id:'a'.repeat(32),state:'pending',title_localizations:{ko:'저장한 곡'},actor_count:3,fps_num:60,width:2880,height:2160}]});await flush();
+assert.equal(e.elements.get('mp4-queue-run').disabled,false);
+assert.equal(e.elements.get('mp4-summary').textContent,'저장된 목록을 내보낼 수 있습니다.');
+assert.equal(e.elements.get('mp4-feedback').textContent,'');
+for(const [language,expected] of [['en','The saved queue is ready to export.'],['ja','保存したリストを書き出せます。']]){
+ e.elements.get('interface_language').value=language;e.elements.get('interface_language').fire('change');await flush();
+ assert.equal(e.elements.get('mp4-summary').textContent,expected);
+}
+app.dispose();
+""")

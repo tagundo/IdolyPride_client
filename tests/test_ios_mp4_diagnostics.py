@@ -70,8 +70,9 @@ static id nativeTrace;static BOOL missingDiagnostics;static int diagnosticSizeMo
 static NSString *nativePhase=@"failed";static id nativeMode=@"fresh_original_scene";
 static size_t statusCopy(char*p,size_t cap){assert(cap==8192);NSData*d=[NSJSONSerialization dataWithJSONObject:@{@"phase":nativePhase,@"pipeline_mode":nativeMode,@"readiness_error":@"native_scene_control_unbound",@"frames":@5,@"path":@"/private/secret"} options:0 error:NULL];assert(d.length<cap);memcpy(p,d.bytes,d.length);return d.length;}
 static size_t diagnosticCopy(char*p,size_t cap){assert(cap==32768);if(diagnosticSizeMode)return cap;NSData*d=[NSJSONSerialization dataWithJSONObject:@{@"export_trace":nativeTrace?:@{}} options:0 error:NULL];assert(d.length<cap);memcpy(p,d.bytes,d.length);return d.length;}
+static size_t queueCopy(char*p,size_t cap){assert(cap==16384);NSMutableArray*jobs=[NSMutableArray new];for(unsigned i=0;i<12;++i)[jobs addObject:@{@"state":@"failed",@"error_code":i?@"/private/error":@"fresh_audio_source_mixer_unsupported",@"job_id":@"private-id",@"path":@"/private/video"}];NSData*d=[NSJSONSerialization dataWithJSONObject:@{@"phase":@"failed",@"error_code":@"fresh_audio_source_mixer_unsupported",@"running":@NO,@"paused":@YES,@"jobs":jobs} options:0 error:NULL];assert(d.length<cap);memcpy(p,d.bytes,d.length);return d.length;}
 static int ready(void){return 0;}
-static void *testDlsym(void*scope,const char*name){(void)scope;if(!strcmp(name,"IDMP4SessionStatus"))return(void*)statusCopy;if(!strcmp(name,"IDMP4SessionReady"))return(void*)ready;if(!strcmp(name,"IDMP4SessionDiagnostics")&&!missingDiagnostics)return(void*)diagnosticCopy;return NULL;}
+static void *testDlsym(void*scope,const char*name){(void)scope;if(!strcmp(name,"IDMP4SessionStatus"))return(void*)statusCopy;if(!strcmp(name,"IDMP4SessionReady"))return(void*)ready;if(!strcmp(name,"IDMP4QueueStatus"))return(void*)queueCopy;if(!strcmp(name,"IDMP4SessionDiagnostics")&&!missingDiagnostics)return(void*)diagnosticCopy;return NULL;}
 #define dlsym testDlsym
 ''' + section + r'''
 int main(int argc,char**argv){@autoreleasepool{
@@ -83,6 +84,9 @@ int main(int argc,char**argv){@autoreleasepool{
  NSDictionary*s=mp4DiagnosticSnapshot(),*trace=s[@"export_trace"];
  assert([s[@"diagnostics_available"]isEqual:@YES]&&[s[@"frames"]isEqual:@5]);assert([trace[@"events"]count]==16);assert([trace[@"events"]firstObject][@"sequence"]&&[[trace[@"events"]firstObject][@"sequence"]isEqual:@5]);
  assert([s[@"pipeline_mode"]isEqual:@"fresh_original_scene"]&&[mp4DiagnosticSaved()[@"latest"][@"pipeline_mode"]isEqual:@"fresh_original_scene"]);
+ assert([s[@"queue_phase"]isEqual:@"failed"]&&[s[@"queue_running"]isEqual:@NO]&&[s[@"queue_job_count"]isEqual:@8]);
+ NSArray*jobStates=s[@"queue_job_states"];assert(jobStates.count==8&&[jobStates[0]count]==3&&[jobStates[0][@"position"]isEqual:@0]);
+ assert([jobStates[0][@"error_code"]isEqual:@"fresh_audio_source_mixer_unsupported"]&&[jobStates[1][@"error_code"]isEqual:@"unknown"]);
  for(id badMode in @[@"unknown",@"/private/secret",@YES,@1,NSNull.null]){nativeMode=badMode;assert(!mp4SessionStatus()[@"pipeline_mode"]);assert(!mp4DiagnosticSummary(@{@"pipeline_mode":badMode})[@"pipeline_mode"]);}
  nativeMode=@"legacy_owned_scene";assert([mp4SessionStatus()[@"pipeline_mode"]isEqual:@"legacy_owned_scene"]);nativeMode=@"fresh_original_scene";
  assert([trace[@"modules"]count]==2&&[trace[@"modules"][@"native_scene_control"]isEqual:@NO]);

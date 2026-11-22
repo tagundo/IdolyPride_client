@@ -910,7 +910,32 @@ static NSDictionary *mp4SessionStatus(void) {
     @synchronized(NSUserDefaults.class){status[@"diagnostic_history"]=mp4DiagnosticSaved();}
     return status;
 }
-static NSDictionary *mp4DiagnosticSnapshot(void) { return mp4SessionStatus(); }
+static NSDictionary *mp4DiagnosticSnapshot(void) {
+    NSMutableDictionary *status=[mp4SessionStatus() mutableCopy];
+    typedef size_t (*Copy)(char *,size_t);
+    Copy copy=(Copy)dlsym(RTLD_DEFAULT,"IDMP4QueueStatus");
+    char buffer[16384]={0};size_t count=copy?copy(buffer,sizeof buffer):0;
+    NSData *bytes=count>0&&count<sizeof buffer?[NSData dataWithBytes:buffer length:count]:nil;
+    id raw=bytes?[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL]:nil;
+    if(![raw isKindOfClass:NSDictionary.class])return status;
+    for(NSString *key in @[@"phase",@"error_code"]){
+        NSString *code=mp4DiagnosticCode(raw[key]);if(code)status[[@"queue_" stringByAppendingString:key]]=code;
+    }
+    for(NSString *key in @[@"running",@"paused"]){
+        id value=raw[key];
+        if([value isKindOfClass:NSNumber.class]&&CFGetTypeID((__bridge CFTypeRef)value)==CFBooleanGetTypeID())
+            status[[@"queue_" stringByAppendingString:key]]=value;
+    }
+    NSArray *jobs=[raw[@"jobs"]isKindOfClass:NSArray.class]?raw[@"jobs"]:@[];
+    NSMutableArray *states=[NSMutableArray new];
+    for(NSUInteger i=0;i<MIN((NSUInteger)8,jobs.count);++i){
+        id job=jobs[i];if(![job isKindOfClass:NSDictionary.class])continue;
+        [states addObject:@{@"position":@(i),@"state":mp4DiagnosticCode(job[@"state"])?:@"unknown",
+            @"error_code":mp4DiagnosticCode(job[@"error_code"])?:@"unknown"}];
+    }
+    status[@"queue_job_count"]=@(MIN((NSUInteger)8,jobs.count));status[@"queue_job_states"]=states;
+    return status;
+}
 // END_IDMP4_DIAGNOSTIC_SANITIZER
 BOOL IdolyEmbeddedServerMP4IsFinishing(void) {
     return [mp4SessionStatus()[@"phase"] isEqual:@"finishing"];

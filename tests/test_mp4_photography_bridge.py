@@ -68,6 +68,9 @@ void mp4_scene_will_change(void*){}
 void mp4_actor_scene_will_change(void*){}
 namespace idoly_mp4_runtime {
 void*normalized=nullptr;
+// This hook fixture has no fresh factory request or export ownership.
+struct FreshFactoryRequest {uint64_t serial=0,identity=0;void*player=nullptr;};
+bool fresh_factory_request(void*,FreshFactoryRequest*out){if(out)*out={};return false;}
 void observe_source_will_change(void*){}
 void observe_source_handoff_failed(void*) noexcept {}
 void observe_presenter_ended(void*p){assert(p==ptr(presenter));order.push_back(6);}

@@ -4911,6 +4911,54 @@
       "registration_pointer_slot_rva": 175299088,
       "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
       "native_abi": "void(void*,Playable16,FrameData64,const MethodInfo*)"
+    },
+    "mp4_timeline_play": {
+      "name": "VL.Timeline.VLTimelineController.Play",
+      "module": "vl-unity.Runtime.dll",
+      "type_definition_index": 28618,
+      "metadata_method_index": 196009,
+      "token_row": 899,
+      "rva": 129794564,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175853072,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_reset_actor_model": {
+      "name": "Solis.Common.Live.SolisLivePlayerBase.ResetActorModel",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23599,
+      "metadata_method_index": 161597,
+      "token_row": 3580,
+      "rva": 117366236,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 132,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175321128,
+      "prefix16": "ff8301d1f65703a9f44f04a9fd7b05a9",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "mp4_director_play": {
+      "name": "UnityEngine.Playables.PlayableDirector.Play",
+      "module": "UnityEngine.DirectorModule.dll",
+      "type_definition_index": 33576,
+      "metadata_method_index": 222546,
+      "token_row": 23,
+      "rva": 126471904,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175705256,
+      "prefix16": "f44fbea9fd7b01a9fd430091138401b0",
+      "native_abi": "void(void*,const MethodInfo*)"
     }
   },
   "hook_names": [
@@ -5085,7 +5133,10 @@
     "mp4_video_process_frame",
     "mp4_video_prepare_frame",
     "mp4_video_update",
-    "mp4_video_behaviour_play"
+    "mp4_video_behaviour_play",
+    "mp4_timeline_play",
+    "mp4_reset_actor_model",
+    "mp4_director_play"
   ],
   "segments": {
     "__TEXT": {
@@ -5127,12 +5178,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 5504,
+    "bytes": 5600,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 1376,
+    "bytes": 1400,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {

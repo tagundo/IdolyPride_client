@@ -34,10 +34,17 @@ inline queue_model::Queue& queue_store(){return queue_owners().store;}
 inline replay_model::Replay& queue_replay(){return queue_owners().replay;}
 inline replay_model::Replay& immediate_replay(){return queue_owners().immediate;}
 static bool fresh_immediate_saved=false,fresh_immediate_started=false,fresh_immediate_failed=false;
+static bool fresh_immediate_cleanup=false;
+static char fresh_immediate_error[192]="none";
+static char fresh_immediate_restore_error[96]="none";
+static uint64_t fresh_immediate_wait_started=0;
 static bool queue_available=false,queue_running=false,queue_paused=false,queue_replay_available=false,
     queue_export_started=false,queue_cancel_requested=false,queue_clock_was_paused=false;
 static bool queue_fresh_origin_saved=false;
 static bool queue_fresh_prepare_failed=false;
+static bool queue_replay_started=false;
+static char queue_prepare_error[65]="none";
+static uint64_t queue_prepare_wait_started=0;
 static bool queue_active_published=false;
 static bool queue_can_run=false,queue_blocked=false;
 static bool queue_pause_pending=false;
@@ -45,7 +52,7 @@ static int queue_exports=-1;
 static char queue_root[path_capacity]{},queue_export_root[path_capacity]{},queue_active_id[33]{},queue_last_added[33]{};
 static char queue_error[65]="none",queue_phase[32]="idle";
 static char queue_published[16384]="{\"schema\":1,\"available\":false,\"command_pending\":false,\"error_code\":\"queue_not_configured\",\"last_added_job_id\":\"\",\"running\":false,\"paused\":false,\"phase\":\"idle\",\"capacity\":8,\"jobs\":[]}";
-static queue_model::Descriptor queue_descriptor_work;
+static queue_model::Descriptor queue_descriptor_work,fresh_factory_descriptor_work;
 struct QueueCandidate {
     queue_model::Descriptor descriptor{};queue_model::Graphics graphics{};
     uint32_t width=0,height=0;
@@ -183,12 +190,37 @@ inline bool fresh_factory_receipt(FreshFactoryReceipt*out){
         ||replay.presenter()!=game.selected_presenter())return false;
     const uint64_t identity=selection.identity(replay.player());
     if(!identity||identity!=replay.ready_identity())return false;
-    *out={replay.ready_load_serial(),identity,replay.presenter(),replay.player()};return out->serial!=0;
+    *out={replay.ready_load_serial(),identity,replay.presenter(),replay.player()};
+    static uint64_t observed_identity=0;
+    if(out->serial&&identity!=observed_identity){observed_identity=identity;diagnostic_event("fresh_factory","load_completed");}
+    return out->serial!=0;
+}
+inline void fresh_factory_dispatched(replay_model::Replay&replay,bool queued){
+    static uint64_t observed_serial[2]{};const auto serial=replay.fresh_dispatch_serial();const size_t index=queued?1:0;
+    if(serial&&serial!=observed_serial[index]){observed_serial[index]=serial;diagnostic_event("fresh_factory","request_returned");}
+}
+inline bool fresh_factory_request(void*player,FreshFactoryRequest*out){
+    if(out)*out={};
+    if(!out||!player||!fresh_scene_installed.load(std::memory_order_acquire))return false;
+    auto&replay=queue_active_id[0]?queue_replay():immediate_replay();
+    const uint64_t identity=selection.identity(player);uint64_t serial=0;
+    if(!identity||selection.selected(player,fresh_factory_descriptor_work)!=Result::ok||!replay.fresh_request(fresh_factory_descriptor_work,identity,&serial))return false;
+    if(!replay.retain_fresh_request_player(player,identity))return false;
+    *out={serial,identity,player};return true;
+}
+inline bool fresh_factory_request_scope(FreshFactoryRequest*out){
+    if(out)*out={};
+    if(!out||!fresh_scene_installed.load(std::memory_order_acquire))return false;
+    auto&replay=queue_active_id[0]?queue_replay():immediate_replay();
+    return replay.fresh_request_scope(&out->serial,&out->identity,&out->player);
 }
 inline void fresh_release_start(){
     if(!queue_active_id[0]){(void)immediate_replay().reset();
-        fresh_immediate_saved=fresh_immediate_started=fresh_immediate_failed=false;}
+        fresh_immediate_saved=fresh_immediate_started=fresh_immediate_failed=fresh_immediate_cleanup=false;}
+    fresh_immediate_wait_started=0;
 }
+inline const char* fresh_start_error(){return strcmp(fresh_immediate_error,"none")?fresh_immediate_error:fresh_scene_error("fresh_prepare_failed");}
+inline const char* fresh_start_restore_error(){return fresh_immediate_restore_error;}
 inline Result fresh_prepare_start(){
     if(!fresh_scene_installed.load(std::memory_order_acquire))return Result::ok;
     // Queue Run already saved the origin and completed this exact factory load.
@@ -196,17 +228,32 @@ inline Result fresh_prepare_start(){
     auto&replay=immediate_replay();
     pthread_mutex_lock(&control_mutex);const bool cancelled=cancel_pending;pthread_mutex_unlock(&control_mutex);
     if(cancelled||fresh_immediate_failed){
+        if(cancelled&&!fresh_immediate_cleanup)snprintf(fresh_immediate_restore_error,sizeof(fresh_immediate_restore_error),"none");
         if(replay.active()){replay.cancel();replay.tick(milliseconds());if(replay.active())return Result::waiting;}
         if(!replay.settle_failure())return Result::waiting;
-        if(fresh_immediate_saved){
+        if(fresh_immediate_cleanup){
             const Result restored=fresh_scene_api.finish(fresh_scene_api.context);
             if(restored==Result::waiting)return Result::waiting;
+            if(restored!=Result::ok)snprintf(fresh_immediate_restore_error,sizeof(fresh_immediate_restore_error),"%s",fresh_scene_error("fresh_logical_restore_failed"));
         }
         fresh_release_start();return Result::failed;
     }
     if(!fresh_immediate_saved){
+        // A rejecting producer may already own a logical origin or mute
+        // lease. Its terminal result still owes the real finish join.
+        if(!fresh_immediate_cleanup){snprintf(fresh_immediate_error,sizeof(fresh_immediate_error),"none");snprintf(fresh_immediate_restore_error,sizeof(fresh_immediate_restore_error),"none");}
+        fresh_immediate_cleanup=true;
         const Result saved=fresh_scene_api.save_origin(fresh_scene_api.context);
-        if(saved!=Result::ok)return saved;
+        if(saved==Result::waiting){
+            const uint64_t now=milliseconds();if(!fresh_immediate_wait_started)fresh_immediate_wait_started=now;
+            if(now>=fresh_immediate_wait_started&&now-fresh_immediate_wait_started>15000){
+                snprintf(fresh_immediate_error,sizeof(fresh_immediate_error),"fresh_origin_save_timeout");fresh_immediate_failed=true;
+                publish_prestart_failure(fresh_immediate_error);}
+            return Result::waiting;
+        }
+        fresh_immediate_wait_started=0;
+        if(saved!=Result::ok){snprintf(fresh_immediate_error,sizeof(fresh_immediate_error),"%s",fresh_scene_error("fresh_origin_not_ready"));
+            fresh_immediate_failed=true;publish_prestart_failure(fresh_immediate_error);return Result::waiting;}
         fresh_immediate_saved=true;
     }
     void*player=game.selected_player(),*presenter=game.selected_presenter();
@@ -214,14 +261,22 @@ inline Result fresh_prepare_start(){
     if(player&&presenter&&identity&&selection.selected(player,queue_descriptor_work)==Result::ok)
         (void)replay.observe(presenter,player,queue_descriptor_work,identity);
     if(!fresh_immediate_started){
-        if(!player||!identity)return Result::waiting;
-        if(selection.selected(player,queue_descriptor_work)!=Result::ok)return Result::waiting;
+        const Result selected=player&&identity?selection.selected(player,queue_descriptor_work):Result::waiting;
+        if(selected!=Result::ok){
+            const uint64_t now=milliseconds();if(!fresh_immediate_wait_started)fresh_immediate_wait_started=now;
+            if(selected!=Result::waiting||(now>=fresh_immediate_wait_started&&now-fresh_immediate_wait_started>15000)){
+                snprintf(fresh_immediate_error,sizeof(fresh_immediate_error),"%s",selected==Result::waiting?"fresh_selected_source_timeout":selection.error());
+                fresh_immediate_failed=true;publish_prestart_failure(fresh_immediate_error);}
+            return Result::waiting;
+        }
+        fresh_immediate_wait_started=0;
         if(!queue_replay_available||!replay.begin(queue_descriptor_work,milliseconds(),true)){
-            fresh_immediate_failed=true;return Result::waiting;}
+            snprintf(fresh_immediate_error,sizeof(fresh_immediate_error),"%s",replay.error());
+            fresh_immediate_failed=true;publish_prestart_failure(fresh_immediate_error);return Result::waiting;}
         fresh_immediate_started=true;
     }
-    replay.tick(milliseconds());
-    if(replay.phase()==replay_model::Phase::failed){fresh_immediate_failed=true;return Result::waiting;}
+    replay.tick(milliseconds());fresh_factory_dispatched(replay,false);
+    if(replay.phase()==replay_model::Phase::failed){snprintf(fresh_immediate_error,sizeof(fresh_immediate_error),"%s",replay.error());fresh_immediate_failed=true;publish_prestart_failure(fresh_immediate_error);return Result::waiting;}
     FreshFactoryReceipt value{};return fresh_factory_receipt(&value)?Result::ok:Result::waiting;
 }
 inline void queue_set_error(const char* value){snprintf(queue_error,sizeof(queue_error),"%s",value?value:"queue_failed");}
@@ -408,11 +463,6 @@ inline void queue_process(const QueueRequest& request){
     if(request.kind==QueueCommandKind::run||request.kind==QueueCommandKind::resume){
         if(native_scene_required&&!native_scene_installed&&!fresh_scene_available&&!queue_active_id[0]){queue_set_error("offline_pipeline_not_verified");return;}
         if(!queue_replay_available){queue_set_error("replay_api_unavailable");return;}
-        if(fresh_scene_installed.load(std::memory_order_acquire)&&!queue_active_id[0]&&queue_has_pending()){
-            const Result saved=fresh_scene_api.save_origin(fresh_scene_api.context);
-            if(saved!=Result::ok&&saved!=Result::waiting){queue_set_error(fresh_scene_error("fresh_origin_not_ready"));return;}
-            queue_fresh_origin_saved=saved==Result::ok;
-        }
         if(queue_active_id[0]){const auto* active=queue_store().find(queue_active_id);if(active&&active->state==queue_model::State::paused&&!queue_record(queue_store().resume(queue_active_id)))return;}
         queue_running=true;queue_paused=false;resume();
         snprintf(queue_phase,sizeof(queue_phase),"waiting_for_scene");return;
@@ -456,8 +506,29 @@ inline void queue_release_attempt(){
     if(queue_graphics_apply)queue_graphics_apply(nullptr);
     queue_replay().reset();queue_active_id[0]=0;queue_export_started=queue_cancel_requested=false;
     queue_fresh_origin_saved=false;
-    queue_fresh_prepare_failed=false;
+    queue_fresh_prepare_failed=queue_replay_started=false;queue_prepare_wait_started=0;
+    snprintf(queue_prepare_error,sizeof(queue_prepare_error),"none");
     queue_observed_identity=queue_observed_generation=0;queue_observed_player=queue_observed_presenter=nullptr;
+}
+inline void queue_preparation_failure(const char*error){
+    if(queue_fresh_prepare_failed)return;
+    queue_fresh_prepare_failed=true;
+    snprintf(queue_prepare_error,sizeof(queue_prepare_error),"%s",error&&strcmp(error,"none")?error:"queued_mv_prepare_failed");
+    queue_set_error(queue_prepare_error);
+    const auto*entry=queue_store().find(queue_active_id);
+    publish_prestart_failure(queue_prepare_error,entry?entry->output_id:nullptr);
+    pthread_mutex_lock(&control_mutex);
+    if(entry&&!strcmp(pending_queue_output,entry->output_id)){
+        pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;
+    }
+    pthread_mutex_unlock(&control_mutex);
+}
+inline bool queue_prepare_wait(const char*phase_name,const char*timeout){
+    snprintf(queue_phase,sizeof(queue_phase),"%s",phase_name);
+    const uint64_t now=milliseconds();
+    if(!queue_prepare_wait_started)queue_prepare_wait_started=now;
+    if(now>=queue_prepare_wait_started&&now-queue_prepare_wait_started>15000){queue_preparation_failure(timeout);return false;}
+    return true;
 }
 inline void queue_execute(){
     pthread_mutex_lock(&control_mutex);const bool suspended=requested_pause_reason!=IDMP4_PAUSE_NONE,session_busy=control_busy;pthread_mutex_unlock(&control_mutex);
@@ -465,10 +536,17 @@ inline void queue_execute(){
     // original screen or advancing an export remains gated below.
     if(queue_blocked){if(!busy_stage()&&!session_busy&&queue_graphics_apply)queue_graphics_apply(nullptr);return;}
     if(queue_fresh_prepare_failed&&queue_active_id[0]&&!queue_export_started){
-        if(fresh_scene_api.finish(fresh_scene_api.context)==Result::waiting){
-            snprintf(queue_phase,sizeof(queue_phase),"restoring_selection");return;}
-        if(!queue_record(queue_store().fail(queue_active_id,"queued_mv_prepare_failed")))return;
-        queue_release_attempt();queue_running=false;queue_set_error("queued_mv_prepare_failed");return;
+        if(queue_replay().active()){queue_replay().cancel();queue_replay().tick(milliseconds());
+            if(queue_replay().active()){snprintf(queue_phase,sizeof(queue_phase),"draining_navigation");return;}}
+        if(!queue_replay().settle_failure()){snprintf(queue_phase,sizeof(queue_phase),"draining_navigation");return;}
+        if(fresh_scene_installed.load(std::memory_order_acquire)){
+            const Result restored=fresh_scene_api.finish(fresh_scene_api.context);
+            if(restored==Result::waiting){snprintf(queue_phase,sizeof(queue_phase),"restoring_selection");return;}
+            if(restored!=Result::ok){snprintf(job.status.restoration_error,sizeof(job.status.restoration_error),"%s",fresh_scene_error("fresh_logical_restore_failed"));publish();}
+        }
+        if(!queue_record(queue_store().fail(queue_active_id,queue_prepare_error)))return;
+        queue_set_error(queue_prepare_error);queue_release_attempt();queue_running=false;
+        snprintf(queue_phase,sizeof(queue_phase),"failed");return;
     }
     if(queue_cancel_requested&&queue_active_id[0]&&!queue_export_started){
         queue_replay().tick(milliseconds());
@@ -490,51 +568,56 @@ inline void queue_execute(){
         if(!queue_record(result))return;
         queue_release_attempt();
     }
-    if(suspended||queue_paused){queue_clock_was_paused=true;return;}
+    if(suspended||queue_paused){queue_clock_was_paused=true;queue_prepare_wait_started=0;return;}
     if(queue_clock_was_paused){queue_replay().resume_clock(milliseconds());queue_clock_was_paused=false;}
     if(!queue_available||!queue_running||!queue_replay_available)return;
     if(!queue_active_id[0]){
         if(busy_stage()||session_busy){snprintf(queue_phase,sizeof(queue_phase),"waiting_for_scene");return;}
-        if(fresh_scene_installed.load(std::memory_order_acquire)&&!queue_fresh_origin_saved&&queue_has_pending()){
-            const Result saved=fresh_scene_api.save_origin(fresh_scene_api.context);
-            if(saved==Result::waiting){snprintf(queue_phase,sizeof(queue_phase),"saving_selection");return;}
-            if(saved!=Result::ok){queue_running=false;queue_set_error(fresh_scene_error("fresh_origin_not_ready"));return;}
-            queue_fresh_origin_saved=true;
-        }
+        // Claim a journal row before calling a producer. This needs no Unity
+        // state and makes even a synchronous origin rejection a real failed
+        // attempt with an exact output identity and cleanup responsibility.
         const auto result=queue_store().claim_next(queue_active_id);
-        if(result==queue_model::Error::not_found){
-            if(fresh_scene_installed.load(std::memory_order_acquire)&&queue_fresh_origin_saved){
-                const auto restored=fresh_scene_api.finish(fresh_scene_api.context);
-                if(restored==Result::waiting){snprintf(queue_phase,sizeof(queue_phase),"restoring_selection");return;}
-                queue_fresh_origin_saved=false;
-            }
-            queue_running=false;snprintf(queue_phase,sizeof(queue_phase),"completed");return;}
+        if(result==queue_model::Error::not_found){queue_running=false;snprintf(queue_phase,sizeof(queue_phase),"completed");return;}
         if(result!=queue_model::Error::ok){queue_running=false;queue_set_storage_error(result);return;}
-        const auto* next=queue_store().find(queue_active_id);
-        if(!next||!queue_graphics_apply||!queue_graphics_apply(&next->options.graphics)
-            ||!queue_replay().begin(next->descriptor,milliseconds(),fresh_scene_installed.load(std::memory_order_acquire))){
-            if(fresh_scene_installed.load(std::memory_order_acquire)){queue_fresh_prepare_failed=true;return;}
-            if(!queue_record(queue_store().fail(queue_active_id,"queued_mv_prepare_failed")))return;
-            queue_release_attempt();queue_running=false;queue_set_error("queued_mv_prepare_failed");return;
-        }
+        queue_prepare_wait_started=0;
     }
-    queue_observe_selection();queue_replay().tick(milliseconds());
-    if(queue_replay().phase()==replay_model::Phase::failed){
-        if(!queue_replay().settle_failure()){snprintf(queue_phase,sizeof(queue_phase),"draining_navigation");return;}
-        if(fresh_scene_installed.load(std::memory_order_acquire)&&fresh_scene_api.finish(fresh_scene_api.context)==Result::waiting){
-            snprintf(queue_phase,sizeof(queue_phase),"restoring_selection");return;}
-        if(!queue_record(queue_store().fail(queue_active_id,queue_replay().error())))return;
-        queue_set_error(queue_replay().error());queue_release_attempt();queue_running=false;return;}
+    if(fresh_scene_installed.load(std::memory_order_acquire)&&!queue_fresh_origin_saved){
+        const Result saved=fresh_scene_api.save_origin(fresh_scene_api.context);
+        if(saved==Result::waiting){queue_prepare_wait("saving_selection","fresh_origin_save_timeout");return;}
+        queue_prepare_wait_started=0;
+        if(saved!=Result::ok){queue_preparation_failure(fresh_scene_error("fresh_origin_not_ready"));return;}
+        queue_fresh_origin_saved=true;
+    }
+    if(!queue_replay_started){
+        const auto* next=queue_store().find(queue_active_id);
+        if(!next||!queue_graphics_apply||!queue_graphics_apply(&next->options.graphics)){
+            queue_preparation_failure("queued_mv_prepare_failed");return;}
+        if(!queue_replay().begin(next->descriptor,milliseconds(),fresh_scene_installed.load(std::memory_order_acquire))){
+            queue_preparation_failure(queue_replay().error());return;}
+        queue_replay_started=true;queue_prepare_wait_started=0;
+    }
+    queue_observe_selection();queue_replay().tick(milliseconds());fresh_factory_dispatched(queue_replay(),true);
+    if(queue_replay().phase()==replay_model::Phase::failed){queue_preparation_failure(queue_replay().error());return;}
     if(queue_replay().phase()!=replay_model::Phase::ready){snprintf(queue_phase,sizeof(queue_phase),"replaying");return;}
-    if(game.selected_player()!=queue_replay().player()){snprintf(queue_phase,sizeof(queue_phase),"waiting_for_scene");return;}
-    Snapshot ready{};if(game.snapshot(ready)!=Result::ok){snprintf(queue_phase,sizeof(queue_phase),"waiting_for_scene");return;}
+    if(game.selected_player()!=queue_replay().player()){
+        queue_prepare_wait("waiting_for_scene","queued_selected_player_timeout");return;}
+    Snapshot ready{};const bool fresh=fresh_scene_installed.load(std::memory_order_acquire);
+    const Result readiness=fresh?probe_readiness(ready,true):game.snapshot(ready);
+    if(readiness==Result::waiting){queue_prepare_wait("waiting_for_scene","queued_scene_readiness_timeout");return;}
+    queue_prepare_wait_started=0;
+    if(readiness!=Result::ok){queue_preparation_failure(fresh?readiness_error:game.last_error());return;}
     const auto* next=queue_store().find(queue_active_id);if(!next){queue_set_error("job_not_found");queue_running=false;queue_release_attempt();return;}
     pthread_mutex_lock(&control_mutex);
     snprintf(pending_queue_output,sizeof(pending_queue_output),"%s",next->output_id);
     snprintf(pending_queue_exports,sizeof(pending_queue_exports),"%s",queue_export_root);
     pending_queue_exports_fd=queue_exports;pending_queue_width=next->options.width;pending_queue_height=next->options.height;
     pthread_mutex_unlock(&control_mutex);
-    if(!start({next->options.fps_num,next->options.fps_den,next->options.codec,next->options.video_bitrate,next->options.audio_bitrate,next->options.output_width,next->options.output_height},true))return;
+    if(!start({next->options.fps_num,next->options.fps_den,next->options.codec,next->options.video_bitrate,next->options.audio_bitrate,next->options.output_width,next->options.output_height},true)){
+        if(!fresh)return;
+        char error[96]{};pthread_mutex_lock(&control_mutex);
+        snprintf(error,sizeof(error),"%s",!configured_valid?"session_not_configured":control_busy||start_pending?"export_already_owned":!published.ready?readiness_error:"invalid_export_options");
+        pthread_mutex_unlock(&control_mutex);queue_preparation_failure(error);return;
+    }
     queue_export_started=true;snprintf(queue_phase,sizeof(queue_phase),"rendering");
 }
 inline void queue_tick(){
@@ -545,7 +628,8 @@ inline void queue_tick(){
     pthread_mutex_lock(&control_mutex);queue_request.kind=QueueCommandKind::none;pthread_mutex_unlock(&control_mutex);
     if(request.kind!=QueueCommandKind::none)queue_process(request);
     pthread_mutex_lock(&control_mutex);const bool reset_clock=reset_watchdog_pending;pthread_mutex_unlock(&control_mutex);
-    if(reset_clock)queue_replay().resume_clock(milliseconds());
+    if(reset_clock){queue_replay().resume_clock(milliseconds());fresh_immediate_wait_started=queue_prepare_wait_started=0;
+        job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;}
     bool can_run=false;
     if(queue_replay_available&&!queue_blocked&&installed&&configured_valid){
         // Only original Unity callbacks inspect the router. Cold server menus

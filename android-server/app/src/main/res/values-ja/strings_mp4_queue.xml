@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="mp4_queue_hint">MVを開いてリストに追加してください。曲・出演者・衣装・画質設定を保存し、順番に書き出します。</string>
+    <string name="mp4_queue_hint">保存したリストのMVは、再生し直さずに書き出せます。</string>
+    <string name="mp4_queue_ready">保存したリストを書き出せます。</string>
     <string name="mp4_queue_add">現在のMVをリストに追加</string>
     <string name="mp4_queue_run">リストの書き出しを開始</string>
     <string name="mp4_queue_pause">リストを一時停止</string>

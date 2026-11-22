@@ -15,6 +15,9 @@ struct CancellationToken8 { void* source=nullptr; };
 static_assert(sizeof(UniTask16)==16&&sizeof(CancellationToken8)==8,"Audited ARM64 UniTask/CancellationToken ABI");
 enum class Kind : int { out_game_param=1,actor_descriptor=2,transition_param=3 };
 enum class Phase { idle,closing,waiting_for_close,opening,waiting_for_open,ready,failed,cancelled };
+// A source producer tags its actual original navigation attempt. State3
+// requires the real preparation task to have settled without SceneLoad.
+struct NavigationReceipt {uint64_t serial=0;uint32_t state=0;};
 struct Api {
     bool(*is_type)(void*,const char*)=nullptr;
     bool(*alive)(void*)=nullptr;
@@ -55,6 +58,7 @@ struct Api {
     void(*photography_cancel)()=nullptr;
     const char*(*photography_error)()=nullptr;
     bool(*photography_current)(void*,void*)=nullptr;
+    NavigationReceipt(*photography_navigation_receipt)()=nullptr;
 };
 inline bool descriptor_equal(const Descriptor&a,const Descriptor&b){
     if(strcmp(a.stage_asset,b.stage_asset)||strcmp(a.timeline_asset,b.timeline_asset)
@@ -92,6 +96,10 @@ public:
                     ||!live_type(player,"Solis.Common.Photography.PhotographyLive3DPresenter"))return false;
             }else if(!live_type(presenter,"Solis.OutGame.LivePlayerScreenPresenter")
                 ||!live_type(player,"Solis.Common.SolisLivePlayer"))return false;
+            if(fresh_source_dispatched()&&selection_identity&&selection_identity!=request_identity_&&descriptor_equal(descriptor,target_)){
+                if(!request_source_identity_)request_source_identity_=selection_identity;
+                if(request_source_identity_==selection_identity&&!request_player_&&!keep(request_player_,player))return false;
+            }
             if(get(observed_presenter_)==presenter&&get(observed_player_)==player
                 &&descriptor_equal(observed_,descriptor)&&observed_identity_==selection_identity)return true;
             uint32_t p=api_.retain(presenter);if(!p)return false;
@@ -102,15 +110,17 @@ public:
     }
     bool begin(const Descriptor&descriptor,uint64_t now,bool forceFresh=false){
         if(active()||!settle_failure())return false;
-        release_attempt();error_="none";phase_=Phase::idle;cancel_requested_=false;
+        release_attempt();release_request();error_="none";phase_=Phase::idle;cancel_requested_=false;
         if(!valid_api()){fail("replay_api_unavailable");return false;}
         if(!idoly_mp4_queue::detail::descriptor(descriptor)){fail("invalid_mv_descriptor");return false;}
         if(descriptor.photo.source_kind==1&&(!api_.photography_open||!api_.photography_can_route
             ||!api_.photography_current||!api_.photography_cancel)){
             fail("photography_replay_api_unavailable");return false;
         }
-        if(forceFresh&&load_sequence_==~uint64_t(0)){fail("replay_generation_exhausted");return false;}
+        if(forceFresh&&descriptor.photo.source_kind==1&&!api_.photography_navigation_receipt){fail("photography_fresh_navigation_unverified");return false;}
+        if(forceFresh&&(load_sequence_==~uint64_t(0)||request_sequence_==~uint64_t(0))){fail("replay_generation_exhausted");return false;}
         force_fresh_=forceFresh;ready_load_serial_=0;
+        request_identity_=observed_identity_;request_serial_=forceFresh?++request_sequence_:0;
         target_=descriptor;started_=now;phase_=Phase::closing;return true;
     }
     // Read-only readiness for accepting Queue Run. A loaded native bridge or
@@ -180,8 +190,12 @@ public:
             if(phase_==Phase::opening){
                 if(target_.photo.source_kind==1){
                     if(!api_.photography_can_route())return;
-                    phase_=Phase::waiting_for_open;started_=now;opening_revision_=observed_revision_;
-                    if(!api_.photography_open(target_.photo)){
+                    phase_=Phase::waiting_for_open;started_=now;opening_revision_=observed_revision_;opening_issued_=true;
+                    const uint64_t previous=api_.photography_navigation_receipt?api_.photography_navigation_receipt().serial:0;
+                    const bool opened=api_.photography_open(target_.photo);
+                    if(api_.photography_navigation_receipt){const auto receipt=api_.photography_navigation_receipt();
+                        if(receipt.serial&&receipt.serial!=previous)request_navigation_serial_=receipt.serial;}
+                    if(!opened){
                         const char* reason=api_.photography_error?api_.photography_error():nullptr;
                         fail(reason&&reason[0]?reason:"photography_scene_load_failed");
                     }
@@ -195,7 +209,7 @@ public:
                 if(!keep(tree_,tree.get())){fail("replay_gc_handle_failed");return;}
                 // Set the phase BEFORE original OpenTree: its original async
                 // initializer may synchronously publish the new player.
-                phase_=Phase::waiting_for_open;started_=now;opening_revision_=observed_revision_;
+                phase_=Phase::waiting_for_open;started_=now;opening_revision_=observed_revision_;opening_issued_=true;
                 api_.open_tree(scene,get(tree_),nullptr,nullptr);return;
             }
             if(phase_==Phase::waiting_for_open){
@@ -208,6 +222,7 @@ public:
                 if(!presenter||!api_.alive(presenter)||!api_.alive(player))return;
                 if(target_.photo.source_kind==1){
                     if(!api_.photography_can_route()||!api_.photography_current(presenter,player))return;
+                    if(force_fresh_&&!fresh_source_dispatched())return;
                 }else{
                     void*scene=api_.scene_instance(nullptr);if(!scene||!api_.alive(scene)||api_.scene_busy(scene,nullptr)
                         ||api_.top_screen(scene,nullptr)!=presenter||!api_.player_ready(player,nullptr))return;
@@ -273,7 +288,48 @@ public:
         &&get(observed_player_)==get(result_player_)&&get(observed_presenter_)==get(result_presenter_);}
     uint64_t ready_load_serial()const{return fresh_ready()?ready_load_serial_:0;}
     uint64_t ready_identity()const{return phase_==Phase::ready?ready_identity_:0;}
+    uint64_t fresh_dispatch_serial()const{return force_fresh_&&opening_issued_?request_serial_:0;}
+    // The owner retains this issued request through failed/cancelled task
+    // draining and its real scene End. A delayed original Play must still be
+    // intercepted for that exact initializer. Only reset/new begin retires it.
+    bool fresh_request(const Descriptor&descriptor,uint64_t identity,uint64_t*serial)const{
+        if(serial)*serial=0;
+        if(!serial||!fresh_source_dispatched()
+            ||!identity||identity==request_identity_||!descriptor_equal(descriptor,target_)
+            ||(phase_!=Phase::opening&&phase_!=Phase::waiting_for_open&&phase_!=Phase::ready&&phase_!=Phase::failed&&phase_!=Phase::cancelled)
+            ||(request_source_identity_&&identity!=request_source_identity_)
+            ||(phase_==Phase::ready&&identity!=ready_identity_))return false;
+        if(!request_source_identity_)request_source_identity_=identity;
+        *serial=request_serial_;return true;
+    }
+    bool retain_fresh_request_player(void*player,uint64_t identity){
+        if(!player||identity!=request_source_identity_||!api_.alive(player))return false;
+        if(request_player_)return get(request_player_)==player;
+        return keep(request_player_,player);
+    }
+    bool fresh_request_scope(uint64_t*serial,uint64_t*identity,void**player)const{
+        if(serial)*serial=0;
+        if(identity)*identity=0;
+        if(player)*player=nullptr;
+        if(!serial||!identity||!player||!force_fresh_||!opening_issued_||!request_serial_||request_without_scene())return false;
+        *serial=request_serial_;*identity=request_source_identity_;*player=get(request_player_);return true;
+    }
 private:
+    bool request_without_scene()const{
+        if(request_no_scene_)return true;
+        if(target_.photo.source_kind==1&&request_navigation_serial_&&api_.photography_navigation_receipt){
+            const auto receipt=api_.photography_navigation_receipt();
+            if(receipt.serial==request_navigation_serial_&&receipt.state==3&&!request_source_identity_&&!request_player_){request_no_scene_=true;return true;}
+        }
+        return false;
+    }
+    bool fresh_source_dispatched()const{
+        if(!force_fresh_||!request_serial_||!opening_issued_||request_without_scene())return false;
+        if(target_.photo.source_kind!=1)return true;
+        if(!request_navigation_serial_||!api_.photography_navigation_receipt)return false;
+        const auto receipt=api_.photography_navigation_receipt();
+        return receipt.serial==request_navigation_serial_&&receipt.state==2;
+    }
     class Root {
     public:
         Root(const Api&a,void*p):api_(a),handle_(p?a.retain(p):0){}
@@ -293,8 +349,9 @@ private:
     void drop(uint32_t&h){if(h&&api_.release)api_.release(h);h=0;}
     bool live_type(void*p,const char*name)const{return p&&api_.alive(p)&&api_.is_type(p,name);}
     void release_attempt(){drop(transition_);drop(tree_);drop(closing_presenter_);drop(closing_player_);drop(result_presenter_);drop(result_player_);drop(closing_task_source_);closing_task_=UniTask16{};close_consumed_=false;failure_close_pending_=failure_open_pending_=false;ready_identity_=ready_revision_=ready_load_serial_=0;}
+    void release_request(){drop(request_player_);opening_issued_=false;request_no_scene_=false;request_serial_=request_source_identity_=request_navigation_serial_=0;}
     void finish_cancel(){release_attempt();phase_=Phase::cancelled;error_="cancelled";}
-    void clear_all(){release_attempt();drop(observed_presenter_);drop(observed_player_);
+    void clear_all(){release_attempt();release_request();drop(observed_presenter_);drop(observed_player_);
         observed_identity_=observed_revision_=opening_revision_=0;phase_=Phase::idle;error_="none";}
     void fail(const char*error){
         failure_close_pending_|=phase_==Phase::waiting_for_close;
@@ -336,9 +393,12 @@ private:
     Phase phase_=Phase::idle;const char*error_="none";uint64_t started_=0,
         observed_identity_=0,observed_revision_=0,opening_revision_=0;
     uint64_t load_sequence_=0,ready_load_serial_=0,ready_identity_=0,ready_revision_=0;
+    uint64_t request_sequence_=0,request_serial_=0,request_identity_=0;
+    mutable uint64_t request_source_identity_=0;
+    uint64_t request_navigation_serial_=0;mutable bool request_no_scene_=false;
     UniTask16 closing_task_{};bool close_consumed_=false,cancel_requested_=false,force_fresh_=false,
-        failure_close_pending_=false,failure_open_pending_=false;
+        failure_close_pending_=false,failure_open_pending_=false,opening_issued_=false;
     uint32_t observed_presenter_=0,observed_player_=0,closing_presenter_=0,closing_player_=0,
-        transition_=0,tree_=0,result_presenter_=0,result_player_=0,closing_task_source_=0;
+        transition_=0,tree_=0,result_presenter_=0,result_player_=0,closing_task_source_=0,request_player_=0;
 };
 } // namespace idoly_mp4_replay

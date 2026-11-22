@@ -95,6 +95,8 @@ Factory& mp4_photography_factory(){return factory;}
 struct Weak {Object* value=nullptr;void* get(bool=false)const{return mp4_alive(value)?value:nullptr;}} mp4_photography_presenter;
 namespace idoly_mp4_runtime {
 uint64_t milliseconds(){return 1;}
+// Observe diagnostics without changing navigation, GC custody or readiness.
+void diagnostic_event(const char*stage,const char*code,uint64_t=0,uint64_t=0,bool=false){assert(stage&&code);}
 struct Game {Object* selected=nullptr;bool built=false;void* selected_player(){return built?selected:nullptr;}} game;
 void observe_presenter(void* p){assert(mp4_type_is(p,"Solis.Photography.PhotographyLivePresenter"));}
 void observe_photography_transition(void* p,void* transition){assert(p==game.selected&&mp4_alive(transition));}

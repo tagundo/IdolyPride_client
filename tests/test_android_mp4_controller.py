@@ -138,6 +138,11 @@ public final class ControllerHarness {
     Activity live=new Activity(),menu=new Activity();game=new WeakReference<>(live);
     completionStorageReady=false;
     require(!requestStart(menu,60,2,17250000,3840,2160)&&menu.intent==null&&pending==null&&starts==0,"failed completion recovery admission cannot navigate or start capture");
+    lastQueue.put("running",true);last.put("phase","idle");
+    require(busy()&&!ready(),"queued scene preparation retains progress and ownership before encoder starts");
+    lastQueue.put("running",false).put("command_pending",true);
+    require(busy()&&!ready(),"accepted queue command retains progress before its first Unity callback");
+    lastQueue.put("command_pending",false);
     completionStorageReady=true;
     require(requestStart(menu,60,2,17250000,3840,2160),"custom bitrate and output geometry accepted");
     require(!dismissed,"next job restores dismissed progress UI");
@@ -357,7 +362,9 @@ public class DiagnosticsHarness {
   boolean optBoolean(String k){return Boolean.TRUE.equals(map.get(k));}String optString(String k,String fallback){Object v=map.get(k);return v instanceof String?(String)v:fallback;}
   long optLong(String k){Object v=map.get(k);return v instanceof Number?((Number)v).longValue():0;}
   JSONArray optJSONArray(String k){return map.get(k) instanceof JSONArray?(JSONArray)map.get(k):null;}}
- static class JSONArray {int size;JSONArray(int n){size=n;}int length(){return size;}}
+ static class JSONArray {int size;final Map<Integer,Object> rows=new HashMap<>();JSONArray(){}JSONArray(int n){size=n;}
+  int length(){return size;}JSONArray put(Object value){rows.put(size++,value);return this;}
+  JSONObject optJSONObject(int index){Object value=rows.get(index);return value instanceof JSONObject?(JSONObject)value:null;}}
  static JSONArray documentDiagnostics(){return new JSONArray(0);}
  static JSONObject queueSnapshot(){return queue;}
  static String nativeStatus(){JSONObject.refs.put("native",nativeValue);return "native";}
@@ -398,6 +405,18 @@ public class DiagnosticsHarness {
   need(result.map.get("queue_job_count").equals(8)&&result.map.get("queue_paused").equals(true),"queue count bounded without job contents");
   need(result.map.get("queue_error_code").equals("queue_install_new_failed")
    &&result.map.get("queue_storage_stage").equals("install_new")&&result.map.get("queue_storage_errno").equals(1L),"queue storage stage and errno survive without paths");
+  JSONArray detailedJobs=new JSONArray().put(new JSONObject().put("state","failed")
+   .put("error_code","fresh_audio_source_mixer_unsupported").put("job_id","secret-id").put("path","/private/video"));
+  for(int i=1;i<12;i++)detailedJobs.put(new JSONObject().put("state","/private/state").put("error_code","../private/error"));
+  queue.put("phase","failed").put("jobs",detailedJobs);
+  JSONObject detail=diagnostics();JSONArray states=detail.optJSONArray("queue_job_states");
+  need(detail.map.get("queue_phase").equals("failed")&&states.length()==8,"queue stage and at most eight job observations survive");
+  JSONObject failedJob=states.optJSONObject(0);
+  need(failedJob.length()==3&&failedJob.map.get("position").equals(0)&&failedJob.map.get("state").equals("failed")
+   &&failedJob.map.get("error_code").equals("fresh_audio_source_mixer_unsupported"),"actual per-job failure survives without identity or path");
+  need(states.optJSONObject(1).map.get("state").equals("unknown")
+   &&states.optJSONObject(1).map.get("error_code").equals("unknown"),"job diagnostic fields never include paths");
+  queue.put("phase","/private/phase");need(diagnostics().map.get("queue_phase").equals("unknown"),"queue phase is a bounded code");
   queue.put("error_code","/private/queue").put("storage_stage","/private/path").put("storage_errno",Long.MAX_VALUE);
   JSONObject invalidStorage=diagnostics();
   need(invalidStorage.map.get("queue_error_code").equals("unknown")&&!invalidStorage.map.containsKey("queue_storage_stage")
@@ -484,7 +503,10 @@ public final class QueueStatusHarness {
   long optLong(String key){Object value=values.get(key);return value instanceof Number?((Number)value).longValue():0;}
   String optString(String key){return optString(key,"");}
   String optString(String key,String fallback){Object value=values.get(key);return value instanceof String?(String)value:fallback;}
+  JSONArray optJSONArray(String key){Object value=values.get(key);return value instanceof JSONArray?(JSONArray)value:null;}
  }
+ static final class JSONArray {final List<JSONObject> rows=new ArrayList<>();JSONArray put(JSONObject row){rows.add(row);return this;}
+  int length(){return rows.size();}JSONObject optJSONObject(int index){return rows.get(index);}}
  static final class Context {String getString(int resource,Object...args){return "resource="+resource+Arrays.toString(args);}}
  static final class R {static final class string {''' + declarations + r'''}}
  static boolean ready(){readyCalls++;return mvReady;}
@@ -506,6 +528,11 @@ public final class QueueStatusHarness {
   for(String phase:new String[]{"idle","completed","failed","cancelled"}){
    last.put("phase",phase);expect(context,R.string.mp4_queue_waiting_scene,"next-scene work takes priority over stale terminal state: "+phase);
   }
+  last.put("phase","failed").put("error_code","fresh_audio_source_mixer_unsupported");
+  lastQueue.put("error_code","fresh_audio_source_mixer_unsupported");
+  expect(context,R.string.mp4_failed,"current preparation failure is visible while the original cleanup join is still running");
+  need(statusText(context).contains("fresh_audio_source_mixer_unsupported"),"the actual failure code is never replaced by a generic preparing message");
+  lastQueue.put("error_code","none");
   last.put("phase","preparing_audio");expect(context,R.string.mp4_preparing_audio,"actual soundtrack preparation remains visible");
   last.put("total_audio_frames",48000L).put("audio_frames",24000L);
   expect(context,R.string.mp4_preparing_audio_progress,"actual soundtrack progress remains visible");
@@ -522,6 +549,9 @@ public final class QueueStatusHarness {
   last.put("phase","failed").put("error_code","encoder_failed");expect(context,R.string.mp4_failed,"a terminal error outside queue work is not hidden");
   last.put("phase","cancelled");expect(context,R.string.mp4_cancelled,"a real terminal cancellation outside queue work is not hidden");
   last.put("phase","idle");expect(context,R.string.mp4_not_ready,"an ordinary idle scene still requests the MV");
+  lastQueue.put("can_run",true).put("jobs",new JSONArray().put(new JSONObject().put("state","pending")));
+  expect(context,R.string.mp4_queue_ready,"a saved runnable queue never asks the user to play an MV");
+  lastQueue.put("can_run",false);expect(context,R.string.mp4_not_ready,"a queue snapshot alone does not invent engine readiness");
   completedOutput=true;expect(context,R.string.mp4_completed,"a retained completed output remains discoverable after native idle");
   completedOutput=false;
   mvSelected=true;last.put("readiness_error","offline_pipeline_not_verified");

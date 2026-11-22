@@ -227,6 +227,15 @@ SELECTIONS.update({
 TYPED_PARAMETERS['mp4_video_behaviour_play']=['UnityEngine.Playables.Playable','UnityEngine.Playables.FrameData']
 TYPED_ABIS['mp4_video_behaviour_play']='void(void*,Playable16,FrameData64,const MethodInfo*)'
 SELECTIONS['mp4_video_behaviour_play']=('Solis.Timeline.SolisVideoPlayerTrackBehaviour','OnBehaviourPlay',2,tuple(TYPED_PARAMETERS['mp4_video_behaviour_play']))
+TYPED_PARAMETERS['mp4_timeline_play']=[]
+TYPED_ABIS['mp4_timeline_play']='void(void*,const MethodInfo*)'
+SELECTIONS['mp4_timeline_play']=('VL.Timeline.VLTimelineController','Play',0,())
+TYPED_PARAMETERS['mp4_reset_actor_model']=[]
+TYPED_ABIS['mp4_reset_actor_model']='void(void*,const MethodInfo*)'
+SELECTIONS['mp4_reset_actor_model']=('Solis.Common.Live.SolisLivePlayerBase','ResetActorModel',0,())
+TYPED_PARAMETERS['mp4_director_play']=[]
+TYPED_ABIS['mp4_director_play']='void(void*,const MethodInfo*)'
+SELECTIONS['mp4_director_play']=('UnityEngine.Playables.PlayableDirector','Play',0,())
 
 FIXED_ALIAS='mp4_fixed_loop_condition'
 NATIVE_IOS_ALIASES={
