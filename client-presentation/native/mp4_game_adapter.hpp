@@ -235,6 +235,9 @@ public:
         return manual_&&serial&&capture_request_running_&&capture_inflight_==serial
             &&controller==get(camera_controller_)&&owned_primary_scene_current();
     }
+    uint64_t owned_capture_request_serial(void* controller)const {
+        return owned_capture_request(controller,capture_inflight_)?capture_inflight_:0;
+    }
     bool owned_pending_capture(void* wrapper)const {
         // CPU discard/readback does not mean that the native renderer has
         // consumed its real queued request. The host checks its exact tuple.
