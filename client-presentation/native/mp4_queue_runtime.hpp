@@ -317,11 +317,12 @@ inline void queue_publish(){
         queue_available?"true":"false",command_pending?"true":"false",queue_error,queue_last_added,
         queue_running?"true":"false",queue_paused?"true":"false",queue_phase,queue_active_id,queue_replay_available?"true":"false",queue_can_run?"true":"false",can_add?"true":"false",add_error,queue_store().storage_stage(),queue_store().storage_errno());
     for(size_t i=0;i<queue_store().count();++i){const auto* queued=queue_store().at(i);if(!queued)continue;
-        append("%s{\"job_id\":\"%s\",\"output_id\":\"%s\",\"timeline\":\"%s\",\"actor_count\":%u,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"fps_num\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"state\":\"%s\",\"error_code\":\"%s\"}",
+        append("%s{\"job_id\":\"%s\",\"output_id\":\"%s\",\"timeline\":\"%s\",\"actor_count\":%u,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"fps_num\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"output_mode\":\"%s\",\"state\":\"%s\",\"error_code\":\"%s\"}",
             i?",":"",queued->id,queued->output_id,queued->descriptor.timeline_asset,queued->descriptor.actor_count,
             queued->options.output_width?queued->options.output_width:queued->options.width&~1U,
             queued->options.output_height?queued->options.output_height:queued->options.height&~1U,
             queued->options.width,queued->options.height,queued->options.fps_num,queued->options.codec,queued->options.video_bitrate,
+            queued->options.output_width?"custom":"current",
             queue_model::state_name(queued->state),queued->error[0]?queued->error:"none");
     }append("%s","]}");
     if(at>=sizeof(next))snprintf(next,sizeof(next),"{\"schema\":1,\"available\":false,\"error_code\":\"queue_status_overflow\",\"jobs\":[]}");
@@ -523,29 +524,6 @@ inline void queue_preparation_failure(const char*error){
     }
     pthread_mutex_unlock(&control_mutex);
 }
-// A "current" job follows the render target size frozen at Add. On a large
-// window at render_scale 2 that exceeds what any encoder accepts (device:
-// 4096x3690 = 15.1 MP vs the 9.9 MP Java staging budget). Lower only this
-// job's render long-edge cap, so the game's own limited-resolution path
-// renders an encodable target with the same aspect, and re-derive a
-// recommended bitrate for it. A custom bitrate and an explicit output size
-// are kept as queued. Jobs queued before this rule get the same treatment.
-inline queue_model::Options queue_encodable_options(const queue_model::Options& stored){
-    namespace out=idoly_mp4_output;
-    queue_model::Options o=stored;
-    const uint32_t width=stored.width&~1U,height=stored.height&~1U;
-    if(stored.output_width||stored.output_height||!stored.graphics.custom_graphics
-        ||!out::dimensions(width,height)||out::current_encodable(width,height))return o;
-    const uint32_t cap=out::current_long_edge_cap(width,height);
-    if(cap<256||static_cast<int32_t>(cap)>=stored.graphics.max_buffer_pixel)return o;
-    const uint32_t longer=width>height?width:height,shorter=width>height?height:width;
-    const uint32_t scaled=static_cast<uint32_t>((static_cast<uint64_t>(shorter)*cap+longer)/(2ULL*longer))*2;
-    o.graphics.max_buffer_pixel=static_cast<int32_t>(cap);
-    o.width=width>=height?cap:scaled;o.height=width>=height?scaled:cap;
-    if(stored.video_bitrate==out::recommended_bitrate(width,height,stored.fps_num,stored.codec))
-        o.video_bitrate=out::recommended_bitrate(o.width,o.height,stored.fps_num,stored.codec);
-    return o;
-}
 inline bool queue_prepare_wait(const char*phase_name,const char*timeout){
     snprintf(queue_phase,sizeof(queue_phase),"%s",phase_name);
     const uint64_t now=milliseconds();
@@ -616,10 +594,7 @@ inline void queue_execute(){
     }
     if(!queue_replay_started){
         const auto* next=queue_store().find(queue_active_id);
-        const queue_model::Options encodable=next?queue_encodable_options(next->options):queue_model::Options{};
-        if(next&&encodable.graphics.max_buffer_pixel!=next->options.graphics.max_buffer_pixel)
-            diagnostic_event("queue_prepare","render_size_capped_for_encoder");
-        if(!next||!queue_graphics_apply||!queue_graphics_apply(&encodable.graphics)){
+        if(!next||!queue_graphics_apply||!queue_graphics_apply(&next->options.graphics)){
             queue_preparation_failure("queued_mv_prepare_failed");return;}
         if(!queue_replay().begin(next->descriptor,milliseconds(),fresh_scene_installed.load(std::memory_order_acquire))){
             queue_preparation_failure(queue_replay().error());return;}
@@ -636,13 +611,12 @@ inline void queue_execute(){
     queue_prepare_wait_started=0;
     if(readiness!=Result::ok){queue_preparation_failure(fresh?readiness_error:game.last_error());return;}
     const auto* next=queue_store().find(queue_active_id);if(!next){queue_set_error("job_not_found");queue_running=false;queue_release_attempt();return;}
-    const queue_model::Options options=queue_encodable_options(next->options);
     pthread_mutex_lock(&control_mutex);
     snprintf(pending_queue_output,sizeof(pending_queue_output),"%s",next->output_id);
     snprintf(pending_queue_exports,sizeof(pending_queue_exports),"%s",queue_export_root);
-    pending_queue_exports_fd=queue_exports;pending_queue_width=options.width;pending_queue_height=options.height;
+    pending_queue_exports_fd=queue_exports;pending_queue_width=next->options.width;pending_queue_height=next->options.height;
     pthread_mutex_unlock(&control_mutex);
-    if(!start({options.fps_num,options.fps_den,options.codec,options.video_bitrate,options.audio_bitrate,options.output_width,options.output_height},true)){
+    if(!start({next->options.fps_num,next->options.fps_den,next->options.codec,next->options.video_bitrate,next->options.audio_bitrate,next->options.output_width,next->options.output_height},true)){
         if(!fresh)return;
         char error[96]{};pthread_mutex_lock(&control_mutex);
         snprintf(error,sizeof(error),"%s",!configured_valid?"session_not_configured":control_busy||start_pending?"export_already_owned":!published.ready?readiness_error:"invalid_export_options");

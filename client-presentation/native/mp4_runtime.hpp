@@ -1030,8 +1030,8 @@ inline bool prepare_frame_output(){
         ||(job.expected_height&&job.expected_height!=static_cast<uint32_t>(height))){
         // An explicit output size is forced onto the target and must match.
         // "Current" accepts only the same target turned by the reload's
-        // window rotation or rounded differently by the encoder size cap;
-        // the first capture below then freezes the size for the whole job.
+        // window rotation; the first capture below then freezes the size
+        // for the whole job.
         if(job.options.output_width||job.options.output_height
             ||!idoly_mp4_output::same_current_geometry(job.expected_width,job.expected_height,static_cast<uint32_t>(width),static_cast<uint32_t>(height))){
             terminal("queued_capture_geometry_changed");return false;}

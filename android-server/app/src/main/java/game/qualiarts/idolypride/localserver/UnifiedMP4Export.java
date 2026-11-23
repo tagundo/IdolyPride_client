@@ -374,7 +374,7 @@ public final class UnifiedMP4Export {
             result.put("queue_error_code", queueError.matches("[A-Za-z0-9_]{1,96}") ? queueError : "unknown");
             String queuePhase = queue.optString("phase", "unknown");
             result.put("queue_phase", queuePhase.matches("[A-Za-z0-9_]{1,96}") ? queuePhase : "unknown");
-            JSONArray jobStates = new JSONArray();
+            JSONArray jobStates = new JSONArray(), jobOptions = new JSONArray();
             for (int index = 0; jobs != null && index < Math.min(8, jobs.length()); index++) {
                 JSONObject job = jobs.optJSONObject(index);
                 if (job == null) continue;
@@ -383,8 +383,18 @@ public final class UnifiedMP4Export {
                 jobStates.put(new JSONObject().put("position", index)
                         .put("state", stateCode.matches("[A-Za-z0-9_]{1,96}") ? stateCode : "unknown")
                         .put("error_code", failureCode.matches("[A-Za-z0-9_]{1,96}") ? failureCode : "unknown"));
+                // The immutable size/codec options each queued job was added
+                // with: "custom" is an explicit export resolution, "current"
+                // follows the render target. Numbers only, never identities.
+                String outputMode = job.optString("output_mode", "unknown");
+                JSONObject options = new JSONObject().put("position", index)
+                        .put("output_mode", outputMode.equals("custom") || outputMode.equals("current") ? outputMode : "unknown");
+                for (String key : new String[] {"width", "height", "source_width", "source_height", "fps_num", "video_codec"})
+                    options.put(key, Math.max(0L, Math.min(8192L, job.optLong(key))));
+                options.put("video_bitrate", Math.max(0L, Math.min(1_000_000_000L, job.optLong("video_bitrate"))));
+                jobOptions.put(options);
             }
-            result.put("queue_job_states", jobStates);
+            result.put("queue_job_states", jobStates).put("queue_job_options", jobOptions);
             String storageStage = queue.optString("storage_stage", "none");
             if (java.util.Arrays.asList("none", "allocate_state", "allocate_store", "allocate_wire",
                     "open_temp", "stat_temp", "write_temp", "sync_temp", "validate_temp",

@@ -48,19 +48,11 @@ int main(int argc,char** argv){assert(argc==3);const char* mode=argv[1];
         assert(!out::resolved_dimensions(4097,1080,1920,1080,width,height));
     }else if(!std::strcmp(mode,"encoder")){
         // Java stages three RGBA copies plus I420 under 128 MiB (~9.94 MP).
-        assert(out::staging_fits(3840,2160)&&out::staging_fits(4096,1756)&&!out::staging_fits(4096,3690));
-        assert(out::current_encodable(3840,2160)&&out::current_encodable(2160,3840)&&out::current_encodable(2398,2160));
-        assert(!out::current_encodable(4096,1756)&&!out::current_encodable(4096,3690)&&!out::current_encodable(2504,2256*2));
-        // Foldable inner display at render_scale 2: 4096x3690 caps to an encodable long edge.
-        const uint32_t cap=out::current_long_edge_cap(4096,3690);
-        assert(cap==2394&&!(cap&1));
-        const uint32_t shorter=static_cast<uint32_t>((uint64_t(3690)*cap+4096)/(2ULL*4096))*2;
-        assert(out::current_encodable(cap,shorter)&&out::current_encodable(shorter,cap));
-        assert(out::current_long_edge_cap(4096,1756)==3840&&out::current_long_edge_cap(4096,2304)==3836);
-        assert(out::current_long_edge_cap(1280,720)==1280);
-        // A reload turning the window or a 2-4 px cap rounding is the same target.
-        assert(out::same_current_geometry(2394,2156,2156,2394)&&out::same_current_geometry(2394,2156,2394,2154));
-        assert(!out::same_current_geometry(32,32,16,16)&&!out::same_current_geometry(4096,3690,2394,2156));
+        assert(out::staging_fits(3840,2160)&&out::staging_fits(4096,1756)&&out::staging_fits(1280,720));
+        assert(!out::staging_fits(4096,3690)&&!out::staging_fits(4096,4096));
+        // A reload turning the window is the same "current" target; nothing else is.
+        assert(out::same_current_geometry(4096,3690,4096,3690)&&out::same_current_geometry(4096,3690,3690,4096));
+        assert(!out::same_current_geometry(32,32,16,16)&&!out::same_current_geometry(4096,3690,4094,3690));
     }else if(!std::strcmp(mode,"legacy")||!std::strcmp(mode,"options")||!std::strcmp(mode,"120")){
         const char* profile="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         qm::Options o{};if(!std::strcmp(mode,"120"))o.fps_num=120;o.width=17;o.height=19;o.output_width=32;o.output_height=18;o.video_bitrate=12340000;

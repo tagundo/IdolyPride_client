@@ -446,7 +446,9 @@ public class DiagnosticsHarness {
   need(result.map.get("queue_error_code").equals("queue_install_new_failed")
    &&result.map.get("queue_storage_stage").equals("install_new")&&result.map.get("queue_storage_errno").equals(1L),"queue storage stage and errno survive without paths");
   JSONArray detailedJobs=new JSONArray().put(new JSONObject().put("state","failed")
-   .put("error_code","fresh_audio_source_mixer_unsupported").put("job_id","secret-id").put("path","/private/video"));
+   .put("error_code","fresh_audio_source_mixer_unsupported").put("job_id","secret-id").put("path","/private/video")
+   .put("output_mode","custom").put("width",1280L).put("height",720L).put("source_width",4096L).put("source_height",3690L)
+   .put("fps_num",60L).put("video_codec",1L).put("video_bitrate",7740000L));
   for(int i=1;i<12;i++)detailedJobs.put(new JSONObject().put("state","/private/state").put("error_code","../private/error"));
   queue.put("phase","failed").put("jobs",detailedJobs);
   JSONObject detail=diagnostics();JSONArray states=detail.optJSONArray("queue_job_states");
@@ -454,6 +456,13 @@ public class DiagnosticsHarness {
   JSONObject failedJob=states.optJSONObject(0);
   need(failedJob.length()==3&&failedJob.map.get("position").equals(0)&&failedJob.map.get("state").equals("failed")
    &&failedJob.map.get("error_code").equals("fresh_audio_source_mixer_unsupported"),"actual per-job failure survives without identity or path");
+  JSONArray jobOptions=detail.optJSONArray("queue_job_options");JSONObject firstOptions=jobOptions.optJSONObject(0);
+  need(jobOptions.length()==8&&firstOptions.length()==9&&firstOptions.map.get("output_mode").equals("custom")
+   &&firstOptions.map.get("width").equals(1280L)&&firstOptions.map.get("height").equals(720L)
+   &&firstOptions.map.get("source_width").equals(4096L)&&firstOptions.map.get("video_bitrate").equals(7740000L)
+   &&!firstOptions.map.containsKey("job_id"),"each job's requested export size survives without identity");
+  need(jobOptions.optJSONObject(1).map.get("output_mode").equals("unknown")&&jobOptions.optJSONObject(1).map.get("width").equals(0L),
+   "missing job options read as bounded defaults");
   need(states.optJSONObject(1).map.get("state").equals("unknown")
    &&states.optJSONObject(1).map.get("error_code").equals("unknown"),"job diagnostic fields never include paths");
   queue.put("phase","/private/phase");need(diagnostics().map.get("queue_phase").equals("unknown"),"queue phase is a bounded code");
