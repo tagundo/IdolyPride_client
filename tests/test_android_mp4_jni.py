@@ -27,14 +27,17 @@ public final class OfflineMp4Encoder {
       throw new IllegalArgumentException("wrong C ABI argument mapping");
     return new OfflineMp4Encoder();
   }
-  public int appendFrame(ByteBuffer rgba,int row,long index) {
+  // The native adapter converts RGBA to I420 before Java sees the frame.
+  public int appendI420(ByteBuffer i420,long index) {
     if(index==9)throw new IllegalStateException("/private/path-must-not-escape");
-    if(index!=accepted||row!=64||!rgba.isDirect()||rgba.remaining()!=1024)throw new AssertionError("frame mapping");
+    if(index!=accepted||!i420.isDirect()||i420.remaining()!=384)throw new AssertionError("frame mapping");
     if(!retried){retried=true;return 1;}
-    copied=new byte[1024];rgba.get(copied);accepted++;phase=2;return 0;
+    copied=new byte[384];i420.get(copied);accepted++;phase=2;return 0;
   }
   public long[] nativeStatus() {
-    if(copied!=null&&copied[0]!=23)throw new AssertionError("native caller memory escaped copied ownership");
+    // RGB 23 is BT.709 code 10, so limited-range luma 25 and neutral chroma 128.
+    if(copied!=null&&((copied[0]&255)!=25||(copied[255]&255)!=25||(copied[256]&255)!=128||(copied[383]&255)!=128))
+      throw new AssertionError("native I420 conversion or copied ownership");
     if(phase==3&&++reads>1){phase=4;terminal=true;}
     return new long[]{phase,0,accepted,accepted,48000,1234,terminal?1:0};
   }

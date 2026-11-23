@@ -33133,6 +33133,8 @@ Mp4FreshOriginResult mp4_fresh_origin_save(void*){
     auto& o=mp4_fresh_origin_state();
     if(!game_call())return Mp4FreshOriginResult::waiting;
     if(o.saved)return o.failed?Mp4FreshOriginResult::failed:Mp4FreshOriginResult::ok;
+    // A new save never reports the previous job's named restore failure.
+    o.error="none";
     if(!o.configured||!mp4_prefix(mp4_fresh_origin_pause_pin)||!mp4_prefix(mp4_fresh_origin_resume_pin)){
         o.error="fresh_origin_original_apis_unavailable";return Mp4FreshOriginResult::unsupported;
     }

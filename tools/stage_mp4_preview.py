@@ -38,7 +38,7 @@ MIB = 1024 * 1024
 MAX_FILE = 768 * MIB
 CODEC_WAIT = 2400
 MP4_NATIVE = {"client-presentation/native/" + name for name in (
-    "mp4_encoder_api.h", "mp4_android_encoder.hpp", "mp4_game_adapter.hpp", "mp4_game_bindings.hpp", "mp4_runtime.hpp",
+    "mp4_encoder_api.h", "mp4_android_encoder.hpp", "mp4_i420.hpp", "mp4_game_adapter.hpp", "mp4_game_bindings.hpp", "mp4_runtime.hpp",
     "mp4_session_api.h", "mp4_queue.hpp", "mp4_queue_runtime.hpp", "mp4_queue_cleanup.hpp", "mp4_selection_capture.hpp",
     "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp", "mp4_output_policy.hpp",
     "mp4_controller_profile.hpp", "mp4_type_descriptor.hpp",

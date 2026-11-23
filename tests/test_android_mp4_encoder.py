@@ -45,7 +45,10 @@ public final class MathHarness {
         break;
       case "pixels": {
         equal(OfflineMp4Math.pixels(3840,2160),8294400);
+        // Frames are staged as I420, so the native maximum 4096 edge needs no memory cap.
+        equal(OfflineMp4Math.pixels(4096,3690),15114240);equal(OfflineMp4Math.pixels(4096,4096),16777216);
         rejects(()->OfflineMp4Math.pixels(3841,2160));
+        rejects(()->OfflineMp4Math.pixels(4098,2160));
         rejects(()->OfflineMp4Math.pixels(8192,8192));
         byte[] input=new byte[16*16*4],output=new byte[16*16*3/2];
         OfflineMp4Math.rgbaToI420(input,output,16,16);
@@ -62,6 +65,13 @@ public final class MathHarness {
         OfflineMp4Math.rgbaToI420(input,output,16,16);
         equal(output[0]&255,63);equal(output[255]&255,32);equal(output[256+63]&255,240);
         rejects(()->OfflineMp4Math.rgbaToI420(new byte[1],output,16,16));
+        // A padded, offset row stride converts exactly like the packed frame.
+        java.nio.ByteBuffer padded=java.nio.ByteBuffer.allocateDirect(7+16*72);byte[] strided=new byte[16*16*3/2];
+        for(int y=0;y<16;y++)for(int x=0;x<64;x++)padded.put(7+y*72+x,input[y*64+x]);
+        padded.position(7);OfflineMp4Math.rgbaToI420(padded,72,strided,16,16);
+        if(!Arrays.equals(strided,output))throw new AssertionError("row stride changes conversion");
+        final java.nio.ByteBuffer shortRows=padded;
+        rejects(()->OfflineMp4Math.rgbaToI420(shortRows,63,strided,16,16));
         break;
       }
       case "pcm":
@@ -136,3 +146,65 @@ public final class ConfigHarness {
                             capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "PASS config"
+
+
+def test_native_i420_conversion_is_bit_identical_to_java(tmp_path):
+    """mp4_i420.hpp (native producer) must equal OfflineMp4Math.rgbaToI420 byte for byte."""
+    javac, java, cxx = shutil.which("javac"), shutil.which("java"), shutil.which("g++") or shutil.which("c++")
+    if not javac or not java or not cxx:
+        pytest.skip("JDK and C++ compiler required")
+    import random
+    rng = random.Random(1123)
+    width, height, row = 66, 38, 66 * 4 + 20
+    frame = bytearray(rng.getrandbits(8) for _ in range(row * height))
+    # Cover every transfer-table entry in each colour channel and the clamps.
+    for value in range(256):
+        y, x = divmod(value, width)
+        offset = y * row + x * 4
+        frame[offset:offset + 4] = bytes([value, 255 - value, value, rng.getrandbits(8)])
+    (tmp_path / "rgba.bin").write_bytes(bytes(frame))
+    harness = tmp_path / "ParityHarness.java"
+    harness.write_text(r'''
+package game.qualiarts.idolypride.localserver.mp4;
+import java.nio.file.*;
+public final class ParityHarness {
+  public static void main(String[] a) throws Exception {
+    byte[] raw=Files.readAllBytes(Paths.get(a[0]));int w=Integer.parseInt(a[2]),h=Integer.parseInt(a[3]),row=Integer.parseInt(a[4]);
+    java.nio.ByteBuffer rgba=java.nio.ByteBuffer.allocateDirect(raw.length);rgba.put(raw);rgba.position(0);
+    byte[] out=new byte[w*h*3/2];OfflineMp4Math.rgbaToI420(rgba,row,out,w,h);Files.write(Paths.get(a[1]),out);
+  }
+}
+''')
+    classes = tmp_path / "classes"
+    built = subprocess.run([javac, "-J-Xmx256m", "--release", "17", "-d", str(classes),
+                            str(JAVA / "OfflineMp4Math.java"), str(harness)], capture_output=True, text=True)
+    assert built.returncode == 0, built.stderr
+    ran = subprocess.run([java, "-Xmx128m", "-cp", str(classes), "game.qualiarts.idolypride.localserver.mp4.ParityHarness",
+                          str(tmp_path / "rgba.bin"), str(tmp_path / "java.bin"), str(width), str(height), str(row)],
+                         capture_output=True, text=True, timeout=30)
+    assert ran.returncode == 0, ran.stderr
+    native = tmp_path / "parity.cpp"
+    native.write_text(r'''
+#include "mp4_i420.hpp"
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+int main(int argc,char**argv){if(argc!=6)return 1;
+  const unsigned w=std::atoi(argv[3]),h=std::atoi(argv[4]);const size_t row=std::atoi(argv[5]);
+  std::vector<uint8_t> rgba(row*h),out(idoly_mp4_i420::bytes(w,h));
+  FILE*in=std::fopen(argv[1],"rb");if(!in||std::fread(rgba.data(),1,rgba.size(),in)!=rgba.size())return 2;std::fclose(in);
+  if(!idoly_mp4_i420::from_rgba(rgba.data(),row,w,h,out.data(),out.size()))return 3;
+  if(idoly_mp4_i420::from_rgba(rgba.data(),w*4-1,w,h,out.data(),out.size())||idoly_mp4_i420::from_rgba(rgba.data(),row,w,h,out.data(),out.size()-1)
+     ||idoly_mp4_i420::from_rgba(rgba.data(),row,w+1,h,out.data(),out.size()))return 4;
+  FILE*o=std::fopen(argv[2],"wb");if(!o||std::fwrite(out.data(),1,out.size(),o)!=out.size())return 5;std::fclose(o);return 0;
+}
+''')
+    binary = tmp_path / "parity"
+    root = Path(__file__).resolve().parents[1]
+    built = subprocess.run([cxx, "-std=c++17", "-O2", "-Wall", "-Wextra", "-Werror", "-I", str(root / "client-presentation/native"),
+                            str(native), "-o", str(binary)], capture_output=True, text=True, timeout=60)
+    assert built.returncode == 0, built.stderr
+    ran = subprocess.run([str(binary), str(tmp_path / "rgba.bin"), str(tmp_path / "cpp.bin"), str(width), str(height), str(row)],
+                         capture_output=True, text=True, timeout=30)
+    assert ran.returncode == 0, ran.stderr
+    assert (tmp_path / "cpp.bin").read_bytes() == (tmp_path / "java.bin").read_bytes()

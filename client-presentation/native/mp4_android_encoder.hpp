@@ -2,6 +2,7 @@
 // Independent Android MediaCodec adapter. Included once by the Android native bridge.
 #pragma once
 #include "mp4_encoder_api.h"
+#include "mp4_i420.hpp"
 #include <jni.h>
 #include <climits>
 #include <cstring>
@@ -71,6 +72,13 @@ struct Encoder {
     JavaBridge java;
     jobject object = nullptr;
     uint32_t width = 0, height = 0;
+    // Native I420 staging for the frame being offered. A RETRY resubmits the
+    // same frame, so its conversion is reused until Java accepts it.
+    uint8_t *i420 = nullptr;
+    size_t i420_bytes = 0;
+    const uint8_t *converted_source = nullptr;
+    uint64_t converted_index = 0;
+    bool converted = false;
     char error[192] = {};
 };
 
@@ -112,7 +120,7 @@ Java_game_qualiarts_idolypride_localserver_mp4_OfflineMp4Encoder_registerEncoder
     candidate.create = env->GetStaticMethodID(candidate.type, "create",
         "(IIIIIIIIJJLjava/lang/String;Ljava/lang/String;Ljava/lang/String;I)"
         "Lgame/qualiarts/idolypride/localserver/mp4/OfflineMp4Encoder;");
-    if (!exception(env)) candidate.append = env->GetMethodID(candidate.type, "appendFrame", "(Ljava/nio/ByteBuffer;IJ)I");
+    if (!exception(env)) candidate.append = env->GetMethodID(candidate.type, "appendI420", "(Ljava/nio/ByteBuffer;J)I");
     if (!exception(env)) candidate.poll = env->GetMethodID(candidate.type, "nativeStatus", "()[J");
     if (!exception(env)) candidate.finish = env->GetMethodID(candidate.type, "finish", "()I");
     if (!exception(env)) candidate.cancel = env->GetMethodID(candidate.type, "cancel", "()V");
@@ -176,10 +184,18 @@ extern "C" IDMP4EncoderHandle IDMP4EncoderCreate(const IDMP4EncoderConfig *confi
         error_text(error_code, capacity, "encoder_lock_allocation_failed"); return nullptr;
     }
     encoder->java = java; encoder->width = config->width; encoder->height = config->height;
+    encoder->i420_bytes = idoly_mp4_i420::bytes(config->width, config->height);
+    encoder->i420 = encoder->i420_bytes ? static_cast<uint8_t *>(std::malloc(encoder->i420_bytes)) : nullptr;
+    if (!encoder->i420) {
+        env->CallVoidMethod(instance, java.cancel); exception(env); env->DeleteLocalRef(instance);
+        pthread_mutex_destroy(&encoder->lock); encoder->~Encoder(); std::free(encoder);
+        error_text(error_code, capacity, "encoder_frame_allocation_failed"); return nullptr;
+    }
     encoder->object = env->NewGlobalRef(instance);
     if (exception(env) || !encoder->object) {
         env->CallVoidMethod(instance, java.cancel); exception(env);
-        env->DeleteLocalRef(instance); pthread_mutex_destroy(&encoder->lock); encoder->~Encoder(); std::free(encoder);
+        env->DeleteLocalRef(instance); pthread_mutex_destroy(&encoder->lock); std::free(encoder->i420);
+        encoder->~Encoder(); std::free(encoder);
         error_text(error_code, capacity, "encoder_global_reference_failed"); return nullptr;
     }
     env->DeleteLocalRef(instance); return encoder;
@@ -191,15 +207,21 @@ extern "C" int IDMP4EncoderAppendFrame(IDMP4EncoderHandle handle, const uint8_t 
     Encoder *encoder = static_cast<Encoder *>(handle); MutexGuard guard(&encoder->lock);
     if (row_bytes < static_cast<size_t>(encoder->width) * 4 || encoder->height == 0
             || row_bytes > static_cast<size_t>(LLONG_MAX) / encoder->height) return IDMP4_ERROR;
-    size_t length = row_bytes * (encoder->height - 1) + static_cast<size_t>(encoder->width) * 4;
+    // Convert once per offered frame; Java copies the planes into its own slot.
+    if (!encoder->converted || encoder->converted_index != frame_index || encoder->converted_source != rgba) {
+        encoder->converted = false;
+        if (!idoly_mp4_i420::from_rgba(rgba, row_bytes, encoder->width, encoder->height,
+                encoder->i420, encoder->i420_bytes)) return IDMP4_ERROR;
+        encoder->converted = true; encoder->converted_index = frame_index; encoder->converted_source = rgba;
+    }
     Environment scope(encoder->java.vm); JNIEnv *env = scope.get();
     if (!env) return IDMP4_ERROR;
-    jobject bytes = env->NewDirectByteBuffer(const_cast<uint8_t *>(rgba), static_cast<jlong>(length));
+    jobject bytes = env->NewDirectByteBuffer(encoder->i420, static_cast<jlong>(encoder->i420_bytes));
     if (java_error(env, encoder) || !bytes) return IDMP4_ERROR;
-    jint result = env->CallIntMethod(encoder->object, encoder->java.append, bytes,
-                                    static_cast<jint>(row_bytes), static_cast<jlong>(frame_index));
+    jint result = env->CallIntMethod(encoder->object, encoder->java.append, bytes, static_cast<jlong>(frame_index));
     env->DeleteLocalRef(bytes);
     if (java_error(env, encoder)) return IDMP4_ERROR;
+    if (result == IDMP4_ACCEPTED) encoder->converted = false;
     return result == IDMP4_ACCEPTED || result == IDMP4_RETRY ? result : IDMP4_ERROR;
 }
 
@@ -254,6 +276,6 @@ extern "C" int IDMP4EncoderDestroy(IDMP4EncoderHandle handle) {
         env->DeleteGlobalRef(encoder->object); encoder->object = nullptr;
     }
     // The C ABI requires the caller to stop concurrent producers/pollers before Destroy.
-    pthread_mutex_destroy(&encoder->lock); encoder->~Encoder(); std::free(encoder); return IDMP4_ACCEPTED;
+    pthread_mutex_destroy(&encoder->lock); std::free(encoder->i420); encoder->~Encoder(); std::free(encoder); return IDMP4_ACCEPTED;
 }
 } // namespace idoly_mp4_android

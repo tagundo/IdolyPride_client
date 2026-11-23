@@ -11,6 +11,7 @@ on:
       - client-presentation/native/mp4_encoder_api.h
       - client-presentation/native/mp4_session_api.h
       - client-presentation/native/mp4_android_encoder.hpp
+      - client-presentation/native/mp4_i420.hpp
       - ios-unified/native/IdolyMVEncoder.mm
       - ios-unified/native/IdolyMVEncoderPolicy.h
       - ios-unified/native/IdolyMP4UI.*

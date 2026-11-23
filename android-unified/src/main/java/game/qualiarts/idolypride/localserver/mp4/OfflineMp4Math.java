@@ -35,29 +35,39 @@ public final class OfflineMp4Math {
     }
 
     public static int pixels(int width, int height) {
+        // The native producer never renders an edge above 4096. Frames are
+        // staged as I420 (three 1.5-byte-per-pixel slots, at most 72 MiB).
         if (width < 16 || height < 16 || (width & 1) != 0 || (height & 1) != 0
-                || width > 8192 || height > 8192)
-            throw new IllegalArgumentException("Video dimensions must be even, between 16 and 8192");
-        int pixels = Math.multiplyExact(width, height);
-        // Three copied RGBA frames and one worker I420 frame, under 128 MiB.
-        if ((long) pixels * 27 / 2 > 128L * 1024 * 1024)
-            throw new IllegalArgumentException("Requested frame queue exceeds the 128 MiB staging limit");
-        return pixels;
+                || width > 4096 || height > 4096)
+            throw new IllegalArgumentException("Video dimensions must be even, between 16 and 4096");
+        return width * height;
     }
 
     /** Opaque sRGB RGBA8 to limited-range BT.709. Alpha never becomes a fourth image plane. */
     public static void rgbaToI420(byte[] rgba, byte[] planar, int width, int height) {
         int pixels = pixels(width, height);
-        if (rgba.length != pixels * 4 || planar.length != pixels * 3 / 2)
+        if (rgba.length != pixels * 4)
+            throw new IllegalArgumentException("Unexpected frame buffer size");
+        rgbaToI420(java.nio.ByteBuffer.wrap(rgba), width * 4, planar, width, height);
+    }
+
+    /**
+     * Same conversion from rows at rowBytes stride, read from the buffer's position. The native
+     * producer's mp4_i420.hpp is bit-identical to this; its tests compare the two.
+     */
+    public static void rgbaToI420(java.nio.ByteBuffer rgba, int rowBytes, byte[] planar, int width, int height) {
+        int pixels = pixels(width, height), origin = rgba.position();
+        if (planar.length != pixels * 3 / 2 || rowBytes < width * 4
+                || (long) (height - 1) * rowBytes + (long) width * 4 > rgba.remaining())
             throw new IllegalArgumentException("Unexpected frame buffer size");
         for (int y = 0; y < height; y += 2) {
             for (int x = 0; x < width; x += 2) {
                 int red = 0, green = 0, blue = 0;
                 for (int dy = 0; dy < 2; dy++) {
                     for (int dx = 0; dx < 2; dx++) {
-                        int pixel = (y + dy) * width + x + dx, offset = pixel * 4;
-                        int r = SRGB_TO_709[rgba[offset] & 255], g = SRGB_TO_709[rgba[offset + 1] & 255],
-                                b = SRGB_TO_709[rgba[offset + 2] & 255];
+                        int pixel = (y + dy) * width + x + dx, offset = origin + (y + dy) * rowBytes + (x + dx) * 4;
+                        int r = SRGB_TO_709[rgba.get(offset) & 255], g = SRGB_TO_709[rgba.get(offset + 1) & 255],
+                                b = SRGB_TO_709[rgba.get(offset + 2) & 255];
                         planar[pixel] = (byte) clamp(16 + ((47 * r + 157 * g + 16 * b + 128) >> 8), 16, 235);
                         red += r; green += g; blue += b;
                     }

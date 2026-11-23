@@ -80,8 +80,8 @@ public final class OfflineMp4Encoder {
 
     private static final class Frame {
         final long index;
-        final byte[] rgba;
-        Frame(long index, byte[] rgba) { this.index = index; this.rgba = rgba; }
+        final byte[] i420;
+        Frame(long index, byte[] i420) { this.index = index; this.i420 = i420; }
     }
     private static final class Encoded {
         final boolean audio;
@@ -108,7 +108,6 @@ public final class OfflineMp4Encoder {
     private int videoTrack = -1, audioTrack = -1, pendingBytes;
     private boolean muxing, videoEnd, audioEnd;
     private long firstAudioPts = Long.MIN_VALUE, previousVideoPts = -1, previousAudioPts = -1;
-    private byte[] planar;
 
     public static OfflineMp4Encoder create(int width, int height, int fpsNumerator, int fpsDenominator,
             int bitrate, int sampleRate, int channels, long audioFrames, long videoFrames,
@@ -137,9 +136,10 @@ public final class OfflineMp4Encoder {
         this.config = config;
         createPrivatePartial(config.partial);
         try {
+            // Slots hold converted I420 (1.5 bytes per pixel); the native
+            // producer converts RGBA before the frame reaches Java.
             int pixels = OfflineMp4Math.pixels(config.width, config.height);
-            for (int i = 0; i < SLOTS; i++) free.add(new byte[pixels * 4]);
-            planar = new byte[pixels * 3 / 2];
+            for (int i = 0; i < SLOTS; i++) free.add(new byte[pixels * 3 / 2]);
             Thread worker = new Thread(this::encode, "IdolyOfflineMp4");
             worker.setDaemon(true); worker.start();
         } catch (RuntimeException | Error error) { config.partial.delete(); throw error; }
@@ -174,7 +174,25 @@ public final class OfflineMp4Encoder {
         }
     }
 
-    /** ACCEPT means every source byte has been copied; RETRY leaves the clock and data untouched. */
+    /**
+     * Native producer entry: a complete limited-range BT.709 I420 frame (Y, U, V, no padding).
+     * ACCEPT means every source byte has been copied; RETRY leaves the clock and data untouched.
+     */
+    public int appendI420(ByteBuffer i420, long index) {
+        synchronized (stateLock) {
+            if (done || cancelled || finishRequested || failure != null) return ERROR;
+            int length = config.width * config.height * 3 / 2;
+            if (index != accepted || index >= config.videoFrames || i420 == null || !i420.isDirect()
+                    || i420.remaining() != length)
+                return failInput("Invalid or out-of-order I420 frame");
+            byte[] target = free.poll();
+            if (target == null) return RETRY;
+            i420.duplicate().get(target, 0, length);
+            return offer(index, target);
+        }
+    }
+
+    /** RGBA entry for Java producers (codec QA); converts into the slot on the caller's thread. */
     public int appendFrame(ByteBuffer rgba, int rowBytes, long index) {
         synchronized (stateLock) {
             if (done || cancelled || finishRequested || failure != null) return ERROR;
@@ -184,15 +202,15 @@ public final class OfflineMp4Encoder {
                 return failInput("Invalid or out-of-order RGBA frame");
             byte[] target = free.poll();
             if (target == null) return RETRY;
-            ByteBuffer source = rgba.duplicate();
-            int origin = source.position(), rowLength = config.width * 4;
-            for (int y = 0; y < config.height; y++) {
-                source.position(origin + y * rowBytes); source.get(target, y * rowLength, rowLength);
-            }
-            if (!frames.offer(new Frame(index, target))) { free.add(target); return RETRY; }
-            accepted++;
-            return ACCEPT;
+            OfflineMp4Math.rgbaToI420(rgba, rowBytes, target, config.width, config.height);
+            return offer(index, target);
         }
+    }
+
+    private int offer(long index, byte[] target) {
+        if (!frames.offer(new Frame(index, target))) { free.add(target); return RETRY; }
+        accepted++;
+        return ACCEPT;
     }
 
     private int failInput(String message) { errorCode = "invalid_frame_contract"; failure = message; cancelled = true; return ERROR; }
@@ -256,10 +274,8 @@ public final class OfflineMp4Encoder {
                 check();
                 Frame frame = frames.poll(10, TimeUnit.MILLISECONDS);
                 if (frame != null) {
-                    try {
-                        OfflineMp4Math.rgbaToI420(frame.rgba, planar, config.width, config.height);
-                        inputVideo(frame.index);
-                    } finally { free.add(frame.rgba); }
+                    try { inputVideo(frame.index, frame.i420); }
+                    finally { free.add(frame.i420); }
                     long target = Math.min(config.audioFrames, OfflineMp4Math.audioBoundary(
                             frame.index + 1, config.fpsNumerator, config.fpsDenominator, config.sampleRate));
                     while (audioInput < target) {
@@ -329,7 +345,7 @@ public final class OfflineMp4Encoder {
             AacPrimingProbe.close(video); AacPrimingProbe.close(audio);
             if (muxer != null) try { muxer.release(); } catch (RuntimeException ignored) {}
             synchronized (stateLock) {
-                frames.clear(); free.clear(); pending.clear(); planar = null;
+                frames.clear(); free.clear(); pending.clear();
                 if (!success) config.partial.delete();
                 if (finalReservationOwned) config.destination.delete();
                 done = true;
@@ -412,7 +428,7 @@ public final class OfflineMp4Encoder {
             if (drain(false) | drain(true)) progressAt = System.nanoTime(); else waitForCodec(progressAt);
         }
     }
-    private void inputVideo(long index) throws IOException, InterruptedException {
+    private void inputVideo(long index, byte[] planar) throws IOException, InterruptedException {
         int slot = inputSlot(video);
         Image image = video.getInputImage(slot);
         if (image == null || image.getFormat() != ImageFormat.YUV_420_888 || image.getPlanes().length != 3
