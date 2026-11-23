@@ -990,7 +990,7 @@ bool mp4_readable_memory(uintptr_t address,size_t bytes){
     // scan; no profile paths or mapping contents leave the native validator.
     FILE* maps=fopen("/proc/self/maps","r");if(!maps)return false;
     char line[512]{};unsigned lines=0;
-    while(cursor<end&&lines++<16384&&fgets(line,sizeof(line),maps)){
+    while(cursor<end&&lines++<262144&&fgets(line,sizeof(line),maps)){
         unsigned long long begin=0,limit=0;char permissions[5]{};
         if(sscanf(line,"%llx-%llx %4s",&begin,&limit,permissions)!=3)continue;
         if(begin>cursor)break;
@@ -1045,7 +1045,7 @@ bool mp4_native_manager_writable(uintptr_t address){
 #else
     FILE* maps=fopen("/proc/self/maps","r");if(!maps)return false;
     char line[512]{};unsigned lines=0;
-    while(cursor<end&&lines++<16384&&fgets(line,sizeof(line),maps)){
+    while(cursor<end&&lines++<262144&&fgets(line,sizeof(line),maps)){
         unsigned long long begin=0,limit=0;char permissions[5]{};
         if(sscanf(line,"%llx-%llx %4s",&begin,&limit,permissions)!=3)continue;
         if(begin>cursor)break;
@@ -2748,7 +2748,9 @@ std::atomic<bool> mp4_actor_managed_installed{false},mp4_actor_burst_installed{f
 bool mp4_actor_source_verified=false;
 uint32_t mp4_actor_job_type_handle=0,mp4_actor_transform_type_handle=0;
 struct Mp4ActorRange {uintptr_t begin=0,end=0;unsigned protection=0;};
-Mp4ActorRange mp4_actor_ranges[4096]{};size_t mp4_actor_range_count=0;
+// A Unity game process (GPU driver, bundles, il2cpp heap) can exceed several
+// thousand distinct mappings; a truncated snapshot rejects every high one.
+Mp4ActorRange mp4_actor_ranges[65536]{};size_t mp4_actor_range_count=0;
 struct Mp4ActorHost {
     mp4actor::Scope scope;mp4actor::Owner owners[32]{};size_t count=0;
     void* player=nullptr;void* presenter=nullptr;void* director=nullptr;
@@ -2765,7 +2767,7 @@ bool mp4_actor_map_add(uintptr_t begin,uintptr_t end,unsigned protection){
     if(mp4_actor_range_count){auto& last=mp4_actor_ranges[mp4_actor_range_count-1];
         if(begin<last.end)return false;
         if(begin==last.end&&last.protection==protection){last.end=end;return true;}}
-    if(mp4_actor_range_count==4096)return false;
+    if(mp4_actor_range_count==sizeof(mp4_actor_ranges)/sizeof(*mp4_actor_ranges))return false;
     mp4_actor_ranges[mp4_actor_range_count++]={begin,end,protection};return true;
 }
 bool mp4_actor_refresh_maps(){
@@ -2773,7 +2775,7 @@ bool mp4_actor_refresh_maps(){
     mp4_actor_range_count=0;
 #ifdef IDOLY_DARWIN_BRIDGE
     uint64_t cursor=0;
-    for(unsigned i=0;i<16384;++i){
+    for(unsigned i=0;i<262144;++i){
         uint64_t begin=cursor,span=0;int info[16]{};unsigned count=16,object=0;
         const int result=mach_vm_region(mach_task_self_,&begin,&span,9,info,&count,&object);
         if(object)(void)mach_port_deallocate(mach_task_self_,object);
@@ -2785,7 +2787,7 @@ bool mp4_actor_refresh_maps(){
 #else
     FILE* maps=fopen("/proc/self/maps","r");if(!maps)return false;
     char line[512]{};unsigned count=0;bool ok=true;
-    while(count++<16384&&fgets(line,sizeof(line),maps)){
+    while(count++<262144&&fgets(line,sizeof(line),maps)){
         unsigned long long begin=0,end=0;char permissions[5]{};
         if(sscanf(line,"%llx-%llx %4s",&begin,&end,permissions)!=3)continue;
         if(!mp4_actor_map_add(static_cast<uintptr_t>(begin),static_cast<uintptr_t>(end),
@@ -2797,11 +2799,29 @@ bool mp4_actor_refresh_maps(){
 bool mp4_actor_mapped(const void* value,size_t bytes,bool writable){
     if(!game_call()||!value||!bytes||bytes>64*1024*1024)return false;
     const uintptr_t address=reinterpret_cast<uintptr_t>(value),end=address+bytes;if(end<address)return false;
-    size_t low=0,high=mp4_actor_range_count;
-    while(low<high){const size_t mid=low+(high-low)/2;if(mp4_actor_ranges[mid].begin<=address)low=mid+1;else high=mid;}
-    if(!low)return false;
-    const auto& range=mp4_actor_ranges[low-1];
-    return end<=range.end&&(range.protection&(writable?3u:1u))==(writable?3u:1u);
+    const auto known=[&]{
+        size_t low=0,high=mp4_actor_range_count;
+        while(low<high){const size_t mid=low+(high-low)/2;if(mp4_actor_ranges[mid].begin<=address)low=mid+1;else high=mid;}
+        if(!low)return false;
+        const auto& range=mp4_actor_ranges[low-1];
+        return end<=range.end&&(range.protection&(writable?3u:1u))==(writable?3u:1u);
+    };
+    if(known())return true;
+    // A scene load maps new heap after the last snapshot (device 11.23.3/.4:
+    // the fresh scene's camera field and timeline track lists read as
+    // missing). Refresh on a miss, at most every 250 ms, then decide again.
+    static timespec refreshed{};timespec now{};
+#ifdef IDOLY_DARWIN_BRIDGE
+    constexpr unsigned clock_id=6; // Darwin CLOCK_MONOTONIC, as sound_monotonic_ms
+#else
+    constexpr clockid_t clock_id=CLOCK_MONOTONIC;
+#endif
+    if(clock_gettime(clock_id,&now))return false;
+    const int64_t elapsed=(static_cast<int64_t>(now.tv_sec)-refreshed.tv_sec)*1000
+        +(static_cast<int64_t>(now.tv_nsec)-refreshed.tv_nsec)/1000000;
+    if((refreshed.tv_sec||refreshed.tv_nsec)&&elapsed>=0&&elapsed<250)return false;
+    refreshed=now;
+    return mp4_actor_refresh_maps()&&known();
 }
 template<class T> bool mp4_actor_field(void* object,size_t offset,T& result){
     if(!object||reinterpret_cast<uintptr_t>(object)+offset<reinterpret_cast<uintptr_t>(object)
@@ -55688,6 +55708,19 @@ struct Mp4FreshControlRoster {
  const char*error="fresh_control_roster_idle";
 };
 bool mp4_fresh_control_fail(Mp4FreshControlRoster&r,const char*error){r.error=error;r.ready=false;return false;}
+// Which read of a List<T> fact failed, so a device failure names its step.
+const char*mp4_fresh_control_list_reason=nullptr;
+const char*mp4_fresh_control_list_code(){
+ const char*reason=mp4_fresh_control_list_reason?mp4_fresh_control_list_reason:"";
+ if(!strcmp(reason,"field"))return "fresh_control_track_list_invalid_field";
+ if(!strcmp(reason,"list"))return "fresh_control_track_list_invalid_list";
+ if(!strcmp(reason,"array"))return "fresh_control_track_list_invalid_array";
+ if(!strcmp(reason,"type"))return "fresh_control_track_list_invalid_type";
+ if(!strcmp(reason,"version"))return "fresh_control_track_list_invalid_version";
+ if(!strcmp(reason,"item"))return "fresh_control_track_list_invalid_item";
+ if(!strcmp(reason,"capacity"))return "fresh_control_track_list_invalid_capacity";
+ return "fresh_control_track_list_invalid";
+}
 bool mp4_fresh_control_keep(Mp4FreshControlRoster&r,void*object){
  if(!object)return true;
  for(size_t i=0;i<r.root_count;++i)if(weak_get(r.roots[i])==object)return true;
@@ -55732,17 +55765,20 @@ bool mp4_fresh_control_schema(void*asset){
  return true;
 }
 bool mp4_fresh_control_list(Mp4FreshControlRoster&r,void*owner,size_t offset,const char*array_type,size_t*index){
- if(!index||r.list_count==2048)return false;
+ const auto miss=[](const char*reason){mp4_fresh_control_list_reason=reason;return false;};
+ if(!index||r.list_count==2048)return miss("capacity");
  auto&fact=r.lists[r.list_count];fact={};fact.owner=owner;fact.offset=offset;fact.begin=r.item_count;fact.array_type=array_type;
- if(!mp4_actor_field(owner,offset,fact.list)||!mp4_fresh_control_keep(r,fact.list))return false;
+ if(!mp4_actor_field(owner,offset,fact.list)||!mp4_fresh_control_keep(r,fact.list))return miss("field");
  if(fact.list){void**values=nullptr;size_t count=0;
-  if(!mp4_actor_list(fact.list,&values,&count,16384)||count>16384-r.item_count
-   ||!mp4_actor_field(fact.list,16,fact.array)||!mp4_type_is(fact.array,array_type?array_type:"System.Array")||!mp4_fresh_control_keep(r,fact.array)
-   ||!mp4_actor_field(fact.list,28,fact.version))return false;
+  if(!mp4_actor_list(fact.list,&values,&count,16384))return miss("list");
+  if(count>16384-r.item_count)return miss("capacity");
+  if(!mp4_actor_field(fact.list,16,fact.array))return miss("array");
+  if(!mp4_type_is(fact.array,array_type?array_type:"System.Array")||!mp4_fresh_control_keep(r,fact.array))return miss("type");
+  if(!mp4_actor_field(fact.list,28,fact.version))return miss("version");
   fact.count=count;
-  for(size_t i=0;i<count;++i){void*object=values[i];if(!object||!mp4_fresh_control_keep(r,object))return false;r.items[r.item_count++]=object;}
+  for(size_t i=0;i<count;++i){void*object=values[i];if(!object||!mp4_fresh_control_keep(r,object))return miss("item");r.items[r.item_count++]=object;}
  }
- *index=r.list_count++;return true;
+ mp4_fresh_control_list_reason=nullptr;*index=r.list_count++;return true;
 }
 bool mp4_fresh_control_list_current(const Mp4FreshControlRoster&r,const Mp4FreshControlRoster::List&fact){
  void*list=nullptr,*array=nullptr;int32_t version=0;void**values=nullptr;size_t count=0;
@@ -56025,7 +56061,7 @@ bool mp4_fresh_path_current(const Mp4FreshControlRoster&r){
   if(!mp4_fresh_path_search(r,node.director))return fail("fresh_path_registry_invalid");
   if(!node.asset)continue;
   if(!mp4_root_track_field(node.asset,"m_Tracks",mp4stage::Layout::timeline_tracks))return fail("fresh_control_track_schema_invalid");
-  size_t roots=0;if(!mp4_fresh_control_list(r,node.asset,mp4stage::Layout::timeline_tracks,"UnityEngine.Timeline.TrackAsset[]",&roots))return fail("fresh_control_track_list_invalid");
+  size_t roots=0;if(!mp4_fresh_control_list(r,node.asset,mp4stage::Layout::timeline_tracks,"UnityEngine.Timeline.TrackAsset[]",&roots))return fail(mp4_fresh_control_list_code());
   void*tracks[512]{};size_t track_count=0;const auto root_list=r.lists[roots];
   if(root_list.count>512)return fail("fresh_control_track_count_invalid");
   for(size_t i=0;i<root_list.count;++i)tracks[track_count++]=r.items[root_list.begin+i];
@@ -56036,7 +56072,7 @@ bool mp4_fresh_path_current(const Mp4FreshControlRoster&r){
     ||!mp4_root_track_field(track,"m_Clips",mp4stage::Layout::track_clips))return fail("fresh_control_track_schema_invalid");
    size_t children=0,clips=0;
    if(!mp4_fresh_control_list(r,track,mp4stage::Layout::track_children,"UnityEngine.Timeline.TrackAsset[]",&children)
-    ||!mp4_fresh_control_list(r,track,mp4stage::Layout::track_clips,"UnityEngine.Timeline.TimelineClip[]",&clips))return fail("fresh_control_track_list_invalid");
+    ||!mp4_fresh_control_list(r,track,mp4stage::Layout::track_clips,"UnityEngine.Timeline.TimelineClip[]",&clips))return fail(mp4_fresh_control_list_code());
    const auto child_list=r.lists[children];if(child_list.count>512-track_count)return fail("fresh_control_track_count_invalid");
    for(size_t i=0;i<child_list.count;++i)tracks[track_count++]=r.items[child_list.begin+i];
    if(!mp4_type_is(track,"UnityEngine.Timeline.ControlTrack"))continue;
