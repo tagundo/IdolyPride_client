@@ -28,6 +28,7 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
             oldLeft, oldTop, oldRight, oldBottom) -> {
         if (left != oldLeft || top != oldTop || right != oldRight || bottom != oldBottom) {
             cancelWindowMenuHold();
+            UnifiedMP4Export.geometrySource("layout", oldRight - oldLeft, oldBottom - oldTop, right - left, bottom - top);
             UnifiedMP4Export.geometryChanged(this);
         }
     };
@@ -99,8 +100,11 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
         // as it is and must not cancel an MP4 capture; real bounds changes are
         // also reported by the decor layout listener.
         int[] shape = windowShape(configuration);
-        if (windowShape == null || shape == null || !java.util.Arrays.equals(shape, windowShape))
+        if (windowShape == null || shape == null || !java.util.Arrays.equals(shape, windowShape)) {
+            UnifiedMP4Export.geometrySource("configuration", windowShape == null ? 0 : windowShape[1],
+                    windowShape == null ? 0 : windowShape[2], shape == null ? 0 : shape[1], shape == null ? 0 : shape[2]);
             UnifiedMP4Export.geometryChanged(this);
+        }
         windowShape = shape;
         updateWindowing(isInMultiWindowMode());
         // Unity owns updating its configuration, SurfaceView and render lifecycle.
@@ -109,6 +113,7 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
 
     @Override public void onMultiWindowModeChanged(boolean multiWindow, Configuration configuration) {
         cancelWindowMenuHold();
+        UnifiedMP4Export.geometrySource(multiWindow ? "multi_window_on" : "multi_window_off", 0, 0, 0, 0);
         UnifiedMP4Export.geometryChanged(this);
         updateWindowing(multiWindow);
         super.onMultiWindowModeChanged(multiWindow, configuration);

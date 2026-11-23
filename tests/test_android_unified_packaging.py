@@ -389,7 +389,7 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
     sources[package + "MainActivity.java"] = "package game.qualiarts.idolypride.localserver; public class MainActivity extends android.app.Activity { static RuntimeException failure; public MainActivity(){if(failure!=null)throw failure;} }"
     sources[package + "UnifiedMP4Export.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedMP4Export {static void restoreState(android.content.Context c,android.os.Bundle b){}
-        static void attachGame(android.app.Activity a){}static void geometryChanged(android.app.Activity a){}
+        static void attachGame(android.app.Activity a){}static void geometrySource(String s,int a,int b,int c,int d){}static void geometryChanged(android.app.Activity a){}
         static boolean menuOpening;static int menuOpenFailures;
         static void serverMenuOpening(android.app.Activity a){menuOpening=true;}
         static void serverMenuOpenFailed(android.app.Activity a){menuOpening=false;menuOpenFailures++;}

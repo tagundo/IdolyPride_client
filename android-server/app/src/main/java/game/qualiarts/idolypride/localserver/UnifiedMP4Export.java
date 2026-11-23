@@ -580,9 +580,13 @@ public final class UnifiedMP4Export {
     private static void recordCancel(String origin) {
         Context context = application;
         if (context == null || !initialized || !(busy() || backgroundQueueHasWork())) return;
+        // Keep the cancel that ended the job, not a later one during its cleanup.
+        String phase = last.optString("phase", ""), stage = last.optString("job_stage", "");
+        if (phase.equals("cancelling") || phase.equals("cancelled") || stage.equals("restore_retire")) return;
         try {
             context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).edit().putString("last_cancel",
                     new JSONObject().put("origin", origin).put("time_ms", System.currentTimeMillis())
+                            .put("detail", origin.equals("geometry_changed") ? geometryDetail : "none")
                             .put("phase", publicCode(last.optString("phase", ""))).put("job_stage", publicCode(last.optString("job_stage", "")))
                             .put("queue_phase", publicCode(lastQueue.optString("phase", ""))).toString()).apply();
         } catch (Exception ignored) { /* Diagnostics never block a cancel. */ }
@@ -593,7 +597,7 @@ public final class UnifiedMP4Export {
             if (raw.isEmpty() || raw.length() > 4096) return null;
             JSONObject source = new JSONObject(raw), result = new JSONObject();
             result.put("time_ms", Math.max(0L, source.optLong("time_ms")));
-            for (String key : new String[] {"origin", "phase", "job_stage", "queue_phase"}) {
+            for (String key : new String[] {"origin", "detail", "phase", "job_stage", "queue_phase"}) {
                 String value = source.optString(key, "");
                 result.put(key, value.matches("[A-Za-z0-9_]{1,64}") ? value : "unknown");
             }
@@ -741,9 +745,23 @@ public final class UnifiedMP4Export {
             // Keep the last immutable MV through the explicit server-menu
             // handoff. A real active-window resize requires a fresh snapshot.
             if (!menuHandoff && activePlayerWindow) invalidateQueueSelection();
-            // An existing capture still cancels on every real geometry change.
-            if (pending == null) cancelFrom("geometry_changed");
+            // A capture with its output geometry applied still cancels on a
+            // real geometry change. Scene preparation re-reads the window at
+            // render setup, and finishing/cleanup no longer use it: the fresh
+            // scene reload itself reshapes the window on device (11.23.3).
+            if (pending == null && !geometryFreeStage()) cancelFrom("geometry_changed");
         }
+    }
+    private static boolean geometryFreeStage() {
+        String stage = last.optString("job_stage", "");
+        return stage.equals("begin") || stage.equals("scene_acquire") || stage.equals("audio_setup")
+                || stage.equals("encoder_finish_save") || stage.equals("restore_retire");
+    }
+    private static String geometryDetail = "none";
+    /** Called by the game window just before geometryChanged: which signal and the old/new shape. */
+    static void geometrySource(String source, int oldWidth, int oldHeight, int width, int height) {
+        geometryDetail = source + "_" + Math.max(0, oldWidth) + "x" + Math.max(0, oldHeight)
+                + "_" + Math.max(0, width) + "x" + Math.max(0, height);
     }
     static void focusChanged(Activity activity, boolean focused) {
         // A notification shade or another split-screen window can take focus
@@ -815,7 +833,10 @@ public final class UnifiedMP4Export {
             boolean terminal = complete || phase.equals("failed") || phase.equals("cancelled");
             if (busy()) dismissed = false;
             overlay.setVisibility(!dismissed && (busy() || terminal || saving) ? View.VISIBLE : View.GONE);
-            overlayText.setText(statusText(activity));
+            String overlayStatus;
+            try { overlayStatus = statusText(activity); }
+            catch (RuntimeException failed) { overlayStatus = activity.getString(R.string.mp4_progress_title); }
+            overlayText.setText(overlayStatus);
             bindSaveButton(overlaySave, activity);
             overlaySave.setText(phase.equals("completed") ? R.string.mp4_save : R.string.mp4_save_completed);
             overlaySave.setVisibility(complete ? View.VISIBLE : View.INVISIBLE);
@@ -831,10 +852,11 @@ public final class UnifiedMP4Export {
             overlayDismiss.setVisibility(terminal && !saving && !busy() ? View.VISIBLE : View.INVISIBLE);
         }
         Context notice = application != null ? application : activity;
-        if (notice != null && initialized && (busy() || backgroundQueueHasWork()))
+        if (notice != null && initialized && (busy() || backgroundQueueHasWork())) try {
             UnifiedMP4Service.update(statusText(notice),
                     last.optString("phase").equals("rendering") ? last.optLong("frames") : 0,
                     last.optString("phase").equals("rendering") ? last.optLong("total_frames") : 0);
+        } catch (RuntimeException ignored) { /* The notification mirror never ends the process. */ }
         for (Runnable observer : new ArrayList<>(observers)) observer.run();
         if (configured && (resumed || !observers.isEmpty()) || initialized && (busy() || backgroundQueueHasWork())
                 || UnifiedMP4Background.expectsService() || saving) {

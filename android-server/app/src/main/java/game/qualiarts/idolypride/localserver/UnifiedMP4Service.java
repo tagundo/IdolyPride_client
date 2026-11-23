@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import java.lang.ref.WeakReference;
 
 /** Dedicated, bounded media job service. Stopping it never stops ServerService. */
@@ -26,13 +27,25 @@ public final class UnifiedMP4Service extends Service {
     private boolean stopping, foreground;
     private String shown = "";
     private final Runnable expired = () -> stopJob("background_time_budget", false);
+    // startForegroundService() obliges the started record to reach
+    // startForeground(); bringing it down first makes the system crash the
+    // whole app ("did not then call Service.startForeground()"). A stop that
+    // arrives while a start is in flight is applied right after promotion.
+    // Main thread only, like every caller.
+    private static final long START_GRACE_MS = 10_000L;
+    private static boolean startPending, stopRequested;
+    private static long startRequestedAt;
     static boolean start(Context context) {
-        try { context.startForegroundService(new Intent(context, UnifiedMP4Service.class)); return true; }
+        try { context.startForegroundService(new Intent(context, UnifiedMP4Service.class)); }
         catch (RuntimeException unavailable) { return false; }
+        startPending = true; stopRequested = false; startRequestedAt = SystemClock.uptimeMillis();
+        return true;
     }
     static void stop(Context context) {
         UnifiedMP4Service owner = current.get();
         if (owner != null) owner.stopping = true;
+        if (startPending && SystemClock.uptimeMillis() - startRequestedAt < START_GRACE_MS) { stopRequested = true; return; }
+        startPending = false; stopRequested = false;
         context.stopService(new Intent(context, UnifiedMP4Service.class));
     }
     @Override public IBinder onBind(Intent intent) { return null; }
@@ -45,11 +58,20 @@ public final class UnifiedMP4Service extends Service {
     }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && CANCEL.equals(intent.getAction())) { stopJob("user_cancelled", true); return START_NOT_STICKY; }
-        if (!UnifiedMP4Background.expectsService()) { stopping = true; stopSelf(); return START_NOT_STICKY; }
-        if (!foreground && !stopping) try {
-            Notification notification = notification(UnifiedMP4Export.statusText(this), 0, 0);
+        // Promote first, with a constant notification, on every start: this
+        // record came from startForegroundService even when it is unwanted.
+        boolean promoted = foreground;
+        if (!promoted) try {
             // Public SDK constants: mediaProcessing=8192(API35), dataSync=1.
-            startForeground(NOTIFICATION, notification, Build.VERSION.SDK_INT >= 35 ? 8192 : 1);
+            startForeground(NOTIFICATION, notification(getString(R.string.mp4_progress_title), 0, 0),
+                    Build.VERSION.SDK_INT >= 35 ? 8192 : 1);
+            promoted = true;
+        } catch (RuntimeException unavailable) { /* Stopped below. */ }
+        boolean wanted = promoted && !stopping && !stopRequested && UnifiedMP4Background.expectsService();
+        startPending = false; stopRequested = false;
+        if (!promoted) { stopJob("background_service_unavailable", false); return START_NOT_STICKY; }
+        if (!wanted) { stopping = true; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return START_NOT_STICKY; }
+        if (!foreground) try {
             PowerManager power = (PowerManager)getSystemService(POWER_SERVICE);
             wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, getPackageName() + ":mp4-export");
             wakeLock.setReferenceCounted(false); wakeLock.acquire(BUDGET_MS + 10_000);

@@ -56740,15 +56740,23 @@ bool mp4_fresh_field(void*object,size_t offset,void*&value){
  if(mp4_actor_field(object,offset,value))return true;
  static uint64_t refreshed=0;const uint64_t now=idoly_mp4_runtime::milliseconds();
  if(!object||(refreshed&&now>=refreshed&&now-refreshed<100))return false;
- refreshed=now;return mp4_actor_refresh_maps()&&mp4_actor_field(object,offset,value);
+ refreshed=now;
+ if(!mp4_actor_refresh_maps()){
+  // A truncated snapshot (range/line bound) keeps rejecting high mappings.
+  static bool reported=false;if(!reported){reported=true;idoly_mp4_runtime::diagnostic_event("fresh_prepare","actor_maps_refresh_incomplete");}
+  return false;}
+ return mp4_actor_field(object,offset,value);
 }
-// VLSRPCameraController.get_mainCamera caches GetComponent<Camera>() in the
-// field later stages compare; controller discovery already matched it.
+// VLSRPCameraController.get_mainCamera returns (and caches) the controller's
+// camera; controller discovery accepted this controller only because that
+// getter returned the live timeline camera. Device 11.23.3 showed the raw
+// +0x50 read failing the range check even after a refresh while the camera
+// existed, so the bind takes the getter's live, typed Camera. Later stages
+// read the same field directly through the game adapter.
 void*mp4_fresh_controller_camera(void*controller){
- void*field=nullptr;if(!controller)return nullptr;
- if(mp4_fresh_field(controller,mp4game::Layout{}.camera_main,field)&&field)return field;
- void*camera=rt_camera?rt_camera(controller,nullptr):nullptr;
- return camera&&mp4_fresh_field(controller,mp4game::Layout{}.camera_main,field)&&field==camera?camera:nullptr;
+ if(!controller||!rt_camera||!mp4_alive(controller))return nullptr;
+ void*camera=rt_camera(controller,nullptr);
+ return camera&&mp4_type_is(camera,"UnityEngine.Camera")&&mp4_alive(camera)?camera:nullptr;
 }
 struct Mp4FreshPlayGate {
  void*player=nullptr,*presenter=nullptr,*timeline=nullptr,*master=nullptr,*camera=nullptr,*controller=nullptr;Method*method=nullptr;

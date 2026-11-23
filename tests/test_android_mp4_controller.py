@@ -94,7 +94,7 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
                 "beginPending", "gameResumed", "gamePaused", "gameStarted", "gameStopped", "suspendForLifecycle",
                 "resumeForLifecycle", "togglePause", "requestPause", "requestResume", "focusChanged", "gameDestroyed", "cancel",
                 "requestQueueRun", "bringQueueToForeground", "serverMenuOpening", "serverMenuOpenFailed", "geometryChanged",
-                "invalidateQueueSelection", "observeGameOwner", "cancelFrom"]]
+                "invalidateQueueSelection", "observeGameOwner", "cancelFrom", "geometryFreeStage"]]
     selected += [method(source, "requestStart", 1), method(source, "requestEnqueue", 1)]
     prefix = r'''package game.qualiarts.idolypride.localserver;
 import java.io.*;import java.nio.file.*;import java.lang.ref.WeakReference;import java.util.*;
@@ -223,7 +223,12 @@ public final class ControllerHarness {
     require(cancelOrigins.get(cancelOrigins.size()-1).equals("game_destroyed"),"a destroyed game owner attributes its cancel");
     Activity rotating=new Activity();game=new WeakReference<>(rotating);last=new JSONObject();
     resumed=true;stopped=false;gameFocused=true;foregroundSelectionReady=false;allowNative=true;
-    gamePaused(rotating);allowNative=false;int cancelsBeforeGeometry=cancels,enqueuesBeforeGeometry=enqueues;
+    gamePaused(rotating);allowNative=false;
+    for(String stage:new String[]{"begin","scene_acquire","audio_setup","encoder_finish_save","restore_retire"}){
+      last=new JSONObject().put("job_stage",stage);int before=cancels;geometryChanged(rotating);
+      require(cancels==before,"the fresh scene reload reshapes the window before render setup; "+stage+" must not cancel");}
+    last=new JSONObject().put("job_stage","frame_readback");foregroundSelectionReady=true;
+    int cancelsBeforeGeometry=cancels,enqueuesBeforeGeometry=enqueues;
     geometryChanged(rotating);
     require(foregroundSelectionReady&&ready(),"landscape MV -> paused portrait server resize preserves the verified logical selection");
     require(cancels==cancelsBeforeGeometry+1,"a geometry change still cancels any existing capture");

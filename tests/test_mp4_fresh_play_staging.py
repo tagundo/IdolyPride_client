@@ -73,12 +73,13 @@ void observe_presenter_ended(void*p){assert(p==&::presenter);++ended_observers;s
 // A stale range snapshot rejects the freshly loaded controller's heap page
 // until a refresh; the field itself is present.
 bool mp4_actor_field(void*object,size_t offset,void*&value){if(!object||(maps_stale&&object==&controller))return false;auto&o=*static_cast<Object*>(object);auto it=o.fields.find(offset);if(it==o.fields.end())return false;value=it->second;return true;}
-bool mp4_actor_refresh_maps(){++map_refreshes;maps_stale=false;return true;}
+bool maps_truncated=false;
+bool mp4_actor_refresh_maps(){++map_refreshes;if(maps_truncated)return false;maps_stale=false;return true;}
 // VLSRPCameraController.get_mainCamera: lazily caches GetComponent<Camera>().
 void*(*rt_camera)(void*,Method*)=[](void*c,Method*)->void*{if(c!=&controller)return nullptr;if(!controller.fields.count(2)&&camera_lazy)controller.fields[2]=&camera;return controller.fields.count(2)?controller.fields[2]:nullptr;};
 bool mp4_actor_list(void*object,void***values,size_t*count,size_t max){if(object!=&list||directors.size()>max)return false;*values=directors.data();*count=directors.size();return true;}
 bool mp4_alive(void*object){return object&&static_cast<Object*>(object)->alive;}
-bool mp4_type_is(void*object,const char*type){if(object==&presenter)return !std::strcmp(type,photo_source?"Solis.Photography.PhotographyLivePresenter":"Solis.OutGame.LivePlayerScreenPresenter");return (object==&master||object==&child)&&!std::strcmp(type,"UnityEngine.Playables.PlayableDirector");}
+bool mp4_type_is(void*object,const char*type){if(object==&presenter)return !std::strcmp(type,photo_source?"Solis.Photography.PhotographyLivePresenter":"Solis.OutGame.LivePlayerScreenPresenter");if(object==&camera)return !std::strcmp(type,"UnityEngine.Camera");return (object==&master||object==&child)&&!std::strcmp(type,"UnityEngine.Playables.PlayableDirector");}
 struct PhotoWeak{void*get(bool){return photo_source?&presenter:nullptr;}}mp4_photography_presenter;
 void mp4_observe_photography_presenter(){++photo_observations;}
 void*mp4_selected_controller(void*p){return p==&presenter&&controller_ready?&controller:nullptr;}
@@ -286,12 +287,19 @@ int main(int argc,char**argv){
   mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
  }
  if(scenario=="stale_camera_maps"){
-  // Device 11.23.2: the controller of the freshly loaded scene sat in a heap
-  // mapping newer than the range snapshot, so its present camera read as
-  // missing until the admission budget. One refresh binds it at Play.
-  maps_stale=true;source_play(&method);
-  assert(mp4_fresh_play_gate.deferred&&!mp4_fresh_play_gate.bind_pending&&!mp4_fresh_play_gate.failed&&map_refreshes==1);
+  // Device 11.23.2/.3: the controller of the freshly loaded scene is rejected
+  // by the range snapshot, even a truncated refreshed one; its camera comes
+  // from the getter discovery matched, so Play binds at once.
+  maps_stale=true;maps_truncated=true;source_play(&method);
+  assert(mp4_fresh_play_gate.deferred&&!mp4_fresh_play_gate.bind_pending&&!mp4_fresh_play_gate.failed);
   assert(roots.size()==6&&mp4_fresh_play_gate.camera==&camera&&mp4_fresh_play_gate_current());
+  mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
+ }
+ if(scenario=="dead_camera"){
+  // A destroyed or foreign object from the getter is never bound as camera.
+  camera.alive=false;source_play(&method);
+  assert(mp4_fresh_play_gate.bind_pending&&!std::strcmp(mp4_fresh_play_gate_bind(false),"camera"));
+  camera.alive=true;assert(mp4_fresh_play_gate_bind(false)==nullptr&&mp4_fresh_play_gate.camera==&camera);
   mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
  }
  if(scenario=="lazy_camera"){
@@ -302,7 +310,7 @@ int main(int argc,char**argv){
  }
  if(scenario=="absent_camera"){
   // A controller without any camera stays unbound; no field is invented.
-  controller.fields.erase(2);source_play(&method);
+  controller.fields.erase(2);source_play(&method);assert(!camera_lazy);
   assert(mp4_fresh_play_gate.bind_pending&&!std::strcmp(mp4_fresh_play_gate_bind(false),"camera")&&!mp4_fresh_play_gate.camera);
   mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
  }
@@ -490,7 +498,7 @@ def play_staging_binaries(tmp_path_factory):
     "reset_caller", "reset_caller_unmapped", "reset_instruction", "reset_continuation", "reset_injected",
     "end_photo", "end_outgame", "end_unheld", "end_failed", "end_selected_clear", "end_wrong_binding", "end_wait_reset", "late_play_cleanup",
     "late_play_expired", "late_play_wall_only", "played_not_intercepted", "unknown_first_expired", "end_reset_expired", "end_reset_expired_outgame",
-    "late_bind", "late_bind_end", "late_bind_never", "late_bind_no_owner", "stale_camera_maps", "lazy_camera", "absent_camera",
+    "late_bind", "late_bind_end", "late_bind_never", "late_bind_no_owner", "stale_camera_maps", "lazy_camera", "absent_camera", "dead_camera",
     "certificate_source", "certificate_ready", "certificate_backend", "certificate_base", "certificate_hook", "certificate_original", "certificate_stub",
     "certificate_master_hook", "certificate_master_original", "certificate_master_stub",
 ])
