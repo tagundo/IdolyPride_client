@@ -85,6 +85,7 @@ def test_real_android_transport_compiles_and_progress_gate_checks_actual_capture
     sources = {
         "UnifiedMP4Export.java": f"""package {package}; final class UnifiedMP4Export {{
             static void cancel(){{}}static boolean queuePause(){{return true;}}
+            static String statusText(android.content.Context c){{return "status";}}
             static boolean backgroundQueueHasWork(){{return false;}} }}""",
         "UnifiedRuntime.java": f"""package {package}; final class UnifiedRuntime {{
             static int notificationIcon(android.content.Context c,int fallback){{return fallback;}} }}""",

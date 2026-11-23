@@ -905,6 +905,18 @@ static NSDictionary *mp4SessionStatus(void) {
         id envelope=[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL];
         NSDictionary *trace=[envelope isKindOfClass:NSDictionary.class]?mp4SanitizeExportTrace(envelope[@"export_trace"]):nil;
         if(trace){status[@"export_trace"]=trace;status[@"diagnostics_available"]=@YES;}
+        // The pending original cleanup join of a terminal export, as bounded
+        // scalars from the separate ABI; the 2 KiB status is unchanged.
+        NSDictionary *progress=[envelope isKindOfClass:NSDictionary.class]&&[envelope[@"session_progress"]isKindOfClass:NSDictionary.class]?envelope[@"session_progress"]:nil;
+        for(NSString *key in @[@"job_stage",@"cleanup_stage"]){
+            NSString *value=[progress[key]isKindOfClass:NSString.class]?progress[key]:nil;
+            if(value&&value.length<=63&&[code numberOfMatchesInString:value options:0 range:NSMakeRange(0,value.length)]==1)status[key]=value;
+        }
+        for(NSString *key in @[@"cleanup_wait_ms",@"boundary_entries"]){
+            NSNumber *value=[progress[key]isKindOfClass:NSNumber.class]?progress[key]:nil;
+            if(value&&CFGetTypeID((__bridge CFTypeRef)value)!=CFBooleanGetTypeID()&&value.doubleValue>=0&&value.doubleValue<=9007199254740991.0
+                &&value.doubleValue==value.unsignedLongLongValue)status[key]=value;
+        }
     }
     mp4DiagnosticRemember(status);
     @synchronized(NSUserDefaults.class){status[@"diagnostic_history"]=mp4DiagnosticSaved();}

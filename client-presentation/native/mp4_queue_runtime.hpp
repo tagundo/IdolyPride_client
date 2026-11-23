@@ -536,6 +536,9 @@ inline void queue_execute(){
     // original screen or advancing an export remains gated below.
     if(queue_blocked){if(!busy_stage()&&!session_busy&&queue_graphics_apply)queue_graphics_apply(nullptr);return;}
     if(queue_fresh_prepare_failed&&queue_active_id[0]&&!queue_export_started){
+        // A later Run/Resume/Pause request clears queue_error; the attempt's
+        // own failure stays visible for its whole original cleanup drain.
+        queue_set_error(queue_prepare_error);
         if(queue_replay().active()){queue_replay().cancel();queue_replay().tick(milliseconds());
             if(queue_replay().active()){snprintf(queue_phase,sizeof(queue_phase),"draining_navigation");return;}}
         if(!queue_replay().settle_failure()){snprintf(queue_phase,sizeof(queue_phase),"draining_navigation");return;}

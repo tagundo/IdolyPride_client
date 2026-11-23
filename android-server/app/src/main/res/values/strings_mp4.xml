@@ -29,6 +29,8 @@
     <string name="mp4_delete_video_confirm">앱에 보관한 완료 영상을 삭제할까요? 외부에 저장한 복사본은 유지됩니다.</string>
     <string name="mp4_cancelled">내보내기를 취소했습니다.</string>
     <string name="mp4_failed">내보내기 실패: %1$s</string>
+    <string name="mp4_cleanup_waiting">원본 장면 정리 대기 중 · %1$s (%2$d초)</string>
+    <string name="mp4_cleanup_stalled">정리가 %1$d초째 끝나지 않았습니다. 계속 멈춰 있으면 앱을 완전히 종료한 뒤 다시 실행하세요. 목록에서 다시 시도할 수 있습니다.</string>
     <string name="mp4_idle">내보내기 대기</string>
     <string name="mp4_not_ready">MV 재생 화면을 먼저 여세요.</string>
     <string name="mp4_unavailable">MP4 내보내기를 사용할 수 없습니다.</string>

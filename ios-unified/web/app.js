@@ -573,7 +573,7 @@
   Object.assign(UI_TRANSLATIONS.en, {
     "MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다.":"MV detected. Export is not ready yet.",
     "MV를 모은 뒤 큐를 실행하세요.":"Add MVs, then run the queue.",
-    "게임 화면을 준비하고 있습니다.":"Preparing the game scene.",
+    "게임 화면을 준비하고 있습니다.":"Preparing the game scene.","원본 장면 정리 대기 중":"Waiting for the original scene cleanup",
     "큐 실행":"Run queue","현재 MV 추가":"Add current MV","큐 일시 정지":"Pause queue","큐 계속하기":"Resume queue",
     "큐 실행 중":"Queue running","작업 목록":"Jobs","등록한 작업이 없습니다.":"No jobs added.","MP4 작업 목록":"MP4 jobs",
     "앱을 나가면 멈추고 돌아오면 이어집니다.":"Export pauses when you leave the app and resumes when you return.",
@@ -586,7 +586,7 @@
   Object.assign(UI_TRANSLATIONS.ja, {
     "MV를 확인했습니다. 내보내기는 아직 준비되지 않았습니다.":"MVを確認しました。書き出しはまだ準備できていません。",
     "MV를 모은 뒤 큐를 실행하세요.":"MVを追加してからキューを実行してください。",
-    "게임 화면을 준비하고 있습니다.":"ゲーム画面を準備しています。",
+    "게임 화면을 준비하고 있습니다.":"ゲーム画面を準備しています。","원본 장면 정리 대기 중":"元のシーンの後処理を待っています",
     "큐 실행":"キューを実行","현재 MV 추가":"現在のMVを追加","큐 일시 정지":"キューを一時停止","큐 계속하기":"キューを再開",
     "큐 실행 중":"キューを実行中","작업 목록":"処理リスト","등록한 작업이 없습니다.":"登録された処理はありません。","MP4 작업 목록":"MP4処理リスト",
     "앱을 나가면 멈추고 돌아오면 이어집니다.":"アプリを離れると一時停止し、戻ると処理を再開します。",
@@ -1034,7 +1034,13 @@
       const phase = mp4Status.phase, paused = phase === "paused" || phase === "pausing", active = ["preparing_audio","rendering","finishing","cancelling","pausing","paused"].includes(phase);
       const queuedOutput = Boolean(mp4Status.export_id) && mp4QueueStatus.jobs.some(job => job.output_id === mp4Status.export_id);
       const queueOwnsScene = mp4QueueStatus.running === true || mp4QueueStatus.paused === true || Boolean(mp4QueueStatus.current_job_id);
-      const queuePreparing = (mp4QueueStatus.running === true || mp4QueueStatus.command_pending === true)
+      // The running job's own failure stays visible through its original cleanup
+      // join; only an older job's terminal row yields to the next scene.
+      const currentJob = mp4QueueStatus.current_job_id ? mp4QueueStatus.jobs.find(job => job.job_id === mp4QueueStatus.current_job_id) : null;
+      const cleanupStage = typeof mp4Status.cleanup_stage === "string" && mp4Status.cleanup_stage !== "none" ? mp4Status.cleanup_stage : "";
+      const currentTerminal = (phase === "failed" || phase === "cancelled") && Boolean(mp4Status.export_id)
+        && (Boolean(cleanupStage) || Boolean(currentJob && currentJob.output_id === mp4Status.export_id));
+      const queuePreparing = !currentTerminal && (mp4QueueStatus.running === true || mp4QueueStatus.command_pending === true)
         && ["","idle","completed","failed","cancelled"].includes(phase || "");
       const selectedMV = mp4SelectedMV();
       const queuedReady = !queueOwnsScene && !active && (!phase || phase === "idle")
@@ -1049,7 +1055,9 @@
       text("mp4-summary",t(label)+(queuePreparing || queuedReady || exportBlocked ? "" : (total ? " · "+frames+" / "+total : "")+geometry),false);
       const pauseHint = mp4Status.pause_reason === "lifecycle_background" ? "앱으로 돌아오면 이어서 처리합니다."
         : mp4Status.pause_reason === "surface_unavailable" ? "게임 화면이 준비되면 계속할 수 있습니다." : "계속하기를 누르면 이어서 처리합니다.";
-      text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : paused ? t(pauseHint) : phase === "failed" ? plain(mp4Status.error_code,128)
+      const cleanupHint = currentTerminal && cleanupStage ? " · "+t("원본 장면 정리 대기 중")+" · "+plain(cleanupStage,64)+" ("+Math.floor(count(mp4Status.cleanup_wait_ms)/1000)+"s)" : "";
+      text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : paused ? t(pauseHint) : phase === "failed" ? plain(mp4Status.error_code,128)+cleanupHint
+        : currentTerminal ? plain(mp4Status.error_code,128)+cleanupHint
         : exportBlocked && mp4Status.readiness_error !== "none" ? plain(mp4Status.readiness_error,128)
         : !queuedReady && !active && mp4Status.selected_mv === false && mp4Status.selection_error !== "none" ? plain(mp4Status.selection_error,128) : "",false);
       el("mp4-progress").hidden = queuePreparing || !active && phase !== "completed";

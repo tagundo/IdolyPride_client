@@ -29,6 +29,8 @@
     <string name="mp4_delete_video_confirm">Delete the completed video kept in the app? Copies saved elsewhere will remain.</string>
     <string name="mp4_cancelled">Export cancelled.</string>
     <string name="mp4_failed">Export failed: %1$s</string>
+    <string name="mp4_cleanup_waiting">Waiting for the original scene cleanup · %1$s (%2$ds)</string>
+    <string name="mp4_cleanup_stalled">Cleanup has not finished for %1$d seconds. If it stays stuck, fully close the app and start it again. You can retry the job from the list.</string>
     <string name="mp4_idle">Ready to export</string>
     <string name="mp4_not_ready">Open the MV playback screen first.</string>
     <string name="mp4_unavailable">MP4 export is unavailable.</string>

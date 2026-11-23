@@ -156,7 +156,8 @@ inline void close_configuration(Configuration& c){for(int*fd:{&c.root,&c.req,&c.
 struct Options{uint32_t fps_num=30,fps_den=1,codec=1,bitrate=16000000,audio_bitrate=192000,output_width=0,output_height=0;};
 struct PublicStatus {
     char phase[24]="idle",id[33]{},error[192]="none";
-    char restoration_error[96]="none";
+    char restoration_error[96]="none",stage[24]="idle",cleanup[64]="none";
+    uint64_t cleanup_since=0;
     uint64_t frames=0,total_frames=0,audio=0,total_audio=0,bytes=0;
     uint32_t width=0,height=0,fps_num=30,fps_den=1,source_width=0,source_height=0,video_codec=1,video_bitrate=0;
     bool ready=false,pausable=false;
@@ -195,7 +196,7 @@ static uint32_t pending_queue_width=0,pending_queue_height=0;
 // before touching another original Unity action; pending work remains intact.
 static int requested_pause_reason=IDMP4_PAUSE_NONE;
 static bool pause_acknowledged=false,reset_watchdog_pending=false;
-static uint64_t unity_ticks=0,capture_acks=0;
+static uint64_t unity_ticks=0,capture_acks=0,boundary_entries=0;
 inline void increment_counter(uint64_t& value){if(value<9007199254740991ULL)++value;}
 static idoly_mp4_game::GameAdapter game;
 static idoly_mp4_selection::Capture selection;
@@ -270,6 +271,9 @@ struct FreshSceneApi {
 struct FreshFactoryReceipt {uint64_t serial=0,identity=0;void*presenter=nullptr,*player=nullptr;};
 struct FreshFactoryRequest {uint64_t serial=0,identity=0;void*player=nullptr;};
 static FreshSceneApi fresh_scene_api;
+// Unity-thread scalar naming the original join a WAITING cleanup call awaits.
+// Purely diagnostic; ownership decisions never read it.
+static const char* fresh_cleanup_detail=nullptr;
 static std::atomic<bool> fresh_scene_installed{false};
 static bool fresh_scene_available=false;
 inline bool fresh_factory_receipt(FreshFactoryReceipt*);
@@ -440,6 +444,8 @@ inline void diagnostic_module(size_t index,bool bound,const char*missing,bool se
  export_trace.modules[index]=value;pthread_mutex_unlock(&trace_mutex);
  if(changed&&!bound&&selected)diagnostic_event("bindings",missing,0,0,true);
 }
+// Optional bounded scalars appended by the owner of the session status.
+static size_t (*diagnostic_session_progress)(char*,size_t)=nullptr;
 inline size_t diagnostics(char*out,size_t capacity){
  if(!out||!capacity)return 0;
  ExportTrace t{};pthread_mutex_lock(&trace_mutex);t=export_trace;pthread_mutex_unlock(&trace_mutex);
@@ -455,9 +461,28 @@ inline size_t diagnostics(char*out,size_t capacity){
  n=snprintf(out+at,capacity-at,"],\"modules\":{");if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}at+=static_cast<size_t>(n);
  for(size_t i=0;i<trace_modules;++i){n=snprintf(out+at,capacity-at,"%s\"%s\":%s",i?",":"",names[i],t.modules[i]==2?"true":"false");
   if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}at+=static_cast<size_t>(n);}
- n=snprintf(out+at,capacity-at,"}}}");if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}return at+static_cast<size_t>(n);
+ n=snprintf(out+at,capacity-at,"}}");if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}at+=static_cast<size_t>(n);
+ if(diagnostic_session_progress){const size_t extra=diagnostic_session_progress(out+at,capacity-at);
+  if(!extra||extra>=capacity-at){out[0]=0;return 0;}at+=extra;}
+ n=snprintf(out+at,capacity-at,"}");if(n<=0||static_cast<size_t>(n)>=capacity-at){out[0]=0;return 0;}return at+static_cast<size_t>(n);
 }
 // END_MP4_EXPORT_FAILURE_TRACE
+// The 2 KiB SessionStatus contract stays unchanged; the pending cleanup join
+// of a terminal export is appended to the separate diagnostics document with
+// the same scalar-only rules. unity_ticks advancing while boundary_entries
+// does not means the TimeManager boundary that owns every fresh stage is idle.
+inline size_t session_progress_json(char*out,size_t capacity){
+ if(!out||!capacity)return 0;
+ pthread_mutex_lock(&control_mutex);char stage[sizeof published.stage]{},cleanup[sizeof published.cleanup]{};
+ memcpy(stage,published.stage,sizeof stage);memcpy(cleanup,published.cleanup,sizeof cleanup);
+ const uint64_t since=published.cleanup_since,boundary=boundary_entries;pthread_mutex_unlock(&control_mutex);
+ const uint64_t now=milliseconds();
+ const int n=snprintf(out,capacity,",\"session_progress\":{\"job_stage\":\"%s\",\"cleanup_stage\":\"%s\",\"cleanup_wait_ms\":%llu,\"boundary_entries\":%llu}",
+  stage[0]?stage:"idle",cleanup[0]?cleanup:"none",static_cast<unsigned long long>(strcmp(cleanup,"none")&&since&&now>=since?now-since:0),
+  static_cast<unsigned long long>(boundary));
+ return n>0&&static_cast<size_t>(n)<capacity?static_cast<size_t>(n):0;
+}
+[[maybe_unused]] static const bool session_progress_bound=(diagnostic_session_progress=session_progress_json,true);
 
 static uint64_t next_job_generation=1;
 struct NativeObservation {
@@ -542,8 +567,16 @@ inline void refresh_native_observation(bool rendered=false){
     pthread_mutex_lock(&control_mutex);native_observation=next;pthread_mutex_unlock(&control_mutex);
 }
 inline bool busy_stage(){return job.stage!=Stage::idle;}
-inline void publish(){static Stage previous=Stage::idle;if(previous!=job.stage){previous=job.stage;diagnostic_job_event("stage_entered");}pthread_mutex_lock(&control_mutex);const bool ready=published.ready;published=job.status;published.ready=ready;published.pausable=job.stage!=Stage::idle&&job.stage!=Stage::finishing&&job.stage!=Stage::retiring;pthread_mutex_unlock(&control_mutex);}
+inline void publish(){static Stage previous=Stage::idle;if(previous!=job.stage){previous=job.stage;diagnostic_job_event("stage_entered");}snprintf(job.status.stage,sizeof job.status.stage,"%s",trace_stage(job.stage));pthread_mutex_lock(&control_mutex);const bool ready=published.ready;published=job.status;published.ready=ready;published.pausable=job.stage!=Stage::idle&&job.stage!=Stage::finishing&&job.stage!=Stage::retiring;pthread_mutex_unlock(&control_mutex);}
 inline void progress(){job.activity=milliseconds();}
+// Stage::retiring ends only through real original cleanup joins. Publish the
+// join still pending, and since when, instead of a generic terminal phase.
+inline void cleanup_wait(const char*step){
+    char safe[sizeof job.status.cleanup]{};trace_code(safe,sizeof safe,step);
+    if(!strcmp(job.status.cleanup,safe))return;
+    memcpy(job.status.cleanup,safe,sizeof safe);job.status.cleanup_since=milliseconds();
+    diagnostic_event("cleanup_wait",safe,job.frame);
+}
 inline void phase(const char* value){snprintf(job.status.phase,sizeof(job.status.phase),"%s",value);progress();publish();}
 inline void stable_error(const char* value){size_t at=0;for(;value&&value[at]&&at<sizeof(job.status.error)-1;++at){char c=value[at];job.status.error[at]=((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')?c:'_';}job.status.error[at]=0;if(!at)snprintf(job.status.error,sizeof(job.status.error),"export_failed");diagnostic_job_event(job.status.error,true);}
 inline void publish_prestart_failure(const char*error,const char*output=nullptr,bool cancelled=false){
@@ -1099,7 +1132,12 @@ inline void retire() {
     static bool running=false;
     if(running)return;
     struct Guard{bool& value;explicit Guard(bool& v):value(v){value=true;}~Guard(){value=false;}} guard(running);
-    if(job.automatic&&!job.scene_restored&&!(job.fresh&&job.fresh_finish_settled))return;
+    if(job.automatic&&!job.scene_restored&&!(job.fresh&&job.fresh_finish_settled)){
+        // The fresh boundary owns this join. Name it if that boundary has not
+        // reported a more specific pending step yet.
+        if(!strcmp(job.status.cleanup,"none"))cleanup_wait(job.fresh?"fresh_native_boundary":"scene_restore_boundary");
+        return;
+    }
     service_deferred_encoder_cancel();
     if(game.restoration_pending()){
         const Result restored=game.restore();
@@ -1109,17 +1147,18 @@ inline void retire() {
         // An owned native job or an asynchronous restoration step can outlive
         // the UI's cancel/finish request. Retain its scene roots and buffers;
         // a new job cannot inherit resources still owned by this one.
-        if(game.restoration_pending())return;
+        if(game.restoration_pending()){cleanup_wait("selection_restore");return;}
     }
-    if(!service_post_restore())return;
-    if(!retire_pending_audio())return;
-    if(job.encoder){const int result=job.api.destroy(job.encoder);if(result==IDMP4_RETRY)return;if(result<0)restoration_failure("encoder_cleanup_failed");job.encoder=nullptr;}
-    if(!cleanup_bundle())return; // Original Unity async bundle IO must finish first.
+    if(!service_post_restore()){cleanup_wait("post_restore");return;}
+    if(!retire_pending_audio()){cleanup_wait("audio_retire");return;}
+    if(job.encoder){const int result=job.api.destroy(job.encoder);if(result==IDMP4_RETRY){cleanup_wait("encoder_destroy");return;}if(result<0)restoration_failure("encoder_cleanup_failed");job.encoder=nullptr;}
+    if(!cleanup_bundle()){cleanup_wait("audio_bundle_release");return;} // Original Unity async bundle IO must finish first.
     if(job.pcm>=0){close(job.pcm);job.pcm=-1;}
     if(job.pcm_owned)unlink_owned(job.config.exports,job.pcm_name,job.pcm_identity);
     if(job.rgba){free(job.rgba);job.rgba=nullptr;}
     close_configuration(job.config);
     if(job.fresh)fresh_release_start();
+    snprintf(job.status.cleanup,sizeof job.status.cleanup,"none");job.status.cleanup_since=0;
     job.stage=Stage::idle;
     phase((job.terminal_success||(job.fresh&&job.media_finalized))?"completed":job.terminal_cancel?"cancelled":"failed");
     pthread_mutex_lock(&control_mutex);control_busy=false;cancel_pending=false;pthread_mutex_unlock(&control_mutex);
@@ -1503,33 +1542,36 @@ inline bool native_fresh_render_boundary_impl(void*manager,double wall){
             // Complete the actual fresh writers before disposing their graph.
             // A replaced scene never authorizes a stale property write.
             if(job.scene_acquired&&!job.clock_lost&&api.current(api.context)){
+                fresh_cleanup_detail=nullptr;
                 const Result held=api.hold(api.context);
-                if(held==Result::waiting)return native_boundary_clock_tick(manager,wall);
+                if(held==Result::waiting){cleanup_wait("fresh_hold");return native_boundary_clock_tick(manager,wall);}
                 if(held!=Result::ok){job.clock_lost=true;restoration_failure(fresh_scene_error("fresh_hold_failed"));}
             }
             if(!job.fresh_pre_finish_settled){
+                fresh_cleanup_detail=nullptr;
                 const Result prepared=api.prepare_finish(api.context);
-                if(prepared==Result::waiting)return native_boundary_clock_tick(manager,wall);
+                if(prepared==Result::waiting){cleanup_wait(fresh_cleanup_detail?fresh_cleanup_detail:"fresh_prepare_finish");return native_boundary_clock_tick(manager,wall);}
                 job.fresh_pre_finish_settled=true;
                 if(prepared!=Result::ok)restoration_failure(fresh_scene_error("fresh_decoder_cleanup_failed"));
             }
             const Result released=game.end_fresh();
-            if(released==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(released==Result::waiting){cleanup_wait("fresh_scene_end");return native_boundary_clock_tick(manager,wall);}
             if(released!=Result::ok)restoration_failure(game.last_error());
             // Keep virtual absolute time coherent, restore only owned global
             // clock controls, and never copy a former scene's native history.
             job.clock_settings_restored=!clock.active()||clock.restore(manager,wall,false);
             if(!job.clock_settings_restored)restoration_failure("fresh_clock_release_failed");
             job.scene_detached=!clock.active();
-            if(!job.scene_detached)return native_boundary_clock_tick(manager,wall);
+            if(!job.scene_detached){cleanup_wait("fresh_clock_release");return native_boundary_clock_tick(manager,wall);}
         }
         // finish detaches shader/render globals before original End, then
         // awaits a real reload of logical selection/time/pause. An independent
         // Listener mute lease may span that reload and ends on every terminal
         // result. Natural clock ticks permit the original async loader.
         if(!job.fresh_finish_settled){
+            fresh_cleanup_detail=nullptr;
             const Result finished=api.finish(api.context);
-            if(finished==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(finished==Result::waiting){cleanup_wait(fresh_cleanup_detail?fresh_cleanup_detail:"fresh_finish");return native_boundary_clock_tick(manager,wall);}
             job.fresh_finish_settled=true;job.scene_restored=finished==Result::ok;
             if(!job.scene_restored)restoration_failure(fresh_scene_error("fresh_logical_restore_failed"));
             progress();
@@ -1705,7 +1747,7 @@ inline void on_unity_tick_impl() {
     struct ObserveExit {~ObserveExit(){try{refresh_native_observation();}catch(...){pthread_mutex_lock(&control_mutex);native_observation.source_valid=false;pthread_mutex_unlock(&control_mutex);}}} observe_exit;
     queue_tick();
     pthread_mutex_lock(&control_mutex);
-    increment_counter(unity_ticks);
+    increment_counter(unity_ticks);boundary_entries=native_entries;
     const bool should_cancel=cancel_pending;
     if(should_cancel&&start_pending&&!busy_stage()&&!fresh_scene_installed.load(std::memory_order_acquire)){
         // A parked start has acquired no Unity or encoder state yet.

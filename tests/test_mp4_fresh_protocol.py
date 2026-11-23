@@ -487,6 +487,9 @@ int main(int argc,char**argv){
   assert(rtcore::milliseconds()<limit);
  }while(rtcore::control_busy||rtcore::busy_stage()||rtcore::start_pending);
  char status[2048]{};assert(rtcore::status(status,sizeof status));
+ // The pending cleanup join is appended to the separate diagnostics ABI.
+ {char diag[16384]{};const size_t dn=rtcore::diagnostics(diag,sizeof diag);assert(dn&&dn==strlen(diag)&&diag[dn-1]=='}');
+  assert(strstr(diag,"\"session_progress\":{\"job_stage\":\"idle\",\"cleanup_stage\":\"none\",\"cleanup_wait_ms\":0,\"boundary_entries\":"));}
  assert(save_calls==1&&opened==2&&closed==2&&restored&&!host_acquired&&!rtcore::native_clock_scope().active());
  assert(time_value==saved_source_time&&mode==saved_mode&&!custom&&bgm_volume==1&&voice_volume==1);
  if(scenario=="cancel"||scenario=="throw_readpixels"||scenario=="source_gain_changed"||scenario=="mixer_gain_changed")assert(encoder_cancels==1&&!encoder_finishes);

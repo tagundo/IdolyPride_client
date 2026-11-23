@@ -141,7 +141,9 @@ public final class UnifiedMP4Export {
         catch (LinkageError unavailable) { /* Optional addon; still retire the session below. */ }
         invalidateQueueSelection();
         configured = false; queueConfigured = false; foregroundSelectionReady = false; foregroundMvSelected = false; menuHandoffDeadline = 0;
-        MAIN.post(() -> { cancel(); pending = null; wake(); });
+        // poll() stops refreshing the unconfigured queue; never keep showing its
+        // last running snapshot as live work for the rest of the process.
+        MAIN.post(() -> { cancel(); pending = null; lastQueue = new JSONObject(); wake(); });
     }
     private static void invalidateQueueSelection() {
         foregroundSelectionReady = false; foregroundMvSelected = false;
@@ -256,15 +258,29 @@ public final class UnifiedMP4Export {
     private static boolean eventsPresent(JSONObject trace) {
         JSONArray events = trace.optJSONArray("events"); return events != null && events.length() != 0;
     }
-    private static JSONObject readNativeTrace() {
+    private static JSONObject readNativeDiagnostics() {
         if (!initialized) return null;
         try {
             String raw = nativeDiagnostics();
-            return raw != null && raw.length() <= 65536 ? exportTrace(new JSONObject(raw)) : null;
+            return raw != null && raw.length() <= 65536 ? new JSONObject(raw) : null;
         } catch (Exception | LinkageError unavailable) { return null; }
     }
-    private static void rememberNativeTrace() {
-        JSONObject trace = readNativeTrace(); if (trace == null) return;
+    /** The 2 KiB session status is unchanged; its pending cleanup join comes from the separate diagnostics ABI. */
+    private static void mergeSessionProgress(JSONObject target, JSONObject document) {
+        JSONObject source = document == null ? null : document.optJSONObject("session_progress");
+        try {
+            String stage = source == null ? "idle" : source.optString("job_stage", "idle");
+            String cleanup = source == null ? "none" : source.optString("cleanup_stage", "none");
+            Long waited = source == null ? null : traceInteger(source.opt("cleanup_wait_ms"));
+            Long boundary = source == null ? null : traceInteger(source.opt("boundary_entries"));
+            target.put("job_stage", stage.matches("[A-Za-z0-9_]{1,63}") ? stage : "unknown")
+                    .put("cleanup_stage", cleanup.matches("[A-Za-z0-9_]{1,63}") ? cleanup : "none")
+                    .put("cleanup_wait_ms", waited == null ? 0L : waited)
+                    .put("boundary_entries", boundary == null ? 0L : boundary);
+        } catch (Exception ignored) { /* Keep the bounded status already parsed. */ }
+    }
+    private static void rememberNativeTrace(JSONObject trace) {
+        if (trace == null) return;
         lastNativeTrace = trace;
         Context context = application; if (context == null) return;
         try {
@@ -303,12 +319,25 @@ public final class UnifiedMP4Export {
             }
             result.put("save_picker_pending", pendingSaveId != null).put("save_copy_active", saving)
                     .put("document_picker_events", documentDiagnostics());
+            // Lifecycle and experimental transport facts that can park a queue
+            // in the foreground; fixed scalars and bounded codes only.
+            result.put("user_paused", userPaused).put("pending_queue_run", pendingQueueRun)
+                    .put("experimental_background", context != null && experimentalBackgroundEnabled(context));
+            JSONObject transport = UnifiedMP4Background.snapshot(), background = new JSONObject();
+            for (String key : new String[] {"state", "error_code"}) {
+                String value = transport.optString(key, "unknown");
+                background.put(key, value.matches("[A-Za-z0-9_]{1,64}") ? value : "unknown");
+            }
+            result.put("background", background.put("heartbeat_verified", transport.optBoolean("heartbeat_verified"))
+                    .put("capture_verified", transport.optBoolean("capture_verified")));
             JSONObject state = snapshot();
             if (initialized) try {
                 String raw = nativeStatus();
                 if (raw != null && raw.length() <= 65536) state = new JSONObject(raw);
             } catch (Exception | LinkageError ignored) { }
-            JSONObject trace = readNativeTrace();
+            JSONObject nativeDocument = readNativeDiagnostics();
+            mergeSessionProgress(state, nativeDocument);
+            JSONObject trace = exportTrace(nativeDocument);
             if (trace == null) trace = lastNativeTrace;
             if (trace == null) trace = savedNativeTrace("last_native_trace");
             if (trace != null) result.put("export_trace", trace);
@@ -318,12 +347,13 @@ public final class UnifiedMP4Export {
             String pipelineMode = state.optString("pipeline_mode", "");
             if (pipelineMode.equals("fresh_original_scene") || pipelineMode.equals("legacy_owned_scene"))
                 result.put("pipeline_mode", pipelineMode);
-            for (String key : new String[] {"phase", "readiness_error", "selection_error", "error_code", "restoration_error", "pause_reason"}) {
+            for (String key : new String[] {"phase", "readiness_error", "selection_error", "error_code", "restoration_error", "pause_reason",
+                    "job_stage", "cleanup_stage"}) {
                 String value = state.optString(key, "unknown");
                 result.put(key, value.matches("[A-Za-z0-9_]{1,96}") ? value : "unknown");
             }
             for (String key : new String[] {"unity_ticks", "capture_acks", "width", "height", "source_width", "source_height",
-                    "fps_num", "fps_den", "video_bitrate", "frames", "total_frames"})
+                    "fps_num", "fps_den", "video_bitrate", "frames", "total_frames", "cleanup_wait_ms", "boundary_entries"})
                 result.put(key, Math.max(0L, Math.min(9007199254740991L, state.optLong(key))));
             JSONObject discovery = controllerDiscovery(state);
             if (discovery != null) result.put("controller_discovery", discovery);
@@ -661,9 +691,20 @@ public final class UnifiedMP4Export {
     static void cancel() {
         UnifiedMP4Background.stopCurrent();
         pendingQueueRun = false;
+        boolean releasedUserPause = userPaused;
         userPaused = false;
         if (pending != null) { pending = null; MAIN.removeCallbacks(BEGIN); }
-        if (initialized) try { nativeCancel(); } catch (LinkageError unavailable) { /* Optional addon. */ }
+        if (initialized) try {
+            nativeCancel();
+            // A user pause request outlives the cancelled session natively and
+            // would park the next queued job forever. Hand it back to the real
+            // lifecycle: a visible player resumes, a hidden one stays parked.
+            if (releasedUserPause) {
+                Activity activity = game.get();
+                if (activity != null && !stopped && (resumed || activity.isInMultiWindowMode())) nativeResume();
+                else nativeSuspend(1);
+            }
+        } catch (LinkageError unavailable) { /* Optional addon. */ }
         wake();
     }
     private static void wake() { if (!polling) { polling = true; MAIN.post(POLL); } }
@@ -677,7 +718,9 @@ public final class UnifiedMP4Export {
                 if (queue != null && queue.length() <= 65536) lastQueue = new JSONObject(queue);
             }
         } catch (Exception | LinkageError unavailable) { /* Keep last complete user-visible snapshot. */ }
-        rememberNativeTrace();
+        JSONObject nativeDiagnostics = readNativeDiagnostics();
+        mergeSessionProgress(last, nativeDiagnostics);
+        rememberNativeTrace(exportTrace(nativeDiagnostics));
         rememberCompletedOutputs();
         UnifiedMP4Background.sample(last);
         Activity activity = game.get();
@@ -704,8 +747,15 @@ public final class UnifiedMP4Export {
             overlayPause.setVisibility(pausable ? View.VISIBLE : View.INVISIBLE);
             overlayPause.setText(userPaused || phase.equals("paused") ? R.string.mp4_resume : R.string.mp4_pause);
             overlayPause.setEnabled(!stopped && (resumed || activity.isInMultiWindowMode()));
-            overlayDismiss.setVisibility(terminal && !saving ? View.VISIBLE : View.INVISIBLE);
+            // While queue work owns the scene the next poll re-shows the panel;
+            // offer Close only when dismissing actually hides it.
+            overlayDismiss.setVisibility(terminal && !saving && !busy() ? View.VISIBLE : View.INVISIBLE);
         }
+        Context notice = application != null ? application : activity;
+        if (notice != null && initialized && (busy() || backgroundQueueHasWork()))
+            UnifiedMP4Service.update(statusText(notice),
+                    last.optString("phase").equals("rendering") ? last.optLong("frames") : 0,
+                    last.optString("phase").equals("rendering") ? last.optLong("total_frames") : 0);
         for (Runnable observer : new ArrayList<>(observers)) observer.run();
         if (configured && (resumed || !observers.isEmpty()) || initialized && (busy() || backgroundQueueHasWork())
                 || UnifiedMP4Background.expectsService() || saving) {
@@ -718,17 +768,54 @@ public final class UnifiedMP4Export {
             return context.getString(R.string.mp4_queue_error, reason);
         return statusText(context);
     }
+    private static String publicCode(String value) {
+        return value != null && value.matches("[A-Za-z0-9_]{1,96}") && !value.equals("none") && !value.equals("unknown") ? value : "";
+    }
+    /** A terminal session row belongs to the running queue job only by its exact output identity or live cleanup. */
+    private static boolean sessionOwnsCurrentQueueJob() {
+        if (!publicCode(last.optString("cleanup_stage", "none")).isEmpty()) return true;
+        String output = last.optString("export_id", ""), current = lastQueue.optString("current_job_id", "");
+        JSONArray jobs = lastQueue.optJSONArray("jobs");
+        if (output.isEmpty() || current.isEmpty() || jobs == null) return false;
+        for (int index = 0; index < Math.min(8, jobs.length()); index++) {
+            JSONObject job = jobs.optJSONObject(index);
+            if (job != null && current.equals(job.optString("job_id"))) return output.equals(job.optString("output_id"));
+        }
+        return false;
+    }
+    /** Names the original cleanup join that still owns the scene; never a generic "preparing" line. */
+    private static String cleanupText(Context context) {
+        String stage = publicCode(last.optString("cleanup_stage", "none"));
+        if (stage.isEmpty()) stage = publicCode(lastQueue.optString("phase", ""));
+        if (stage.isEmpty()) return context.getString(R.string.mp4_finishing);
+        long seconds = Math.max(0L, Math.min(86_400L, last.optLong("cleanup_wait_ms") / 1000L));
+        String text = context.getString(R.string.mp4_cleanup_waiting, stage, seconds);
+        return seconds >= 60 ? text + "\n" + context.getString(R.string.mp4_cleanup_stalled, seconds) : text;
+    }
     static String statusText(Context context) {
         if (saving) return context.getString(R.string.mp4_finishing);
         if (pending != null) return context.getString(R.string.mp4_preparing_audio);
         String phase = last.optString("phase", "idle");
         String preparationError = lastQueue.optString("error_code", "none");
+        boolean terminalSession = phase.equals("failed") || phase.equals("cancelled");
         if (phase.equals("failed") && backgroundQueueHasWork() && !preparationError.equals("none")
                 && preparationError.matches("[A-Za-z0-9_]{1,96}") && preparationError.equals(last.optString("error_code")))
-            return context.getString(R.string.mp4_failed, preparationError) + "\n" + context.getString(R.string.mp4_finishing);
+            return context.getString(R.string.mp4_failed, preparationError) + "\n" + cleanupText(context);
+        // The current job's own failure or cancellation stays visible through
+        // its original cleanup join. Only an older job's row yields to the next.
+        if (terminalSession && backgroundQueueHasWork() && sessionOwnsCurrentQueueJob()) {
+            String code = publicCode(last.optString("error_code"));
+            return (phase.equals("failed") ? context.getString(R.string.mp4_failed, code.isEmpty() ? "export_failed" : code)
+                    : context.getString(R.string.mp4_cancelled)) + "\n" + cleanupText(context);
+        }
+        String queuePhase = publicCode(lastQueue.optString("phase", ""));
+        String queueError = publicCode(preparationError);
+        if (backgroundQueueHasWork() && !queueError.isEmpty()
+                && (queuePhase.equals("draining_navigation") || queuePhase.equals("restoring_selection")))
+            return context.getString(R.string.mp4_failed, queueError) + "\n" + cleanupText(context);
         if (backgroundQueueHasWork() && (phase.isEmpty() || phase.equals("idle") || phase.equals("completed")
                 || phase.equals("failed") || phase.equals("cancelled")))
-            return context.getString(R.string.mp4_queue_waiting_scene);
+            return context.getString(R.string.mp4_queue_waiting_scene) + (queuePhase.isEmpty() ? "" : "\n(" + queuePhase + ")");
         switch (phase) {
             case "preparing_audio": return last.optLong("total_audio_frames") > 0
                     ? context.getString(R.string.mp4_preparing_audio_progress, last.optLong("audio_frames"), last.optLong("total_audio_frames"))

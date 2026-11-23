@@ -21,6 +21,7 @@ FIXTURE = r'''
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <stdexcept>
@@ -37,7 +38,7 @@ Object player,presenter,timeline,camera,controller,master,child,list,foreign,end
 std::vector<void*>directors{&child};std::map<uint32_t,void*>roots;uint32_t next_root=1;
 bool unity_thread=true,request_valid=true,held=false,graph_ready=false,throw_play=false,throw_reset=false;
 bool photo_source=true,end_fails=false;int end_status=0;unsigned end_calls=0,end_consumes=0,ended_observers=0;
-bool memory_cell_mapped=true,memory_method_mapped=true,backend_good=true;
+bool memory_cell_mapped=true,memory_method_mapped=true,backend_good=true,ios_cell_indirect=false;uintptr_t got_var_offset=0;
 bool continuation_prefix=true,scheduler_prefix=true,caller_mapped=true;unsigned mp4_fresh_injected_reset_depth=0;uint64_t caller_instruction=0xd63f0120u;
 unsigned original_plays=0,original_timeline_plays=0,original_resets=0,scheduled_resets=0,events=0,photo_observations=0;const char*last_error="none";
 uintptr_t image_base=0x10000000;MethodInfo method{image_base+pin::mp4_reset_actor_model.rva},wrong_method{method.entry};Method*cell_method=&method;
@@ -63,7 +64,8 @@ struct Selection{uint64_t identity(void*p){return p==&::player?selected_identity
 bool fresh_factory_request(void*p,FreshFactoryRequest*out){if(out)*out={};if(!request_valid||p!=&::player||!out)return false;*out=request;return true;}
 bool fresh_factory_request_scope(FreshFactoryRequest*out){if(out)*out={};if(!request_valid||!out)return false;*out=request;return true;}
 struct Clock{bool held(){return ::held;}}clock;Clock&native_clock_scope(){return clock;}
-void diagnostic_event(const char*,const char*){++events;}
+void diagnostic_event(const char*,const char*,uint64_t=0,uint64_t=0,bool=false){++events;}
+uint64_t now_ms=1000;uint64_t milliseconds(){return now_ms;}const char*fresh_cleanup_detail=nullptr;
 void observe_presenter(void*p){assert(p==&::presenter);selected_presenter_value=p;}
 void observe_presenter_ended(void*p){assert(p==&::presenter);++ended_observers;selected_player_value=selected_presenter_value=nullptr;}
 }
@@ -84,11 +86,17 @@ bool mp4_mapped(uintptr_t at,size_t size,bool executable){
  if((at==image_base+photo_return-4||at==image_base+base_return-4)&&size==4&&executable)return true;
  if(size!=8||executable)return false;
 #ifdef IDOLY_DARWIN_BRIDGE
- if(at==image_base+0xa4712a8)return memory_cell_mapped;
+ if(at==image_base+0xa4712a8||(ios_cell_indirect&&at==image_base+0xa500000))return memory_cell_mapped;
 #else
- if(at==image_base+0x99d37a8)return memory_cell_mapped;
+ // Shipped ELF: .got 0x99d37a8 holds R_AARCH64_RELATIVE -> var 0x9d05b70.
+ if(at==image_base+0x99d37a8||at==image_base+0x9d05b70+got_var_offset)return memory_cell_mapped;
 #endif
- return (at==reinterpret_cast<uintptr_t>(&method)||at==reinterpret_cast<uintptr_t>(&wrong_method))&&memory_method_mapped;
+ // Resolved MethodInfo lives in il2cpp runtime metadata memory, never in an
+ // image segment: an image-mapping query must not be what admits it.
+ return false;
+}
+bool mp4_readable_memory(uintptr_t at,size_t size){
+ return size==8&&(at==reinterpret_cast<uintptr_t>(&method)||at==reinterpret_cast<uintptr_t>(&wrong_method))&&memory_method_mapped;
 }
 template<class T>T read(void*p,size_t offset){assert(!offset);T value{};
 #ifdef IDOLY_DARWIN_BRIDGE
@@ -99,7 +107,19 @@ template<class T>T read(void*p,size_t offset){assert(!offset);T value{};
  if(reinterpret_cast<uintptr_t>(p)==image_base+photo_return-4)std::memcpy(&value,&photo_branch,sizeof value);
  else if(reinterpret_cast<uintptr_t>(p)==image_base+base_return-4)std::memcpy(&value,&base_branch,sizeof value);
  else if(reinterpret_cast<uintptr_t>(p)==image_base+reset_return-4)std::memcpy(&value,&caller_instruction,sizeof value);
- else if(reinterpret_cast<uintptr_t>(p)==image_base+cell)std::memcpy(&value,&cell_method,sizeof value);
+ else if(reinterpret_cast<uintptr_t>(p)==image_base+cell){
+#ifdef IDOLY_DARWIN_BRIDGE
+  if(ios_cell_indirect){const uintptr_t slot=image_base+0xa500000;std::memcpy(&value,&slot,sizeof value);}
+  else std::memcpy(&value,&cell_method,sizeof value);
+#else
+  const uintptr_t slot=image_base+0x9d05b70+got_var_offset;std::memcpy(&value,&slot,sizeof value);
+#endif
+ }
+#ifdef IDOLY_DARWIN_BRIDGE
+ else if(ios_cell_indirect&&reinterpret_cast<uintptr_t>(p)==image_base+0xa500000)std::memcpy(&value,&cell_method,sizeof value);
+#else
+ else if(reinterpret_cast<uintptr_t>(p)==image_base+0x9d05b70+got_var_offset)std::memcpy(&value,&cell_method,sizeof value);
+#endif
  else std::memcpy(&value,p,sizeof value);return value;
 }
 bool source_playing(void*p,Method*){return static_cast<Object*>(p)->playing;}bool source_paused(void*p,Method*){return static_cast<Object*>(p)->paused;}
@@ -163,6 +183,7 @@ int main(int argc,char**argv){
  assert(argc==2);std::string scenario=argv[1];const bool cleanup_outgame=scenario.rfind("cleanup_",0)==0&&scenario.size()>8&&scenario.compare(scenario.size()-8,8,"_outgame")==0;
  if(cleanup_outgame)scenario.resize(scenario.size()-8);
  photo_source=!cleanup_outgame&&scenario!="end_outgame"&&scenario!="outgame_base_forward"&&scenario!="selected_clear_preplay_outgame"&&scenario!="reset_outgame_valid";
+ if(scenario=="end_reset_expired_outgame"){photo_source=false;scenario="end_reset_expired";}
  player.fields[1]=&timeline;controller.fields[2]=&camera;timeline.fields[3]=&master;timeline.fields[4]=&list;master.mode=0;child.mode=3;
  presenter.fields[5]=&photo_mode;photo_mode.fields[6]=&player;presenter.fields[7]=&player;
  mp4_api.director_get_duration=duration;mp4_api.director_get_mode=get_mode;mp4_api.director_set_mode=set_mode;mp4_api.director_graph_injected=get_graph;mp4_api.graph_valid=valid_graph;
@@ -198,7 +219,37 @@ int main(int argc,char**argv){
  if(scenario=="no_request"){request_valid=false;mp4_director_play_hook(&master,&method);assert(original_plays==1&&roots.empty());return 0;}
  if(scenario=="foreign_director"){mp4_director_play_hook(&child,&method);assert(original_plays==1&&roots.empty());return 0;}
  if(scenario=="late_play_cleanup"){
+  master.state=0;
   assert(mp4_fresh_stop_disposable()==Mp4FreshResult::waiting&&!mp4_fresh_play_gate.ending&&roots.empty()&&!end_calls);
+ }
+ if(scenario=="late_play_expired"){
+  // The queue retires its request scope only after this cleanup returns. A
+  // Play that never arrives cannot hold the scene forever.
+  master.state=0;
+  for(int i=0;i<700;++i)assert(mp4_fresh_stop_disposable()==Mp4FreshResult::waiting&&!mp4_fresh_play_gate.ending);
+  idoly_mp4_runtime::now_ms+=10001;const auto before=events;
+  assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok&&mp4_fresh_play_gate.ending&&events==before+1&&!end_calls&&roots.empty());
+  assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok);mp4_director_play_hook(&master,&method);assert(original_plays==1&&roots.empty());return 0;
+ }
+ if(scenario=="late_play_wall_only"){
+  // Wall time alone never expires the wait: a suspended engine polls nothing.
+  master.state=0;assert(mp4_fresh_stop_disposable()==Mp4FreshResult::waiting);
+  idoly_mp4_runtime::now_ms+=1000000;
+  for(int i=0;i<599;++i)assert(mp4_fresh_stop_disposable()==Mp4FreshResult::waiting);
+  assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok);return 0;
+ }
+ if(scenario=="played_not_intercepted"){
+  // An original Play that already ran un-intercepted is never repeated.
+  request_valid=true;master.state=1;const auto before=events;
+  assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok&&mp4_fresh_play_gate.ending&&events==before+1&&!end_calls);return 0;
+ }
+ if(scenario=="unknown_first_expired"){
+  mp4_director_play_hook(&master,&method);held=true;
+  assert(mp4_fresh_play_gate.await_scheduler&&!original_plays&&!scheduled_resets);
+  for(int i=0;i<700;++i)assert(mp4_fresh_stop_disposable()==Mp4FreshResult::waiting&&!end_calls);
+  idoly_mp4_runtime::now_ms+=10001;
+  assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok&&end_calls==1&&mp4_fresh_play_gate.ending&&mp4_fresh_play_gate.wait_expired&&!original_plays);
+  mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
  }
  if(scenario=="unknown_first"){
   mp4_director_play_hook(&master,&method);held=true;
@@ -244,6 +295,21 @@ int main(int argc,char**argv){
  }else if(scenario.rfind("end_",0)==0||scenario=="late_play_cleanup"){
   held=true;graph_ready=true;
   assert(mp4_fresh_release_deferred_play()==Mp4FreshResult::ok&&original_plays==1);
+  if(scenario=="end_reset_expired"){
+   // A rejected or cancelled return leaves debt no callback can pay: End
+   // proceeds after real polls and wall time, keeping every root until clear.
+   for(int i=0;i<700;++i)assert(mp4_fresh_stop_disposable()==Mp4FreshResult::waiting&&!end_calls&&roots.size()==6);
+   idoly_mp4_runtime::now_ms+=10001;
+   assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok&&end_calls==1&&mp4_fresh_play_gate.wait_expired&&!original_resets);
+   held=false;
+   if(!photo_source){
+    for(int i=0;i<1300;++i)assert(mp4_fresh_no_origin_settled()==Mp4FreshResult::waiting&&!end_consumes);
+    idoly_mp4_runtime::now_ms+=60001;
+    assert(mp4_fresh_no_origin_settled()==Mp4FreshResult::failed&&!end_consumes&&roots.size()==6);
+    assert(mp4_fresh_no_origin_settled()==Mp4FreshResult::ok);
+   }else assert(mp4_fresh_no_origin_settled()==Mp4FreshResult::ok);
+   mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
+  }
   if(scenario=="end_wait_reset"){
    const auto before=events;
    for(int i=0;i<3;++i)assert(mp4_fresh_stop_disposable()==Mp4FreshResult::waiting&&!mp4_fresh_play_gate.ending&&!end_calls);
@@ -282,6 +348,11 @@ int main(int argc,char**argv){
  }else if(scenario.rfind("reset_",0)==0){
   void*self=&player;Method*given=&method;
   if(scenario=="reset_cell")cell_method=&wrong_method;
+#ifdef IDOLY_DARWIN_BRIDGE
+  else if(scenario=="reset_pointer_slot")ios_cell_indirect=true;
+#else
+  else if(scenario=="reset_got_target")got_var_offset=8;
+#endif
   else if(scenario=="reset_method")method.entry++;
   else if(scenario=="reset_cell_unmapped")memory_cell_mapped=false;
   else if(scenario=="reset_method_unmapped")memory_method_mapped=false;
@@ -293,9 +364,9 @@ int main(int argc,char**argv){
   else if(scenario=="reset_continuation")continuation_prefix=false;
   else if(scenario=="reset_injected")mp4_fresh_injected_reset_depth=1;
   else if(scenario=="reset_throw")throw_reset=true;
-  else assert(scenario=="reset_valid"||scenario=="reset_outgame_valid");
+  else assert(scenario=="reset_valid"||scenario=="reset_outgame_valid"||scenario=="reset_pointer_slot");
   try{mp4_reset_actor_model_hook(self,given);assert(!throw_reset);}catch(const std::runtime_error&){assert(throw_reset);}
-  const bool valid=scenario=="reset_valid"||scenario=="reset_outgame_valid";
+  const bool valid=scenario=="reset_valid"||scenario=="reset_outgame_valid"||scenario=="reset_pointer_slot";
   assert(original_resets==1&&mp4_fresh_play_gate.reset_returned==valid);
   if(valid){mp4_reset_actor_model_hook(self,given);assert(original_resets==2&&mp4_fresh_play_gate.reset_returned);}
  }else{
@@ -355,6 +426,7 @@ def play_staging_binaries(tmp_path_factory):
     "reset_valid", "reset_outgame_valid", "reset_cell", "reset_method", "reset_cell_unmapped", "reset_method_unmapped", "reset_receiver", "reset_wrong_method", "reset_throw",
     "reset_caller", "reset_caller_unmapped", "reset_instruction", "reset_continuation", "reset_injected",
     "end_photo", "end_outgame", "end_unheld", "end_failed", "end_selected_clear", "end_wrong_binding", "end_wait_reset", "late_play_cleanup",
+    "late_play_expired", "late_play_wall_only", "played_not_intercepted", "unknown_first_expired", "end_reset_expired", "end_reset_expired_outgame",
     "certificate_source", "certificate_ready", "certificate_backend", "certificate_base", "certificate_hook", "certificate_original", "certificate_stub",
     "certificate_master_hook", "certificate_master_original", "certificate_master_stub",
 ])
@@ -365,7 +437,7 @@ def test_shipping_fresh_play_staging_and_real_reset_methodinfo_gate(play_staging
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("scenario", ["certificate_slot", "certificate_duplicate"])
+@pytest.mark.parametrize("scenario", ["certificate_slot", "certificate_duplicate", "reset_got_target"])
 def test_shipping_android_play_install_receipt_rejects_stale_or_duplicate_hook(play_staging_binaries, scenario):
     result = subprocess.run([str(play_staging_binaries["android"]), scenario], capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -380,4 +452,4 @@ def test_shipping_original_end_preparation_is_joined_before_clock_release():
     boundary = definition(runtime, "inline bool native_fresh_render_boundary_impl(void*manager,double wall)")
     assert boundary.index("api.prepare_finish(api.context)") < boundary.index("game.end_fresh()") < boundary.index("clock.restore(manager,wall,false)")
     cleanup = boundary[boundary.index("api.prepare_finish(api.context)"):boundary.index("game.end_fresh()")]
-    assert "if(prepared==Result::waiting)return native_boundary_clock_tick(manager,wall)" in cleanup
+    assert "if(prepared==Result::waiting){cleanup_wait(" in cleanup and "return native_boundary_clock_tick(manager,wall);}" in cleanup

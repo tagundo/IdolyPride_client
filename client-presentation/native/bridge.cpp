@@ -56729,7 +56729,22 @@ struct Mp4FreshPlayGate {
  uint64_t serial=0,identity=0,reset_requests=0,reset_returns=0;uint32_t roots[6]{};size_t root_count=0;
  bool armed=false,deferred=false,forward_started=false,forwarded=false,reset_required=false,reset_returned=false,reset_cleanup_wait=false,await_scheduler=false,ending=false,failed=false;
  bool stop_started=false,stop_returned=false,stop_failed=false,end_consumed=false;idoly_mp4_replay::UniTask16 end_task{};uint32_t end_source=0;
+ // Terminal cleanup budget for original callbacks that may never arrive.
+ uint64_t play_wait_started=0,wait_started=0,end_wait_started=0;uint32_t play_wait_polls=0,wait_polls=0,end_wait_polls=0;bool wait_expired=false,caller_reported=false,reset_reported=false;
 }mp4_fresh_play_gate;
+// A cleanup may wait for an original Play/Reset callback that can still
+// arrive, never for one that cannot. Both real Unity polls and wall time must
+// exceed the budget, so a suspended engine never expires an open callback.
+bool mp4_fresh_budget_expired(uint64_t&started,uint32_t&polls,uint32_t minimum_polls,uint64_t milliseconds){
+ const uint64_t now=idoly_mp4_runtime::milliseconds();if(!started)started=now;if(polls<~uint32_t(0))++polls;
+ return polls>minimum_polls&&now>=started&&now-started>milliseconds;
+}
+// Bounded device evidence for an interception check that rejected the
+// original call: the image-relative return address only, never a pointer.
+void mp4_fresh_report_caller(const char*what,uintptr_t caller,bool failure){
+ char code[64]{};snprintf(code,sizeof code,"%s_%llx",what,caller>=image_base?static_cast<unsigned long long>(caller-image_base):0ULL);
+ idoly_mp4_runtime::diagnostic_event("fresh_prepare",code,0,0,failure);
+}
 void mp4_fresh_play_gate_clear(){
  auto&g=mp4_fresh_play_gate;if(g.end_source)weak_free(g.end_source);for(size_t i=0;i<g.root_count;++i)if(g.roots[i])weak_free(g.roots[i]);g=Mp4FreshPlayGate{};
 }
@@ -56770,8 +56785,13 @@ bool mp4_fresh_defer_master_play(void*self,Method*method,uintptr_t caller)noexce
     ||!mp4_actor_field(scope.player,mp4game::Layout{}.player_director_controller,timeline)||!timeline||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||master!=self)return false;
    player=scope.player;
   }
-  idoly_mp4_runtime::FreshFactoryRequest request{};if(!idoly_mp4_runtime::fresh_factory_request(player,&request))return false;
+  idoly_mp4_runtime::FreshFactoryRequest request{};if(!idoly_mp4_runtime::fresh_factory_request(player,&request)){
+   // The exact master of the requested scene plays un-intercepted. Record it
+   // once: admission then reports fresh_autoplay_not_intercepted.
+   if(!g.deferred&&!g.caller_reported){g.caller_reported=true;mp4_fresh_report_caller("master_play_request_rejected",caller,false);}
+   return false;}
   const bool schedules=mp4_fresh_reset_scheduler_timeline==timeline||mp4_fresh_base_scheduler(caller);
+  if(!schedules&&!g.caller_reported){g.caller_reported=true;mp4_fresh_report_caller("unrecognized_play_caller",caller,true);}
   if(g.deferred){if(schedules){if(g.reset_requests!=~uint64_t(0))++g.reset_requests;g.reset_required=true;g.reset_returned=false;g.await_scheduler=false;}g.failed=true;mp4_fresh_withdrawn.store(true,std::memory_order_release);mp4_fresh_host.error="fresh_duplicate_play_request";return true;}
   g.player=player;g.reset_required=schedules;g.reset_requests=schedules?1:0;g.await_scheduler=!schedules;if(!schedules){g.failed=true;mp4_fresh_host.error="fresh_unrecognized_master_play";mp4_fresh_withdrawn.store(true,std::memory_order_release);}g.presenter=idoly_mp4_runtime::game.selected_presenter();g.timeline=timeline;g.master=self;g.method=method;g.serial=request.serial;g.identity=request.identity;
   const auto owns=[&](void*p){void*value=nullptr,*mode=nullptr;if(!p||!mp4_alive(p))return false;
@@ -56808,12 +56828,29 @@ bool mp4_fresh_delayed_reset_enter(void*self,Method*method,uintptr_t caller)noex
   constexpr uintptr_t cell=0xa4712a8,callback_return=0x75dad28;
   const mp4game::Binding continuation{0x75dab3c,{0xff,0x43,0x01,0xd1,0xf8,0x5f,0x01,0xa9,0xf6,0x57,0x02,0xa9,0xf4,0x4f,0x03,0xa9}};
 #else
-  constexpr uintptr_t cell=0x99d37a8,callback_return=0x8d76594;
+  // 0x99d37a8 is the .got slot (R_AARCH64_RELATIVE -> 0x9d05b70). Base.Play
+  // and the Photo scheduler load GOT -> RuntimeMethod var -> MethodInfo*.
+  constexpr uintptr_t cell=0x99d37a8,callback_return=0x8d76594,method_var=0x9d05b70;
   const mp4game::Binding continuation{0x8d763a4,{0xff,0xc3,0x00,0xd1,0xfe,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0xf4,0x97,0x00,0xb0}};
 #endif
-  if(caller!=image_base+callback_return||!mp4_prefix(continuation)||!mp4_mapped(caller-4,4,true)||read<uint32_t>(reinterpret_cast<void*>(caller-4),0)!=0xd63f0120u)return false;
-  const auto at=image_base+cell;if(at<image_base||!mp4_mapped(at,8,false)||read<Method*>(reinterpret_cast<void*>(at),0)!=method
-   ||!mp4_mapped(reinterpret_cast<uintptr_t>(method),8,false))return false;
+  if(caller!=image_base+callback_return||!mp4_prefix(continuation)||!mp4_mapped(caller-4,4,true)||read<uint32_t>(reinterpret_cast<void*>(caller-4),0)!=0xd63f0120u){
+   if(!g.reset_reported){g.reset_reported=true;mp4_fresh_report_caller("rejected_actor_reset_caller",caller,false);}
+   return false;}
+  const auto at=image_base+cell;if(at<image_base||!mp4_mapped(at,8,false))return false;
+  const auto first=read<uintptr_t>(reinterpret_cast<void*>(at),0);
+#ifdef IDOLY_DARWIN_BRIDGE
+  // The Mach-O cell is in __DATA: accept the var itself, or a pointer slot
+  // to a mapped var, and always require the exact MethodInfo entry below.
+  const bool cell_method=first==reinterpret_cast<uintptr_t>(method)
+   ||(first>image_base&&mp4_mapped(first,8,false)&&read<Method*>(reinterpret_cast<void*>(first),0)==method);
+#else
+  const bool cell_method=first==image_base+method_var&&mp4_mapped(first,8,false)&&read<Method*>(reinterpret_cast<void*>(first),0)==method;
+#endif
+  // il2cpp allocates the resolved MethodInfo in runtime metadata memory, not
+  // in an image segment: require readable memory, not an ELF/Mach-O mapping.
+  if(!cell_method||!mp4_readable_memory(reinterpret_cast<uintptr_t>(method),8)){
+   if(!g.reset_reported){g.reset_reported=true;idoly_mp4_runtime::diagnostic_event("fresh_prepare","rejected_actor_reset_method_cell");}
+   return false;}
   return read<uintptr_t>(const_cast<void*>(static_cast<const void*>(method)),0)==image_base+pin::mp4_reset_actor_model.rva;
  }catch(...){return false;}
 }
@@ -56859,6 +56896,8 @@ bool mp4_fresh_no_mv_origin_candidate(){
  const auto&p=mp4_api.automatic_playback;
  return p.player_playing&&p.player_paused&&!p.player_playing(player,nullptr)&&!p.player_paused(player,nullptr);
 }
+// Names the original join a WAITING cleanup call awaits; diagnostics only.
+Mp4FreshResult mp4_fresh_wait(const char*why){idoly_mp4_runtime::fresh_cleanup_detail=why;return Mp4FreshResult::waiting;}
 Mp4FreshResult mp4_fresh_stop_disposable(){
  auto&g=mp4_fresh_play_gate;auto&o=mp4_fresh_origin_state();
  if(!game_call())return Mp4FreshResult::waiting;
@@ -56867,11 +56906,27 @@ Mp4FreshResult mp4_fresh_stop_disposable(){
   // Built can precede the original delayed Play call. Keep its exact factory
   // permission/mute until that real call is intercepted, including cancel.
   idoly_mp4_runtime::FreshFactoryRequest pending{};
-  if(idoly_mp4_runtime::fresh_factory_request_scope(&pending))return Mp4FreshResult::waiting;
+  if(idoly_mp4_runtime::fresh_factory_request_scope(&pending)){
+   // The queue retires this request scope only after the session is idle,
+   // which itself waits for this cleanup. An original Play that already ran
+   // un-intercepted never repeats; a not-yet-called one gets a bounded wait.
+   void*timeline=nullptr,*master=nullptr;
+   const bool played=pending.player&&mp4_alive(pending.player)
+    &&mp4_actor_field(pending.player,mp4game::Layout{}.player_director_controller,timeline)&&timeline
+    &&mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)&&master&&mp4_alive(master)
+    &&mp4_api.automatic_playback.director_state&&mp4_api.automatic_playback.director_state(master,nullptr)==1;
+   if(!played&&!mp4_fresh_budget_expired(g.play_wait_started,g.play_wait_polls,600,10000))return mp4_fresh_wait("fresh_cleanup_awaiting_deferred_play");
+   // Logical origin restoration still runs; the trace keeps the cause.
+   idoly_mp4_runtime::diagnostic_event("fresh_cleanup",played?"original_play_not_intercepted":"deferred_play_wait_expired",0,0,true);
+  }
   g.ending=true;g.stop_returned=true;return Mp4FreshResult::ok;
  }
- if(g.stop_started)return g.stop_failed?Mp4FreshResult::failed:Mp4FreshResult::waiting;
- if(g.await_scheduler||(g.reset_required&&!g.reset_returned)){if(!g.reset_cleanup_wait){g.reset_cleanup_wait=true;idoly_mp4_runtime::diagnostic_event("fresh_cleanup",g.await_scheduler?"awaiting_original_play_scheduler":"awaiting_delayed_actor_reset");}return Mp4FreshResult::waiting;}
+ if(g.stop_started)return g.stop_failed?Mp4FreshResult::failed:mp4_fresh_wait("fresh_cleanup_original_end");
+ if(!g.wait_expired&&(g.await_scheduler||(g.reset_required&&!g.reset_returned))){if(!g.reset_cleanup_wait){g.reset_cleanup_wait=true;idoly_mp4_runtime::diagnostic_event("fresh_cleanup",g.await_scheduler?"awaiting_original_play_scheduler":"awaiting_delayed_actor_reset");}
+  // The delayed reset is an 8-frame continuation; an unrecognized first Play
+  // schedules no known one. Past the budget, End proceeds like an early exit.
+  if(!mp4_fresh_budget_expired(g.wait_started,g.wait_polls,600,10000))return mp4_fresh_wait(g.await_scheduler?"fresh_cleanup_awaiting_play_scheduler":"fresh_cleanup_awaiting_actor_reset");
+  g.wait_expired=true;idoly_mp4_runtime::diagnostic_event("fresh_cleanup",g.await_scheduler?"play_scheduler_wait_expired":"actor_reset_wait_expired",0,0,true);}
  idoly_mp4_runtime::FreshFactoryRequest actual{};
  if(!idoly_mp4_runtime::fresh_factory_request(g.player,&actual)||actual.serial!=g.serial||actual.identity!=g.identity
   ||actual.player!=g.player
@@ -56916,7 +56971,12 @@ Mp4FreshOriginResult mp4_fresh_no_origin_settled(){
  const auto stopped=mp4_fresh_stop_disposable();if(stopped==Mp4FreshResult::waiting)return stopped;
  if(g.end_source&&!g.end_consumed){
   g.end_task.source=weak_get(g.end_source);if(!g.end_task.source)return Mp4FreshOriginResult::failed;
-  try{const int32_t status=o.original_api.task_status(&g.end_task,nullptr);if(status==0)return Mp4FreshOriginResult::waiting;
+  try{const int32_t status=o.original_api.task_status(&g.end_task,nullptr);
+   if(status==0&&!mp4_fresh_budget_expired(g.end_wait_started,g.end_wait_polls,1200,60000))return mp4_fresh_wait("fresh_cleanup_end_task");
+   if(status==0){
+    // Same bound as an original screen close: stop polling, keep no claim.
+    idoly_mp4_runtime::diagnostic_event("fresh_cleanup","original_end_task_wait_expired",0,0,true);
+    weak_free(g.end_source);g.end_source=0;g.end_task={};g.end_consumed=true;return Mp4FreshOriginResult::failed;}
    if(status<1||status>3)return Mp4FreshOriginResult::failed;
    auto awaiter=o.original_api.task_get_awaiter(&g.end_task,nullptr);g.end_consumed=true;o.original_api.task_get_result(&awaiter,nullptr);
    weak_free(g.end_source);g.end_source=0;g.end_task={};
@@ -57263,7 +57323,7 @@ Mp4FreshResult mp4_fresh_prepare_finish(void*){
  auto&h=mp4_fresh_host;
  if(!game_call())return Mp4FreshResult::waiting;
  if(h.pre_release_done)return h.pre_release_failed?Mp4FreshResult::failed:Mp4FreshResult::ok;
- if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return Mp4FreshResult::waiting;
+ if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return mp4_fresh_wait("fresh_cleanup_callbacks_unwind");
  bool complete=true;h.brain_serial=0;
  if(mp4_fresh_current(nullptr)){
   complete=mp4_fresh_video_restore_knobs();
@@ -57296,10 +57356,10 @@ Mp4FreshResult mp4_fresh_finish(void*){
   const auto stopped=mp4_fresh_stop_disposable();if(stopped==Mp4FreshResult::waiting)return stopped;
   if(stopped!=Mp4FreshResult::ok)h.pre_release_failed=true;
   const auto qos=idoly_mp4_fresh_qos::finish(h.qos,mp4_fresh_qos_api());
-  if(h.qos.active)return Mp4FreshResult::waiting;
+  if(h.qos.active)return mp4_fresh_wait("fresh_cleanup_qos_restore");
   mp4_fresh_qos_published.store(false,std::memory_order_release);
   if(qos!=idoly_mp4_fresh_qos::Result::ok){h.qos_failed=true;h.error="fresh_qos_restore_failed";}
-  if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return Mp4FreshResult::waiting;
+  if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return mp4_fresh_wait("fresh_cleanup_callbacks_unwind");
   h.brain_serial=0;
   if(h.mono){mp4_actor_mono_gate.release(h.source.generation);h.mono=false;}
   if(h.shader){
@@ -57316,16 +57376,16 @@ Mp4FreshResult mp4_fresh_finish(void*){
   h.active=false;h.detached=true;
  }
  const auto restored=mp4_fresh_origin_restore(nullptr);
- if(restored==Mp4FreshResult::waiting)return restored;
+ if(restored==Mp4FreshResult::waiting){if(!idoly_mp4_runtime::fresh_cleanup_detail)idoly_mp4_runtime::fresh_cleanup_detail="fresh_origin_restore";return restored;}
  if(restored!=Mp4FreshResult::ok)h.error=mp4_fresh_origin_error(nullptr);
  mp4_fresh_video_clear_after_end();mp4_fresh_video_program=Mp4FreshVideoProgram{};mp4_fresh_play_gate_clear();
  for(size_t i=0;i<h.root_count;++i)if(h.roots[i]){weak_free(h.roots[i]);h.roots[i]=0;}h.root_count=0;
- if(h.roster){if(!mp4_fresh_control_roster_clear(*h.roster))return Mp4FreshResult::waiting;h.roster->~Mp4FreshControlRoster();::free(h.roster);h.roster=nullptr;}
+ if(h.roster){if(!mp4_fresh_control_roster_clear(*h.roster))return mp4_fresh_wait("fresh_cleanup_control_roster");h.roster->~Mp4FreshControlRoster();::free(h.roster);h.roster=nullptr;}
  // The listener is the only global lease deliberately retained through the
  // real reload/seek. Release it on every terminal restore outcome.
  const auto audio=h.listener.finish(h.listener_token);
  if(audio!=idoly_mp4_timeline_audio::ListenerResult::ok){h.error=h.listener.error();
-  if(h.listener.active())return Mp4FreshResult::waiting;
+  if(h.listener.active())return mp4_fresh_wait("fresh_cleanup_audio_listener");
   return Mp4FreshResult::failed;
  }
  return restored==Mp4FreshResult::ok&&(h.qos_failed||h.pre_release_failed)?Mp4FreshResult::failed:restored;

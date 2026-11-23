@@ -113,6 +113,17 @@ for(const phase of ['idle','completed','cancelled','failed']){
  assert.equal(e.elements.get('mp4-progress').hidden,true);
  if(phase==='failed')assert.equal(e.elements.get('mp4-feedback').textContent,'capture_failed');
 }
+// The running job's own failure is never relabeled as scene preparation.
+await sample({phase:'failed',ready:false,export_id:'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',error_code:'fresh_scene_acquire_timeout',cleanup_stage:'fresh_cleanup_awaiting_actor_reset',cleanup_wait_ms:75000},
+ {running:true,phase:'rendering',current_job_id:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',jobs:[{job_id:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',output_id:'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',state:'running',timeline:'t',actor_count:1,width:16,height:16,fps_num:30,video_codec:1,error_code:'none'}]});
+assert.equal(e.elements.get('mp4-summary').textContent,'MP4 실패');
+assert.equal(e.elements.get('mp4-feedback').textContent,'fresh_scene_acquire_timeout · 원본 장면 정리 대기 중 · fresh_cleanup_awaiting_actor_reset (75s)');
+await sample({phase:'cancelled',ready:false,export_id:'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',error_code:'cancelled_by_user'},
+ {running:true,phase:'rendering',current_job_id:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',jobs:[{job_id:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',output_id:'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',state:'running',timeline:'t',actor_count:1,width:16,height:16,fps_num:30,video_codec:1,error_code:'none'}]});
+assert.equal(e.elements.get('mp4-summary').textContent,'취소됨');
+await sample({phase:'failed',ready:false,export_id:'cccccccccccccccccccccccccccccccc',error_code:'capture_failed'},
+ {running:true,phase:'replaying',current_job_id:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',jobs:[{job_id:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',output_id:'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',state:'running',timeline:'t',actor_count:1,width:16,height:16,fps_num:30,video_codec:1,error_code:'none'}]});
+assert.equal(e.elements.get('mp4-summary').textContent,'게임 화면을 준비하고 있습니다.');
 // Enqueue can be accepted before its first native Unity tick creates the job.
 await sample({phase:'idle',ready:false},{command_pending:true});
 assert.equal(e.elements.get('mp4-summary').textContent,'게임 화면을 준비하고 있습니다.');

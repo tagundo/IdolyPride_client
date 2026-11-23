@@ -29,6 +29,8 @@
     <string name="mp4_delete_video_confirm">アプリ内の完了した動画を削除しますか？外部に保存したコピーは残ります。</string>
     <string name="mp4_cancelled">書き出しを中止しました。</string>
     <string name="mp4_failed">書き出しに失敗しました: %1$s</string>
+    <string name="mp4_cleanup_waiting">元のシーンの後処理を待っています · %1$s (%2$d秒)</string>
+    <string name="mp4_cleanup_stalled">後処理が%1$d秒経っても終わりません。止まったままの場合はアプリを完全に終了してから再起動してください。リストから再試行できます。</string>
     <string name="mp4_idle">書き出し待機中</string>
     <string name="mp4_not_ready">先にMV再生画面を開いてください。</string>
     <string name="mp4_unavailable">MP4の書き出しは利用できません。</string>

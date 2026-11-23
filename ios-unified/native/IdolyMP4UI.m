@@ -255,6 +255,15 @@ static IDMP4Progress *IDMP4ActiveProgress;
         NSDictionary *status = owner.queueMode && [result[@"session"] isKindOfClass:NSDictionary.class] ? result[@"session"] : result;
         NSString *phase = status[@"phase"];
         NSUInteger done = 0, remaining = 0, failures = 0;
+        // The current job's own failure stays visible through its original
+        // cleanup join; only an older job's terminal row yields to the next MV.
+        NSString *cleanupStage = [status[@"cleanup_stage"] isKindOfClass:NSString.class] && ![status[@"cleanup_stage"] isEqual:@"none"] ? status[@"cleanup_stage"] : nil;
+        BOOL ownsCurrentJob = cleanupStage != nil;
+        if (owner.queueMode && !ownsCurrentJob && [status[@"export_id"] isKindOfClass:NSString.class] && [result[@"current_job_id"] isKindOfClass:NSString.class])
+            for (NSDictionary *row in result[@"jobs"])
+                if ([row isKindOfClass:NSDictionary.class] && [row[@"job_id"] isEqual:result[@"current_job_id"]])
+                    ownsCurrentJob = [row[@"output_id"] isEqual:status[@"export_id"]] && [status[@"export_id"] length] > 0;
+        NSString *sessionPhase = phase;
         if (owner.queueMode) {
             for (NSDictionary *row in result[@"jobs"]) {
                 if ([row[@"state"] isEqual:@"completed"]) ++done;
@@ -290,10 +299,20 @@ static IDMP4Progress *IDMP4ActiveProgress;
             owner.label.numberOfLines = 3;
             owner.label.text = [owner.label.text stringByAppendingFormat:@"\n%@ · %lu / %lu MV",IDMP4Text(@"작업 목록",@"処理リスト",@"Queue"),(unsigned long)done,(unsigned long)[result[@"jobs"] count]];
             NSString *preparationError=[result[@"error_code"]isKindOfClass:NSString.class]?result[@"error_code"]:nil;
-            if([status[@"phase"]isEqual:@"failed"]&&preparationError.length&&![preparationError isEqual:@"none"]&&[preparationError isEqual:status[@"error_code"]]){
-                owner.label.numberOfLines=4;
-                owner.label.text=[NSString stringWithFormat:@"%@\n%@\n%@",IDMP4Text(@"MP4 실패",@"MP4に失敗",@"MP4 failed"),preparationError,IDMP4Text(@"MP4 마무리 중",@"MP4を仕上げ中",@"Finalizing MP4")];
-            }
+            NSString *queuePhase=[result[@"phase"]isKindOfClass:NSString.class]?result[@"phase"]:@"";
+            BOOL queueCleanup=preparationError.length&&![preparationError isEqual:@"none"]&&([queuePhase isEqual:@"draining_navigation"]||[queuePhase isEqual:@"restoring_selection"]);
+            BOOL currentTerminal=!owner.terminal&&([sessionPhase isEqual:@"failed"]||[sessionPhase isEqual:@"cancelled"])&&ownsCurrentJob;
+            BOOL sameFailure=[sessionPhase isEqual:@"failed"]&&preparationError.length&&![preparationError isEqual:@"none"]&&[preparationError isEqual:status[@"error_code"]];
+            if(!owner.terminal&&(sameFailure||currentTerminal||queueCleanup)){
+                NSString *failure=currentTerminal&&[status[@"error_code"]isKindOfClass:NSString.class]?status[@"error_code"]:preparationError;
+                NSString *stage=cleanupStage?:(queuePhase.length?queuePhase:@"cleanup");
+                unsigned long long seconds=[status[@"cleanup_wait_ms"]unsignedLongLongValue]/1000ULL;
+                NSString *wait=[NSString stringWithFormat:@"%@ · %@ (%llus)",IDMP4Text(@"원본 장면 정리 대기 중",@"元のシーンの後処理を待っています",@"Waiting for the original scene cleanup"),stage,seconds];
+                if(seconds>=60)wait=[wait stringByAppendingFormat:@"\n%@",IDMP4Text(@"계속 멈춰 있으면 앱을 완전히 종료한 뒤 다시 실행하세요.",@"止まったままの場合はアプリを完全に終了してから再起動してください。",@"If it stays stuck, fully close the app and start it again.")];
+                owner.label.numberOfLines=6;
+                owner.label.text=[NSString stringWithFormat:@"%@\n%@\n%@",[sessionPhase isEqual:@"cancelled"]&&currentTerminal?IDMP4Text(@"취소됨",@"キャンセル済み",@"Cancelled"):IDMP4Text(@"MP4 실패",@"MP4に失敗",@"MP4 failed"),failure?:@"export_failed",wait];
+            }else if(!owner.terminal&&[phase isEqual:@"queued"]&&queuePhase.length)
+                owner.label.text=[owner.label.text stringByAppendingFormat:@" (%@)",queuePhase];
             [owner.button setTitle:owner.terminal ? IDMP4Text(@"닫기",@"閉じる",@"Close") : IDMP4Text(@"숨기기",@"非表示",@"Hide") forState:UIControlStateNormal];
         }
         owner.progress.progress = total ? (float)MIN(1.0,(double)frames/(double)total) : 0;

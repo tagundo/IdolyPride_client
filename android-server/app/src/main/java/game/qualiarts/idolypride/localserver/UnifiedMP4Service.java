@@ -24,6 +24,7 @@ public final class UnifiedMP4Service extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private PowerManager.WakeLock wakeLock;
     private boolean stopping, foreground;
+    private String shown = "";
     private final Runnable expired = () -> stopJob("background_time_budget", false);
     static boolean start(Context context) {
         try { context.startForegroundService(new Intent(context, UnifiedMP4Service.class)); return true; }
@@ -46,15 +47,7 @@ public final class UnifiedMP4Service extends Service {
         if (intent != null && CANCEL.equals(intent.getAction())) { stopJob("user_cancelled", true); return START_NOT_STICKY; }
         if (!UnifiedMP4Background.expectsService()) { stopping = true; stopSelf(); return START_NOT_STICKY; }
         if (!foreground && !stopping) try {
-            PendingIntent open = PendingIntent.getActivity(this, NOTIFICATION, new Intent(this, MainActivity.class),
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            PendingIntent cancel = PendingIntent.getService(this, NOTIFICATION,
-                new Intent(this, UnifiedMP4Service.class).setAction(CANCEL), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            Notification notification = new Notification.Builder(this, CHANNEL)
-                .setSmallIcon(UnifiedRuntime.notificationIcon(this, R.drawable.ic_server))
-                .setContentTitle(getString(R.string.mp4_progress_title)).setContentText(getString(R.string.mp4_rendering, 0, 0))
-                .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
-                .addAction(new Notification.Action.Builder(null, getString(R.string.mp4_cancel), cancel).build()).build();
+            Notification notification = notification(UnifiedMP4Export.statusText(this), 0, 0);
             // Public SDK constants: mediaProcessing=8192(API35), dataSync=1.
             startForeground(NOTIFICATION, notification, Build.VERSION.SDK_INT >= 35 ? 8192 : 1);
             PowerManager power = (PowerManager)getSystemService(POWER_SERVICE);
@@ -63,6 +56,36 @@ public final class UnifiedMP4Service extends Service {
             foreground = true; main.postDelayed(expired, BUDGET_MS); UnifiedMP4Background.serviceStarted();
         } catch (RuntimeException unavailable) { stopJob("background_service_unavailable", false); }
         return START_NOT_STICKY;
+    }
+    private Notification notification(String text, long frames, long total) {
+        PendingIntent open = PendingIntent.getActivity(this, NOTIFICATION, new Intent(this, MainActivity.class),
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent cancel = PendingIntent.getService(this, NOTIFICATION,
+            new Intent(this, UnifiedMP4Service.class).setAction(CANCEL), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        String body = text == null || text.isEmpty() ? getString(R.string.mp4_progress_title) : text;
+        int newline = body.indexOf('\n');
+        Notification.Builder builder = new Notification.Builder(this, CHANNEL)
+            .setSmallIcon(UnifiedRuntime.notificationIcon(this, R.drawable.ic_server))
+            .setContentTitle(getString(R.string.mp4_progress_title)).setContentText(newline < 0 ? body : body.substring(0, newline))
+            .setStyle(new Notification.BigTextStyle().bigText(body))
+            .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
+            .addAction(new Notification.Action.Builder(null, getString(R.string.mp4_cancel), cancel).build());
+        // Show real encoder progress only; preparation and cleanup are not 0/0 frames.
+        if (total > 0 && total <= Integer.MAX_VALUE && frames >= 0)
+            builder.setProgress((int) total, (int) Math.min(frames, total), false);
+        return builder.build();
+    }
+    /** Main thread only: mirror the same status text the in-game overlay shows. */
+    static void update(String text, long frames, long total) {
+        UnifiedMP4Service owner = current.get();
+        if (owner == null || !owner.foreground || owner.stopping || text == null) return;
+        String key = text + "\n" + frames + "/" + total;
+        if (key.equals(owner.shown)) return;
+        owner.shown = key;
+        try {
+            NotificationManager manager = (NotificationManager) owner.getSystemService(NOTIFICATION_SERVICE);
+            manager.notify(NOTIFICATION, owner.notification(text, frames, total));
+        } catch (RuntimeException ignored) { /* A notification update never changes export ownership. */ }
     }
     // Public callback added in API35; deliberately compiles against SDK34 too.
     public void onTimeout(int startId, int fgsType) { stopJob("background_service_timeout", false); }

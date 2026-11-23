@@ -315,6 +315,15 @@ public final class ControllerHarness {
     rejects(()->completedFile(out,"linked"));
     Files.createSymbolicLink(new File(root,"aliased").toPath(),out.toPath());
     rejects(()->privateDirectory(root,new File(root,"aliased").getPath()));
+    // A user pause survives natively past Cancel; hand it back to the real
+    // lifecycle so the next queued job is never parked by a stale request.
+    Activity owner=new Activity();game=new WeakReference<>(owner);resumed=true;stopped=false;userPaused=true;
+    int beforeResumes=resumes,beforeSuspends=suspends,beforeCancels=cancels;
+    cancel();require(!userPaused&&cancels==beforeCancels+1&&resumes==beforeResumes+1&&suspends==beforeSuspends,"a visible player's cancelled user pause is released");
+    userPaused=true;resumed=false;stopped=true;
+    cancel();require(resumes==beforeResumes+1&&suspends==beforeSuspends+1&&reason==1,"a hidden player's cancelled user pause becomes a lifecycle park");
+    userPaused=false;resumed=true;stopped=false;
+    cancel();require(resumes==beforeResumes+1&&suspends==beforeSuspends+1,"an ordinary cancel leaves lifecycle state untouched");
     System.out.println("PASS controller");
   }
 }
@@ -339,7 +348,7 @@ def test_diagnostics_copies_only_bounded_public_state_without_private_payloads(t
     if not javac or not java:
         pytest.skip("JDK required")
     source = SOURCE.read_text()
-    selected = "\n".join(method(source, name) for name in ("controllerDiscovery", "snapshot", "diagnostics"))
+    selected = "\n".join(method(source, name) for name in ("controllerDiscovery", "snapshot", "traceInteger", "mergeSessionProgress", "diagnostics"))
     fixture = tmp_path / "DiagnosticsHarness.java"
     fixture.write_text(r'''
 import java.util.*;import java.lang.ref.WeakReference;
@@ -351,8 +360,12 @@ public class DiagnosticsHarness {
  static JSONObject last=new JSONObject(),queue=new JSONObject(),nativeValue=new JSONObject();
  static JSONObject lastNativeTrace;static Context application;static boolean foregroundMvSelected=true;
  static class Context {static final int MODE_PRIVATE=0;Preferences getSharedPreferences(String k,int mode){return new Preferences();}}
- static class Preferences {String getString(String k,String fallback){return fallback;}}
- static JSONObject readNativeTrace(){return null;}static JSONObject savedNativeTrace(String key){return null;}
+ static class Preferences {String getString(String k,String fallback){return fallback;}boolean getBoolean(String k,boolean fallback){return true;}}
+ static boolean userPaused=true,pendingQueueRun;static boolean experimentalBackgroundEnabled(Context c){return c.getSharedPreferences("mp4_export",0).getBoolean("experimental_background",false);}
+ static class UnifiedMP4Background {static JSONObject snapshot(){return new JSONObject().put("state","probing").put("error_code","/private/surface")
+  .put("heartbeat_verified",true).put("capture_verified",false).put("raw_surface","0xdead");}}
+ static JSONObject progressDocument;static JSONObject readNativeDiagnostics(){return progressDocument;}static JSONObject exportTrace(JSONObject document){return null;}
+ static JSONObject savedNativeTrace(String key){return null;}
 
  static class JSONObject {static final Map<String,JSONObject> refs=new HashMap<>();final Map<String,Object> map=new LinkedHashMap<>();
   JSONObject(){}JSONObject(String raw){map.putAll(refs.get(raw).map);}JSONObject put(String k,Object v){map.put(k,v);return this;}
@@ -393,6 +406,22 @@ public class DiagnosticsHarness {
   need(result.map.get("phase").equals("idle"),"diagnostics obtains current native status rather than stale UI snapshot");
   need(result.map.get("readiness_error").equals("selected_capture_geometry_unsupported"),"actual readiness reason survives");
   need(result.map.get("pipeline_mode").equals("fresh_original_scene"),"actual original-scene mode survives without inventing legacy verification");
+  need(result.map.get("user_paused").equals(true)&&result.map.get("pending_queue_run").equals(false)&&result.map.get("experimental_background").equals(false),
+   "lifecycle pause and experimental transport flags are explicit (no application context means not enabled)");
+  JSONObject transport=(JSONObject)result.map.get("background");
+  need(transport.map.get("state").equals("probing")&&transport.map.get("error_code").equals("unknown")&&transport.map.get("heartbeat_verified").equals(true)
+   &&transport.map.get("capture_verified").equals(false)&&!transport.map.containsKey("raw_surface"),"experimental transport state is bounded");
+  need(result.map.get("job_stage").equals("idle")&&result.map.get("cleanup_stage").equals("none")&&result.map.get("cleanup_wait_ms").equals(0L),
+   "an absent separate progress ABI reports idle with no pending cleanup");
+  progressDocument=new JSONObject().put("session_progress",new JSONObject().put("job_stage","restore_retire")
+   .put("cleanup_stage","fresh_cleanup_awaiting_actor_reset").put("cleanup_wait_ms",61000L).put("boundary_entries",4242L).put("path","/private/x"));
+  JSONObject cleanup=diagnostics();
+  need(cleanup.map.get("job_stage").equals("restore_retire")&&cleanup.map.get("cleanup_stage").equals("fresh_cleanup_awaiting_actor_reset")
+   &&cleanup.map.get("cleanup_wait_ms").equals(61000L)&&cleanup.map.get("boundary_entries").equals(4242L)&&!cleanup.map.containsKey("path"),"the pending original cleanup join and its age are exported as bounded scalars");
+  progressDocument=new JSONObject().put("session_progress",new JSONObject().put("job_stage","../private").put("cleanup_stage","/private/stage").put("cleanup_wait_ms",-5L));
+  JSONObject hostile=diagnostics();
+  need(hostile.map.get("job_stage").equals("unknown")&&hostile.map.get("cleanup_stage").equals("none")&&hostile.map.get("cleanup_wait_ms").equals(0L),"progress values are bounded codes");
+  progressDocument=null;
   for(Object mode:new Object[]{"/private/path","unknown",true,1,new JSONObject()}){
    nativeValue.put("pipeline_mode",mode);need(!diagnostics().map.containsKey("pipeline_mode"),"unknown pipeline values are not copied");
   }
@@ -487,7 +516,8 @@ def test_status_keeps_queue_handoffs_distinct_from_idle_or_previous_completion(t
     if not javac or not java:
         pytest.skip("JDK required")
     source = SOURCE.read_text()
-    production = "\n".join(method(source, name) for name in ("backgroundQueueHasWork", "statusText", "enqueueFailureText"))
+    production = "\n".join(method(source, name) for name in ("backgroundQueueHasWork", "publicCode", "sessionOwnsCurrentQueueJob",
+                                                             "cleanupText", "statusText", "enqueueFailureText"))
     resources = sorted(set(re.findall(r"R\.string\.([a-z0-9_]+)", production)))
     declarations = "".join(f"static final int {name}={index};" for index, name in enumerate(resources, 1))
     harness = tmp_path / "QueueStatusHarness.java"
@@ -532,7 +562,26 @@ public final class QueueStatusHarness {
   lastQueue.put("error_code","fresh_audio_source_mixer_unsupported");
   expect(context,R.string.mp4_failed,"current preparation failure is visible while the original cleanup join is still running");
   need(statusText(context).contains("fresh_audio_source_mixer_unsupported"),"the actual failure code is never replaced by a generic preparing message");
-  lastQueue.put("error_code","none");
+  lastQueue.put("error_code","none").put("current_job_id","job2").put("jobs",new JSONArray().put(new JSONObject().put("job_id","job2").put("output_id","out2").put("state","running")));
+  last.put("phase","failed").put("error_code","fresh_scene_acquire_timeout").put("export_id","out2")
+   .put("cleanup_stage","fresh_cleanup_awaiting_actor_reset").put("cleanup_wait_ms",75000L);
+  expect(context,R.string.mp4_failed,"the running job's own failure in cleanup is never relabeled as scene preparation");
+  need(statusText(context).contains("fresh_scene_acquire_timeout"),"the current job's actual failure code is shown");
+  need(statusText(context).contains("resource="+R.string.mp4_cleanup_waiting+"[fresh_cleanup_awaiting_actor_reset, 75]"),"the pending original cleanup join and its age are named");
+  need(statusText(context).contains("resource="+R.string.mp4_cleanup_stalled+"[75]"),"a long cleanup stall offers restart guidance");
+  last.put("cleanup_stage","none").put("cleanup_wait_ms",0L);
+  expect(context,R.string.mp4_failed,"the current job's terminal row is identified by its exact output identity");
+  last.put("phase","cancelled");expect(context,R.string.mp4_cancelled,"the current job's cancellation stays visible through cleanup");
+  last.put("export_id","out1").put("phase","failed");
+  expect(context,R.string.mp4_queue_waiting_scene,"an older job's terminal row still yields to the next queued scene");
+  lastQueue.put("phase","restoring_selection").put("error_code","queued_scene_readiness_timeout");
+  expect(context,R.string.mp4_failed,"a queue preparation failure stays visible through its original cleanup join");
+  need(statusText(context).contains("queued_scene_readiness_timeout"),"the queue preparation failure code is shown");
+  lastQueue.put("phase","saving_selection").put("error_code","none");
+  expect(context,R.string.mp4_queue_waiting_scene,"genuine queue preparation still reports scene preparation");
+  need(statusText(context).endsWith("(saving_selection)"),"the actual queue preparation phase is named");
+  lastQueue.remove("phase");lastQueue.remove("current_job_id");lastQueue.remove("jobs");
+  last.remove("export_id");last.remove("cleanup_stage");last.remove("cleanup_wait_ms");
   last.put("phase","preparing_audio");expect(context,R.string.mp4_preparing_audio,"actual soundtrack preparation remains visible");
   last.put("total_audio_frames",48000L).put("audio_frames",24000L);
   expect(context,R.string.mp4_preparing_audio_progress,"actual soundtrack progress remains visible");
@@ -589,6 +638,8 @@ def test_server_stop_parks_native_queue_before_disabling_it_and_cancelling_sessi
 public final class ServerStopHarness {
  static boolean configured,initialized,queueConfigured,foregroundSelectionReady,foregroundMvSelected,throwPause,throwInvalidate,queueParked;
  static long menuHandoffDeadline;static int[] pending;static int pauseResult;
+ static final class JSONObject {final Map<String,Object> map=new HashMap<>();JSONObject put(String k,Object v){map.put(k,v);return this;}}
+ static JSONObject lastQueue=new JSONObject();
  static final List<String> events=new ArrayList<>();static final Handler MAIN=new Handler();
  static final class Handler {
   final List<Runnable> work=new ArrayList<>();void post(Runnable task){work.add(task);}
@@ -609,11 +660,12 @@ public final class ServerStopHarness {
  }
 ''' + production + r'''
  public static void main(String[]arguments){
-  reset(true,true);serverStopped();
+  reset(true,true);lastQueue=new JSONObject().put("running",true);serverStopped();
   need(events.equals(Arrays.asList("pause","invalidate"))&&queueParked,"native queue is parked and its Add snapshot retired synchronously without waiting for paused Unity");
   need(!configured&&!queueConfigured&&!foregroundSelectionReady&&menuHandoffDeadline==0,"server stop retires host availability and cached menu eligibility");
   need(MAIN.work.size()==1&&pending!=null,"existing main-thread session cleanup remains deferred");
   MAIN.drain();need(events.equals(Arrays.asList("pause","invalidate","cancel","wake"))&&pending==null&&queueParked,"session cancellation follows queue parking without resuming the queue");
+  need(lastQueue.map.isEmpty(),"an unconfigured queue's last running snapshot never stays visible as live work");
   serverStopped();need(Collections.frequency(events,"pause")==1,"a repeated stop cannot call an already-retired queue");MAIN.drain();
   reset(true,false);serverStopped();need(events.equals(Arrays.asList("invalidate")),"an unconfigured queue still retires cached selection without receiving pause");MAIN.drain();
   need(events.equals(Arrays.asList("invalidate","cancel","wake")),"queue absence preserves existing session cleanup");
@@ -661,6 +713,7 @@ final class UnifiedMP4Background {{
  static boolean ownsSurface(android.app.Activity a){{return false;}}
  static void sample(org.json.JSONObject state){{}}static boolean expectsService(){{return false;}}
 }}""",
+        "UnifiedMP4Service.java": f"package {package}; final class UnifiedMP4Service {{static void update(String text,long frames,long total){{}}}}",
     }
     paths = []
     for name, content in stubs.items():

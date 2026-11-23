@@ -182,6 +182,7 @@ final class UnifiedMP4Background {{
  static void foregrounding(android.app.Activity a){{}}static void focusLost(android.app.Activity a){{}}
  static boolean ownsSurface(android.app.Activity a){{return false;}}static void sample(org.json.JSONObject value){{}}static boolean expectsService(){{return false;}}
 }}''',
+        PACKAGE.replace(".", "/") + "/UnifiedMP4Service.java": f"package {PACKAGE};final class UnifiedMP4Service {{static void update(String text,long frames,long total){{}}}}",
     }
 
 
