@@ -56061,7 +56061,10 @@ bool mp4_fresh_path_current(const Mp4FreshControlRoster&r){
   if(!mp4_fresh_path_search(r,node.director))return fail("fresh_path_registry_invalid");
   if(!node.asset)continue;
   if(!mp4_root_track_field(node.asset,"m_Tracks",mp4stage::Layout::timeline_tracks))return fail("fresh_control_track_schema_invalid");
-  size_t roots=0;if(!mp4_fresh_control_list(r,node.asset,mp4stage::Layout::timeline_tracks,"UnityEngine.Timeline.TrackAsset[]",&roots))return fail(mp4_fresh_control_list_code());
+  // Shipped metadata: TimelineAsset.m_Tracks and TrackAsset.m_Children are
+  // List<ScriptableObject> (backing ScriptableObject[]); m_Clips is
+  // List<TimelineClip>. Each element is type-checked as a TrackAsset below.
+  size_t roots=0;if(!mp4_fresh_control_list(r,node.asset,mp4stage::Layout::timeline_tracks,"UnityEngine.ScriptableObject[]",&roots))return fail(mp4_fresh_control_list_code());
   void*tracks[512]{};size_t track_count=0;const auto root_list=r.lists[roots];
   if(root_list.count>512)return fail("fresh_control_track_count_invalid");
   for(size_t i=0;i<root_list.count;++i)tracks[track_count++]=r.items[root_list.begin+i];
@@ -56071,7 +56074,7 @@ bool mp4_fresh_path_current(const Mp4FreshControlRoster&r){
    if(!mp4_root_track_field(track,"m_Children",mp4stage::Layout::track_children)
     ||!mp4_root_track_field(track,"m_Clips",mp4stage::Layout::track_clips))return fail("fresh_control_track_schema_invalid");
    size_t children=0,clips=0;
-   if(!mp4_fresh_control_list(r,track,mp4stage::Layout::track_children,"UnityEngine.Timeline.TrackAsset[]",&children)
+   if(!mp4_fresh_control_list(r,track,mp4stage::Layout::track_children,"UnityEngine.ScriptableObject[]",&children)
     ||!mp4_fresh_control_list(r,track,mp4stage::Layout::track_clips,"UnityEngine.Timeline.TimelineClip[]",&clips))return fail(mp4_fresh_control_list_code());
    const auto child_list=r.lists[children];if(child_list.count>512-track_count)return fail("fresh_control_track_count_invalid");
    for(size_t i=0;i<child_list.count;++i)tracks[track_count++]=r.items[child_list.begin+i];
