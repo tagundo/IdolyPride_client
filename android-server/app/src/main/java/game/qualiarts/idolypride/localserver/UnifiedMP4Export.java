@@ -745,17 +745,18 @@ public final class UnifiedMP4Export {
             // Keep the last immutable MV through the explicit server-menu
             // handoff. A real active-window resize requires a fresh snapshot.
             if (!menuHandoff && activePlayerWindow) invalidateQueueSelection();
-            // A capture with its output geometry applied still cancels on a
-            // real geometry change. Scene preparation re-reads the window at
-            // render setup, and finishing/cleanup no longer use it: the fresh
-            // scene reload itself reshapes the window on device (11.23.3).
+            // Only a running capture uses the window geometry. Every earlier
+            // stage (idle before the first poll after start, scene, audio and
+            // render setup) is followed by the first capture, which freezes
+            // the live target size, and native fails a real mid-capture size
+            // change with its own code. The fresh scene reload turns the
+            // window twice on device, often after Play (11.23.3-11.23.5).
             if (pending == null && !geometryFreeStage()) cancelFrom("geometry_changed");
         }
     }
     private static boolean geometryFreeStage() {
         String stage = last.optString("job_stage", "");
-        return stage.equals("begin") || stage.equals("scene_acquire") || stage.equals("audio_setup")
-                || stage.equals("encoder_finish_save") || stage.equals("restore_retire");
+        return !(stage.equals("frame_request") || stage.equals("frame_readback") || stage.equals("encoder_append"));
     }
     private static String geometryDetail = "none";
     /** Called by the game window just before geometryChanged: which signal and the old/new shape. */

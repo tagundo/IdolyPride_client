@@ -224,9 +224,12 @@ public final class ControllerHarness {
     Activity rotating=new Activity();game=new WeakReference<>(rotating);last=new JSONObject();
     resumed=true;stopped=false;gameFocused=true;foregroundSelectionReady=false;allowNative=true;
     gamePaused(rotating);allowNative=false;
-    for(String stage:new String[]{"begin","scene_acquire","audio_setup","encoder_finish_save","restore_retire"}){
+    for(String stage:new String[]{"idle","begin","scene_acquire","audio_setup","audio_request","audio_response","audio_load","audio_mix","audio_finalize","render_setup","encoder_finish_save","restore_retire"}){
       last=new JSONObject().put("job_stage",stage);int before=cancels;geometryChanged(rotating);
       require(cancels==before,"the fresh scene reload reshapes the window before render setup; "+stage+" must not cancel");}
+    for(String stage:new String[]{"frame_request","encoder_append"}){
+      last=new JSONObject().put("job_stage",stage);int before=cancels;geometryChanged(rotating);
+      require(cancels==before+1,"a running capture still cancels on a geometry change: "+stage);}
     last=new JSONObject().put("job_stage","frame_readback");foregroundSelectionReady=true;
     int cancelsBeforeGeometry=cancels,enqueuesBeforeGeometry=enqueues;
     geometryChanged(rotating);

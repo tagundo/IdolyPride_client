@@ -33007,7 +33007,8 @@ struct Mp4FreshOrigin {
     idoly_mp4_game::Snapshot snapshot{};
     Config queue_graphics{};
     double seconds=0; int32_t mode=0,state=0;
-    uint64_t identity=0,shader_generation=0,restore_identity=0,load_serial=0,autoplay_wait_started=0;
+    uint64_t identity=0,shader_generation=0,restore_identity=0,load_serial=0,autoplay_wait_started=0,fence_wait_started=0;
+    bool fence_refreshed=false;
     bool configured=false,saved=false,no_mv=false,playing=false,paused=false,queue_override=false;
     bool shader_custom=false,globals_restored=false,shader_superseded=false;
     float shader_time=0;
@@ -33051,7 +33052,10 @@ Mp4FreshOriginResult mp4_fresh_origin_retire_failure(){
     o.saved=false;return Mp4FreshOriginResult::failed;
 }
 Mp4FreshOriginResult mp4_fresh_origin_fail(const char* error){
-    auto& o=mp4_fresh_origin_state();o.failed=true;o.error=error;
+    auto& o=mp4_fresh_origin_state();o.failed=true;
+    // A replay/game error that still reads "none" would publish only the
+    // generic fresh_logical_restore_failed. Keep the failing step visible.
+    o.error=error&&*error&&std::strcmp(error,"none")?error:"fresh_origin_restore_unnamed_failure";
     return mp4_fresh_origin_retire_failure();
 }
 const char* mp4_fresh_origin_error(void*){return mp4_fresh_origin_state().error;}
@@ -33099,6 +33103,23 @@ Mp4FreshOriginResult mp4_fresh_complete_selected_actors(const Mp4SceneWitness& s
     }
     return Mp4FreshOriginResult::ok;
 }
+// The reloaded origin's actors are new heap objects. Refresh the range
+// snapshot once, allow a bounded wait for a transient Animator or range miss,
+// then fail with a name through retire_failure. A raw unsupported/stale return
+// left o.saved, reload_started and the ready replay behind (device: unnamed
+// fresh_logical_restore_failed, and the next Run reused the stale origin).
+Mp4FreshOriginResult mp4_fresh_origin_fence(Mp4FreshOrigin& o,const Mp4SceneWitness& source){
+    if(!o.fence_refreshed){o.fence_refreshed=true;(void)mp4_actor_refresh_maps();}
+    const auto fenced=mp4_fresh_complete_selected_actors(source);
+    if(fenced==Mp4FreshOriginResult::ok){o.fence_wait_started=0;return fenced;}
+    const uint64_t now=idoly_mp4_runtime::milliseconds();
+    if(!o.fence_wait_started){o.fence_wait_started=now?now:1;
+        idoly_mp4_runtime::diagnostic_event("fresh_origin",fenced==Mp4FreshOriginResult::waiting?"actor_fence_waiting":fenced==Mp4FreshOriginResult::stale?"actor_fence_stale_retry":"actor_fence_unsupported_retry");}
+    else if(now<o.fence_wait_started||now-o.fence_wait_started>5000)
+        return mp4_fresh_origin_fail(fenced==Mp4FreshOriginResult::waiting?"fresh_origin_actor_fence_timeout"
+            :fenced==Mp4FreshOriginResult::stale?"fresh_origin_actor_fence_stale":"fresh_origin_actor_fence_unsupported");
+    return Mp4FreshOriginResult::waiting;
+}
 // Public Pause/Resume preserve the original sleep policy and reset behavior.
 // The nine playback profile calls supply the remaining original flag/mode APIs.
 #ifdef IDOLY_DARWIN_BRIDGE
@@ -33126,7 +33147,7 @@ Mp4FreshOriginResult mp4_fresh_origin_save(void*){
         pthread_mutex_lock(&config_mutex);o.queue_override=mp4_queue_graphics_override;o.queue_graphics=mp4_queue_graphics;pthread_mutex_unlock(&config_mutex);
         o.descriptor={};o.seconds=0;o.mode=o.state=0;o.playing=o.paused=false;o.identity=0;o.no_mv=true;o.saved=true;
         o.failed=o.globals_restored=o.shader_superseded=o.reload_started=o.pause_started=o.pause_returned=o.seek_started=o.state_started=false;
-        o.restore_identity=o.load_serial=o.autoplay_wait_started=0;o.error="none";return Mp4FreshOriginResult::ok;
+        o.restore_identity=o.load_serial=o.autoplay_wait_started=o.fence_wait_started=0;o.fence_refreshed=false;o.error="none";return Mp4FreshOriginResult::ok;
     }
     const auto sampled=game.snapshot(o.snapshot,false);if(sampled!=Mp4FreshOriginResult::ok){o.error=game.last_error();return sampled;}
     Mp4SceneWitness source{};
@@ -33159,7 +33180,7 @@ Mp4FreshOriginResult mp4_fresh_origin_save(void*){
     pthread_mutex_lock(&config_mutex);o.queue_override=mp4_queue_graphics_override;o.queue_graphics=mp4_queue_graphics;pthread_mutex_unlock(&config_mutex);
     o.seconds=seconds;o.mode=mode;o.state=state;o.playing=playing;o.paused=paused;o.identity=identity;o.no_mv=false;
     o.saved=true;o.failed=o.globals_restored=o.shader_superseded=o.reload_started=o.pause_started=o.pause_returned=o.seek_started=o.state_started=false;
-    o.restore_identity=o.load_serial=o.autoplay_wait_started=0;o.error="none";return Mp4FreshOriginResult::ok;
+    o.restore_identity=o.load_serial=o.autoplay_wait_started=o.fence_wait_started=0;o.fence_refreshed=false;o.error="none";return Mp4FreshOriginResult::ok;
 }
 bool mp4_fresh_origin_observe(Mp4FreshOrigin& o){
     void* player=idoly_mp4_runtime::game.selected_player();void* presenter=idoly_mp4_runtime::game.selected_presenter();
@@ -33194,16 +33215,16 @@ Mp4FreshOriginResult mp4_fresh_origin_restore(void*){
             // Force the REAL original factory route even for the same selected
             // song/costumes. Ready on an old retained player is insufficient.
             if(!o.replay.begin(o.descriptor,idoly_mp4_runtime::milliseconds(),true))
-                return mp4_fresh_origin_fail(o.replay.error());
+                return mp4_fresh_origin_fail(std::strcmp(o.replay.error(),"none")?o.replay.error():"fresh_origin_reload_begin_failed");
             o.reload_started=true;
         }
         o.replay.tick(idoly_mp4_runtime::milliseconds());
         if(o.replay.active())return Mp4FreshOriginResult::waiting;
         if(o.replay.phase()!=idoly_mp4_replay::Phase::ready||!o.replay.fresh_ready()||!o.replay.ready_load_serial())
-            return mp4_fresh_origin_fail(o.replay.error());
+            return mp4_fresh_origin_fail(std::strcmp(o.replay.error(),"none")?o.replay.error():"fresh_origin_reload_not_ready");
         auto& game=idoly_mp4_runtime::game;
         const auto sampled=game.snapshot(o.snapshot,false);if(sampled==Mp4FreshOriginResult::waiting)return sampled;
-        if(sampled!=Mp4FreshOriginResult::ok)return mp4_fresh_origin_fail(game.last_error());
+        if(sampled!=Mp4FreshOriginResult::ok)return mp4_fresh_origin_fail(std::strcmp(game.last_error(),"none")?game.last_error():"fresh_origin_snapshot_failed");
         Mp4SceneWitness source{};
         if(!game.selected_scene_witness(source,false)||source.player!=o.replay.player()||source.presenter!=o.replay.presenter())
             return mp4_fresh_origin_fail("fresh_origin_reloaded_source_changed");
@@ -33222,7 +33243,7 @@ Mp4FreshOriginResult mp4_fresh_origin_restore(void*){
             return Mp4FreshOriginResult::waiting;
         }
         if(!o.pause_started){
-            const auto fenced=mp4_fresh_complete_selected_actors(source);if(fenced!=Mp4FreshOriginResult::ok)return fenced;
+            const auto fenced=mp4_fresh_origin_fence(o,source);if(fenced!=Mp4FreshOriginResult::ok)return fenced;
             if(!mp4_fresh_origin_current(source,identity))return mp4_fresh_origin_fail("fresh_origin_reloaded_source_changed");
             o.pause_started=true;o.restore_identity=identity;o.load_serial=o.replay.ready_load_serial();
             // Freeze ordinary playback BEFORE any later completion WAIT. Keep
@@ -33237,7 +33258,7 @@ Mp4FreshOriginResult mp4_fresh_origin_restore(void*){
         if(!o.seek_started){
             if(p.director_state(source.director,nullptr)!=0||!p.player_paused(source.player,nullptr))
                 return mp4_fresh_origin_fail("fresh_origin_pause_not_held");
-            const auto fenced=mp4_fresh_complete_selected_actors(source);if(fenced!=Mp4FreshOriginResult::ok)return fenced;
+            const auto fenced=mp4_fresh_origin_fence(o,source);if(fenced!=Mp4FreshOriginResult::ok)return fenced;
             if(!mp4_fresh_origin_current(source,identity))return mp4_fresh_origin_fail("fresh_origin_seek_source_changed");
             o.seek_started=true;mp4_api.player_set_time(source.player,static_cast<float>(o.seconds),nullptr);
         }
@@ -56251,7 +56272,7 @@ struct Mp4FreshSceneHost {
  double prepared_seconds=0;
  uint32_t roots[1024]{};size_t root_count=0;
  unsigned render_depth=0;
- bool active=false,mono=false,shader=false,started=false,start_returned=false,prepared=false,detached=false,held=false,camera_started=false,camera_returned=false,path_reset_started=false,path_reset_returned=false,pre_release_done=false,pre_release_failed=false;
+ bool active=false,mono=false,shader=false,started=false,start_returned=false,prepared=false,detached=false,held=false,camera_started=false,camera_returned=false,path_reset_started=false,path_reset_returned=false,pre_release_done=false,pre_release_failed=false,conversion_begun=false;
  const char*error="none";
  idoly_mp4_timeline_audio::ListenerLease listener{};
  idoly_mp4_fresh_qos::State qos{};bool qos_failed=false;
@@ -57292,7 +57313,7 @@ Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job
  // DSP settings through the original typed setter, never grant DSP authority.
  for(size_t i=0;i<h.actor_count;++i){uintptr_t native=0;if(!mp4_actor_field(h.actors[i].animator,16,native)||!native
    ||!mp4_fresh_complete_handle(reinterpret_cast<void*>(native+0x238)))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_initial_animator_job_wait");}
- if(!h.roster->converted){for(size_t i=0;i<h.director_count;++i){
+ if(!h.roster->converted){h.conversion_begun=true;for(size_t i=0;i<h.director_count;++i){
    mp4_api.director_set_mode(h.directors[i],h.director_modes[i],nullptr);
    if(!mp4_fresh_current(nullptr)||mp4_api.director_get_mode(h.directors[i],nullptr)!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_clock_conversion_failed");
    mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
@@ -57430,30 +57451,39 @@ Mp4FreshResult mp4_fresh_prepare_finish(void*){
  if(!game_call())return Mp4FreshResult::waiting;
  if(h.pre_release_done)return h.pre_release_failed?Mp4FreshResult::failed:Mp4FreshResult::ok;
  if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return mp4_fresh_wait("fresh_cleanup_callbacks_unwind");
- bool complete=true;h.brain_serial=0;
- if(mp4_fresh_current(nullptr)){
-  complete=mp4_fresh_video_restore_knobs();
-  try{
+ // Un-hold only what acquire actually changed. An acquire that failed before
+ // any clock conversion or video knob capture changed nothing; reporting a
+ // release failure for it hid the real cause and failed a good origin restore.
+ const char*why=nullptr;h.brain_serial=0;
+ const auto failed=[&why](const char*code){if(!why)why=code;};
+ bool videos=false;for(size_t i=0;i<mp4_fresh_video_count;++i)if(mp4_fresh_videos[i].saved.captured&&!mp4_fresh_videos[i].saved.restored)videos=true;
+ if(videos&&!mp4_fresh_video_restore_knobs())failed("fresh_release_video_knobs_failed");
+ if(h.conversion_begun){
+  if(!mp4_fresh_current(nullptr))failed("fresh_release_scene_not_current");
+  else try{
    for(size_t i=0;i<h.director_count;++i){mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
     if(raw.handle&&mp4_api.graph_valid(&raw,nullptr)){mp4actor::Handle graph{};int32_t mode=-1;std::memcpy(&graph,&raw,16);
-     if(!mp4_actor_graph_mode(&graph,&mode)||(mode!=h.director_modes[i]&&mode!=3)){complete=false;continue;}
+     if(!mp4_actor_graph_mode(&graph,&mode)||(mode!=h.director_modes[i]&&mode!=3)){failed("fresh_release_director_mode_failed");continue;}
      mp4_actor_graph_set(&graph,h.director_modes[i],nullptr);
-     if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.director_modes[i])complete=false;}}
+     if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.director_modes[i])failed("fresh_release_director_mode_failed");}}
    for(size_t i=0;i<h.roster->path_graph_count;++i){auto graph=h.roster->path_graphs[i].graph;int32_t mode=-1;
-    mp4_actor_graph_set(&graph,h.roster->path_graphs[i].desired_mode,nullptr);if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode)complete=false;}
-   if(mp4_fresh_actors_current())for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
-    mp4_actor_graph_set(&graph,h.actor_modes[i],nullptr);if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.actor_modes[i])complete=false;}
-   else complete=false;
-  }catch(...){complete=false;}
- }else if(h.active||mp4_fresh_video_count)complete=false;
- if(mp4_output_geometry_owned(h.source.controller)&&!mp4_set_output_geometry(h.source.controller,0,0)){complete=false;h.error="fresh_output_restore_failed";}
- const auto stopped=mp4_fresh_stop_disposable();if(stopped==Mp4FreshResult::waiting)return stopped;if(stopped!=Mp4FreshResult::ok)complete=false;
+    mp4_actor_graph_set(&graph,h.roster->path_graphs[i].desired_mode,nullptr);if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode)failed("fresh_release_path_mode_failed");}
+   if(!h.actor_count){}
+   else if(mp4_fresh_actors_current())for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
+    mp4_actor_graph_set(&graph,h.actor_modes[i],nullptr);if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.actor_modes[i])failed("fresh_release_actor_mode_failed");}
+   else failed("fresh_release_actor_identity_failed");
+  }catch(...){failed("fresh_release_exception");}
+ }
+ if(mp4_output_geometry_owned(h.source.controller)&&!mp4_set_output_geometry(h.source.controller,0,0))failed("fresh_output_restore_failed");
+ const auto stopped=mp4_fresh_stop_disposable();if(stopped==Mp4FreshResult::waiting)return stopped;
+ if(stopped!=Mp4FreshResult::ok)failed(h.error&&!std::strncmp(h.error,"fresh_terminal_",15)?h.error:"fresh_original_end_failed");
  // Source tasks may reuse pooled wrappers after End. Stop consulting owned
  // script pointers before the first ordinary reload; retain GC custody only.
  mp4_fresh_video_event_sink.store(nullptr,std::memory_order_release);
  mp4_fresh_video_update_sink.store(nullptr,std::memory_order_release);
- h.pre_release_done=true;h.pre_release_failed=!complete;
- return complete?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::failed,"fresh_scene_local_release_failed");
+ h.pre_release_done=true;h.pre_release_failed=why!=nullptr;
+ if(why)idoly_mp4_runtime::diagnostic_event("fresh_cleanup",why,0,0,true);
+ return why?mp4_fresh_fail(Mp4FreshResult::failed,why):Mp4FreshResult::ok;
 }
 Mp4FreshResult mp4_fresh_finish(void*){
  auto&h=mp4_fresh_host;
@@ -57483,7 +57513,16 @@ Mp4FreshResult mp4_fresh_finish(void*){
  }
  const auto restored=mp4_fresh_origin_restore(nullptr);
  if(restored==Mp4FreshResult::waiting){if(!idoly_mp4_runtime::fresh_cleanup_detail)idoly_mp4_runtime::fresh_cleanup_detail="fresh_origin_restore";return restored;}
- if(restored!=Mp4FreshResult::ok)h.error=mp4_fresh_origin_error(nullptr);
+ if(restored!=Mp4FreshResult::ok){const char*origin=mp4_fresh_origin_error(nullptr);
+  h.error=origin&&*origin&&std::strcmp(origin,"none")?origin
+   :restored==Mp4FreshResult::stale?"fresh_origin_restore_unnamed_stale"
+   :restored==Mp4FreshResult::unsupported?"fresh_origin_restore_unnamed_unsupported":"fresh_origin_restore_unnamed_failure";
+  // Every terminal restore must drop the saved origin, so the next Run saves
+  // the current scene instead of reusing a half-restored one.
+  auto&o=mp4_fresh_origin_state();
+  if(o.saved&&!o.failed){o.failed=true;o.error=h.error;const auto retired=mp4_fresh_origin_retire_failure();
+   if(retired==Mp4FreshOriginResult::waiting)return Mp4FreshResult::waiting;}
+ }
  mp4_fresh_video_clear_after_end();mp4_fresh_video_program=Mp4FreshVideoProgram{};mp4_fresh_play_gate_clear();
  for(size_t i=0;i<h.root_count;++i)if(h.roots[i]){weak_free(h.roots[i]);h.roots[i]=0;}h.root_count=0;
  if(h.roster){if(!mp4_fresh_control_roster_clear(*h.roster))return mp4_fresh_wait("fresh_cleanup_control_roster");h.roster->~Mp4FreshControlRoster();::free(h.roster);h.roster=nullptr;}

@@ -1027,7 +1027,16 @@ inline void finalize_audio() {
 inline bool prepare_frame_output(){
     int32_t width=0,height=0;if(game.capture_geometry(width,height)!=Result::ok){terminal(game.last_error());return false;}
     if((job.expected_width&&job.expected_width!=static_cast<uint32_t>(width))
-        ||(job.expected_height&&job.expected_height!=static_cast<uint32_t>(height))){terminal("queued_capture_geometry_changed");return false;}
+        ||(job.expected_height&&job.expected_height!=static_cast<uint32_t>(height))){
+        // An explicit output size is forced onto the target and must match.
+        // "Current" accepts only the same target turned by the reload's
+        // window rotation or rounded differently by the encoder size cap;
+        // the first capture below then freezes the size for the whole job.
+        if(job.options.output_width||job.options.output_height
+            ||!idoly_mp4_output::same_current_geometry(job.expected_width,job.expected_height,static_cast<uint32_t>(width),static_cast<uint32_t>(height))){
+            terminal("queued_capture_geometry_changed");return false;}
+        if(!job.status.source_width)diagnostic_event("render_setup","queued_geometry_follows_live_target");
+    }
     if(!idoly_mp4_output::source_dimensions(static_cast<uint32_t>(width),static_cast<uint32_t>(height))){terminal("capture_geometry_not_supported");return false;}
     if(job.status.source_width&&(job.status.source_width!=static_cast<uint32_t>(width)||job.status.source_height!=static_cast<uint32_t>(height))){terminal("capture_geometry_changed");return false;}
     job.status.source_width=static_cast<uint32_t>(width);job.status.source_height=static_cast<uint32_t>(height);
@@ -1036,6 +1045,7 @@ inline bool prepare_frame_output(){
     job.status.video_codec=job.options.codec;
     job.status.video_bitrate=idoly_mp4_output::resolved_bitrate(job.options.bitrate,job.status.width,job.status.height,job.options.fps_num,job.options.codec);
     if(!job.status.video_bitrate){terminal("invalid_export_options");return false;}
+    if(!idoly_mp4_output::staging_fits(job.status.width,job.status.height)){terminal("output_exceeds_encoder_staging_limit");return false;}
     const size_t needed=static_cast<size_t>(width)*static_cast<size_t>(height)*4;
     if(!job.rgba){job.rgba=static_cast<uint8_t*>(malloc(needed));job.rgba_capacity=needed;if(!job.rgba){terminal("frame_buffer_allocation_failed");return false;}}
     if(job.rgba_capacity!=needed){terminal("frame_buffer_geometry_changed");return false;}

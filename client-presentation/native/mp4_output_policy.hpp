@@ -37,6 +37,38 @@ inline uint32_t recommended_bitrate(uint32_t width,uint32_t height,uint32_t fps,
 inline uint32_t resolved_bitrate(uint32_t requested,uint32_t width,uint32_t height,uint32_t fps,uint32_t codec) {
     return !bitrate(requested)?0:requested?requested:recommended_bitrate(width,height,fps,codec);
 }
+// Java stages three RGBA copies plus one I420 frame under 128 MiB
+// (OfflineMp4Math.pixels). Larger frames can never create an encoder.
+inline bool staging_fits(uint32_t width,uint32_t height) {
+    return static_cast<uint64_t>(width)*height*27/2<=128ULL*1024*1024;
+}
+// "Current" exports follow the live render target, which a large window at
+// render_scale 2 makes larger than encoders accept. Keep them inside the
+// broadly supported UHD class (3840x2160 in either orientation).
+constexpr uint32_t current_long_edge=3840,current_short_edge=2160;
+inline bool current_encodable(uint32_t width,uint32_t height) {
+    const uint32_t longer=width>height?width:height,shorter=width>height?height:width;
+    return dimensions(width,height)&&longer<=current_long_edge&&shorter<=current_short_edge&&staging_fits(width,height);
+}
+// The largest even render long-edge cap that keeps a target of this aspect
+// encodable. The short edge keeps a 2 px margin for the renderer's rounding.
+inline uint32_t current_long_edge_cap(uint32_t width,uint32_t height) {
+    if(!source_dimensions(width,height))return 0;
+    const uint64_t longer=width>height?width:height,shorter=width>height?height:width;
+    uint64_t cap=current_long_edge;
+    const uint64_t by_short=static_cast<uint64_t>(current_short_edge-2)*longer/shorter;
+    if(by_short<cap)cap=by_short;
+    if(cap>longer)cap=longer;
+    return static_cast<uint32_t>(cap&~1ULL);
+}
+// A queued "current" job may meet its Add-time size turned by the window
+// (the reload rotates it) or rounded differently once the long edge is
+// capped. Anything else is a different render target and still fails.
+inline bool same_current_geometry(uint32_t expected_width,uint32_t expected_height,uint32_t width,uint32_t height) {
+    const auto near=[](uint32_t a,uint32_t b){return (a>b?a-b:b-a)<=4;};
+    return (near(expected_width,width)&&near(expected_height,height))
+        ||(near(expected_width,height)&&near(expected_height,width));
+}
 // The original renderer must produce exactly these pixels. There is no
 // letterbox, crop, stretch, or image-resampling fallback.
 inline bool resolved_dimensions(uint32_t source_width,uint32_t source_height,uint32_t requested_width,uint32_t requested_height,uint32_t& width,uint32_t& height) {
