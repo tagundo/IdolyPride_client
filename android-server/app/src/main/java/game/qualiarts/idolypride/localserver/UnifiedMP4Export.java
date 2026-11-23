@@ -143,7 +143,7 @@ public final class UnifiedMP4Export {
         configured = false; queueConfigured = false; foregroundSelectionReady = false; foregroundMvSelected = false; menuHandoffDeadline = 0;
         // poll() stops refreshing the unconfigured queue; never keep showing its
         // last running snapshot as live work for the rest of the process.
-        MAIN.post(() -> { cancel(); pending = null; lastQueue = new JSONObject(); wake(); });
+        MAIN.post(() -> { cancelFrom("server_stopped"); pending = null; lastQueue = new JSONObject(); wake(); });
     }
     private static void invalidateQueueSelection() {
         foregroundSelectionReady = false; foregroundMvSelected = false;
@@ -318,6 +318,8 @@ public final class UnifiedMP4Export {
                     result.put("last_save_failure_stage", stage);
                 JSONObject crash = javaCrashDiagnostics(context);
                 if (crash != null) result.put("last_java_crash", crash);
+                JSONObject cancelled = lastCancelDiagnostics(context);
+                if (cancelled != null) result.put("last_cancel", cancelled);
             }
             result.put("save_picker_pending", pendingSaveId != null).put("save_copy_active", saving)
                     .put("document_picker_events", documentDiagnostics());
@@ -452,6 +454,7 @@ public final class UnifiedMP4Export {
     }
     static boolean queueCommand(int operation, String jobId, int position) {
         if (!queueConfigured || operation < 1 || operation > 4 || jobId == null || !jobId.matches("[A-Za-z0-9_-]{1,80}")) return false;
+        if (operation == 1) recordCancel("queue_command");
         try { boolean accepted = nativeQueueCommand(operation, jobId, position) == 0; wake(); return accepted; }
         catch (LinkageError unavailable) { return false; }
     }
@@ -573,6 +576,30 @@ public final class UnifiedMP4Export {
             if (previous != null) previous.uncaughtException(thread, error);
         });
     }
+    /** Only a cancel of live work is kept: who asked, when, and the job/queue stage it hit. */
+    private static void recordCancel(String origin) {
+        Context context = application;
+        if (context == null || !initialized || !(busy() || backgroundQueueHasWork())) return;
+        try {
+            context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).edit().putString("last_cancel",
+                    new JSONObject().put("origin", origin).put("time_ms", System.currentTimeMillis())
+                            .put("phase", publicCode(last.optString("phase", ""))).put("job_stage", publicCode(last.optString("job_stage", "")))
+                            .put("queue_phase", publicCode(lastQueue.optString("phase", ""))).toString()).apply();
+        } catch (Exception ignored) { /* Diagnostics never block a cancel. */ }
+    }
+    private static JSONObject lastCancelDiagnostics(Context context) {
+        try {
+            String raw = context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).getString("last_cancel", "");
+            if (raw.isEmpty() || raw.length() > 4096) return null;
+            JSONObject source = new JSONObject(raw), result = new JSONObject();
+            result.put("time_ms", Math.max(0L, source.optLong("time_ms")));
+            for (String key : new String[] {"origin", "phase", "job_stage", "queue_phase"}) {
+                String value = source.optString(key, "");
+                result.put(key, value.matches("[A-Za-z0-9_]{1,64}") ? value : "unknown");
+            }
+            return result;
+        } catch (Exception invalid) { return null; }
+    }
     /** Bounded class/frame names only: no exception message, path or payload is ever recorded. */
     private static JSONObject javaCrashDiagnostics(Context context) {
         try {
@@ -610,7 +637,7 @@ public final class UnifiedMP4Export {
         bar.addView(actions, new LinearLayout.LayoutParams(-1, -2));
         Button pause = new Button(activity); pause.setText(R.string.mp4_pause);
         pause.setOnClickListener(view -> togglePause()); actions.addView(pause, new LinearLayout.LayoutParams(0, -2, 1));
-        Button stop = new Button(activity); stop.setText(R.string.mp4_cancel); stop.setOnClickListener(view -> cancel()); actions.addView(stop, new LinearLayout.LayoutParams(0, -2, 1));
+        Button stop = new Button(activity); stop.setText(R.string.mp4_cancel); stop.setOnClickListener(view -> cancelFrom("overlay_button")); actions.addView(stop, new LinearLayout.LayoutParams(0, -2, 1));
         Button save = new Button(activity); save.setText(R.string.mp4_save); actions.addView(save, new LinearLayout.LayoutParams(0, -2, 1));
         Button dismiss = new Button(activity); dismiss.setText(R.string.mp4_dismiss);
         dismiss.setOnClickListener(view -> { dismissed = true; bar.setVisibility(View.GONE); }); actions.addView(dismiss, new LinearLayout.LayoutParams(0, -2, 1));
@@ -715,7 +742,7 @@ public final class UnifiedMP4Export {
             // handoff. A real active-window resize requires a fresh snapshot.
             if (!menuHandoff && activePlayerWindow) invalidateQueueSelection();
             // An existing capture still cancels on every real geometry change.
-            if (pending == null) cancel();
+            if (pending == null) cancelFrom("geometry_changed");
         }
     }
     static void focusChanged(Activity activity, boolean focused) {
@@ -730,12 +757,17 @@ public final class UnifiedMP4Export {
     static void gameDestroyed(Activity activity) {
         if (game.get() != activity) return;
         invalidateQueueSelection();
-        cancel(); pending = null; game.clear(); resumed = false; stopped = true;
+        cancelFrom("game_destroyed"); pending = null; game.clear(); resumed = false; stopped = true;
         foregroundSelectionReady = false; foregroundMvSelected = false; gameFocused = false; menuHandoffDeadline = 0;
         if (overlay != null && overlay.getParent() instanceof ViewGroup) ((ViewGroup) overlay.getParent()).removeView(overlay);
         overlay = null; overlayText = null; overlaySave = null; overlayCancel = null; overlayPause = null; overlayDismiss = null;
     }
+    private static String cancelOrigin = "unknown";
+    /** Names the caller so a cancel of live work is attributable in diagnostics. */
+    static void cancelFrom(String origin) { cancelOrigin = origin; cancel(); }
     static void cancel() {
+        String origin = cancelOrigin; cancelOrigin = "unknown";
+        recordCancel(origin);
         UnifiedMP4Background.stopCurrent();
         pendingQueueRun = false;
         boolean releasedUserPause = userPaused;

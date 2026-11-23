@@ -22,6 +22,7 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
     private View menuSurface;
     private boolean discardResizedTouch;
     private int menuDisplay = Display.INVALID_DISPLAY;
+    private int[] windowShape;
     private final Runnable showMenu = this::recognizeMenuHold;
     private final View.OnLayoutChangeListener menuLayout = (view, left, top, right, bottom,
             oldLeft, oldTop, oldRight, oldBottom) -> {
@@ -42,6 +43,7 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
             throw new IllegalStateException("unified_data_not_prepared", failure);
         }
         super.onCreate(state);
+        windowShape = windowShape(getResources().getConfiguration());
         windowOwner = new WeakReference<>(this);
         updateWindowing(isInMultiWindowMode());
         menuSurface = getWindow().getDecorView();
@@ -85,9 +87,21 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
         }
     }
 
+    /** The configuration fields that move or resize the game surface. */
+    private static int[] windowShape(Configuration c) {
+        return c == null ? null : new int[] {c.orientation, c.screenWidthDp, c.screenHeightDp,
+                c.smallestScreenWidthDp, c.densityDpi};
+    }
+
     @Override public void onConfigurationChanged(Configuration configuration) {
         cancelWindowMenuHold();
-        UnifiedMP4Export.geometryChanged(this);
+        // uiMode, locale, font scale or asset-path changes leave the surface
+        // as it is and must not cancel an MP4 capture; real bounds changes are
+        // also reported by the decor layout listener.
+        int[] shape = windowShape(configuration);
+        if (windowShape == null || shape == null || !java.util.Arrays.equals(shape, windowShape))
+            UnifiedMP4Export.geometryChanged(this);
+        windowShape = shape;
         updateWindowing(isInMultiWindowMode());
         // Unity owns updating its configuration, SurfaceView and render lifecycle.
         super.onConfigurationChanged(configuration);

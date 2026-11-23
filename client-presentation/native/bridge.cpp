@@ -56731,6 +56731,25 @@ const char*mp4_fresh_controller_reason(){
  pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);return reason;
 }
 // BEGIN_MP4_FRESH_PLAY_STAGE
+// The actor range cache is a /proc/self/maps (Mach region) snapshot. A freshly
+// loaded scene can place its objects, the render controller in particular, in
+// heap mappings created after that snapshot; a present field then read as
+// missing. Refresh once on a miss (rate bounded); never read memory the
+// refreshed snapshot still rejects.
+bool mp4_fresh_field(void*object,size_t offset,void*&value){
+ if(mp4_actor_field(object,offset,value))return true;
+ static uint64_t refreshed=0;const uint64_t now=idoly_mp4_runtime::milliseconds();
+ if(!object||(refreshed&&now>=refreshed&&now-refreshed<100))return false;
+ refreshed=now;return mp4_actor_refresh_maps()&&mp4_actor_field(object,offset,value);
+}
+// VLSRPCameraController.get_mainCamera caches GetComponent<Camera>() in the
+// field later stages compare; controller discovery already matched it.
+void*mp4_fresh_controller_camera(void*controller){
+ void*field=nullptr;if(!controller)return nullptr;
+ if(mp4_fresh_field(controller,mp4game::Layout{}.camera_main,field)&&field)return field;
+ void*camera=rt_camera?rt_camera(controller,nullptr):nullptr;
+ return camera&&mp4_fresh_field(controller,mp4game::Layout{}.camera_main,field)&&field==camera?camera:nullptr;
+}
 struct Mp4FreshPlayGate {
  void*player=nullptr,*presenter=nullptr,*timeline=nullptr,*master=nullptr,*camera=nullptr,*controller=nullptr;Method*method=nullptr;
  uint64_t serial=0,identity=0,reset_requests=0,reset_returns=0;uint32_t roots[6]{};size_t root_count=0;
@@ -56761,33 +56780,35 @@ bool mp4_fresh_play_gate_current(){
  auto&g=mp4_fresh_play_gate;if(!game_call()||!g.armed||!g.deferred||g.ending||g.failed||!mp4_fresh_play_frontends_ready())return false;
  idoly_mp4_runtime::FreshFactoryRequest request{};
  if(!idoly_mp4_runtime::fresh_factory_request(g.player,&request)||request.serial!=g.serial||request.identity!=g.identity||request.player!=g.player)return false;
- void*timeline=nullptr,*master=nullptr;if(!mp4_actor_field(g.player,mp4game::Layout{}.player_director_controller,timeline)||timeline!=g.timeline
-  ||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||master!=g.master)return false;
+ void*timeline=nullptr,*master=nullptr;if(!mp4_fresh_field(g.player,mp4game::Layout{}.player_director_controller,timeline)||timeline!=g.timeline
+  ||!mp4_fresh_field(timeline,mp4game::Layout{}.controller_master,master)||master!=g.master)return false;
  for(size_t i=0;i<g.root_count;++i)if(!g.roots[i]||!weak_get(g.roots[i]))return false;
  return idoly_mp4_runtime::game.selected_presenter()==g.presenter;
 }
 bool mp4_fresh_presenter_owns(void*p,void*player){
  void*value=nullptr,*mode=nullptr;if(!p||!player||!mp4_alive(p))return false;
- if(mp4_type_is(p,"Solis.Photography.PhotographyLivePresenter"))return mp4_actor_field(p,mp4game::Layout{}.photo_root_mode,mode)&&mode&&mp4_actor_field(mode,mp4game::Layout{}.photo_mode_player,value)&&value==player;
- return mp4_type_is(p,"Solis.OutGame.LivePlayerScreenPresenter")&&mp4_actor_field(p,mp4game::Layout{}.presenter_player,value)&&value==player;
+ if(mp4_type_is(p,"Solis.Photography.PhotographyLivePresenter"))return mp4_fresh_field(p,mp4game::Layout{}.photo_root_mode,mode)&&mode&&mp4_fresh_field(mode,mp4game::Layout{}.photo_mode_player,value)&&value==player;
+ return mp4_type_is(p,"Solis.OutGame.LivePlayerScreenPresenter")&&mp4_fresh_field(p,mp4game::Layout{}.presenter_player,value)&&value==player;
 }
 // The original scheduler can call Play while the Photography 3D presenter,
 // its timeline camera or the render controller are still being built. The
 // held Play stays exact; these scene parts are bound before admission instead
 // of failing the export at Play time. Returns the missing part, or nullptr.
-const char*mp4_fresh_play_gate_bind(bool initial){
- auto&g=mp4_fresh_play_gate;if(!g.bind_pending)return nullptr;
+const char*mp4_fresh_play_gate_bind(bool initial,void**owner=nullptr){
+ auto&g=mp4_fresh_play_gate;if(owner)*owner=nullptr;if(!g.bind_pending)return nullptr;
  if(!game_call())return "thread";
  void*presenter=idoly_mp4_runtime::game.selected_presenter();
  if(!mp4_fresh_presenter_owns(presenter,g.player)){
   void*candidate=mp4_photography_presenter.get(true);
   if(!mp4_fresh_presenter_owns(candidate,g.player)){const auto&api=mp4_fresh_origin_state().original_api;void*scene=api.scene_instance?api.scene_instance(nullptr):nullptr;candidate=scene&&api.top_screen?api.top_screen(scene,nullptr):nullptr;}
   if(mp4_fresh_presenter_owns(candidate,g.player)){idoly_mp4_runtime::observe_presenter(candidate);presenter=candidate;}
+  else presenter=nullptr;
  }
+ if(owner)*owner=presenter;
  const char*missing=nullptr;void*controller=nullptr,*camera=nullptr;
  if(!presenter)missing="presenter";
  else if(!(controller=mp4_selected_controller(presenter)))missing="controller";
- else if(!mp4_actor_field(controller,mp4game::Layout{}.camera_main,camera)||!camera)missing="camera";
+ else if(!(camera=mp4_fresh_controller_camera(controller)))missing="camera";
  else{const double duration=mp4_api.director_get_duration(g.master,nullptr);if(!std::isfinite(duration)||duration<=0)missing="duration";}
  if(missing){
   if(missing!=g.bind_missing){g.bind_missing=missing;char code[96]{};
@@ -56825,9 +56846,9 @@ bool mp4_fresh_defer_master_play(void*self,Method*method,uintptr_t caller)noexce
   mp4_observe_photography_presenter();
   void*player=idoly_mp4_runtime::game.selected_player();void*timeline=nullptr,*master=nullptr;
   idoly_mp4_runtime::FreshFactoryRequest scope{};
-  if(!player||!mp4_actor_field(player,mp4game::Layout{}.player_director_controller,timeline)||!timeline||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||master!=self){
+  if(!player||!mp4_fresh_field(player,mp4game::Layout{}.player_director_controller,timeline)||!timeline||!mp4_fresh_field(timeline,mp4game::Layout{}.controller_master,master)||master!=self){
    if(!idoly_mp4_runtime::fresh_factory_request_scope(&scope)||!scope.player
-    ||!mp4_actor_field(scope.player,mp4game::Layout{}.player_director_controller,timeline)||!timeline||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||master!=self)return false;
+    ||!mp4_fresh_field(scope.player,mp4game::Layout{}.player_director_controller,timeline)||!timeline||!mp4_fresh_field(timeline,mp4game::Layout{}.controller_master,master)||master!=self)return false;
    player=scope.player;
   }
   idoly_mp4_runtime::FreshFactoryRequest request{};if(!idoly_mp4_runtime::fresh_factory_request(player,&request)){
@@ -56849,8 +56870,8 @@ bool mp4_fresh_reset_owner_current(){
  const auto&g=mp4_fresh_play_gate;if(!game_call()||!g.armed||!g.deferred||g.ending||!mp4_fresh_play_frontends_ready())return false;
  idoly_mp4_runtime::FreshFactoryRequest actual{};void*timeline=nullptr,*master=nullptr;
  if(!idoly_mp4_runtime::fresh_factory_request(g.player,&actual)||actual.serial!=g.serial||actual.identity!=g.identity||actual.player!=g.player
-  ||!mp4_actor_field(g.player,mp4game::Layout{}.player_director_controller,timeline)||timeline!=g.timeline
-  ||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||master!=g.master)return false;
+  ||!mp4_fresh_field(g.player,mp4game::Layout{}.player_director_controller,timeline)||timeline!=g.timeline
+  ||!mp4_fresh_field(timeline,mp4game::Layout{}.controller_master,master)||master!=g.master)return false;
  for(size_t i=0;i<g.root_count;++i)if(!g.roots[i]||!weak_get(g.roots[i]))return false;
  return true;
 }
@@ -56904,7 +56925,7 @@ Mp4FreshResult mp4_fresh_release_deferred_play(){
   // before graph birth. Other flat Directors may be original Path/Control
   // children; the complete source roster assigns their modes after Play.
   void*master=nullptr;
-  if(!mp4_actor_field(g.timeline,mp4game::Layout{}.controller_master,master)||!mp4_type_is(master,"UnityEngine.Playables.PlayableDirector")||!mp4_alive(master))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_preplay_director_unavailable");
+  if(!mp4_fresh_field(g.timeline,mp4game::Layout{}.controller_master,master)||!mp4_type_is(master,"UnityEngine.Playables.PlayableDirector")||!mp4_alive(master))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_preplay_director_unavailable");
   const int32_t mode=mp4_api.director_get_mode(master,nullptr);
   if(mode!=0&&mode!=1)return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_preplay_clock_unsupported");
   if(mode!=1)mp4_api.director_set_mode(master,1,nullptr);
@@ -56913,7 +56934,7 @@ Mp4FreshResult mp4_fresh_release_deferred_play(){
   idoly_mp4_runtime::diagnostic_event("fresh_prepare","owned_master_play_returned");
  }
  if(!g.forwarded)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_original_play_unclosed");
- void*master=nullptr;if(!mp4_actor_field(g.timeline,mp4game::Layout{}.controller_master,master)||!master)return Mp4FreshResult::waiting;
+ void*master=nullptr;if(!mp4_fresh_field(g.timeline,mp4game::Layout{}.controller_master,master)||!master)return Mp4FreshResult::waiting;
  mp4game::PlayableGraph graph{};mp4_api.director_graph_injected(master,&graph,nullptr);
  return graph.handle&&mp4_api.graph_valid(&graph,nullptr)?Mp4FreshResult::ok:Mp4FreshResult::waiting;
 }
@@ -56945,8 +56966,8 @@ Mp4FreshResult mp4_fresh_stop_disposable(){
    // un-intercepted never repeats; a not-yet-called one gets a bounded wait.
    void*timeline=nullptr,*master=nullptr;
    const bool played=pending.player&&mp4_alive(pending.player)
-    &&mp4_actor_field(pending.player,mp4game::Layout{}.player_director_controller,timeline)&&timeline
-    &&mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)&&master&&mp4_alive(master)
+    &&mp4_fresh_field(pending.player,mp4game::Layout{}.player_director_controller,timeline)&&timeline
+    &&mp4_fresh_field(timeline,mp4game::Layout{}.controller_master,master)&&master&&mp4_alive(master)
     &&mp4_api.automatic_playback.director_state&&mp4_api.automatic_playback.director_state(master,nullptr)==1;
    if(!played&&!mp4_fresh_budget_expired(g.play_wait_started,g.play_wait_polls,600,10000))return mp4_fresh_wait("fresh_cleanup_awaiting_deferred_play");
    // Logical origin restoration still runs; the trace keeps the cause.
@@ -56960,7 +56981,10 @@ Mp4FreshResult mp4_fresh_stop_disposable(){
   // schedules no known one. Past the budget, End proceeds like an early exit.
   if(!mp4_fresh_budget_expired(g.wait_started,g.wait_polls,600,10000))return mp4_fresh_wait(g.await_scheduler?"fresh_cleanup_awaiting_play_scheduler":"fresh_cleanup_awaiting_actor_reset");
   g.wait_expired=true;idoly_mp4_runtime::diagnostic_event("fresh_cleanup",g.await_scheduler?"play_scheduler_wait_expired":"actor_reset_wait_expired",0,0,true);}
- if(g.bind_pending)(void)mp4_fresh_play_gate_bind(false);
+ if(g.bind_pending){void*owner=nullptr;(void)mp4_fresh_play_gate_bind(false,&owner);
+  // A cancel before the scene parts bind still ends the exact presenter that
+  // owns the held player; skipping End left the origin reload unable to run.
+  if(g.bind_pending&&!g.presenter&&owner){g.presenter=owner;idoly_mp4_runtime::diagnostic_event("fresh_cleanup","unbound_presenter_end");}}
  idoly_mp4_runtime::FreshFactoryRequest actual{};
  if(!idoly_mp4_runtime::fresh_factory_request(g.player,&actual)||actual.serial!=g.serial||actual.identity!=g.identity
   ||actual.player!=g.player
@@ -56968,12 +56992,12 @@ Mp4FreshResult mp4_fresh_stop_disposable(){
   g.ending=true;g.stop_returned=g.stop_failed=true;return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_terminal_source_changed");}
  if(g.forwarded&&!idoly_mp4_runtime::native_clock_scope().held())return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_terminal_clock_not_held");
  void*timeline=nullptr,*master=nullptr;
- if(!mp4_actor_field(g.player,mp4game::Layout{}.player_director_controller,timeline)||timeline!=g.timeline
-  ||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||!mp4_alive(master))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_terminal_director_changed");
+ if(!mp4_fresh_field(g.player,mp4game::Layout{}.player_director_controller,timeline)||timeline!=g.timeline
+  ||!mp4_fresh_field(timeline,mp4game::Layout{}.controller_master,master)||!mp4_alive(master))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_terminal_director_changed");
  void*bound=nullptr,*mode=nullptr;
  const bool photo=mp4_type_is(g.presenter,"Solis.Photography.PhotographyLivePresenter");
- const bool same=photo?(mp4_actor_field(g.presenter,mp4game::Layout{}.photo_root_mode,mode)&&mode&&mp4_actor_field(mode,mp4game::Layout{}.photo_mode_player,bound)&&bound==g.player)
-  :(mp4_type_is(g.presenter,"Solis.OutGame.LivePlayerScreenPresenter")&&mp4_actor_field(g.presenter,mp4game::Layout{}.presenter_player,bound)&&bound==g.player);
+ const bool same=photo?(mp4_fresh_field(g.presenter,mp4game::Layout{}.photo_root_mode,mode)&&mode&&mp4_fresh_field(mode,mp4game::Layout{}.photo_mode_player,bound)&&bound==g.player)
+  :(mp4_type_is(g.presenter,"Solis.OutGame.LivePlayerScreenPresenter")&&mp4_fresh_field(g.presenter,mp4game::Layout{}.presenter_player,bound)&&bound==g.player);
  if(!same)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_terminal_presenter_changed");
  Mp4ActorTempRoot player(g.player),presenter(g.presenter),director(master);
  const auto&p=mp4_api.automatic_playback;g.ending=true;g.stop_started=true;
@@ -57110,8 +57134,8 @@ Mp4FreshResult mp4_fresh_admit(void*){
   ||receipt.player!=idoly_mp4_runtime::game.selected_player()||receipt.presenter!=idoly_mp4_runtime::game.selected_presenter())
   return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_original_factory_wait");
  void*timeline=nullptr,*master=nullptr;
- if(!mp4_actor_field(receipt.player,mp4game::Layout{}.player_director_controller,timeline)
-  ||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||!mp4_alive(master))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_original_start_wait");
+ if(!mp4_fresh_field(receipt.player,mp4game::Layout{}.player_director_controller,timeline)
+  ||!mp4_fresh_field(timeline,mp4game::Layout{}.controller_master,master)||!mp4_alive(master))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_original_start_wait");
  auto&g=mp4_fresh_play_gate;
  if(g.failed)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_play_staging_failed");
  if(!g.deferred){if(mp4_api.automatic_playback.director_state(master,nullptr)==1)return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_autoplay_not_intercepted");return Mp4FreshResult::waiting;}

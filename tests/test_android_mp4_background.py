@@ -84,7 +84,7 @@ def test_real_android_transport_compiles_and_progress_gate_checks_actual_capture
     package = "game.qualiarts.idolypride.localserver"
     sources = {
         "UnifiedMP4Export.java": f"""package {package}; final class UnifiedMP4Export {{
-            static void cancel(){{}}static boolean queuePause(){{return true;}}
+            static void cancel(){{}}static void cancelFrom(String o){{cancel();}}static boolean queuePause(){{return true;}}
             static String statusText(android.content.Context c){{return "status";}}
             static boolean backgroundQueueHasWork(){{return false;}} }}""",
         "UnifiedRuntime.java": f"""package {package}; final class UnifiedRuntime {{

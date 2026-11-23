@@ -94,7 +94,7 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
                 "beginPending", "gameResumed", "gamePaused", "gameStarted", "gameStopped", "suspendForLifecycle",
                 "resumeForLifecycle", "togglePause", "requestPause", "requestResume", "focusChanged", "gameDestroyed", "cancel",
                 "requestQueueRun", "bringQueueToForeground", "serverMenuOpening", "serverMenuOpenFailed", "geometryChanged",
-                "invalidateQueueSelection", "observeGameOwner"]]
+                "invalidateQueueSelection", "observeGameOwner", "cancelFrom"]]
     selected += [method(source, "requestStart", 1), method(source, "requestEnqueue", 1)]
     prefix = r'''package game.qualiarts.idolypride.localserver;
 import java.io.*;import java.nio.file.*;import java.lang.ref.WeakReference;import java.util.*;
@@ -104,6 +104,7 @@ public final class ControllerHarness {
   static WeakReference<Activity> game=new WeakReference<>(null);
   static JSONObject last=new JSONObject(),lastQueue=new JSONObject();static final Handler MAIN=new Handler();static final Runnable BEGIN=()->{};
   static ViewGroup overlay;static Object overlayText,overlaySave,overlayCancel,overlayPause,overlayDismiss;
+  static String cancelOrigin="unknown";static final List<String> cancelOrigins=new ArrayList<>();static void recordCancel(String origin){cancelOrigins.add(origin);}
   static class JSONObject {Map<String,Object> map=new HashMap<>();JSONObject put(String k,Object v){map.put(k,v);return this;}
     String optString(String k){return optString(k,"");}
     Object opt(String k){return map.get(k);}
@@ -219,12 +220,14 @@ public final class ControllerHarness {
     pendingQueueRun=true;pendingDeadline=android.os.SystemClock.now-1;
     beginPending();require(!pendingQueueRun&&starts==startsBeforeQueue,"expired foreground bookkeeping clears without invoking a one-shot exporter");
     gameDestroyed(photo);
+    require(cancelOrigins.get(cancelOrigins.size()-1).equals("game_destroyed"),"a destroyed game owner attributes its cancel");
     Activity rotating=new Activity();game=new WeakReference<>(rotating);last=new JSONObject();
     resumed=true;stopped=false;gameFocused=true;foregroundSelectionReady=false;allowNative=true;
     gamePaused(rotating);allowNative=false;int cancelsBeforeGeometry=cancels,enqueuesBeforeGeometry=enqueues;
     geometryChanged(rotating);
     require(foregroundSelectionReady&&ready(),"landscape MV -> paused portrait server resize preserves the verified logical selection");
     require(cancels==cancelsBeforeGeometry+1,"a geometry change still cancels any existing capture");
+    require(cancelOrigins.get(cancelOrigins.size()-1).equals("geometry_changed")&&"unknown".equals(cancelOrigin),"a geometry cancel is attributed once, then the origin resets");
     require(requestEnqueue(menu,30,1,16000000)&&enqueues==enqueuesBeforeGeometry+1,"retained logical selection can enqueue for native identity/source revalidation");
     gameResumed(rotating);gameFocused=true;geometryChanged(rotating);
     require(!foregroundSelectionReady&&!ready(),"a real foreground resize keeps the original readiness invalidation");
@@ -365,7 +368,7 @@ public class DiagnosticsHarness {
  static class UnifiedMP4Background {static JSONObject snapshot(){return new JSONObject().put("state","probing").put("error_code","/private/surface")
   .put("heartbeat_verified",true).put("capture_verified",false).put("raw_surface","0xdead");}}
  static JSONObject progressDocument;static JSONObject readNativeDiagnostics(){return progressDocument;}static JSONObject exportTrace(JSONObject document){return null;}
- static JSONObject savedNativeTrace(String key){return null;}static JSONObject javaCrashDiagnostics(Context c){return null;}
+ static JSONObject savedNativeTrace(String key){return null;}static JSONObject javaCrashDiagnostics(Context c){return null;}static JSONObject lastCancelDiagnostics(Context c){return null;}
 
  static class JSONObject {static final Map<String,JSONObject> refs=new HashMap<>();final Map<String,Object> map=new LinkedHashMap<>();
   JSONObject(){}JSONObject(String raw){map.putAll(refs.get(raw).map);}JSONObject put(String k,Object v){map.put(k,v);return this;}
@@ -651,7 +654,7 @@ public final class ServerStopHarness {
   if(pauseResult==0)queueParked=true;return pauseResult;
  }
  static void nativeInvalidateQueueSelection(){events.add("invalidate");if(throwInvalidate)throw new UnsatisfiedLinkError("optional snapshot addon unavailable");}
- static void cancel(){events.add("cancel");}
+ static void cancel(){events.add("cancel");}static void cancelFrom(String origin){cancel();}
  static void wake(){events.add("wake");}
  static void need(boolean value,String message){if(!value)throw new AssertionError(message);}
  static void reset(boolean loaded,boolean queued){

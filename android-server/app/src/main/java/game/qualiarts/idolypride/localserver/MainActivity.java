@@ -2353,7 +2353,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 Toast.makeText(this, R.string.mp4_not_ready, Toast.LENGTH_LONG).show();
             refreshMp4();
         });
-        mp4Cancel.setOnClickListener(view -> UnifiedMP4Export.cancel());
+        mp4Cancel.setOnClickListener(view -> UnifiedMP4Export.cancelFrom("console_button"));
         UnifiedMP4Export.bindSaveButton(mp4Save, this);
         refreshMp4();
     }

@@ -24,9 +24,10 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
                 jobs.remove(due);due.r.run();}}
           }''',
         "android/util/DisplayMetrics.java": "package android.util; public class DisplayMetrics { public float density=1; }",
-        "android/content/res/Configuration.java": "package android.content.res; public class Configuration {}",
+        "android/content/res/Configuration.java": "package android.content.res; public class Configuration {public int orientation,screenWidthDp,screenHeightDp,smallestScreenWidthDp,densityDpi;}",
         "android/content/res/Resources.java": '''package android.content.res; public class Resources {
           public final android.util.DisplayMetrics metrics=new android.util.DisplayMetrics();
+          public Configuration configuration=new Configuration();public Configuration getConfiguration(){return configuration;}
           public android.util.DisplayMetrics getDisplayMetrics(){return metrics;} }''',
         "android/content/Context.java": "package android.content; public class Context {}",
         "android/view/Display.java": '''package android.view; public class Display {
@@ -92,7 +93,7 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
     sources[package + "MainActivity.java"] = "package game.qualiarts.idolypride.localserver; public class MainActivity extends android.app.Activity {}"
     sources[package + "UnifiedMP4Export.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedMP4Export {static void restoreState(android.content.Context c,android.os.Bundle b){}
-        static void attachGame(android.app.Activity a){}static void geometryChanged(android.app.Activity a){}
+        static void attachGame(android.app.Activity a){}static int geometries;static void geometryChanged(android.app.Activity a){geometries++;}
         static void serverMenuOpening(android.app.Activity a){}static void serverMenuOpenFailed(android.app.Activity a){}
         static void focusChanged(android.app.Activity a,boolean focused){}
         static void gamePaused(android.app.Activity a){}static void gameResumed(android.app.Activity a){}static void gameDestroyed(android.app.Activity a){}
@@ -122,8 +123,13 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
           up(a,900,50);need(a.dispatches==dispatched,"old resized stream leaked");
           down(a,150,30);Handler.advance(4000);need(a.starts==0,"old window region reused");up(a,150,30);
           down(a,350,30);Handler.advance(6000);need(a.starts==1,"new narrow corner unavailable");up(a,350,30);
+          int geometries=UnifiedMP4Export.geometries;
           a.resources.metrics.density=2;Configuration density=new Configuration();a.onConfigurationChanged(density);
           need(a.configs==1&&a.lastConfig==density,"parent configuration lost");
+          need(UnifiedMP4Export.geometries==geometries,"a configuration that keeps the window shape must not cancel an MP4 capture");
+          Configuration turned=new Configuration();turned.orientation=1;turned.screenWidthDp=400;a.onConfigurationChanged(turned);
+          need(UnifiedMP4Export.geometries==geometries+1&&a.configs==2,"a window-shape configuration change still reaches the MP4 geometry check");
+          a.onConfigurationChanged(new Configuration());need(UnifiedMP4Export.geometries==geometries+2&&a.configs==3,"returning to the previous shape is a change too");
           down(a,150,30);Handler.advance(8000);need(a.starts==2,"new density not applied");up(a,150,30);alive(a);
           decor.layout(0,0,800,400);down(a,700,40);int before=a.cancels;
           Configuration multi=new Configuration(),config=new Configuration();
@@ -131,7 +137,7 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
           need(UnifiedWindowing.mode,"multiwindow mode not propagated");
           decor.layout(0,0,700,500);need(a.cancels==before+1,"duplicate touch cancel");
           Handler.advance(10000);need(a.starts==2,"window transition fired hold");up(a,700,40);
-          need(a.configs==2&&a.lastConfig==config,"configuration forwarded twice");
+          need(a.configs==4&&a.lastConfig==config,"configuration forwarded twice");
           need(a.multiWindows==1&&a.lastMultiConfig==multi,"multiwindow callback lost");
           need(a.pauses==0&&a.resumes==0&&a.destroys==0,"resize invoked manual lifecycle");alive(a);
           down(a,650,40);before=a.cancels;decor.display.id=2;Handler.advance(12000);

@@ -86,7 +86,7 @@ final class UnifiedMP4Background {
     static boolean expectsService() { return current != null && !current.disposed && !current.releaseRequested; }
     static void serviceStopped(String reason, boolean cancelled) {
         if (current == null) return;
-        if (cancelled) { UnifiedMP4Export.queuePause(); UnifiedMP4Export.cancel(); }
+        if (cancelled) { UnifiedMP4Export.queuePause(); UnifiedMP4Export.cancelFrom("notification_cancel"); }
         else current.fail(reason);
     }
     static void backgrounded(Activity activity) {

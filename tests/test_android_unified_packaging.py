@@ -314,7 +314,7 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
     if not javac or not java:
         pytest.skip("JDK required for actual gesture fixture")
     sources = {
-        "android/content/res/Configuration.java": "package android.content.res; public class Configuration {}",
+        "android/content/res/Configuration.java": "package android.content.res; public class Configuration {public int orientation,screenWidthDp,screenHeightDp,smallestScreenWidthDp,densityDpi;}",
         "android/view/Display.java": "package android.view; public class Display {public static final int INVALID_DISPLAY=-1;public int getDisplayId(){return 0;}}",
         "android/os/Bundle.java": "package android.os; public class Bundle {}",
         "android/util/Log.java": '''package android.util; public class Log {
@@ -334,6 +334,7 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
           }''',
         "android/util/DisplayMetrics.java": "package android.util; public class DisplayMetrics { public float density=1; }",
         "android/content/res/Resources.java": '''package android.content.res; public class Resources {
+          public Configuration getConfiguration(){return new Configuration();}
           public android.util.DisplayMetrics getDisplayMetrics(){return new android.util.DisplayMetrics();} }''',
         "android/content/Context.java": "package android.content; public class Context {}",
         "android/content/Intent.java": '''package android.content; public class Intent {
