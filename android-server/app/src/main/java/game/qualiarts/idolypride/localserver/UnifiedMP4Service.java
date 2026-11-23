@@ -27,16 +27,17 @@ public final class UnifiedMP4Service extends Service {
     private boolean stopping, foreground;
     private String shown = "";
     private final Runnable expired = () -> stopJob("background_time_budget", false);
-    // startForegroundService() obliges the started record to reach
-    // startForeground(); bringing it down first makes the system crash the
-    // whole app ("did not then call Service.startForeground()"). A stop that
-    // arrives while a start is in flight is applied right after promotion.
-    // Main thread only, like every caller.
+    // Only the resumed game starts this service, so a plain startService()
+    // is allowed and onStartCommand promotes it at once. Unlike
+    // startForegroundService() it creates no system obligation that turns an
+    // early stop into an app crash ("did not then call startForeground()").
+    // A stop that arrives while a start is in flight is still applied right
+    // after promotion. Main thread only, like every caller.
     private static final long START_GRACE_MS = 10_000L;
     private static boolean startPending, stopRequested;
     private static long startRequestedAt;
     static boolean start(Context context) {
-        try { context.startForegroundService(new Intent(context, UnifiedMP4Service.class)); }
+        try { context.startService(new Intent(context, UnifiedMP4Service.class)); }
         catch (RuntimeException unavailable) { return false; }
         startPending = true; stopRequested = false; startRequestedAt = SystemClock.uptimeMillis();
         return true;

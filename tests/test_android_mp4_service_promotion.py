@@ -1,5 +1,8 @@
 """Execute the real UnifiedMP4Service start/stop ordering against an AMS model.
 
+The service is started with startService() from the resumed game, so no stop
+can violate a startForeground obligation; promotion still precedes any stop.
+
 startForegroundService() obliges the started record to reach startForeground();
 bringing that record down first makes system_server crash the whole app
 (RemoteServiceException "did not then call Service.startForeground()").
@@ -22,7 +25,9 @@ public class Context {
   public static final String NOTIFICATION_SERVICE="notification",POWER_SERVICE="power";
   public static final java.util.List<String> log=new java.util.ArrayList<>();
   public static int pendingStarts;public static boolean crashed;
+  // Only a startForegroundService record carries the startForeground obligation.
   public Object startForegroundService(Intent i){log.add("startForegroundService");pendingStarts++;return null;}
+  public Object startService(Intent i){log.add("startService");return null;}
   public boolean stopService(Intent i){log.add("stopService");if(pendingStarts>0)crashed=true;return true;}
   public String getString(int id){return "s"+id;}
   public String getPackageName(){return "pkg";}
@@ -102,8 +107,11 @@ public class PromotionFixture {
   static UnifiedMP4Service deliver(){UnifiedMP4Service s=new UnifiedMP4Service();s.onCreate();s.onStartCommand(new Intent(s,UnifiedMP4Service.class),0,1);return s;}
   public static void main(String[] a){
     Context host=new Context();
-    // A stop that races a pending start is deferred until promotion.
-    reset();need(UnifiedMP4Service.start(host),"start");UnifiedMP4Service.stop(host);
+    // The resumed game starts the service without a startForeground obligation.
+    reset();need(UnifiedMP4Service.start(host),"start");
+    need(Context.log.contains("startService")&&!Context.log.contains("startForegroundService"),"start must not create an FGS obligation");
+    // A stop that races a pending start is still deferred until promotion.
+    UnifiedMP4Service.stop(host);
     need(!Context.log.contains("stopService"),"stop must not bring down a record before startForeground");
     UnifiedMP4Service s=deliver();
     need(Context.log.indexOf("startForeground")>=0&&Context.log.indexOf("startForeground")<Context.log.indexOf("stopSelf"),"promote, then stop");
