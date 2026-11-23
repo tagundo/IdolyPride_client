@@ -37,7 +37,7 @@ struct Object{bool alive=true,playing=true,paused=false;int mode=0,state=1;std::
 Object player,presenter,timeline,camera,controller,master,child,list,foreign,end_task_source,photo_mode;
 std::vector<void*>directors{&child};std::map<uint32_t,void*>roots;uint32_t next_root=1;
 bool unity_thread=true,request_valid=true,held=false,graph_ready=false,throw_play=false,throw_reset=false;
-bool photo_source=true,end_fails=false;int end_status=0;unsigned end_calls=0,end_consumes=0,ended_observers=0;
+bool photo_source=true,end_fails=false,controller_ready=true;int end_status=0;unsigned end_calls=0,end_consumes=0,ended_observers=0;
 bool memory_cell_mapped=true,memory_method_mapped=true,backend_good=true,ios_cell_indirect=false;uintptr_t got_var_offset=0;
 bool continuation_prefix=true,scheduler_prefix=true,caller_mapped=true;unsigned mp4_fresh_injected_reset_depth=0;uint64_t caller_instruction=0xd63f0120u;
 unsigned original_plays=0,original_timeline_plays=0,original_resets=0,scheduled_resets=0,events=0,photo_observations=0;const char*last_error="none";
@@ -75,7 +75,8 @@ bool mp4_alive(void*object){return object&&static_cast<Object*>(object)->alive;}
 bool mp4_type_is(void*object,const char*type){if(object==&presenter)return !std::strcmp(type,photo_source?"Solis.Photography.PhotographyLivePresenter":"Solis.OutGame.LivePlayerScreenPresenter");return (object==&master||object==&child)&&!std::strcmp(type,"UnityEngine.Playables.PlayableDirector");}
 struct PhotoWeak{void*get(bool){return photo_source?&presenter:nullptr;}}mp4_photography_presenter;
 void mp4_observe_photography_presenter(){++photo_observations;}
-void*mp4_selected_controller(void*p){return p==&presenter?&controller:nullptr;}
+void*mp4_selected_controller(void*p){return p==&presenter&&controller_ready?&controller:nullptr;}
+const char*mp4_fresh_controller_reason(){return "selected_photography_3d_not_built";}
 uint32_t mp4_retain(void*object){const auto id=next_root++;roots[id]=object;return id;}
 void*weak_get(uint32_t id){auto it=roots.find(id);return it==roots.end()?nullptr:it->second;}
 void weak_free(uint32_t id){assert(roots.erase(id)==1);}
@@ -242,6 +243,32 @@ int main(int argc,char**argv){
   // An original Play that already ran un-intercepted is never repeated.
   request_valid=true;master.state=1;const auto before=events;
   assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok&&mp4_fresh_play_gate.ending&&events==before+1&&!end_calls);return 0;
+ }
+ if(scenario=="late_bind"){
+  // The original scheduler holds Play before the 3D presenter/controller is
+  // built. The Play stays exactly held and is bound later, never failed.
+  controller_ready=false;source_play(&method);
+  assert(mp4_fresh_play_gate.deferred&&mp4_fresh_play_gate.bind_pending&&!mp4_fresh_play_gate.failed&&!original_plays);
+  assert(roots.size()==3&&!mp4_fresh_play_gate.camera&&!mp4_fresh_staged_camera(&camera));
+  assert(!std::strcmp(mp4_fresh_play_gate_bind(false),"controller")&&mp4_fresh_play_gate.bind_pending);
+  mp4_reset_actor_model_hook(&player,&method);assert(mp4_fresh_play_gate.reset_returned);
+  controller_ready=true;assert(mp4_fresh_play_gate_bind(false)==nullptr&&!mp4_fresh_play_gate.bind_pending);
+  assert(roots.size()==6&&mp4_fresh_play_gate.camera==&camera&&mp4_fresh_staged_camera(&camera)&&mp4_fresh_play_gate_current());
+  held=true;graph_ready=true;assert(mp4_fresh_release_deferred_play()==Mp4FreshResult::ok&&original_plays==1);
+  assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok&&end_calls==1);
+  mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
+ }
+ if(scenario=="late_bind_end"){
+  // Cleanup binds a late presenter before its original End.
+  controller_ready=false;source_play(&method);mp4_reset_actor_model_hook(&player,&method);held=true;
+  controller_ready=true;assert(mp4_fresh_stop_disposable()==Mp4FreshResult::ok&&end_calls==1&&!mp4_fresh_play_gate.bind_pending);
+  mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
+ }
+ if(scenario=="late_bind_never"){
+  // A presenter that never builds cannot be ended; cleanup still returns.
+  controller_ready=false;source_play(&method);mp4_reset_actor_model_hook(&player,&method);held=true;
+  assert(mp4_fresh_stop_disposable()==Mp4FreshResult::stale&&!end_calls&&mp4_fresh_play_gate.ending);
+  mp4_fresh_play_gate_clear();assert(roots.empty());return 0;
  }
  if(scenario=="unknown_first_expired"){
   mp4_director_play_hook(&master,&method);held=true;
@@ -427,6 +454,7 @@ def play_staging_binaries(tmp_path_factory):
     "reset_caller", "reset_caller_unmapped", "reset_instruction", "reset_continuation", "reset_injected",
     "end_photo", "end_outgame", "end_unheld", "end_failed", "end_selected_clear", "end_wrong_binding", "end_wait_reset", "late_play_cleanup",
     "late_play_expired", "late_play_wall_only", "played_not_intercepted", "unknown_first_expired", "end_reset_expired", "end_reset_expired_outgame",
+    "late_bind", "late_bind_end", "late_bind_never",
     "certificate_source", "certificate_ready", "certificate_backend", "certificate_base", "certificate_hook", "certificate_original", "certificate_stub",
     "certificate_master_hook", "certificate_master_original", "certificate_master_stub",
 ])

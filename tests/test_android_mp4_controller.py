@@ -365,7 +365,7 @@ public class DiagnosticsHarness {
  static class UnifiedMP4Background {static JSONObject snapshot(){return new JSONObject().put("state","probing").put("error_code","/private/surface")
   .put("heartbeat_verified",true).put("capture_verified",false).put("raw_surface","0xdead");}}
  static JSONObject progressDocument;static JSONObject readNativeDiagnostics(){return progressDocument;}static JSONObject exportTrace(JSONObject document){return null;}
- static JSONObject savedNativeTrace(String key){return null;}
+ static JSONObject savedNativeTrace(String key){return null;}static JSONObject javaCrashDiagnostics(Context c){return null;}
 
  static class JSONObject {static final Map<String,JSONObject> refs=new HashMap<>();final Map<String,Object> map=new LinkedHashMap<>();
   JSONObject(){}JSONObject(String raw){map.putAll(refs.get(raw).map);}JSONObject put(String k,Object v){map.put(k,v);return this;}

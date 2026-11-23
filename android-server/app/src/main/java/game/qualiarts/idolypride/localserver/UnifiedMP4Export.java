@@ -316,6 +316,8 @@ public final class UnifiedMP4Export {
                 String stage = context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).getString("last_save_failure_stage", "none");
                 if (java.util.Arrays.asList("none", "save_validate_source", "save_open_document", "save_copy_document", "save_verify_copy").contains(stage))
                     result.put("last_save_failure_stage", stage);
+                JSONObject crash = javaCrashDiagnostics(context);
+                if (crash != null) result.put("last_java_crash", crash);
             }
             result.put("save_picker_pending", pendingSaveId != null).put("save_copy_active", saving)
                     .put("document_picker_events", documentDiagnostics());
@@ -547,7 +549,52 @@ public final class UnifiedMP4Export {
         game = new WeakReference<>(activity);
         foregroundSelectionReady = false; foregroundMvSelected = false; gameFocused = false; menuHandoffDeadline = 0;
     }
+    private static volatile boolean crashRecorderInstalled;
+    /** Keeps the class chain and top frames of an uncaught Java crash for the next diagnostics export. */
+    private static void installCrashRecorder(Context context) {
+        if (crashRecorderInstalled || context == null) return;
+        crashRecorderInstalled = true;
+        final Context owner = context.getApplicationContext();
+        final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread, error) -> {
+            try {
+                JSONArray causes = new JSONArray(), frames = new JSONArray();
+                Throwable root = error;
+                for (Throwable at = error; at != null && causes.length() < 4; at = at.getCause()) { causes.put(at.getClass().getName()); root = at; }
+                for (StackTraceElement frame : root.getStackTrace()) {
+                    if (frames.length() >= 16) break;
+                    frames.put(frame.getClassName() + "." + frame.getMethodName() + ":" + frame.getLineNumber());
+                }
+                owner.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).edit().putString("last_java_crash",
+                        new JSONObject().put("time_ms", System.currentTimeMillis())
+                                .put("thread", thread.getName().replaceAll("[^A-Za-z0-9_.-]", "_"))
+                                .put("causes", causes).put("frames", frames).toString()).commit();
+            } catch (Throwable ignored) { /* Never replace the original crash. */ }
+            if (previous != null) previous.uncaughtException(thread, error);
+        });
+    }
+    /** Bounded class/frame names only: no exception message, path or payload is ever recorded. */
+    private static JSONObject javaCrashDiagnostics(Context context) {
+        try {
+            String raw = context.getSharedPreferences("mp4_export", Context.MODE_PRIVATE).getString("last_java_crash", "");
+            if (raw.isEmpty() || raw.length() > 16384) return null;
+            JSONObject source = new JSONObject(raw), result = new JSONObject();
+            result.put("time_ms", Math.max(0L, source.optLong("time_ms")));
+            String thread = source.optString("thread", "");
+            result.put("thread", thread.matches("[A-Za-z0-9_.-]{1,64}") ? thread : "unknown");
+            for (String key : new String[] {"causes", "frames"}) {
+                JSONArray input = source.optJSONArray(key), output = new JSONArray();
+                for (int i = 0; input != null && i < Math.min(16, input.length()); i++) {
+                    String value = input.optString(i, "");
+                    output.put(value.matches("[A-Za-z0-9_.$<>:-]{1,200}") ? value : "unknown");
+                }
+                result.put(key, output);
+            }
+            return result;
+        } catch (Exception invalid) { return null; }
+    }
     static void attachGame(Activity activity) {
+        installCrashRecorder(activity);
         observeGameOwner(activity);
         restoreCompleted(activity);
         LinearLayout bar = new LinearLayout(activity); bar.setOrientation(LinearLayout.VERTICAL);

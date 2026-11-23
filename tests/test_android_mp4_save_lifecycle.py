@@ -161,6 +161,7 @@ public final class JSONObject {
         "org/json/JSONArray.java": r'''package org.json;import java.util.*;
 public final class JSONArray {final ArrayList<Object> values=new ArrayList<>();public JSONArray(){}
  public JSONArray put(Object v){values.add(v);return this;}public int length(){return values.size();}public JSONObject optJSONObject(int i){return i>=0&&i<values.size()&&values.get(i) instanceof JSONObject?(JSONObject)values.get(i):null;}
+ public String optString(int i,String d){return i>=0&&i<values.size()&&values.get(i)!=null?String.valueOf(values.get(i)):d;}
  public JSONObject getJSONObject(int i){JSONObject v=optJSONObject(i);if(v==null)throw new IllegalArgumentException();return v;}
  JSONArray copy(){JSONArray r=new JSONArray();for(Object v:values)r.put(v instanceof JSONObject?((JSONObject)v).copy():v);return r;}
  public String toString(){StringBuilder b=new StringBuilder("[");for(Object v:values){if(b.length()>1)b.append(',');b.append(JSONObject.value(v));}return b.append(']').toString();}}

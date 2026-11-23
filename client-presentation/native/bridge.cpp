@@ -56723,6 +56723,13 @@ Mp4FreshResult mp4_fresh_video_adopt(){
 }
 // END_MP4_FRESH_VIDEO_PROGRAM
 
+// The bounded reason the last selected-controller discovery reported.
+const char*mp4_fresh_controller_reason(){
+ static char reason[sizeof idoly_mp4_runtime::controller_discovery.reason]{};
+ pthread_mutex_lock(&idoly_mp4_runtime::control_mutex);
+ snprintf(reason,sizeof reason,"%s",idoly_mp4_runtime::controller_discovery.reason);
+ pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);return reason;
+}
 // BEGIN_MP4_FRESH_PLAY_STAGE
 struct Mp4FreshPlayGate {
  void*player=nullptr,*presenter=nullptr,*timeline=nullptr,*master=nullptr,*camera=nullptr,*controller=nullptr;Method*method=nullptr;
@@ -56731,6 +56738,8 @@ struct Mp4FreshPlayGate {
  bool stop_started=false,stop_returned=false,stop_failed=false,end_consumed=false;idoly_mp4_replay::UniTask16 end_task{};uint32_t end_source=0;
  // Terminal cleanup budget for original callbacks that may never arrive.
  uint64_t play_wait_started=0,wait_started=0,end_wait_started=0;uint32_t play_wait_polls=0,wait_polls=0,end_wait_polls=0;bool wait_expired=false,caller_reported=false,reset_reported=false;
+ // The held Play may precede the scene's presenter/controller/camera build.
+ bool bind_pending=false;const char*bind_missing=nullptr;
 }mp4_fresh_play_gate;
 // A cleanup may wait for an original Play/Reset callback that can still
 // arrive, never for one that cannot. Both real Unity polls and wall time must
@@ -56756,6 +56765,42 @@ bool mp4_fresh_play_gate_current(){
   ||!mp4_actor_field(timeline,mp4game::Layout{}.controller_master,master)||master!=g.master)return false;
  for(size_t i=0;i<g.root_count;++i)if(!g.roots[i]||!weak_get(g.roots[i]))return false;
  return idoly_mp4_runtime::game.selected_presenter()==g.presenter;
+}
+bool mp4_fresh_presenter_owns(void*p,void*player){
+ void*value=nullptr,*mode=nullptr;if(!p||!player||!mp4_alive(p))return false;
+ if(mp4_type_is(p,"Solis.Photography.PhotographyLivePresenter"))return mp4_actor_field(p,mp4game::Layout{}.photo_root_mode,mode)&&mode&&mp4_actor_field(mode,mp4game::Layout{}.photo_mode_player,value)&&value==player;
+ return mp4_type_is(p,"Solis.OutGame.LivePlayerScreenPresenter")&&mp4_actor_field(p,mp4game::Layout{}.presenter_player,value)&&value==player;
+}
+// The original scheduler can call Play while the Photography 3D presenter,
+// its timeline camera or the render controller are still being built. The
+// held Play stays exact; these scene parts are bound before admission instead
+// of failing the export at Play time. Returns the missing part, or nullptr.
+const char*mp4_fresh_play_gate_bind(bool initial){
+ auto&g=mp4_fresh_play_gate;if(!g.bind_pending)return nullptr;
+ if(!game_call())return "thread";
+ void*presenter=idoly_mp4_runtime::game.selected_presenter();
+ if(!mp4_fresh_presenter_owns(presenter,g.player)){
+  void*candidate=mp4_photography_presenter.get(true);
+  if(!mp4_fresh_presenter_owns(candidate,g.player)){const auto&api=mp4_fresh_origin_state().original_api;void*scene=api.scene_instance?api.scene_instance(nullptr):nullptr;candidate=scene&&api.top_screen?api.top_screen(scene,nullptr):nullptr;}
+  if(mp4_fresh_presenter_owns(candidate,g.player)){idoly_mp4_runtime::observe_presenter(candidate);presenter=candidate;}
+ }
+ const char*missing=nullptr;void*controller=nullptr,*camera=nullptr;
+ if(!presenter)missing="presenter";
+ else if(!(controller=mp4_selected_controller(presenter)))missing="controller";
+ else if(!mp4_actor_field(controller,mp4game::Layout{}.camera_main,camera)||!camera)missing="camera";
+ else{const double duration=mp4_api.director_get_duration(g.master,nullptr);if(!std::isfinite(duration)||duration<=0)missing="duration";}
+ if(missing){
+  if(missing!=g.bind_missing){g.bind_missing=missing;char code[96]{};
+   snprintf(code,sizeof code,"master_play_unbound_%s%s%s",missing,!strcmp(missing,"controller")?"_":"",!strcmp(missing,"controller")?mp4_fresh_controller_reason():"");
+   idoly_mp4_runtime::diagnostic_event("fresh_prepare",code);}
+  return missing;
+ }
+ for(auto*object:{presenter,camera,controller}){
+  const auto root=mp4_retain(object);if(!root||weak_get(root)!=object||g.root_count>=6){if(root)weak_free(root);g.failed=true;g.bind_pending=false;idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_play_bind_root_failed");return "root";}
+  g.roots[g.root_count++]=root;}
+ g.presenter=presenter;g.controller=controller;g.camera=camera;g.bind_pending=false;g.bind_missing=nullptr;
+ idoly_mp4_runtime::diagnostic_event("fresh_prepare",initial?"master_play_deferred":"master_play_bound_late");
+ return nullptr;
 }
 bool mp4_fresh_photo_scheduler(void*self,uintptr_t caller)noexcept{
  if(!game_call()||!self||!mp4_source_verified||!ready.load(std::memory_order_acquire))return false;
@@ -56792,24 +56837,12 @@ bool mp4_fresh_defer_master_play(void*self,Method*method,uintptr_t caller)noexce
    return false;}
   const bool schedules=mp4_fresh_reset_scheduler_timeline==timeline||mp4_fresh_base_scheduler(caller);
   if(!schedules&&!g.caller_reported){g.caller_reported=true;mp4_fresh_report_caller("unrecognized_play_caller",caller,true);}
-  if(g.deferred){if(schedules){if(g.reset_requests!=~uint64_t(0))++g.reset_requests;g.reset_required=true;g.reset_returned=false;g.await_scheduler=false;}g.failed=true;mp4_fresh_withdrawn.store(true,std::memory_order_release);mp4_fresh_host.error="fresh_duplicate_play_request";return true;}
-  g.player=player;g.reset_required=schedules;g.reset_requests=schedules?1:0;g.await_scheduler=!schedules;if(!schedules){g.failed=true;mp4_fresh_host.error="fresh_unrecognized_master_play";mp4_fresh_withdrawn.store(true,std::memory_order_release);}g.presenter=idoly_mp4_runtime::game.selected_presenter();g.timeline=timeline;g.master=self;g.method=method;g.serial=request.serial;g.identity=request.identity;
-  const auto owns=[&](void*p){void*value=nullptr,*mode=nullptr;if(!p||!mp4_alive(p))return false;
-   if(mp4_type_is(p,"Solis.Photography.PhotographyLivePresenter"))return mp4_actor_field(p,mp4game::Layout{}.photo_root_mode,mode)&&mode&&mp4_actor_field(mode,mp4game::Layout{}.photo_mode_player,value)&&value==player;
-   return mp4_type_is(p,"Solis.OutGame.LivePlayerScreenPresenter")&&mp4_actor_field(p,mp4game::Layout{}.presenter_player,value)&&value==player;};
-  if(!owns(g.presenter)){
-   void*candidate=mp4_photography_presenter.get(true);
-   if(!owns(candidate)){const auto&api=mp4_fresh_origin_state().original_api;void*scene=api.scene_instance?api.scene_instance(nullptr):nullptr;candidate=scene&&api.top_screen?api.top_screen(scene,nullptr):nullptr;}
-   if(owns(candidate)){idoly_mp4_runtime::observe_presenter(candidate);g.presenter=candidate;}
-  }
-  g.controller=mp4_selected_controller(g.presenter);
-  if(!g.presenter||!g.controller||!mp4_actor_field(g.controller,mp4game::Layout{}.camera_main,g.camera)
-   ||!master||!g.camera
-   ||!std::isfinite(mp4_api.director_get_duration(master,nullptr))||mp4_api.director_get_duration(master,nullptr)<=0){g.failed=true;g.deferred=true;return true;}
-  for(auto*object:{g.player,g.presenter,g.timeline,g.master,g.camera,g.controller}){
-   const auto root=mp4_retain(object);if(!root||weak_get(root)!=object){if(root)weak_free(root);g.failed=true;g.deferred=true;return true;}g.roots[g.root_count++]=root;}
-  g.deferred=true;idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_play_deferred");return true;
- }catch(...){mp4_fresh_play_gate.failed=true;return mp4_fresh_play_gate.deferred;}
+  if(g.deferred){if(schedules){if(g.reset_requests!=~uint64_t(0))++g.reset_requests;g.reset_required=true;g.reset_returned=false;g.await_scheduler=false;}g.failed=true;mp4_fresh_withdrawn.store(true,std::memory_order_release);mp4_fresh_host.error="fresh_duplicate_play_request";idoly_mp4_runtime::diagnostic_event("fresh_prepare",g.bind_pending?"duplicate_master_play_unbound":"duplicate_master_play");return true;}
+  g.player=player;g.reset_required=schedules;g.reset_requests=schedules?1:0;g.await_scheduler=!schedules;if(!schedules){g.failed=true;mp4_fresh_host.error="fresh_unrecognized_master_play";mp4_fresh_withdrawn.store(true,std::memory_order_release);}g.timeline=timeline;g.master=self;g.method=method;g.serial=request.serial;g.identity=request.identity;
+  for(auto*object:{g.player,g.timeline,g.master}){
+   const auto root=mp4_retain(object);if(!root||weak_get(root)!=object){if(root)weak_free(root);g.failed=true;g.deferred=true;idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_play_root_failed",0,0,true);return true;}g.roots[g.root_count++]=root;}
+  g.deferred=true;g.bind_pending=true;(void)mp4_fresh_play_gate_bind(true);return true;
+ }catch(...){mp4_fresh_play_gate.failed=true;idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_play_exception");return mp4_fresh_play_gate.deferred;}
 }
 // Withdrawal stops frames, not cleanup of already scheduled original work.
 bool mp4_fresh_reset_owner_current(){
@@ -56858,7 +56891,7 @@ void mp4_fresh_delayed_reset_return(void*self,Method*method,uintptr_t caller,boo
  if(!entered)return;
  try{if(mp4_fresh_delayed_reset_enter(self,method,caller)){
   auto&g=mp4_fresh_play_gate;if(g.reset_returns!=~uint64_t(0))++g.reset_returns;g.reset_returned=g.reset_requests&&g.reset_returns>=g.reset_requests;if(g.reset_returned)idoly_mp4_runtime::diagnostic_event("fresh_prepare","delayed_actor_reset_returned");
- }}catch(...){mp4_fresh_play_gate.failed=true;}
+ }}catch(...){mp4_fresh_play_gate.failed=true;idoly_mp4_runtime::diagnostic_event("fresh_prepare","delayed_reset_exception");}
 }
 bool mp4_fresh_staged_camera(void*camera){
  const auto&g=mp4_fresh_play_gate;return g.armed&&g.deferred&&!g.ending&&!mp4_fresh_host.active&&camera==g.camera;
@@ -56927,6 +56960,7 @@ Mp4FreshResult mp4_fresh_stop_disposable(){
   // schedules no known one. Past the budget, End proceeds like an early exit.
   if(!mp4_fresh_budget_expired(g.wait_started,g.wait_polls,600,10000))return mp4_fresh_wait(g.await_scheduler?"fresh_cleanup_awaiting_play_scheduler":"fresh_cleanup_awaiting_actor_reset");
   g.wait_expired=true;idoly_mp4_runtime::diagnostic_event("fresh_cleanup",g.await_scheduler?"play_scheduler_wait_expired":"actor_reset_wait_expired",0,0,true);}
+ if(g.bind_pending)(void)mp4_fresh_play_gate_bind(false);
  idoly_mp4_runtime::FreshFactoryRequest actual{};
  if(!idoly_mp4_runtime::fresh_factory_request(g.player,&actual)||actual.serial!=g.serial||actual.identity!=g.identity
   ||actual.player!=g.player
@@ -57081,6 +57115,7 @@ Mp4FreshResult mp4_fresh_admit(void*){
  auto&g=mp4_fresh_play_gate;
  if(g.failed)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_play_staging_failed");
  if(!g.deferred){if(mp4_api.automatic_playback.director_state(master,nullptr)==1)return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_autoplay_not_intercepted");return Mp4FreshResult::waiting;}
+ if(g.bind_pending&&mp4_fresh_play_gate_bind(false))return g.failed?mp4_fresh_fail(Mp4FreshResult::failed,"fresh_play_staging_failed"):mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_play_staging_bind_wait");
  if(!mp4_fresh_play_gate_current()||g.player!=receipt.player||g.identity!=receipt.identity)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_play_factory_changed");
  mp4_fresh_host.factory=receipt.serial;return Mp4FreshResult::ok;
 }
