@@ -125,7 +125,8 @@ int main(){
     assert(!a.selected_audio_track(1,audio_director,audio_asset,audio_track,audio_source)&&!audio_director&&!audio_asset&&!audio_track&&!audio_source);
     int32_t actual_width=0,actual_height=0;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==4096&&actual_height==2458);
     source_width=4095;source_height=2457;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==4095&&actual_height==2457);
-    source_width=4097;assert(a.source_geometry(actual_width,actual_height)==Result::unsupported);source_width=4096;source_height=2458;
+    source_width=7680;source_height=4320;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==7680&&actual_height==4320);
+    source_width=8193;assert(a.source_geometry(actual_width,actual_height)==Result::unsupported);source_width=4096;source_height=2458;
     assert(a.set_output_geometry(1920,1080)==Result::stale&&geometry_calls.empty());
     write(clip,0x38,2.0);assert(a.snapshot(s)==Result::unsupported);write(clip,0x38,1.0);assert(a.snapshot(s)==Result::ok);
     assert(s.actor_graph_count==1);assert(a.begin_manual()==Result::ok&&mode==3&&bgm_volume==0&&voice_volume==0&&actor_mode==3&&actor_resets==1);assert(a.evaluate(2)==Result::ok&&time_value==2&&shader==2&&graph_steps==1);assert(a.evaluate(2)==Result::ok&&graph_steps==1&&actor_steps==1&&camera_steps==1);graph_variant=1;assert(a.evaluate(3)==Result::ok&&time_value==3&&graph_steps==2);graph_variant=0;assert(a.evaluate(123)==Result::invalid);
