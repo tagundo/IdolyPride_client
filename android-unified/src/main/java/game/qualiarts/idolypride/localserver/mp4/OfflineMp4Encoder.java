@@ -137,9 +137,20 @@ public final class OfflineMp4Encoder {
         createPrivatePartial(config.partial);
         try {
             // Slots hold converted I420 (1.5 bytes per pixel); the native
-            // producer converts RGBA before the frame reaches Java.
-            int pixels = OfflineMp4Math.pixels(config.width, config.height);
-            for (int i = 0; i < SLOTS; i++) free.add(new byte[pixels * 3 / 2]);
+            // producer converts RGBA before the frame reaches Java. An 8K frame
+            // is about 50 MB, so stage only as many slots (1..3) as half of the
+            // free Java heap holds: a small heap overlaps less, never crashes.
+            int bytes = OfflineMp4Math.pixels(config.width, config.height) * 3 / 2;
+            Runtime runtime = Runtime.getRuntime();
+            long available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
+            int slots = (int) Math.max(1, Math.min(SLOTS, available / 2 / bytes));
+            for (int i = 0; i < slots; i++) {
+                try { free.add(new byte[bytes]); }
+                catch (OutOfMemoryError full) {
+                    if (i == 0) throw new IllegalArgumentException("Not enough memory for one video frame");
+                    break;
+                }
+            }
             Thread worker = new Thread(this::encode, "IdolyOfflineMp4");
             worker.setDaemon(true); worker.start();
         } catch (RuntimeException | Error error) { config.partial.delete(); throw error; }
@@ -442,7 +453,12 @@ public final class OfflineMp4Encoder {
             int base = target.position(), row = plane.getRowStride(), pixel = plane.getPixelStride();
             if (row <= 0 || pixel <= 0 || (long) base + (long) (height - 1) * row + (long) (width - 1) * pixel >= target.limit())
                 throw new IOException("Video encoder YUV plane strides are invalid");
-            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+            if (pixel == 1) {
+                // Planar rows copy in bulk; an 8K frame is 50 MB per frame.
+                for (int y = 0; y < height; y++) {
+                    target.position(base + y * row); target.put(planar, source, width); source += width;
+                }
+            } else for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
                 target.put(base + y * row + x * pixel, planar[source++]);
         }
         video.queueInputBuffer(slot, 0, planar.length,

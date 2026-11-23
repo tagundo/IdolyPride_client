@@ -35,11 +35,11 @@ public final class OfflineMp4Math {
     }
 
     public static int pixels(int width, int height) {
-        // The native producer never renders an edge above 4096. Frames are
-        // staged as I420 (three 1.5-byte-per-pixel slots, at most 72 MiB).
+        // Up to 8K in either orientation, matching the native producer. Frames
+        // are staged as I420; the encoder sizes its slot count to the heap.
         if (width < 16 || height < 16 || (width & 1) != 0 || (height & 1) != 0
-                || width > 4096 || height > 4096)
-            throw new IllegalArgumentException("Video dimensions must be even, between 16 and 4096");
+                || width > 8192 || height > 8192)
+            throw new IllegalArgumentException("Video dimensions must be even, between 16 and 8192");
         return width * height;
     }
 

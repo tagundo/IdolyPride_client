@@ -28,7 +28,7 @@ IDMP4_SESSION_API int IDMP4SessionConfigure(const char *broker, uint64_t epoch,
 IDMP4_SESSION_API int IDMP4SessionStart(uint32_t fps_num, uint32_t fps_den,
     uint32_t codec, uint32_t video_bitrate, uint32_t audio_bitrate);
 // V2: video_bitrate=0 uses the output size/FPS/codec recommendation. Explicit
-// output dimensions must both be even 16..4096; (0,0) follows the source with
+// output dimensions must both be even 16..8192; (0,0) follows the source with
 // odd edges rounded down to an encoder-compatible size. V1 remains available.
 IDMP4_SESSION_API int IDMP4SessionStartV2(uint32_t fps_num, uint32_t fps_den,
     uint32_t codec, uint32_t video_bitrate, uint32_t audio_bitrate,

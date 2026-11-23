@@ -11012,13 +11012,13 @@ bool mp4_set_output_geometry(void* controller,int32_t width,int32_t height){
         mp4_clear_output_geometry();return good;
     }
     if(!idoly_mp4_runtime::game.owned_primary_scene_current()||!mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")
-        ||!mp4_alive(controller)||width<16||height<16||width>4096||height>4096||width%2||height%2)return false;
+        ||!mp4_alive(controller)||width<16||height<16||width>8192||height>8192||width%2||height%2)return false;
     if(mp4_geometry_active&&!mp4_geometry_controller.get(true))mp4_clear_output_geometry();
     if(mp4_geometry_active&&mp4_geometry_controller.get(true)!=controller)return false;
     if(!mp4_geometry_active){
         int32_t previous_width=0,previous_height=0;
         if(!mp4_actual_source_geometry(controller,&previous_width,&previous_height)
-            ||previous_width<16||previous_height<16||previous_width>4096||previous_height>4096)return false;
+            ||previous_width<16||previous_height<16||previous_width>8192||previous_height>8192)return false;
         if(!mp4_remember_output_projection(controller,rt_camera(controller,nullptr),previous_width,previous_height)){
             mp4_clear_output_geometry();return false;
         }

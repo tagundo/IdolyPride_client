@@ -23,7 +23,8 @@ qm::Descriptor descriptor(){qm::Descriptor d{};std::strcpy(d.stage_asset,"stage"
 int main(int argc,char** argv){assert(argc==3);const char* mode=argv[1];
     if(!std::strcmp(mode,"policy")){
         assert(out::requested_dimensions(0,0)&&!out::requested_dimensions(0,1080));
-        assert(out::dimensions(4096,4096)&&!out::dimensions(4098,1080)&&!out::dimensions(1919,1080));
+        assert(out::dimensions(4096,4096)&&out::dimensions(7680,4320)&&out::dimensions(4320,7680)&&out::dimensions(8192,8192));
+        assert(!out::dimensions(8194,1080)&&!out::dimensions(1919,1080));
         assert(out::source_dimensions(1919,1079)&&!out::source_dimensions(15,1080));
         assert(out::bitrate(0)&&out::bitrate(100000)&&out::bitrate(12340000)&&out::bitrate(200000000));
         assert(!out::bitrate(99999)&&!out::bitrate(200000001));
@@ -45,7 +46,8 @@ int main(int argc,char** argv){assert(argc==3);const char* mode=argv[1];
         assert(out::resolved_dimensions(1920,1080,4000,1000,width,height)&&width==4000&&height==1000);
         assert(out::resolved_dimensions(1919,1079,0,0,width,height)&&width==1918&&height==1078);
         assert(!out::resolved_dimensions(1920,1080,0,1080,width,height));
-        assert(!out::resolved_dimensions(4097,1080,1920,1080,width,height));
+        assert(!out::resolved_dimensions(8193,1080,1920,1080,width,height));
+        assert(out::resolved_dimensions(4320,7680,7680,4320,width,height)&&width==7680&&height==4320);
     }else if(!std::strcmp(mode,"rotation")){
         // A reload turning the window is the same "current" target; nothing else is.
         assert(out::same_current_geometry(4096,3690,4096,3690)&&out::same_current_geometry(4096,3690,3690,4096));

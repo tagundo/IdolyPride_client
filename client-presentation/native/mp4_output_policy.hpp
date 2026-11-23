@@ -9,7 +9,9 @@
 #endif
 
 namespace idoly_mp4_output {
-constexpr uint32_t maximum_dimension=4096;
+// Up to 8K in either orientation (7680x4320). The device encoder decides
+// whether it accepts a size; the renderer and readback have no smaller cap.
+constexpr uint32_t maximum_dimension=8192;
 inline bool supported_fps(uint32_t fps) { return fps==30||fps==60||fps==120; }
 // 30 fps retains the original 60 Hz simulation and samples every other tick.
 // 120 fps advances the owned original loop at 120 Hz, one distinct step per frame.

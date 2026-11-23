@@ -9,7 +9,7 @@ import java.util.Map;
 final class Mp4ExportSettings {
     static final String PREFS = "mp4_export";
     static final int MIN_BITRATE = 100_000, MAX_BITRATE = 200_000_000;
-    static final int MIN_EDGE = 16, MAX_EDGE = 4096;
+    static final int MIN_EDGE = 16, MAX_EDGE = 8192; // up to 8K in either orientation
     private static final String PREFIX = "options_v1_";
 
     interface Store {

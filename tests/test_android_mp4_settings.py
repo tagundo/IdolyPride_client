@@ -155,13 +155,15 @@ public final class Mp4SettingsHarness {
     need(Mp4ExportSettings.parseBitrate("1.000001")==1000001,"decimal Mbps maps exactly to whole bps");
     for(String raw:new String[]{"0","0.099999","200.000001","NaN","Infinity","1e2","1,5","1.0000001","-5"," 16","16 ","","1."})
       need(Mp4ExportSettings.parseBitrate(raw)==-1,"malformed, imprecise or out-of-range Mbps is rejected: "+raw);
-    for(String raw:new String[]{"16","1920","4096"})need(Mp4ExportSettings.parseEdge(raw)==Integer.parseInt(raw),"valid even pixels "+raw);
-    for(String raw:new String[]{"0","15","17","4097","1000000","1e3","1920.0","-1920",""," 1920"})need(Mp4ExportSettings.parseEdge(raw)==-1,"invalid pixels "+raw);
+    for(String raw:new String[]{"16","1920","4096","7680","8192"})need(Mp4ExportSettings.parseEdge(raw)==Integer.parseInt(raw),"valid even pixels "+raw);
+    for(String raw:new String[]{"0","15","17","4097","8194","1000000","1e3","1920.0","-1920",""," 1920"})need(Mp4ExportSettings.parseEdge(raw)==-1,"invalid pixels "+raw);
     need(!Mp4ExportSettings.validResolution(0,1080)&&!Mp4ExportSettings.validResolution(1920,0),"mixed auto and explicit dimensions never reach native capture");
     need(Mp4ExportSettings.recommendedBitrate(1920,1080,30,1)==8710000,"H264 uses Elichika .14 and rounds to two-decimal Mbps");
     need(Mp4ExportSettings.recommendedBitrate(1920,1080,60,2)==11200000,"HEVC uses Elichika .09 with selected frame rate");
     need(Mp4ExportSettings.recommendedBitrate(16,16,30,1)==250000,"recommendation minimum is 0.25 Mbps");
-    need(Mp4ExportSettings.recommendedBitrate(4096,4096,60,1)==140930000,"largest supported frame stays within native encoder limits");
+    need(Mp4ExportSettings.recommendedBitrate(4096,4096,60,1)==140930000,"4K-class frames keep their recommendation");
+    need(Mp4ExportSettings.recommendedBitrate(7680,4320,30,1)==139350000
+      &&Mp4ExportSettings.recommendedBitrate(7680,4320,60,1)==200000000,"8K recommendation stays within the 200 Mbps encoder bound");
     need(Mp4ExportSettings.recommendedBitrate(4097,2160,30,1)==-1&&Mp4ExportSettings.recommendedBitrate(1920,1080,90,1)==-1,"unsupported geometry/clock cannot invent a recommendation");
     System.out.println("PASS durable MP4 settings and exact option contract");
   }
@@ -190,6 +192,6 @@ def test_editor_resources_keep_all_languages_and_validation_units():
         assert values.keys() == reference.keys()
         assert all(value.strip() for value in values.values())
         assert "200" in values["mp4_bitrate_invalid"] and "Mbps" in values["mp4_bitrate_invalid"]
-        assert "4096" in values["mp4_resolution_invalid"]
+        assert "8192" in values["mp4_resolution_invalid"]
         for name in reference:
             assert sorted(re.findall(r"%\d+\$[ds]", values[name])) == sorted(re.findall(r"%\d+\$[ds]", reference[name]))

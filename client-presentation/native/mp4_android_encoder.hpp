@@ -2,13 +2,92 @@
 // Independent Android MediaCodec adapter. Included once by the Android native bridge.
 #pragma once
 #include "mp4_encoder_api.h"
-#include "mp4_i420.hpp"
 #include <jni.h>
 #include <climits>
 #include <cstring>
 #include <pthread.h>
 #include <cstdlib>
 #include <new>
+
+// Opaque sRGB RGBA8 to limited-range BT.709 I420, done natively before the
+// frame reaches Java (as Elichika's exporter does). Java then stages 1.5
+// bytes per pixel instead of 4, and its encoder thread only copies planes.
+// Kept in this header: the Android package pins at most 64 source files.
+namespace idoly_mp4_i420 {
+// OfflineMp4Math.transferTable(): sRGB-encoded 8-bit to BT.709 OETF, rounded.
+constexpr uint8_t srgb_to_709[256]={
+    0,0,1,1,1,2,2,2,3,3,3,4,4,5,5,5,
+    6,6,7,7,8,9,9,10,10,11,12,13,13,14,15,16,
+    17,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,
+    32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
+    48,49,50,51,52,53,55,56,57,58,59,60,61,62,63,64,
+    65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
+    81,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,
+    98,99,100,101,103,104,105,106,107,108,109,110,111,112,113,114,
+    115,116,117,119,120,121,122,123,124,125,126,127,128,129,130,131,
+    133,134,135,136,137,138,139,140,141,142,143,144,145,147,148,149,
+    150,151,152,153,154,155,156,157,159,160,161,162,163,164,165,166,
+    167,168,169,171,172,173,174,175,176,177,178,179,180,182,183,184,
+    185,186,187,188,189,190,191,193,194,195,196,197,198,199,200,201,
+    203,204,205,206,207,208,209,210,211,213,214,215,216,217,218,219,
+    220,221,223,224,225,226,227,228,229,230,231,233,234,235,236,237,
+    238,239,240,242,243,244,245,246,247,248,249,251,252,253,254,255};
+
+inline size_t bytes(uint32_t width,uint32_t height){return static_cast<size_t>(width)*height*3/2;}
+inline int clamp(int value,int lower,int upper){return value<lower?lower:value>upper?upper:value;}
+
+// Rows are read first to last with row_bytes stride; Y, then U, then V, with
+// no padding. Bit-identical to OfflineMp4Math.rgbaToI420 (alpha is ignored).
+inline bool valid(const uint8_t*rgba,size_t row_bytes,uint32_t width,uint32_t height,const uint8_t*out,size_t out_bytes){
+    return rgba&&out&&width>=2&&height>=2&&!(width&1)&&!(height&1)&&row_bytes>=static_cast<size_t>(width)*4
+        &&out_bytes==bytes(width,height);
+}
+// Converts the row pairs starting at rows first..last-2 (even row indices).
+inline void convert_rows(const uint8_t*rgba,size_t row_bytes,uint32_t width,uint32_t height,uint8_t*out,uint32_t first,uint32_t last){
+    const size_t pixels=static_cast<size_t>(width)*height;
+    uint8_t*const u=out+pixels;uint8_t*const v=u+pixels/4;
+    for(uint32_t y=first;y<last;y+=2){
+        const uint8_t*const rows[2]={rgba+static_cast<size_t>(y)*row_bytes,rgba+static_cast<size_t>(y+1)*row_bytes};
+        uint8_t*const luma[2]={out+static_cast<size_t>(y)*width,out+static_cast<size_t>(y+1)*width};
+        const size_t chroma_row=static_cast<size_t>(y/2)*(width/2);
+        for(uint32_t x=0;x<width;x+=2){
+            int red=0,green=0,blue=0;
+            for(int dy=0;dy<2;++dy)for(uint32_t dx=0;dx<2;++dx){
+                const uint8_t*const p=rows[dy]+static_cast<size_t>(x+dx)*4;
+                const int r=srgb_to_709[p[0]],g=srgb_to_709[p[1]],b=srgb_to_709[p[2]];
+                luma[dy][x+dx]=static_cast<uint8_t>(clamp(16+((47*r+157*g+16*b+128)>>8),16,235));
+                red+=r;green+=g;blue+=b;
+            }
+            u[chroma_row+x/2]=static_cast<uint8_t>(clamp(128+((-26*red-86*green+112*blue+512)>>10),16,240));
+            v[chroma_row+x/2]=static_cast<uint8_t>(clamp(128+((112*red-102*green-10*blue+512)>>10),16,240));
+        }
+    }
+}
+inline bool from_rgba(const uint8_t*rgba,size_t row_bytes,uint32_t width,uint32_t height,uint8_t*out,size_t out_bytes){
+    if(!valid(rgba,row_bytes,width,height,out,out_bytes))return false;
+    convert_rows(rgba,row_bytes,width,height,out,0,height);return true;
+}
+// Same bytes. A large frame (4K, 8K) splits its independent row pairs across
+// up to four threads, so the game thread does not convert it alone. A band
+// whose thread cannot start runs on the caller.
+inline bool from_rgba_parallel(const uint8_t*rgba,size_t row_bytes,uint32_t width,uint32_t height,uint8_t*out,size_t out_bytes){
+    if(!valid(rgba,row_bytes,width,height,out,out_bytes))return false;
+    constexpr uint32_t maximum_bands=4;
+    const uint32_t pairs=height/2,bands=static_cast<size_t>(width)*height>=2000000&&pairs>=maximum_bands?maximum_bands:1;
+    struct Band {const uint8_t*rgba;size_t row_bytes;uint32_t width,height,first,last;uint8_t*out;pthread_t thread;bool started;};
+    Band band[maximum_bands]{};
+    for(uint32_t i=0;i<bands;++i){
+        const uint32_t first=pairs*i/bands*2,last=pairs*(i+1)/bands*2;
+        band[i]={rgba,row_bytes,width,height,first,last,out,pthread_t{},false};
+    }
+    auto run=[](void*value)->void*{const Band*b=static_cast<const Band*>(value);
+        convert_rows(b->rgba,b->row_bytes,b->width,b->height,b->out,b->first,b->last);return nullptr;};
+    for(uint32_t i=1;i<bands;++i)band[i].started=pthread_create(&band[i].thread,nullptr,run,&band[i])==0;
+    run(&band[0]);
+    for(uint32_t i=1;i<bands;++i){if(band[i].started)pthread_join(band[i].thread,nullptr);else run(&band[i]);}
+    return true;
+}
+} // namespace idoly_mp4_i420
 
 namespace idoly_mp4_android {
 namespace {
@@ -210,7 +289,7 @@ extern "C" int IDMP4EncoderAppendFrame(IDMP4EncoderHandle handle, const uint8_t 
     // Convert once per offered frame; Java copies the planes into its own slot.
     if (!encoder->converted || encoder->converted_index != frame_index || encoder->converted_source != rgba) {
         encoder->converted = false;
-        if (!idoly_mp4_i420::from_rgba(rgba, row_bytes, encoder->width, encoder->height,
+        if (!idoly_mp4_i420::from_rgba_parallel(rgba, row_bytes, encoder->width, encoder->height,
                 encoder->i420, encoder->i420_bytes)) return IDMP4_ERROR;
         encoder->converted = true; encoder->converted_index = frame_index; encoder->converted_source = rgba;
     }
@@ -269,9 +348,15 @@ extern "C" int IDMP4EncoderDestroy(IDMP4EncoderHandle handle) {
     Encoder *encoder = static_cast<Encoder *>(handle);
     {
         MutexGuard guard(&encoder->lock);
-        Environment scope(encoder->java.vm); JNIEnv *env = scope.get(); if (!env) return IDMP4_ERROR;
+        // A caller abandons the handle after ERROR; release the native frame
+        // buffer then. RETRY keeps everything for the next Destroy.
+        const auto abandon = [encoder] {
+            std::free(encoder->i420); encoder->i420 = nullptr; encoder->i420_bytes = 0; encoder->converted = false;
+            return IDMP4_ERROR;
+        };
+        Environment scope(encoder->java.vm); JNIEnv *env = scope.get(); if (!env) return abandon();
         jboolean done = env->CallBooleanMethod(encoder->object, encoder->java.terminal);
-        if (java_error(env, encoder)) return IDMP4_ERROR;
+        if (java_error(env, encoder)) return abandon();
         if (!done) return IDMP4_RETRY;
         env->DeleteGlobalRef(encoder->object); encoder->object = nullptr;
     }

@@ -2432,7 +2432,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         JSONObject state = UnifiedMP4Export.snapshot();
         int width = mp4Settings.customResolution ? mp4Settings.requestWidth() : state.optInt("source_width", 0);
         int height = mp4Settings.customResolution ? mp4Settings.requestHeight() : state.optInt("source_height", 0);
-        if (!mp4Settings.customResolution && width >= 16 && width <= 4096 && height >= 16 && height <= 4096) {
+        if (!mp4Settings.customResolution && width >= 16 && width <= Mp4ExportSettings.MAX_EDGE
+                && height >= 16 && height <= Mp4ExportSettings.MAX_EDGE) {
             width -= width % 2; height -= height % 2;
         }
         int recommended = Mp4ExportSettings.recommendedBitrate(width, height, mp4Settings.fps, mp4Settings.codec);

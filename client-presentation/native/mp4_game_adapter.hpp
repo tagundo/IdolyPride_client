@@ -407,11 +407,11 @@ public:
             // These are source RGBA pixels, not an encoder configuration.
             // Original mobile aspect ratios may legitimately produce an odd
             // edge; the output stage separately chooses even codec dimensions.
-            return width>=16&&height>=16&&width<=4096&&height<=4096?Result::ok:Result::unsupported;
+            return width>=16&&height>=16&&width<=8192&&height<=8192?Result::ok:Result::unsupported;
         }
         void* camera=get(camera_);if(!camera||!live(camera)||!api_.camera_pixel_width||!api_.camera_pixel_height)return Result::waiting;
         width=api_.camera_pixel_width(camera,nullptr);height=api_.camera_pixel_height(camera,nullptr);
-        return width>=16&&height>=16&&width<=4096&&height<=4096?Result::ok:Result::unsupported;
+        return width>=16&&height>=16&&width<=8192&&height<=8192?Result::ok:Result::unsupported;
     }
 private:
     template<class T> static T field(const void* p,size_t offset) { T value{};if(p)std::memcpy(&value,static_cast<const uint8_t*>(p)+offset,sizeof(T));return value; }
@@ -1138,7 +1138,7 @@ inline Result GameAdapter::evaluate(double seconds) {
 }
 inline Result GameAdapter::set_output_geometry(uint32_t width,uint32_t height) {
     if(!manual_||!identities_current())return fail(Result::stale,"selected_scene_changed");
-    if(width<16||height<16||width>4096||height>4096||width%2||height%2)
+    if(width<16||height<16||width>8192||height>8192||width%2||height%2)
         return fail(Result::invalid,"output_geometry_invalid");
     if(!api_.output_geometry||!api_.output_projection)
         return fail(Result::unsupported,"output_render_projection_unavailable");
@@ -1194,7 +1194,7 @@ inline Result GameAdapter::request_capture() {
     // retain its actual returned wrapper but grants no native queued request.
     capture_last_issued_=operation;
     int32_t width=api_.texture_width(texture,nullptr),height=api_.texture_height(texture,nullptr);
-    if(width<16||height<16||width>4096||height>4096)
+    if(width<16||height<16||width>8192||height>8192)
         return fail(Result::unsupported,"capture_geometry_not_supported");
     snapshot_.width=width;snapshot_.height=height;
     capture_pending_=true;capture_pass_seen_=capture_submitted_=false;

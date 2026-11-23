@@ -48,8 +48,8 @@ public final class MathHarness {
         // Frames are staged as I420, so the native maximum 4096 edge needs no memory cap.
         equal(OfflineMp4Math.pixels(4096,3690),15114240);equal(OfflineMp4Math.pixels(4096,4096),16777216);
         rejects(()->OfflineMp4Math.pixels(3841,2160));
-        rejects(()->OfflineMp4Math.pixels(4098,2160));
-        rejects(()->OfflineMp4Math.pixels(8192,8192));
+        equal(OfflineMp4Math.pixels(7680,4320),33177600);equal(OfflineMp4Math.pixels(4320,7680),33177600);
+        rejects(()->OfflineMp4Math.pixels(8194,2160));rejects(()->OfflineMp4Math.pixels(16384,16384));
         byte[] input=new byte[16*16*4],output=new byte[16*16*3/2];
         OfflineMp4Math.rgbaToI420(input,output,16,16);
         for(int i=0;i<256;i++)equal(output[i]&255,16);
@@ -149,14 +149,15 @@ public final class ConfigHarness {
 
 
 def test_native_i420_conversion_is_bit_identical_to_java(tmp_path):
-    """mp4_i420.hpp (native producer) must equal OfflineMp4Math.rgbaToI420 byte for byte."""
+    """The native producer (mp4_android_encoder.hpp) must equal OfflineMp4Math.rgbaToI420 byte for byte."""
     javac, java, cxx = shutil.which("javac"), shutil.which("java"), shutil.which("g++") or shutil.which("c++")
     if not javac or not java or not cxx:
         pytest.skip("JDK and C++ compiler required")
     import random
     rng = random.Random(1123)
-    width, height, row = 66, 38, 66 * 4 + 20
-    frame = bytearray(rng.getrandbits(8) for _ in range(row * height))
+    # Above two megapixels, so the production four-band parallel path runs too.
+    width, height, row = 1922, 1090, 1922 * 4 + 20
+    frame = bytearray(rng.randbytes(row * height))
     # Cover every transfer-table entry in each colour channel and the clamps.
     for value in range(256):
         y, x = divmod(value, width)
@@ -185,7 +186,7 @@ public final class ParityHarness {
     assert ran.returncode == 0, ran.stderr
     native = tmp_path / "parity.cpp"
     native.write_text(r'''
-#include "mp4_i420.hpp"
+#include "mp4_android_encoder.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -194,6 +195,8 @@ int main(int argc,char**argv){if(argc!=6)return 1;
   std::vector<uint8_t> rgba(row*h),out(idoly_mp4_i420::bytes(w,h));
   FILE*in=std::fopen(argv[1],"rb");if(!in||std::fread(rgba.data(),1,rgba.size(),in)!=rgba.size())return 2;std::fclose(in);
   if(!idoly_mp4_i420::from_rgba(rgba.data(),row,w,h,out.data(),out.size()))return 3;
+  std::vector<uint8_t> parallel(out.size());
+  if(!idoly_mp4_i420::from_rgba_parallel(rgba.data(),row,w,h,parallel.data(),parallel.size())||parallel!=out)return 6;
   if(idoly_mp4_i420::from_rgba(rgba.data(),w*4-1,w,h,out.data(),out.size())||idoly_mp4_i420::from_rgba(rgba.data(),row,w,h,out.data(),out.size()-1)
      ||idoly_mp4_i420::from_rgba(rgba.data(),row,w+1,h,out.data(),out.size()))return 4;
   FILE*o=std::fopen(argv[2],"wb");if(!o||std::fwrite(out.data(),1,out.size(),o)!=out.size())return 5;std::fclose(o);return 0;
@@ -201,7 +204,11 @@ int main(int argc,char**argv){if(argc!=6)return 1;
 ''')
     binary = tmp_path / "parity"
     root = Path(__file__).resolve().parents[1]
-    built = subprocess.run([cxx, "-std=c++17", "-O2", "-Wall", "-Wextra", "-Werror", "-I", str(root / "client-presentation/native"),
+    include = Path(javac).resolve().parents[1] / "include"
+    if not (include / "jni.h").is_file():
+        pytest.skip("JDK JNI development headers required")
+    built = subprocess.run([cxx, "-std=c++17", "-O2", "-pthread", "-Wall", "-Wextra", "-Werror", "-I", str(include),
+                            "-I", str(include / "linux"), "-I", str(root / "client-presentation/native"),
                             str(native), "-o", str(binary)], capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stderr
     ran = subprocess.run([str(binary), str(tmp_path / "rgba.bin"), str(tmp_path / "cpp.bin"), str(width), str(height), str(row)],
