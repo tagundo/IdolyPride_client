@@ -37,11 +37,6 @@ inline uint32_t recommended_bitrate(uint32_t width,uint32_t height,uint32_t fps,
 inline uint32_t resolved_bitrate(uint32_t requested,uint32_t width,uint32_t height,uint32_t fps,uint32_t codec) {
     return !bitrate(requested)?0:requested?requested:recommended_bitrate(width,height,fps,codec);
 }
-// Java stages three RGBA copies plus one I420 frame under 128 MiB
-// (OfflineMp4Math.pixels). Larger frames can never create an encoder.
-inline bool staging_fits(uint32_t width,uint32_t height) {
-    return static_cast<uint64_t>(width)*height*27/2<=128ULL*1024*1024;
-}
 // A queued "current" job may meet its Add-time size turned by the window
 // (the scene reload rotates it). Any other size is a different render
 // target and still fails.

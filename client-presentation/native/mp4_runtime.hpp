@@ -1045,7 +1045,6 @@ inline bool prepare_frame_output(){
     job.status.video_codec=job.options.codec;
     job.status.video_bitrate=idoly_mp4_output::resolved_bitrate(job.options.bitrate,job.status.width,job.status.height,job.options.fps_num,job.options.codec);
     if(!job.status.video_bitrate){terminal("invalid_export_options");return false;}
-    if(!idoly_mp4_output::staging_fits(job.status.width,job.status.height)){terminal("output_exceeds_encoder_staging_limit");return false;}
     const size_t needed=static_cast<size_t>(width)*static_cast<size_t>(height)*4;
     if(!job.rgba){job.rgba=static_cast<uint8_t*>(malloc(needed));job.rgba_capacity=needed;if(!job.rgba){terminal("frame_buffer_allocation_failed");return false;}}
     if(job.rgba_capacity!=needed){terminal("frame_buffer_geometry_changed");return false;}

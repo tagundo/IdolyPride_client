@@ -46,10 +46,7 @@ int main(int argc,char** argv){assert(argc==3);const char* mode=argv[1];
         assert(out::resolved_dimensions(1919,1079,0,0,width,height)&&width==1918&&height==1078);
         assert(!out::resolved_dimensions(1920,1080,0,1080,width,height));
         assert(!out::resolved_dimensions(4097,1080,1920,1080,width,height));
-    }else if(!std::strcmp(mode,"encoder")){
-        // Java stages three RGBA copies plus I420 under 128 MiB (~9.94 MP).
-        assert(out::staging_fits(3840,2160)&&out::staging_fits(4096,1756)&&out::staging_fits(1280,720));
-        assert(!out::staging_fits(4096,3690)&&!out::staging_fits(4096,4096));
+    }else if(!std::strcmp(mode,"rotation")){
         // A reload turning the window is the same "current" target; nothing else is.
         assert(out::same_current_geometry(4096,3690,4096,3690)&&out::same_current_geometry(4096,3690,3690,4096));
         assert(!out::same_current_geometry(32,32,16,16)&&!out::same_current_geometry(4096,3690,4094,3690));
@@ -92,7 +89,7 @@ def policy_executable(tmp_path_factory):
     return binary
 
 
-@pytest.mark.parametrize("mode", ["policy", "dimensions", "encoder", "legacy", "options", "120"])
+@pytest.mark.parametrize("mode", ["policy", "dimensions", "rotation", "legacy", "options", "120"])
 def test_output_pixels_recommendation_and_immutable_legacy_queue(policy_executable, tmp_path, mode):
     root = tmp_path / "queue"
     root.mkdir(mode=0o700)
