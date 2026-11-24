@@ -1,5 +1,6 @@
 import unittest
-from run_probe import PACKAGE, scoped_crash_log, validate_report
+from run_probe import (PACKAGE, REDROID_GUEST, TRANSLATED_GUEST, guest_properties,
+                       scoped_crash_log, validate_report)
 
 
 def successful():
@@ -59,6 +60,26 @@ class GateTests(unittest.TestCase):
         log = ("11-10 01:02:03.002 900 900 F DEBUG : *** *** ***\n"
                "11-10 01:02:03.003 900 900 F DEBUG : pid: 122, tid: 124 >>> " + PACKAGE + " <<<\n")
         self.assertEqual("", scoped_crash_log(log, "123"))
+
+
+class GuestTests(unittest.TestCase):
+    def test_default_guest_records_the_unchanged_emulator_properties(self):
+        self.assertEqual(("ro.build.version.sdk", "ro.product.cpu.abilist", "ro.dalvik.vm.native.bridge",
+                          "ro.hardware.egl", "ro.boot.qemu.avd_name", "ro.build.version.incremental"),
+                         guest_properties(TRANSLATED_GUEST))
+
+    def test_redroid_records_its_native_gpu_and_codec_stack(self):
+        names = guest_properties(REDROID_GUEST)
+        self.assertEqual(guest_properties(TRANSLATED_GUEST), names[:6])
+        for name in ("ro.hardware", "ro.product.device", "ro.hardware.vulkan", "ro.hardware.gralloc",
+                     "ro.boot.redroid_gpu_mode", "debug.stagefright.ccodec", "sys.use_memfd"):
+            self.assertIn(name, names)
+        with self.assertRaises(ValueError):
+            guest_properties("cuttlefish")
+
+    def test_pass_gate_is_identical_for_every_guest(self):
+        # The guest only changes recorded identity, never validate_report.
+        self.assertTrue(validate_report(successful()))
 
 
 if __name__ == "__main__":

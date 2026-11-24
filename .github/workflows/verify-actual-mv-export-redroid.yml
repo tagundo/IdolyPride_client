@@ -1,0 +1,422 @@
+name: Verify actual MV export in redroid ARM64 (manual, no release)
+
+# The original game's normal Photography 3D MV export, run natively on ARM64
+# in a disposable redroid container on a GitHub ARM runner (no KVM, no ARM
+# translation, software guest GPU). This is a separate evidence scope from the
+# official translated emulator workflow and never phone evidence. A
+# definition-only push registers and runs it on the work branch.
+on:
+  push:
+    branches: [ccr-135ccacf-oukoym]
+    paths: [.github/workflows/verify-actual-mv-export-redroid.yml]
+  workflow_dispatch:
+    inputs:
+      expected_source:
+        description: Optional exact 40-character source commit expected by the caller
+        required: false
+        default: ''
+        type: string
+      song_label:
+        description: Exact visible normal 3D MV song label (no account data)
+        required: true
+        default: Bittersweet Echo
+        type: string
+      cases:
+        description: Runtime case from the table in "Select the runtime case matrix", or all
+        required: true
+        default: direct-30
+        type: choice
+        options: [direct-30, square-60, queue-30, all]
+      image:
+        description: Pinned redroid image tag (each tag is pinned by digest below)
+        required: true
+        default: 15.0.0_64only-250627
+        type: choice
+        options: [15.0.0_64only-250627, 14.0.0_64only-240527]
+      display:
+        description: Portrait guest display (pixel_4 aspect; density 220 or 440)
+        required: true
+        default: 540x1140
+        type: choice
+        options: [540x1140, 1080x2280]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actual-mv-export-redroid-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: ${{ github.sha }}
+  EXPECTED_SOURCE: ${{ inputs.expected_source || github.sha }}
+  PRODUCT_APK: IdolyPride-Unified-2026.11.22.1-prototype.apk
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONPATH: src
+
+jobs:
+  current-input:
+    # Same build as verify-actual-mv-export.yml: the NDK and build-tools are x86-64 hosted.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    outputs:
+      artifact_id: ${{ steps.transport.outputs.artifact-id }}
+      artifact_digest: ${{ steps.transport.outputs.artifact-digest }}
+      cases: ${{ steps.cases.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Select the runtime case matrix (one direct case by default)
+        id: cases
+        env:
+          SELECTED: ${{ inputs.cases || 'direct-30' }}
+          # Extend here: each selected row becomes one independent redroid runtime job.
+          CASE_TABLE: >-
+            [{"case": "direct-30", "fps": 30, "width": 256, "height": 144, "extra": ""},
+            {"case": "square-60", "fps": 60, "width": 192, "height": 192, "extra": ""},
+            {"case": "queue-30", "fps": 30, "width": 256, "height": 144, "extra": "--queue-replay"}]
+        run: |
+          python -B - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os
+          table = json.loads(os.environ["CASE_TABLE"])
+          chosen = os.environ["SELECTED"]
+          rows = [row for row in table if chosen in ("all", row["case"])]
+          if not rows:
+              raise SystemExit("unknown runtime case: " + chosen)
+          print("matrix=" + json.dumps(rows, separators=(",", ":")))
+          EOF
+      - name: Require the exact caller source and strict runtime-verdict tests
+        run: |
+          test "$EXPECTED_SOURCE" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          python -m pip install --disable-pip-version-check pytest==8.4.2 protobuf==6.33.0 pycryptodome==3.23.0
+          python -B -m pytest -q -p no:cacheprovider tests/test_actual_mv_export_qa.py tests/test_actual_mv_qa_input.py tests/test_android_native_source_receipt.py tests/test_package_qa_ui_client.py qa-game-ui/tests/test_loopback_server.py qa-game-ui/tests/test_session_policy.py tests/test_actual_mv_export_redroid_workflow.py tools/emulator_environment_probe/test_driver.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned build toolchain
+        run: sdkmanager 'platforms;android-34' 'platforms;android-35' 'build-tools;34.0.0' 'ndk;26.3.11579264'
+      - name: Execute the observer's exact emulator/redroid guard predicate
+        run: python -B -m pytest -q -p no:cacheprovider qa-game-ui/tests/test_emulator_indicators.py
+      - name: Fetch the normal immutable client and embedded server inputs on this runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -B tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/actual-mv-inputs"
+      - name: Build the current normal unified game without SDK or AES adaptations
+        env:
+          IDOLY_RELEASE_VERSION: 2026.11.22.1
+        run: |
+          mkdir "$RUNNER_TEMP/actual-mv-native" "$RUNNER_TEMP/actual-mv-product" "$RUNNER_TEMP/actual-mv-transport"
+          python -B client-presentation/native/build_native.py --source-commit "$SOURCE_SHA" \
+            --ndk "$ANDROID_HOME/ndk/26.3.11579264" --cache-dir "$RUNNER_TEMP/actual-mv-native-deps" \
+            --output "$RUNNER_TEMP/actual-mv-native/libidoly_presentation.so"
+          umask 077
+          printf '%s\n' android > "$RUNNER_TEMP/actual-mv-development-password.txt"
+          python -B tools/package_android_unified.py --prototype --source-root "$PWD" --source-commit "$SOURCE_SHA" \
+            --client-apk "$RUNNER_TEMP/actual-mv-inputs/client-ko.apk" \
+            --client-ja-apk "$RUNNER_TEMP/actual-mv-inputs/client-ja.apk" \
+            --client-en-apk "$RUNNER_TEMP/actual-mv-inputs/client-en.apk" \
+            --server-apk "$RUNNER_TEMP/actual-mv-inputs/server.apk" \
+            --chaquopy-jar "$RUNNER_TEMP/actual-mv-inputs/chaquopy.jar" \
+            --apkeditor "$RUNNER_TEMP/actual-mv-inputs/APKEditor.jar" \
+            --android-jar "$ANDROID_HOME/platforms/android-35/android.jar" \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" --jdk-bin "$JAVA_HOME/bin" \
+            --keystore android-diagnostics/local-diagnostics-development.keystore \
+            --password-file "$RUNNER_TEMP/actual-mv-development-password.txt" \
+            --native-bridge "$RUNNER_TEMP/actual-mv-native/libidoly_presentation.so" \
+            --native-receipt "$RUNNER_TEMP/actual-mv-native/build-receipt.json" \
+            --output "$RUNNER_TEMP/actual-mv-product/$PRODUCT_APK"
+      - name: Append only the emulator-only observer and bind it to the current producer
+        run: |
+          python -B qa-game-ui/native/build_native.py --ndk "$ANDROID_HOME/ndk/26.3.11579264" \
+            --output "$RUNNER_TEMP/actual-mv-observer-native"
+          INPUT_SHA=$(sha256sum "$RUNNER_TEMP/actual-mv-product/$PRODUCT_APK" | cut -d' ' -f1)
+          python -B tools/package_qa_ui_client.py "$RUNNER_TEMP/actual-mv-product/$PRODUCT_APK" \
+            --input-profile unified-current --emulator-only --session-millis 21600000 \
+            --current-source-receipt "$RUNNER_TEMP/actual-mv-product/${PRODUCT_APK%.apk}.provenance.json" \
+            --source-commit "$SOURCE_SHA" --expected-source-sha256 "$INPUT_SHA" \
+            --native-library "$RUNNER_TEMP/actual-mv-observer-native/lib/arm64-v8a/libidoly_qa_ui_bridge.so" \
+            --apkeditor "$RUNNER_TEMP/actual-mv-inputs/APKEditor.jar" \
+            --android-jar "$ANDROID_HOME/platforms/android-35/android.jar" \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" --java "$JAVA_HOME/bin/java" \
+            --output "$RUNNER_TEMP/actual-mv-transport/current-unified-observer.apk"
+          cp "$RUNNER_TEMP/actual-mv-product/${PRODUCT_APK%.apk}.provenance.json" "$RUNNER_TEMP/actual-mv-transport/"
+          cp "$RUNNER_TEMP/actual-mv-observer-native/native-provenance.json" "$RUNNER_TEMP/actual-mv-transport/observer-native-provenance.json"
+          python -B tools/emulator_environment_probe/build.py --sdk "$ANDROID_HOME" \
+            --ndk "$ANDROID_HOME/ndk/26.3.11579264" --java "$JAVA_HOME/bin" \
+            --output "$RUNNER_TEMP/actual-mv-transport/EnvironmentProbe.apk" \
+            > "$RUNNER_TEMP/actual-mv-transport/environment-build.json"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v4
+        id: transport
+        with:
+          name: redroid-actual-mv-runner-input-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/actual-mv-transport/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  actual-game-redroid:
+    needs: current-input
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.current-input.outputs.cases) }}
+    env:
+      SONG_LABEL: ${{ inputs.song_label || 'Bittersweet Echo' }}
+      REDROID_TAG: ${{ inputs.image || '15.0.0_64only-250627' }}
+      GUEST_DISPLAY: ${{ inputs.display || '540x1140' }}
+      # Loopback only and outside adb's emulator scan range 5555-5585, so the
+      # container has exactly one adb serial and can never be a LAN device.
+      REDROID_SERIAL: 127.0.0.1:15555
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set runner-local evidence directories
+        run: |
+          printf '%s\n' "INPUT_DIR=$RUNNER_TEMP/actual-mv-input" "EVIDENCE_DIR=$RUNNER_TEMP/redroid-mv-evidence" \
+            "REDROID_DATA=$RUNNER_TEMP/redroid-data" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.current-input.outputs.artifact_id }}
+          path: ${{ runner.temp }}/actual-mv-input
+          merge-multiple: true
+      - name: Verify exact input checkout and retain producer identity
+        run: |
+          test "$EXPECTED_SOURCE" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$EVIDENCE_DIR/redroid"
+          cp "$INPUT_DIR"/*.json "$EVIDENCE_DIR/"
+          printf '%s\n' '${{ needs.current-input.outputs.artifact_digest }}' > "$EVIDENCE_DIR/transport-artifact-digest.txt"
+      - name: Host gate (native ARM64 kernel, binder, FUSE; record DMA-BUF heap and memfd)
+        run: |
+          set -euo pipefail
+          H="$EVIDENCE_DIR/redroid/host-capabilities.txt"
+          { uname -a; nproc; free -m; df -h /; echo "page_size=$(getconf PAGESIZE)"
+            grep -m3 -iE 'Features|CPU part|CPU implementer' /proc/cpuinfo || true; } > "$H" 2>&1
+          grep -E 'CONFIG_(ANDROID_BINDER_IPC|ANDROID_BINDERFS|ANDROID_BINDER_DEVICES|DMABUF_HEAPS|DMABUF_HEAPS_SYSTEM|ARM64_4K_PAGES|FUSE_FS|PSI|PSI_DEFAULT_DISABLED|SW_SYNC|COMPAT|MEMFD_CREATE)=' \
+            "/boot/config-$(uname -r)" >> "$H" 2>&1 || true
+          test "$(uname -m)" = aarch64
+          test "$(getconf PAGESIZE)" = 4096
+          # Must precede docker run; the image's own init mounts binderfs itself.
+          sudo modprobe binder_linux devices=binder,hwbinder,vndbinder
+          grep -w binder /proc/filesystems | tee -a "$H"
+          sudo modprobe ashmem_linux 2>/dev/null || echo 'ashmem_linux unavailable (expected on >=5.18): memfd is used' >> "$H"
+          { ls -l /dev/fuse /dev/dma_heap /dev/dri; sysctl vm.memfd_noexec kernel.yama.ptrace_scope; } >> "$H" 2>&1 || true
+          test -c /dev/fuse
+          if [ -c /dev/dma_heap/system ]; then
+            echo 'dma_heap_system=present' >> "$H"
+          else
+            echo 'dma_heap_system=absent' >> "$H"
+            echo '::warning::No /dev/dma_heap/system: a 64only redroid image then exposes no Codec2 encoders.'
+          fi
+          sudo apt-get update -qq
+          # Google ships no linux-aarch64 platform-tools; Ubuntu's arm64 adb is used instead.
+          sudo apt-get install -y --no-install-recommends adb ffmpeg
+          { adb version; ffmpeg -version | head -n 1; docker version --format 'docker {{.Server.Version}} {{.Server.Arch}}'; } >> "$H" 2>&1
+          cat "$H"
+      - name: Start the pinned redroid image (software guest GPU) and wait for boot
+        id: boot
+        run: |
+          set -euo pipefail
+          R="$EVIDENCE_DIR/redroid"
+          case "$REDROID_TAG" in
+            15.0.0_64only-250627) DIGEST=sha256:b51bde9cef80f7bd7581148192f2b2f4d41f23c6344cfe88eceeb8ddd67490ee ;;
+            14.0.0_64only-240527) DIGEST=sha256:0a611199ba2e0b5d60af39b3327a517f6407231f4352114ed3bd3cbfe2be69aa ;;
+            *) echo "::error::unpinned redroid tag"; exit 1 ;;
+          esac
+          IMAGE="redroid/redroid:$REDROID_TAG@$DIGEST"
+          for attempt in 1 2 3 4 5; do
+            if docker pull "$IMAGE"; then break; fi
+            if [ "$attempt" = 5 ]; then exit 1; fi
+            sleep $((attempt * 20))
+          done
+          test "$(docker image inspect -f '{{.Architecture}}' "$IMAGE")" = arm64
+          printf '%s\n' "$IMAGE" > "$R/image.txt"
+          docker image inspect "$IMAGE" > "$R/image-inspect.json"
+          case "$GUEST_DISPLAY" in
+            540x1140) WIDTH=540; HEIGHT=1140; DPI=220 ;;
+            1080x2280) WIDTH=1080; HEIGHT=2280; DPI=440 ;;
+            *) echo "::error::unsupported guest display"; exit 1 ;;
+          esac
+          sudo rm -rf "$REDROID_DATA"
+          mkdir -p "$REDROID_DATA"
+          # Fresh /data on every job; adb published on the runner's loopback only.
+          docker run -d --name redroid --privileged \
+            -v "$REDROID_DATA:/data" \
+            -p "127.0.0.1:${REDROID_SERIAL##*:}:5555" \
+            "$IMAGE" \
+            androidboot.redroid_width="$WIDTH" androidboot.redroid_height="$HEIGHT" androidboot.redroid_dpi="$DPI" \
+            androidboot.redroid_fps=30 androidboot.redroid_gpu_mode=guest \
+            androidboot.use_memfd=true androidboot.use_redroid_c2=1
+          S="$REDROID_SERIAL"
+          booted=
+          for attempt in $(seq 1 300); do
+            if [ "$(docker inspect -f '{{.State.Running}}' redroid)" != true ]; then
+              echo '::error::redroid container exited during boot'; exit 1
+            fi
+            adb connect "$S" >/dev/null 2>&1 || true
+            if [ "$(adb -s "$S" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then booted=1; break; fi
+            sleep 3
+          done
+          test -n "$booted"
+          echo "boot_completed_after_seconds=$SECONDS" | tee "$R/boot.txt"
+          for attempt in $(seq 1 120); do
+            if adb -s "$S" shell cmd package list packages >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          # Quiet the system UI the same way the emulator runner does; nothing touches the game.
+          for setting in 'global window_animation_scale 0' 'global transition_animation_scale 0' \
+              'global animator_duration_scale 0' 'system screen_off_timeout 2147483647' \
+              'secure immersive_mode_confirmations confirmed'; do
+            read -r namespace key value <<< "$setting"
+            adb -s "$S" shell settings put "$namespace" "$key" "$value" || echo "::warning::settings put $setting failed"
+          done
+          # Keep launch and scene-preparation logs: the default ~256 KiB ring
+          # covers only minutes of game logging.
+          adb -s "$S" logcat -G 16M || echo "::warning::logcat buffer resize failed"
+          adb -s "$S" shell svc power stayon true || true
+          adb -s "$S" shell input keyevent KEYCODE_WAKEUP || true
+          adb -s "$S" shell input keyevent 82 || true
+          adb -s "$S" shell wm dismiss-keyguard || true
+          for attempt in $(seq 1 120); do
+            if adb -s "$S" shell dumpsys window windows | tr -d '\r' | grep -E 'mCurrentFocus=.*launcher' > "$R/launcher-focus.txt"; then break; fi
+            sleep 2
+          done
+      - name: Record redroid environment evidence (properties, ABI, GLES/Vulkan, display, codecs, packages)
+        # Best-effort evidence: a missing property or tool must not stop the game run.
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          set -uo pipefail
+          R="$EVIDENCE_DIR/redroid"
+          S="$REDROID_SERIAL"
+          adb -s "$S" shell getprop > "$R/getprop.txt"
+          for name in ro.product.cpu.abi ro.product.cpu.abilist ro.dalvik.vm.native.bridge ro.hardware ro.boot.hardware \
+              ro.product.device ro.build.fingerprint ro.build.version.sdk ro.hardware.egl ro.hardware.vulkan \
+              ro.hardware.gralloc ro.boot.redroid_gpu_mode ro.opengles.version debug.stagefright.ccodec sys.use_memfd \
+              ro.kernel.qemu ro.boot.qemu persist.sys.locale; do
+            printf '%s=%s\n' "$name" "$(adb -s "$S" shell getprop "$name" | tr -d '\r')"
+          done | tee "$R/identity.txt"
+          { adb -s "$S" shell uname -a; adb -s "$S" shell wm size; adb -s "$S" shell wm density; } | tee "$R/display.txt"
+          adb -s "$S" exec-out screencap -p > "$R/boot-screen.png" || true
+          adb -s "$S" shell dumpsys SurfaceFlinger > "$R/surfaceflinger.txt" 2>&1 || true
+          grep -m5 -iE 'GLES:|ANGLE|SwiftShader|Vulkan' "$R/surfaceflinger.txt" | tee "$R/gles-renderer.txt" || true
+          adb -s "$S" shell cmd gpu vkjson > "$R/vulkan.json" 2>&1 || true
+          adb -s "$S" shell dumpsys media.audio_flinger > "$R/audio-flinger.txt" 2>&1 || true
+          adb -s "$S" shell ls /apex/com.android.media.swcodec/lib64 > "$R/swcodec-libraries.txt" 2>&1 || true
+          adb -s "$S" shell ls -l /dev/binderfs /dev/dma_heap /dev/fuse > "$R/guest-devices.txt" 2>&1 || true
+          for package in com.android.documentsui com.google.android.documentsui com.android.inputmethod.latin \
+              com.android.permissioncontroller com.android.launcher3 com.android.systemui com.google.android.gms; do
+            printf '%s %s\n' "$package" "$(adb -s "$S" shell pm path "$package" | tr -d '\r' | head -n 1)"
+          done | tee "$R/packages.txt"
+          adb -s "$S" shell ime list -s > "$R/ime.txt" 2>&1 || true
+          adb devices -l > "$R/adb-devices.txt" 2>&1 || true
+      - name: Environment probe (GLES vec4[300] and the original FCVTZS opcode); verdict recorded, game still runs
+        id: probe
+        continue-on-error: true
+        run: |
+          python -B tools/emulator_environment_probe/run_probe.py --serial "$REDROID_SERIAL" --guest redroid \
+            --apk "$INPUT_DIR/EnvironmentProbe.apk" --output "$EVIDENCE_DIR/environment" --timeout 300
+      - name: Run the real game, play its MV, export, decode, restore and save
+        id: game
+        timeout-minutes: 240
+        run: |
+          # The redroid transport is one adb TCP connection; re-attach it if it drops.
+          ( while sleep 20; do adb connect "$REDROID_SERIAL" >/dev/null 2>&1 || true; done ) &
+          keepalive=$!
+          trap 'kill "$keepalive" 2>/dev/null || true' EXIT
+          python -B tools/run_actual_mv_export_qa.py --guest redroid --serial "$REDROID_SERIAL" \
+            --apk "$INPUT_DIR/current-unified-observer.apk" \
+            --qa-evidence "$INPUT_DIR/current-unified-observer.apk.evidence.json" \
+            --source-commit "$SOURCE_SHA" --output-directory "$EVIDENCE_DIR/runtime" --song-label "$SONG_LABEL" \
+            --fps '${{ matrix.fps }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}' \
+            --startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}
+      - name: Collect bounded container, kernel and redacted Android logs
+        if: always()
+        run: |
+          set +e
+          R="$EVIDENCE_DIR/redroid"
+          S="$REDROID_SERIAL"
+          mkdir -p "$R"
+          REDACT='authorization|bearer|x-auth-token|password|passwd|cookie|(access|refresh|id|auth|session)[_-]?token'
+          docker inspect redroid > "$R/container-inspect.json" 2>&1
+          docker logs --tail 2000 redroid > "$R/docker-logs.txt" 2>&1
+          sudo dmesg -T 2>&1 | tail -n 4000 > "$R/host-dmesg-tail.txt"
+          adb -s "$S" logcat -d -b all -v threadtime 2>&1 | grep -viE "$REDACT" | tail -c 8388608 > "$R/logcat-all-redacted.txt"
+          adb -s "$S" exec-out screencap -p > "$R/final-screen.png" 2>/dev/null
+          { sudo ls -l "$REDROID_DATA/tombstones" "$REDROID_DATA/anr"; } > "$R/tombstones-and-anr.txt" 2>&1
+          mkdir -p "$R/tombstones" "$R/anr"
+          for dir in tombstones anr; do
+            sudo find "$REDROID_DATA/$dir" -maxdepth 1 -type f ! -name '*.pb' 2>/dev/null | sort | tail -n 8 |
+              while read -r file; do sudo head -c 524288 "$file" | grep -viE "$REDACT" > "$R/$dir/$(basename "$file").txt"; done
+          done
+          sudo chown -R "$(id -u):$(id -g)" "$EVIDENCE_DIR"
+          exit 0
+      - name: Summarize where the run stopped
+        if: always()
+        env:
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+          GAME_OUTCOME: ${{ steps.game.outcome }}
+        run: |
+          python -B - <<'EOF' >> "$GITHUB_STEP_SUMMARY" || true
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ["EVIDENCE_DIR"])
+          def load(path):
+              try:
+                  return json.loads((root / path).read_text())
+              except (OSError, ValueError):
+                  return {}
+          report, probe = load("runtime/runtime-report.json"), load("environment/summary.json")
+          print("### redroid ${{ matrix.case }}")
+          print("- probe step:", os.environ["PROBE_OUTCOME"], "/ environment_compatible:", probe.get("environment_compatible"))
+          print("- game step:", os.environ["GAME_OUTCOME"], "/ status:", report.get("status"))
+          print("- failure:", report.get("failure_stage"), report.get("failure_code"))
+          trace = report.get("mp4_diagnostics", {}).get("trace", {})
+          print("- native export trace:", json.dumps(trace.get("export_trace", {}))[:3000])
+          print("- persisted failed trace:", json.dumps(report.get("persisted_mp4_diagnostics", {}))[:2000])
+          EOF
+      - name: Retain small proof even when the actual game cannot launch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redroid-actual-mv-proof-${{ matrix.case }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/redroid-mv-evidence/
+            !${{ runner.temp }}/redroid-mv-evidence/video/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Retain the bounded actual-game movie separately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redroid-actual-mv-movie-${{ matrix.case }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/redroid-mv-evidence/video/*.mp4
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7
+      - name: Remove the disposable container and its data
+        if: always()
+        run: |
+          docker rm -f redroid || true
+          sudo rm -rf "$REDROID_DATA"

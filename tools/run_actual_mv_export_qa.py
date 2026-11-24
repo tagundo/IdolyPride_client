@@ -183,6 +183,7 @@ def redroid_guest_verified(properties):
             and properties.get("ro.product.device") in REDROID_DEVICES
             and properties.get("ro.product.cpu.abi") == "arm64-v8a"
             and "arm64-v8a" in str(properties.get("ro.product.cpu.abilist", "")).split(",")
+            and set(str(properties.get("ro.product.cpu.abilist", "")).split(",")) <= {"arm64-v8a", "armeabi-v7a", "armeabi"}
             and properties.get("ro.dalvik.vm.native.bridge") in ("", "0")
             and properties.get("uname_machine") == "aarch64")
 
@@ -797,7 +798,10 @@ class ActualRun:
             try:
                 need(getattr(self, "explorer", None) is not None, "qa_observer_not_started")
                 payload = self.observer_get("/mp4-diagnostics", MAX_DIAGNOSTICS, "mp4_diagnostics_rejected")
-                need(type(payload) is dict and payload.get("ok") is True, "mp4_diagnostics_unavailable")
+                need(type(payload) is dict, "mp4_diagnostics_unavailable")
+                observer_error = payload.get("error")
+                need(payload.get("ok") is True, "observer_" + re.sub(r"[^a-z0-9_]", "_", str(observer_error))[:64]
+                     if observer_error else "mp4_diagnostics_unavailable")
             except (Rejected, OSError, ValueError, HTTPException, subprocess.SubprocessError) as error:
                 code = str(error)[:96] if isinstance(error, Rejected) else type(error).__name__
                 summary["errors"][code] = summary["errors"].get(code, 0) + 1
@@ -814,7 +818,9 @@ class ActualRun:
             summary.update(last_reason=reason, trace=trace)
             return payload
         except Exception as error:  # Diagnostics must never alter a verdict.
-            self.report.setdefault("mp4_diagnostics_collection_errors", []).append(type(error).__name__)
+            report = getattr(self, "report", None)
+            if isinstance(report, dict):
+                report.setdefault("mp4_diagnostics_collection_errors", []).append(type(error).__name__)
             return None
 
     def capture_persisted_mp4_diagnostics(self):
@@ -859,7 +865,7 @@ class ActualRun:
             waited.append(entry)
             self.record("redroid_system_anr_wait_selected", entry)
             return True
-        except (Rejected, OSError, ValueError, subprocess.SubprocessError) as error:
+        except (Rejected, OSError, ValueError, ET.ParseError, subprocess.SubprocessError) as error:
             self.report.setdefault("system_anr_check_errors", []).append(
                 str(error)[:96] if isinstance(error, Rejected) else type(error).__name__)
             return False

@@ -2,6 +2,8 @@
 from copy import deepcopy
 import importlib.util
 from pathlib import Path
+import re
+import sys
 from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
@@ -632,3 +634,451 @@ def test_all_runtime_labels_exist_in_current_android_resources():
     for name in ("launch_diagnostic_client", "mp4_fps", "mp4_codec", "mp4_bitrate", "mp4_bitrate_mbps", "mp4_output_resolution", "mp4_custom",
                  "mp4_width_pixels", "mp4_height_pixels", "mp4_queue_add", "mp4_queue_run", "mp4_save", "mp4_pause", "mp4_resume"):
         assert qa.labels(name)
+
+
+# --- redroid (native ARM64 container) guest: explicit option, default unchanged ---
+
+def test_default_guest_keeps_the_exact_emulator_serial_contract(tmp_path):
+    assert qa.Device("adb", "emulator-5554", tmp_path).guest == qa.TRANSLATED_GUEST
+    for serial in ("127.0.0.1:15555", "localhost:15555", "emulator-", "emulator-5554 ", "R58M12345"):
+        with pytest.raises(qa.Rejected, match="disposable_emulator_serial_required"):
+            qa.Device("adb", serial, tmp_path)
+
+
+@pytest.mark.parametrize("serial", ["127.0.0.1:15555", "localhost:15555", "127.0.0.1:5555"])
+def test_redroid_guest_accepts_only_its_loopback_adb_transport(tmp_path, serial):
+    device = qa.Device("adb", serial, tmp_path, qa.REDROID_GUEST)
+    assert device.base == ["adb", "-s", serial] and device.guest == qa.REDROID_GUEST
+
+
+@pytest.mark.parametrize("serial", ["emulator-5554", "192.168.1.20:5555", "10.0.2.2:5555", "127.0.0.2:15555",
+                                    "127.0.0.1", "127.0.0.1:1", "R58M12345", "localhost:15555\n"])
+def test_redroid_guest_rejects_emulator_lan_and_physical_serials(tmp_path, serial):
+    with pytest.raises(qa.Rejected, match="disposable_redroid_loopback_serial_required"):
+        qa.Device("adb", serial, tmp_path, qa.REDROID_GUEST)
+
+
+def test_unknown_guest_kind_is_rejected(tmp_path):
+    with pytest.raises(qa.Rejected, match="qa_guest_kind_invalid"):
+        qa.Device("adb", "emulator-5554", tmp_path, "cuttlefish")
+
+
+def redroid_properties(**changes):
+    values = {"ro.hardware": "redroid", "ro.boot.hardware": "redroid", "ro.product.device": "redroid_arm64_only",
+              "ro.product.cpu.abi": "arm64-v8a", "ro.product.cpu.abilist": "arm64-v8a",
+              "ro.dalvik.vm.native.bridge": "0", "ro.kernel.qemu": "", "ro.hardware.egl": "angle",
+              "ro.hardware.vulkan": "pastel", "ro.hardware.gralloc": "redroid", "debug.stagefright.ccodec": "4",
+              "uname_machine": "aarch64"}
+    values.update(changes)
+    return values
+
+
+class PropertyDevice(qa.Device):
+    def __init__(self, tmp_path, guest, values):
+        super().__init__("adb", "127.0.0.1:15555" if guest == qa.REDROID_GUEST else "emulator-5554", tmp_path, guest)
+        self.values, self.commands = values, []
+
+    def adb(self, *args, **kwargs):
+        self.commands.append(args)
+        if args[:2] == ("shell", "getprop"):
+            return self.values.get(args[2], "") + "\n"
+        if args == ("shell", "uname", "-m"):
+            return self.values.get("uname_machine", "") + "\n"
+        if args[:2] == ("shell", "sha256sum"):
+            if "libndk_translation" not in self.values:
+                raise qa.Rejected("adb_operation_failed_shell")
+            return "a" * 64 + "  /system/lib64/libndk_translation.so\n"
+        return ""
+
+
+def test_redroid_identity_records_native_gpu_codec_stack_without_a_translator_hash(tmp_path):
+    device = PropertyDevice(tmp_path, qa.REDROID_GUEST, redroid_properties())
+    identity = device.identity()
+    assert identity["guest"] == "redroid" and identity["ro.hardware.egl"] == "angle"
+    assert identity["debug.stagefright.ccodec"] == "4" and identity["uname_machine"] == "aarch64"
+    assert "native_bridge_sha256" not in identity
+    assert not any(command[:2] == ("shell", "sha256sum") for command in device.commands)
+
+
+@pytest.mark.parametrize("change", [
+    {"ro.hardware": "ranchu"}, {"ro.boot.hardware": ""}, {"ro.boot.hardware": "cutf_cvm"},
+    {"ro.product.device": "redroid_x86_64"}, {"ro.product.device": "redroid_x86_64_only"},
+    {"ro.product.cpu.abi": "x86_64"}, {"ro.product.cpu.abilist": "x86_64,arm64-v8a"},
+    {"ro.dalvik.vm.native.bridge": "libndk_translation.so"}, {"ro.dalvik.vm.native.bridge": "libhoudini.so"},
+    {"uname_machine": "x86_64"},
+])
+def test_redroid_identity_rejects_translated_x86_or_other_guests(tmp_path, change):
+    assert not qa.redroid_guest_verified(redroid_properties(**change))
+    with pytest.raises(qa.Rejected, match="redroid_native_arm64_guest_unavailable"):
+        PropertyDevice(tmp_path, qa.REDROID_GUEST, redroid_properties(**change)).identity()
+
+
+def test_translated_identity_still_requires_qemu_bridge_and_translator_hash(tmp_path):
+    values = {"ro.kernel.qemu": "1", "ro.product.cpu.abilist": "x86_64,arm64-v8a",
+              "ro.dalvik.vm.native.bridge": "libndk_translation.so", "libndk_translation": "present"}
+    identity = PropertyDevice(tmp_path, qa.TRANSLATED_GUEST, values).identity()
+    assert identity["native_bridge_sha256"] == "a" * 64 and "guest" not in identity
+    with pytest.raises(qa.Rejected, match="official_translated_guest_unavailable"):
+        PropertyDevice(tmp_path, qa.TRANSLATED_GUEST, redroid_properties()).identity()
+
+
+ANR_WINDOWS = ("  Window #5 Window{4b1e2a7 u0 Application Not Responding: com.android.systemui}:\n"
+               "  mCurrentFocus=Window{4b1e2a7 u0 Application Not Responding: com.android.systemui}\n")
+
+
+def anr_ui(title="System UI isn't responding", wait_enabled="true", extra=None):
+    tree = ET.Element("hierarchy")
+    ET.SubElement(tree, "node", {"package": "android", "resource-id": "android:id/alertTitle", "text": title})
+    ET.SubElement(tree, "node", {"package": "android", "resource-id": "android:id/aerr_close", "text": "Close app",
+                               "class": "android.widget.Button", "enabled": "true", "clickable": "true",
+                               "bounds": "[40,500][500,560]"})
+    ET.SubElement(tree, "node", {"package": "android", "resource-id": "android:id/aerr_wait", "text": "Wait",
+                               "class": "android.widget.Button", "enabled": wait_enabled, "clickable": "true",
+                               "bounds": "[40,580][500,640]"})
+    for attributes in extra or ():
+        ET.SubElement(tree, "node", attributes)
+    return tree
+
+
+def test_system_anr_dialog_identifies_only_android_wait_control():
+    assert qa.system_anr_windows(ANR_WINDOWS) == ["com.android.systemui"]
+    assert qa.system_anr_windows("mCurrentFocus=Window{1 u0 com.android.launcher3/.Launcher}") == []
+    title, node = qa.system_anr_wait_control(anr_ui())
+    assert title == "System UI isn't responding" and node.get("resource-id") == "android:id/aerr_wait"
+    assert qa.system_anr_wait_control(anr_ui("Idoly Pride is not responding"))[1].get("text") == "Wait"
+
+
+@pytest.mark.parametrize("tree", [
+    anr_ui(wait_enabled="false"), anr_ui(title="Unfortunately, System UI has stopped"),
+    anr_ui(extra=[{"package": "android", "resource-id": "android:id/aerr_wait", "enabled": "true", "clickable": "true"}]),
+    anr_ui(extra=[{"package": "android", "text": "Launcher isn't responding"}]),
+    ET.fromstring('<hierarchy><node package="com.example" text="Game isn\'t responding"/>'
+                  '<node package="com.example" resource-id="android:id/aerr_wait" enabled="true" clickable="true"/></hierarchy>'),
+])
+def test_ambiguous_or_foreign_anr_dialogs_are_left_alone(tree):
+    assert qa.system_anr_wait_control(tree) is None
+
+
+class AnrDevice:
+    def __init__(self, tree, windows=ANR_WINDOWS):
+        self.tree, self.windows, self.commands, self.touches, self.shots = tree, windows, [], [], []
+
+    def adb(self, *args, **kwargs):
+        self.commands.append(args)
+        return self.windows if args == ("shell", "dumpsys", "window", "windows") else ""
+
+    def android(self):
+        return self.tree
+
+    def screenshot(self, name):
+        self.shots.append(name)
+
+    def touch(self, node):
+        self.touches.append(node)
+
+
+def bare_run(tmp_path, guest=None, **arguments):
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    if guest:
+        arguments["guest"] = guest
+    run.args = SimpleNamespace(**arguments)
+    run.proof, run.report, run.journal, run.explorer = tmp_path, {}, [], None
+    return run
+
+
+def test_redroid_answers_system_anr_with_wait_and_records_it(tmp_path):
+    run = bare_run(tmp_path, qa.REDROID_GUEST)
+    run.device = AnrDevice(anr_ui())
+    assert run.relieve_system_anr(force=True) is True
+    assert [node.get("resource-id") for node in run.device.touches] == ["android:id/aerr_wait"]
+    entry = run.report["system_anr_wait_selected"][0]
+    assert entry["choice"] == "wait" and entry["windows"] == ["com.android.systemui"]
+    assert run.journal[-1]["phase"] == "redroid_system_anr_wait_selected" and run.device.shots == ["system-anr-01"]
+    # Throttled between checks; a capped number of answers per run.
+    assert run.relieve_system_anr() is False and len(run.device.touches) == 1
+
+
+def test_translated_guest_never_answers_a_system_dialog(tmp_path):
+    for run in (bare_run(tmp_path, qa.TRANSLATED_GUEST), bare_run(tmp_path)):
+        run.device = AnrDevice(anr_ui())
+        assert run.relieve_system_anr(force=True) is False
+        assert not run.device.commands and not run.device.touches and "system_anr_wait_selected" not in run.report
+
+
+def test_redroid_without_anr_window_does_not_dump_or_touch(tmp_path):
+    run = bare_run(tmp_path, qa.REDROID_GUEST)
+    run.device = AnrDevice(anr_ui(), windows="mCurrentFocus=Window{1 u0 com.android.launcher3/.Launcher}")
+    assert run.relieve_system_anr(force=True) is False and not run.device.touches
+
+
+def test_redroid_pregrants_only_notification_permission_then_launches_main_without_dialog(tmp_path):
+    launcher = main_ui()
+
+    class RedroidDevice:
+        def __init__(self):
+            self.commands, self.touches = [], []
+
+        def identity(self):
+            return {"guest": "redroid"}
+
+        def adb(self, *args, **kwargs):
+            self.commands.append((args, kwargs))
+            if args[:5] == ("shell", "am", "start", "-W", "-a"):
+                return "Starting: Intent\nStatus: ok\nActivity: " + qa.MAIN + "\nComplete\n"
+            if args == ("shell", "dumpsys", "package", qa.PACKAGE):
+                return "    runtime permissions:\n      android.permission.POST_NOTIFICATIONS: granted=true, flags=[ USER_SET ]\n"
+            if args == ("shell", "dumpsys", "activity", "activities"):
+                return activity_context(qa.MAIN)
+            if args[:4] == ("shell", "run-as", qa.PACKAGE, "cat"):
+                return main_lifecycle("precreated", "created", "started", "resumed")
+            return ""
+
+        def android(self):
+            return launcher
+
+        def touch(self, node):
+            self.touches.append(node)
+
+    run = bare_run(tmp_path, qa.REDROID_GUEST, apk=tmp_path / "actual.apk", startup_timeout=10)
+    run.device = RedroidDevice()
+    run.capture_launch_evidence = lambda stage: ""
+    run.handle_dialog = lambda snapshot: False
+    run.ui = SimpleNamespace(UiExplorer=lambda device: SimpleNamespace(_snapshot=lambda: {"ok": True}),
+                             _home_role=lambda snapshot, role: True)
+    run.wait = lambda action, timeout, code: action()
+    run.launch()
+    commands = [args for args, _ in run.device.commands]
+    install = [kwargs for args, kwargs in run.device.commands if args[0] == "install"]
+    assert install == [{"timeout": 600}]
+    grant = ("shell", "pm", "grant", qa.PACKAGE, "android.permission.POST_NOTIFICATIONS")
+    assert grant in commands and commands.index(grant) < next(i for i, c in enumerate(commands) if c[:3] == ("shell", "am", "start"))
+    assert [c for c in commands if "grant" in c] == [grant] and not any("appops" in c for c in commands)
+    assert run.report["notification_permission_pregranted_via_adb"] is True
+    assert [event["phase"] for event in run.journal] == ["redroid_notification_permission_pregranted",
+        "unified_launcher_start_requested", "unified_launcher_start_reported", "unified_launcher_start_accepted"]
+    assert run.device.touches == [launcher[0]]
+
+
+def test_unverified_redroid_pregrant_keeps_the_observed_dialog_path(tmp_path):
+    run = bare_run(tmp_path, qa.REDROID_GUEST)
+    run.device = SimpleNamespace(adb=lambda *args, **kwargs: "Exception occurred while executing 'grant'")
+    assert run.grant_redroid_notification_permission() is False
+    assert run.journal[-1]["phase"] == "redroid_notification_permission_pregrant_unverified"
+
+
+class SaveDevice:
+    def __init__(self, installed):
+        self.installed, self.commands = installed, []
+
+    def adb(self, *args, **kwargs):
+        self.commands.append(args)
+        if args[:3] == ("shell", "pm", "path"):
+            return "package:/system/priv-app/DocumentsUI/DocumentsUI.apk\n" if args[3] in self.installed else ""
+        return ""
+
+
+@pytest.mark.parametrize("guest,installed,expected", [
+    (qa.REDROID_GUEST, (), False), (qa.REDROID_GUEST, ("com.android.documentsui",), True),
+    (qa.TRANSLATED_GUEST, (), True), (None, (), True)])
+def test_missing_documentsui_is_a_distinct_redroid_save_block_not_a_crash(tmp_path, guest, installed, expected):
+    run = bare_run(tmp_path, guest)
+    run.device = SaveDevice(installed)
+    calls = []
+    run.save_cancel = lambda path, digest: calls.append("cancel")
+    run.save_completed = lambda path, digest, identifier: calls.append("save")
+    assert run.save_steps("files/x.mp4", "d" * 64, "e" * 32) is expected
+    if expected:
+        assert calls == ["cancel", "save"] and run.report["save_verdict"] == {"status": "VERIFIED"}
+    else:
+        assert calls == [] and run.report["save_verdict"]["code"] == qa.SAVE_BLOCKED_DOCUMENTSUI
+        assert run.journal[-1]["phase"] == qa.SAVE_BLOCKED_DOCUMENTSUI
+    if guest != qa.REDROID_GUEST:
+        assert not run.device.commands
+
+
+def diagnostics_payload(stage="fresh_warm", code="fresh_warm_draw_wait", sequence=7, last_error="none"):
+    return {"ok": True, "schema": 1, "qa_only": True, "read_only": True, "native_initialized": True,
+            "native_status": {"phase": "preparing", "error_code": "none", "readiness_error": "none",
+                              "scene_diagnostics": {"actor": {"result": 0, "error": "none"}}},
+            "native_diagnostics": {"pipeline_mode": "fresh_original_scene", "export_trace": {
+                "schema": 1, "current_stage": stage, "last_error": last_error,
+                "events": [{"sequence": sequence, "stage": stage, "code": code, "frame": 0, "tick": 0}],
+                "modules": {"native_scene_control": True, "scene_parts": False}},
+                "session_progress": {"job_stage": "scene_acquire", "boundary_entries": 3}},
+            "app_diagnostics": {"job_stage": "scene_acquire", "last_failed_export_trace": {"last_error": "output_geometry_x"}}}
+
+
+def test_export_trace_summary_names_where_the_export_stopped():
+    summary = qa.export_trace_summary(diagnostics_payload())
+    assert summary["export_trace"]["current_stage"] == "fresh_warm"
+    assert summary["export_trace"]["events"][-1]["code"] == "fresh_warm_draw_wait"
+    assert summary["export_trace"]["unbound_modules"] == ["scene_parts"]
+    assert summary["session_progress"]["job_stage"] == "scene_acquire" and summary["phase"] == "preparing"
+    assert summary["last_failed_export_trace"] == {"last_error": "output_geometry_x"}
+    assert summary["scene_diagnostics"]["actor"]["result"] == 0
+    assert qa.export_trace_summary(None) == {} and qa.export_trace_summary({"native_diagnostics": []}) == {}
+
+
+def test_diagnostics_capture_writes_distinct_trace_snapshots_and_never_raises(tmp_path):
+    run = bare_run(tmp_path)
+    run.explorer = SimpleNamespace(port=1)
+    payloads = [diagnostics_payload(), diagnostics_payload(), diagnostics_payload("fresh_wait", "fresh_wait_actor", 8)]
+    run.observer_get = lambda path, limit, code: payloads.pop(0)
+    for reason in ("export_progress", "export_progress", "failure"):
+        run.capture_mp4_diagnostics(reason, force=True)
+    files = sorted(path.name for path in tmp_path.glob("mp4-diagnostics-*.json"))
+    assert files == ["mp4-diagnostics-001-export_progress.json", "mp4-diagnostics-002-failure.json"]
+    assert run.report["mp4_diagnostics"]["trace"]["export_trace"]["current_stage"] == "fresh_wait"
+    assert (tmp_path / "latest-mp4-diagnostics.json").is_file()
+    def unavailable(path, limit, code):
+        raise qa.Rejected("qa_observer_token_unavailable")
+    run.observer_get = unavailable
+    assert run.capture_mp4_diagnostics("final", force=True) is None
+    assert run.report["mp4_diagnostics"]["errors"] == {"qa_observer_token_unavailable": 1}
+    run.observer_get = lambda path, limit, code: 1 / 0
+    assert run.capture_mp4_diagnostics("final", force=True) is None
+    assert run.report["mp4_diagnostics_collection_errors"] == ["ZeroDivisionError"]
+    assert qa.ActualRun.__new__(qa.ActualRun).capture_mp4_diagnostics("x") is None
+
+
+def test_persisted_trace_keeps_only_the_apps_own_export_diagnostics():
+    trace = '{"export_trace":{"current_stage":"output_geometry","last_error":"output_geometry_odd"}}'
+    raw = ("<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n"
+           '    <string name="last_failed_native_trace">' + trace.replace('"', "&quot;") + "</string>\n"
+           '    <string name="last_save_failure_stage">none</string>\n'
+           '    <string name="mp4_title_catalog">private-looking value</string>\n'
+           '    <int name="mp4_fps" value="30" />\n</map>\n')
+    document = qa.persisted_mp4_diagnostics(raw)
+    assert document["last_failed_native_trace"]["export_trace"]["last_error"] == "output_geometry_odd"
+    assert document["last_save_failure_stage"] == "none" and "mp4_title_catalog" not in document
+    assert qa.persisted_mp4_diagnostics("run-as: package not debuggable") == {"available": False}
+
+
+def run_with_stubbed_flow(tmp_path, monkeypatch, guest, *, documentsui=True, export_error=None):
+    monkeypatch.setattr(qa.subprocess, "check_output", lambda *args, **kwargs: "a" * 40 + "\n")
+    apk = tmp_path / "observer.apk"
+    apk.write_bytes(b"apk")
+    evidence = tmp_path / "observer.evidence.json"
+    evidence.write_text(qa.json.dumps({"compiled_manifest_structure_preserved": True,
+        "manifest_factory_and_activities_preserved": True, "input_profile": "unified-current", "qa_only": True,
+        "software_aes_and_no_store_input": False, "all_existing_members_preserved_except_manifest_and_signatures": True,
+        "qa_ui": {"source_commit": "a" * 40}, "output_apk_sha256": qa.sha(apk)}))
+    proof = tmp_path / "runtime"
+    proof.mkdir()
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.args = SimpleNamespace(source_commit="a" * 40, qa_evidence=evidence, apk=apk, export_timeout=60,
+                               queue_replay=False, guest=guest)
+    run.proof, run.journal, run.explorer = proof, [], SimpleNamespace(port=1, _snapshot=lambda: {"ok": True})
+    run.report = {"scope": qa.GUESTS[guest]["scope"], "guest": guest}
+    run.device = SimpleNamespace(adb=lambda *args, **kwargs: "package:/x.apk\n" if documentsui and args[:3] == ("shell", "pm", "path") else "",
+                                 android=lambda: ET.Element("hierarchy"), screenshot=lambda name: None)
+    final = snapshot(600, complete=True)
+    run.launch = run.server_menu = run.configure_and_start = lambda: None
+    run.open_mv = lambda: snapshot()
+    def await_export(baseline):
+        if export_error:
+            raise qa.Rejected(export_error)
+        return final, baseline
+    run.await_export = await_export
+    run.retrieve_and_decode = lambda payload, label: ("files/.idoly-mp4-library/exports/x.mp4", "d" * 64)
+    run.save_cancel = lambda path, digest: None
+    run.save_completed = lambda path, digest, identifier: None
+    reasons = []
+    run.observer_get = lambda path, limit, code: reasons.append(path) or diagnostics_payload(sequence=len(reasons))
+    return run, proof, reasons
+
+
+def test_redroid_pass_has_its_own_scope_and_status_and_keeps_the_trace(tmp_path, monkeypatch):
+    run, proof, reasons = run_with_stubbed_flow(tmp_path, monkeypatch, qa.REDROID_GUEST)
+    assert run.run() is True
+    report = qa.json.loads((proof / "runtime-report.json").read_text())
+    assert report["status"] == "PASS_ACTUAL_MV_EXPORT_REDROID_ARM64_ONLY" and report["guest"] == "redroid"
+    assert report["scope"] == "actual_game_in_redroid_native_arm64_container"
+    assert report["save_verdict"] == {"status": "VERIFIED"} and reasons == ["/mp4-diagnostics"]
+    assert report["mp4_diagnostics"]["last_reason"] == "final" and (proof / "persisted-mp4-diagnostics.json").is_file()
+
+
+def test_redroid_save_block_keeps_export_verdict_but_never_passes(tmp_path, monkeypatch):
+    run, proof, _ = run_with_stubbed_flow(tmp_path, monkeypatch, qa.REDROID_GUEST, documentsui=False)
+    assert run.run() is False
+    report = qa.json.loads((proof / "runtime-report.json").read_text())
+    assert report["status"] == "EXPORT_VERIFIED_SAVE_BLOCKED"
+    assert report["failure_code"] == "save_blocked_documentsui_unavailable" and report["failure_stage"] == "save"
+    assert report["direct_playing_source_export_and_restore_verified"] is True
+    assert report["save_verdict"]["status"] == "BLOCKED"
+
+
+def test_export_failure_records_the_native_trace_on_failure_and_final(tmp_path, monkeypatch):
+    run, proof, reasons = run_with_stubbed_flow(tmp_path, monkeypatch, qa.REDROID_GUEST,
+                                                export_error="native_export_failed_fresh_actor_collect_timeout")
+    assert run.run() is False
+    report = qa.json.loads((proof / "runtime-report.json").read_text())
+    assert report["status"] == "FAILED_OR_ENVIRONMENT_BLOCKED"
+    assert report["failure_code"] == "native_export_failed_fresh_actor_collect_timeout"
+    assert reasons == ["/mp4-diagnostics", "/mp4-diagnostics"]
+    assert report["mp4_diagnostics"]["trace"]["export_trace"]["current_stage"] == "fresh_warm"
+    assert sorted(p.name for p in proof.glob("mp4-diagnostics-*")) == [
+        "mp4-diagnostics-001-failure.json", "mp4-diagnostics-002-final.json"]
+
+
+def test_translated_guest_pass_status_is_unchanged(tmp_path, monkeypatch):
+    run, proof, _ = run_with_stubbed_flow(tmp_path, monkeypatch, qa.TRANSLATED_GUEST, documentsui=False)
+    assert run.run() is True
+    report = qa.json.loads((proof / "runtime-report.json").read_text())
+    assert report["status"] == "PASS_ACTUAL_MV_EXPORT_TRANSLATED_GUEST_ONLY"
+
+
+def test_cli_guest_option_defaults_to_the_translated_emulator(monkeypatch, tmp_path):
+    seen = []
+
+    class Recorder:
+        def __init__(self, args):
+            seen.append(args)
+
+        def run(self):
+            return True
+    monkeypatch.setattr(qa, "ActualRun", Recorder)
+    base = ["driver", "--apk", "a.apk", "--qa-evidence", "e.json", "--source-commit", "a" * 40,
+            "--output-directory", str(tmp_path / "out")]
+    for extra, guest, serial in (([], "translated-emulator", "emulator-5554"),
+                                 (["--guest", "redroid", "--serial", "127.0.0.1:15555"], "redroid", "127.0.0.1:15555")):
+        monkeypatch.setattr(sys, "argv", base + extra)
+        with pytest.raises(SystemExit) as exit_code:
+            qa.main()
+        assert exit_code.value.code == 0 and seen[-1].guest == guest and seen[-1].serial == serial
+    monkeypatch.setattr(sys, "argv", base + ["--guest", "cuttlefish"])
+    with pytest.raises(SystemExit) as exit_code:
+        qa.main()
+    assert exit_code.value.code == 2
+
+
+def java_array(source, name):
+    body = re.search(r"\b" + name + r"\s*=\s*\{(.*?)\};", source, re.S)
+    assert body, name
+    return set(re.findall(r'"([a-z_]+)"', re.sub(r"//[^\n]*", "", body.group(1))))
+
+
+def test_observer_exposes_every_native_field_the_runtime_gates_read():
+    """The QA observer whitelist must carry the observation keys the verdict needs."""
+    source = (ROOT / "qa-game-ui/java/game/qualiarts/idolypride/qa/ui/QaMp4Observation.java").read_text()
+    status, observation = java_array(source, "STATUS"), java_array(source, "OBSERVATION")
+    complete = snapshot(complete=True)["native"]
+    needed = set(complete["observation"]) | {"acquired_source_valid", "acquired_source_identity",
+                                             "acquired_source_time", "acquired_source_paused"}
+    assert needed <= observation, sorted(needed - observation)
+    assert set(complete) - {"observation", "source_width", "source_height"} <= status | {"source_width", "source_height"}
+    assert {"paused", "pause_requested", "readiness_error", "restoration_error"} <= status
+    # Never invent a field: each one is formatted by the native status document.
+    runtime = (ROOT / "client-presentation/native/mp4_runtime.hpp").read_text()
+    formatted = set(re.findall(r'\\"([a-z_]+)\\":', runtime))
+    assert observation <= formatted and status <= formatted, sorted((observation | status) - formatted)
+    assert "/mp4-diagnostics" in (ROOT / "qa-game-ui/java/game/qualiarts/idolypride/qa/ui/LoopbackUiServer.java").read_text()
+
+
+def test_observer_side_diagnostics_errors_keep_their_fixed_code(tmp_path):
+    run = bare_run(tmp_path)
+    run.explorer = SimpleNamespace(port=1)
+    run.observer_get = lambda path, limit, code: {"ok": False, "error": "mp4_diagnostics_oversized"}
+    assert run.capture_mp4_diagnostics("final", force=True) is None
+    assert run.report["mp4_diagnostics"]["errors"] == {"observer_mp4_diagnostics_oversized": 1}
+    assert not list(tmp_path.glob("*.json"))

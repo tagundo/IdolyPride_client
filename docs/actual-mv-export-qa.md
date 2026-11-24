@@ -94,3 +94,49 @@ MV ran, that memory was exhausted, or that export works on a physical device.
 No actual MP4, restoration or saved-file verification passed in this case.
 The small proof artifact is `14738371088`; successful artifact collection and
 strict native links remain separate from a functional runtime pass.
+
+## Native ARM64 redroid guest (separate scope)
+
+`verify-actual-mv-export-redroid.yml` builds the same current input on x86 and
+runs the game on a GitHub `ubuntu-24.04-arm` runner inside a disposable
+[redroid](https://github.com/remote-android/redroid-doc) container
+(`redroid/redroid:15.0.0_64only-250627`, pinned by digest; `14.0.0_64only-240527`
+is a dispatch fallback). The game's arm64 code runs natively, so no ARM
+translation library is present. The runner has no KVM or render node, so the
+guest uses redroid's software GPU (ANGLE on SwiftShader). The container gets a
+fresh `/data`, adb is published only on `127.0.0.1:15555`, and the job loads
+`binder_linux` before starting it. The job records the host gate, the image
+digest, `getprop`, the ABI list, the GLES/Vulkan renderer, display size, codec
+libraries, audio HAL and preinstalled packages.
+
+The driver and probe take an explicit `--guest redroid`. The default
+`translated-emulator` contract is unchanged. Under redroid the driver:
+
+- accepts only a loopback adb serial;
+- requires the exact native ARM64 redroid identity (no native bridge,
+  `uname -m` aarch64) instead of the translator hash;
+- pre-grants only `POST_NOTIFICATIONS` through adb before launch;
+- answers an Android system "isn't responding" dialog with **Wait**, recording
+  each answer;
+- reports a missing DocumentsUI as `EXPORT_VERIFIED_SAVE_BLOCKED` /
+  `save_blocked_documentsui_unavailable`, which is never a pass.
+
+Every export, decode, audio and restore gate is identical. A pass is reported
+as `PASS_ACTUAL_MV_EXPORT_REDROID_ARM64_ONLY` with scope
+`actual_game_in_redroid_native_arm64_container`. This is neither emulator nor
+phone evidence. The environment probe result is recorded, but it does not stop
+the game step.
+
+On both outcomes the driver keeps the app's own export trace. The emulator-only
+observer's read-only `/mp4-diagnostics` endpoint returns the native status with
+scene diagnostics, the native export-trace document (current stage, last error,
+recent events and unbound modules) and the app's diagnostics-export document.
+Each value is re-bounded to scalar codes. The driver writes
+`latest-mp4-diagnostics.json` and one `mp4-diagnostics-NNN-<reason>.json` per
+distinct trace. It also writes `persisted-mp4-diagnostics.json`, the app's
+persisted last and last-failed trace, which can still be read after the process
+dies. `runtime-report.json` summarizes them under `mp4_diagnostics`.
+
+`/mp4-status` now also carries the render target, draw count and restoration
+checkpoint fields. The completion gates already required these fields, but the
+observer had not forwarded them.
