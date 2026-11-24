@@ -1,13 +1,23 @@
 """The redroid MV export workflow is a separate, pinned, native ARM64 scope."""
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
+import stat
+import zipfile
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/verify-actual-mv-export-redroid.yml"
 X86_WORKFLOW = ROOT / ".github/workflows/verify-actual-mv-export.yml"
+spec = importlib.util.spec_from_file_location("redroid_gapps_context", ROOT / "tools/redroid_gapps_context.py")
+gapps = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gapps)
+GAPPS_RELEASE = "MindTheGapps-15.0.0-arm64-20260915_032013"
+GAPPS_SHA256 = "e979601ef70b03d9214ea24ca7a103cb408ab102718fff38ec170a6ca03e263d"
+PINNED_BASE = "redroid/redroid:15.0.0_64only-250627@sha256:b51bde9cef80f7bd7581148192f2b2f4d41f23c6344cfe88eceeb8ddd67490ee"
 
 
 def text():
@@ -129,3 +139,165 @@ def test_workflow_is_valid_yaml_when_a_parser_is_available():
     assert triggers["push"]["branches"] == ["ccr-135ccacf-oukoym"]
     assert set(data["jobs"]) == {"current-input", "actual-game-redroid"}
     assert data["jobs"]["actual-game-redroid"]["runs-on"] == "ubuntu-24.04-arm"
+    assert triggers["workflow_dispatch"]["inputs"]["gapps"] == {
+        "description": "Google Play services in the guest (QA environment only; the game is unchanged)",
+        "required": True, "default": "mindthegapps", "type": "choice", "options": ["mindthegapps", "none"]}
+    runtime = data["jobs"]["actual-game-redroid"]
+    assert runtime["env"]["REDROID_GAPPS"] == "${{ inputs.gapps || 'mindthegapps' }}"
+    boot = next(step for step in runtime["steps"] if step.get("id") == "boot")
+    assert boot["env"] == {"GAPPS_RELEASE": GAPPS_RELEASE, "GAPPS_SHA256": GAPPS_SHA256,
+                           "GAPPS_URL": "https://github.com/MindTheGapps/15.0.0-arm64/releases/download/"
+                                        + GAPPS_RELEASE + "/" + GAPPS_RELEASE + ".zip"}
+    names = [step.get("name", "") for step in runtime["steps"]]
+    settle = next(step for step in runtime["steps"] if step.get("name", "").startswith("Let Google Play services settle"))
+    assert settle["if"] == "env.REDROID_GAPPS == 'mindthegapps'" and settle["continue-on-error"] is True
+    assert names.index(boot["name"]) < names.index(settle["name"]) < names.index(
+        next(step["name"] for step in runtime["steps"] if step.get("id") == "probe"))
+
+
+def boot_step():
+    runtime = job("actual-game-redroid")
+    return runtime[runtime.index("id: boot"):runtime.index("- name: Let Google Play services settle")]
+
+
+def test_google_play_services_are_on_by_default_for_dispatch_and_push():
+    assert re.search(r"\n      gapps:\n        description: [^\n]+\n        required: true\n"
+                     r"        default: mindthegapps\n        type: choice\n        options: \[mindthegapps, none\]\n", text())
+    assert "REDROID_GAPPS: ${{ inputs.gapps || 'mindthegapps' }}" in job("actual-game-redroid")
+
+
+def test_gapps_zip_is_downloaded_from_the_pinned_url_and_rejected_unless_its_sha256_matches():
+    boot = boot_step()
+    assert "GAPPS_RELEASE: " + GAPPS_RELEASE + "\n" in boot
+    assert ("GAPPS_URL: https://github.com/MindTheGapps/15.0.0-arm64/releases/download/" + GAPPS_RELEASE + "/"
+            + GAPPS_RELEASE + ".zip\n") in boot
+    assert "GAPPS_SHA256: " + GAPPS_SHA256 + "\n" in boot
+    download = boot.index('curl -fsSL --connect-timeout 30 --max-time 1200 -o "$G/gapps.zip" "$GAPPS_URL"')
+    assert boot.rindex("for attempt in 1 2 3 4 5; do", 0, download) > boot.index("mindthegapps)")
+    check = boot.index("""if ! printf '%s  %s\\n' "$GAPPS_SHA256" "$G/gapps.zip" | sha256sum -c --quiet -; then""")
+    assert "is not the pinned $GAPPS_SHA256\"\n                exit 1\n" in boot[check:]
+    helper = boot.index('python -B tools/redroid_gapps_context.py --zip "$G/gapps.zip" --sha256 "$GAPPS_SHA256"')
+    build = boot.index('docker build --pull=false --platform linux/arm64 -t "$RUN_IMAGE" "$G/context"')
+    assert download < check < helper < build < boot.index("docker run -d --name redroid")
+    assert '--base-image "$IMAGE" --context "$G/context" > "$R/gapps-context.json"' in boot
+    # The package's GmsCore needs API 35: the Android 14 image fails closed instead of booting without it.
+    assert 'if [ "$REDROID_TAG" != 15.0.0_64only-250627 ]; then' in boot
+    assert "none) printf '%s\\n' gapps=none" in boot and '*) echo "::error::unsupported gapps choice"; exit 1 ;;' in boot
+
+
+def test_derived_image_is_local_from_the_pinned_digest_and_boots_with_the_same_properties():
+    boot = boot_step()
+    assert 'RUN_IMAGE="$IMAGE"\n' in boot and 'RUN_IMAGE="redroid-qa-gapps:$REDROID_TAG"\n' in boot
+    for forbidden in ("docker push", "docker login", "docker tag", "# syntax=", "--entrypoint", "update-binary"):
+        assert forbidden not in text()
+    assert "test \"$(docker image inspect -f '{{.Architecture}}' \"$RUN_IMAGE\")\" = arm64" in boot
+    assert '"${BASE_LAYERS%]},"*) ;;' in boot
+    assert "test \"$(docker image inspect -f '{{json .Config.Entrypoint}}' \"$RUN_IMAGE\")\" = \\" in boot
+    assert 'docker cp "gapps-check:/system/$path" - | tar --numeric-owner -tvf -' in boot
+    assert "if grep -vE '^(drwxr-xr-x|-rw-r--r--) 0/0 ' \"$R/gapps-image-files.txt\"; then" in boot
+    run = boot[boot.index("docker run -d --name redroid"):boot.index("androidboot.use_redroid_c2=1") + 30]
+    assert '\n            "$RUN_IMAGE" \\\n' in run and '"$IMAGE"' not in run
+    for argument in ("androidboot.redroid_gpu_mode=guest", "androidboot.use_memfd=true", "androidboot.redroid_fps=30",
+                     'androidboot.redroid_dpi="$DPI"', '-v "$REDROID_DATA:/data"'):
+        assert argument in run
+    settings = boot[boot.index('if [ "$REDROID_GAPPS" = mindthegapps ]; then'):]
+    for setting in ("'global verifier_verify_adb_installs 0'", "'global package_verifier_enable 0'",
+                    "'global heads_up_notifications_enabled 0'"):
+        assert setting in settings[:settings.index("fi\n")]
+
+
+def test_google_play_services_settle_is_bounded_recorded_and_never_blocks_the_game():
+    runtime = job("actual-game-redroid")
+    settle = runtime[runtime.index("- name: Let Google Play services settle"):runtime.index("- name: Record redroid environment")]
+    assert "if: env.REDROID_GAPPS == 'mindthegapps'\n        continue-on-error: true\n        timeout-minutes: 10\n" in settle
+    assert "LIMIT=180" in settle and 'while [ $((SECONDS - start)) -lt "$LIMIT" ]; do' in settle
+    assert "pm path com.google.android.gms 2> /dev/null" in settle and "pidof com.google.android.gms.persistent" in settle
+    assert "for package in com.google.android.gms com.google.android.gsf com.android.vending; do" in settle
+    for evidence in ('"$R/gms-packages.txt"', '"$R/gms-dumpsys.txt"', '"$R/gms-processes.txt"', '"$R/gms-settle.txt"',
+                     "dumpsys package \"$package\"", "versionName=", '"gms_version_name=${VERSION:-none}"',
+                     '"gms_persistent_process_after_seconds=$running"', "grep -m1 -oE 'Accounts: [0-9]+'",
+                     "getprop ro.com.google.gmsversion", "pm list packages -d"):
+        assert evidence in settle
+    assert "set -uo pipefail" in settle and "set -e" not in settle and settle.rstrip().endswith("exit 0")
+    assert runtime.index("- name: Let Google Play services settle") > runtime.index("id: boot")
+    assert runtime.index("- name: Let Google Play services settle") < runtime.index("id: probe") < runtime.index("id: game")
+
+
+def fake_gapps_zip(path, members, extra=()):
+    with zipfile.ZipFile(path, "w") as archive:
+        for name in list(members) + list(extra):
+            archive.writestr(name, ("content of " + name).encode())
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def fake_pins(members):
+    return {name: (package, hashlib.sha256(("content of " + name).encode()).hexdigest(), len("content of " + name))
+            for name, (package, _, _) in members.items()}
+
+
+def test_gapps_context_takes_only_the_allowlist_with_root_modes_and_a_pinned_from(tmp_path):
+    excluded = ("META-INF/com/google/android/update-binary", "toybox", "system/addon.d/addond_head",
+                "system/system_ext/priv-app/SetupWizard/SetupWizard.apk", "system/product/priv-app/Velvet/Velvet.apk",
+                "system/product/overlay/GmsSetupWizardOverlay.apk", "system/product/lib64/libjni_latinimegoogle.so")
+    members = list(gapps.PACKAGE_APKS) + list(gapps.SUPPORT_FILES)
+    digest = fake_gapps_zip(tmp_path / "gapps.zip", members, excluded)
+    context = tmp_path / "context"
+    receipt = gapps.prepare(tmp_path / "gapps.zip", digest, PINNED_BASE, context, apk_pins=fake_pins(gapps.PACKAGE_APKS))
+    assert (context / "Dockerfile").read_text() == "FROM " + PINNED_BASE + "\nCOPY --chown=0:0 system/ /system/\n"
+    found = sorted(str(path.relative_to(context)) for path in context.rglob("*") if path.is_file())
+    assert found == sorted(members + [gapps.INITIAL_STATE_FILE, "Dockerfile"])
+    for path in (context / "system").rglob("*"):
+        assert stat.S_IMODE(path.stat().st_mode) == (0o755 if path.is_dir() else 0o644)
+    assert set(receipt["packages"]) == {"com.google.android.gms", "com.google.android.gsf", "com.android.vending"}
+    assert receipt["packages"]["com.google.android.gms"]["path"] == "/system/product/priv-app/GmsCore/GmsCore.apk"
+    assert receipt["zip_sha256"] == digest and receipt["base_image"] == PINNED_BASE
+    state = (context / gapps.INITIAL_STATE_FILE).read_text()
+    for package in receipt["packages"]:
+        assert '<initial-package-state package="%s" stopped="false"/>' % package in state
+    assert gapps.INITIAL_STATE_FILE == "system/etc/sysconfig/qa-google-initial-package-state.xml"
+
+
+def test_gapps_context_pins_the_three_google_packages_and_leaves_setup_and_optional_apps_out():
+    assert {package for package, _, _ in gapps.PACKAGE_APKS.values()} == {
+        "com.google.android.gms", "com.google.android.gsf", "com.android.vending"}
+    assert gapps.PACKAGE_APKS["system/product/priv-app/GmsCore/GmsCore.apk"][1:] == (
+        "38eb121872076788b3e2cba8006032ca4eaee569514403cf159d49f47a526d4d", 168192577)
+    assert gapps.PACKAGE_APKS["system/product/priv-app/Phonesky/Phonesky.apk"][1:] == (
+        "63192a372c0f5ff74219872a472371fb0d2eb5f7bf719d890bb8213d2ade6a9f", 79449783)
+    assert gapps.PACKAGE_APKS["system/system_ext/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk"][1:] == (
+        "748a7b1eb1edf2ca7928fe9f1e1f69df16f913755da7b657e62f38a55f0bbff7", 5335582)
+    assert "system/product/overlay/GmsOverlay.apk" in gapps.SUPPORT_FILES
+    for name in list(gapps.PACKAGE_APKS) + list(gapps.SUPPORT_FILES):
+        assert name.startswith(("system/product/", "system/system_ext/")) and ".." not in name
+        assert not re.search(r"SetupWizard|GooglePartnerSetup|GoogleRestore|Velvet|update-binary|toybox|addon\.d", name)
+
+
+@pytest.mark.parametrize("defect", ["zip_sha256", "unpinned_base", "apk_pin", "missing", "symlink", "nonempty"])
+def test_gapps_context_fails_closed(tmp_path, defect):
+    members = list(gapps.PACKAGE_APKS) + list(gapps.SUPPORT_FILES)
+    pins, base, context = fake_pins(gapps.PACKAGE_APKS), PINNED_BASE, tmp_path / "context"
+    if defect == "missing":
+        members.remove("system/product/priv-app/Phonesky/Phonesky.apk")
+    digest = fake_gapps_zip(tmp_path / "gapps.zip", members)
+    if defect == "symlink":
+        with zipfile.ZipFile(tmp_path / "gapps.zip") as source, zipfile.ZipFile(tmp_path / "link.zip", "w") as target:
+            for info in source.infolist():
+                if info.filename == "system/product/etc/init/gapps.rc":
+                    info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                target.writestr(info, source.read(info.filename))
+        (tmp_path / "link.zip").replace(tmp_path / "gapps.zip")
+        digest = hashlib.sha256((tmp_path / "gapps.zip").read_bytes()).hexdigest()
+    if defect == "zip_sha256":
+        digest = "0" * 64
+    if defect == "unpinned_base":
+        base = "redroid/redroid:15.0.0_64only-250627"
+    if defect == "apk_pin":
+        pins = dict(gapps.PACKAGE_APKS)
+    if defect == "nonempty":
+        context.mkdir()
+        (context / "stale").write_text("x")
+    expected = {"zip_sha256": "differs from the pinned", "unpinned_base": "digest-pinned", "apk_pin": "pinned 38eb1218",
+                "missing": "zip has no system/product/priv-app/Phonesky", "symlink": "not a regular file",
+                "nonempty": "not empty"}[defect]
+    with pytest.raises(SystemExit, match=re.escape(expected)):
+        gapps.prepare(tmp_path / "gapps.zip", digest, base, context, apk_pins=pins)

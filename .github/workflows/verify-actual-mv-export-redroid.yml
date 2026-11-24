@@ -4,7 +4,10 @@ name: Verify actual MV export in redroid ARM64 (manual, no release)
 # in a disposable redroid container on a GitHub ARM runner (no KVM, no ARM
 # translation, software guest GPU). This is a separate evidence scope from the
 # official translated emulator workflow and never phone evidence. A
-# definition-only push registers and runs it on the work branch.
+# definition-only push registers and runs it on the work branch. By default the
+# guest also gets genuine Google Play services (GmsCore, GSF, Play Store) from a
+# SHA-256-pinned MindTheGapps release in a local derived image, as on a phone;
+# no Google account is signed in and the game itself is not changed.
 on:
   push:
     branches: [ccr-135ccacf-oukoym]
@@ -39,6 +42,12 @@ on:
         default: 540x1140
         type: choice
         options: [540x1140, 1080x2280]
+      gapps:
+        description: Google Play services in the guest (QA environment only; the game is unchanged)
+        required: true
+        default: mindthegapps
+        type: choice
+        options: [mindthegapps, none]
 
 permissions:
   contents: read
@@ -179,6 +188,9 @@ jobs:
       SONG_LABEL: ${{ inputs.song_label || 'Bittersweet Echo' }}
       REDROID_TAG: ${{ inputs.image || '15.0.0_64only-250627' }}
       GUEST_DISPLAY: ${{ inputs.display || '540x1140' }}
+      # The game's Firebase start needs genuine Google Play services: GmsCore, GSF and the
+      # Play Store (its availability check rejects a guest without the Play Store).
+      REDROID_GAPPS: ${{ inputs.gapps || 'mindthegapps' }}
       # Loopback only and outside adb's emulator scan range 5555-5585, so the
       # container has exactly one adb serial and can never be a LAN device.
       REDROID_SERIAL: 127.0.0.1:15555
@@ -236,6 +248,14 @@ jobs:
           cat "$H"
       - name: Start the pinned redroid image (software guest GPU) and wait for boot
         id: boot
+        # Bounds the GApps download/build retries as well as the boot wait.
+        timeout-minutes: 60
+        env:
+          # Official MindTheGapps Android 15 arm64 release; only its GmsCore, GSF, Play Store
+          # and their configuration are added to a local derived image, never pushed.
+          GAPPS_RELEASE: MindTheGapps-15.0.0-arm64-20260915_032013
+          GAPPS_URL: https://github.com/MindTheGapps/15.0.0-arm64/releases/download/MindTheGapps-15.0.0-arm64-20260915_032013/MindTheGapps-15.0.0-arm64-20260915_032013.zip
+          GAPPS_SHA256: e979601ef70b03d9214ea24ca7a103cb408ab102718fff38ec170a6ca03e263d
         run: |
           set -euo pipefail
           R="$EVIDENCE_DIR/redroid"
@@ -253,6 +273,71 @@ jobs:
           test "$(docker image inspect -f '{{.Architecture}}' "$IMAGE")" = arm64
           printf '%s\n' "$IMAGE" > "$R/image.txt"
           docker image inspect "$IMAGE" > "$R/image-inspect.json"
+          RUN_IMAGE="$IMAGE"
+          case "$REDROID_GAPPS" in
+            none) printf '%s\n' gapps=none "run_image=$RUN_IMAGE" > "$R/gapps.txt" ;;
+            mindthegapps)
+              # The pinned package's GmsCore needs API 35: fail closed on any other image.
+              if [ "$REDROID_TAG" != 15.0.0_64only-250627 ]; then
+                echo "::error::No verified Google Play services package for redroid $REDROID_TAG; dispatch with gapps=none"; exit 1
+              fi
+              G="$RUNNER_TEMP/redroid-gapps"
+              rm -rf "$G"
+              mkdir -p "$G"
+              for attempt in 1 2 3 4 5; do
+                if curl -fsSL --connect-timeout 30 --max-time 1200 -o "$G/gapps.zip" "$GAPPS_URL"; then break; fi
+                if [ "$attempt" = 5 ]; then echo "::error::Could not download $GAPPS_RELEASE"; exit 1; fi
+                sleep $((attempt * 15))
+              done
+              if ! printf '%s  %s\n' "$GAPPS_SHA256" "$G/gapps.zip" | sha256sum -c --quiet -; then
+                echo "::error::$GAPPS_RELEASE.zip SHA-256 $(sha256sum "$G/gapps.zip" | cut -d' ' -f1) is not the pinned $GAPPS_SHA256"
+                exit 1
+              fi
+              # Allowlisted regular files only (GmsCore, GSF, Play Store and their configuration),
+              # 0644 files / 0755 directories; nothing from the zip is executed.
+              python -B tools/redroid_gapps_context.py --zip "$G/gapps.zip" --sha256 "$GAPPS_SHA256" \
+                --base-image "$IMAGE" --context "$G/context" > "$R/gapps-context.json"
+              rm -f "$G/gapps.zip"
+              cp "$G/context/Dockerfile" "$R/gapps-Dockerfile"
+              RUN_IMAGE="redroid-qa-gapps:$REDROID_TAG"
+              # Local only (never pushed). FROM is the exact pinned digest pulled above, which
+              # BuildKit prefers locally; the base image's own entrypoint is inherited.
+              for attempt in 1 2 3; do
+                if docker build --pull=false --platform linux/arm64 -t "$RUN_IMAGE" "$G/context"; then break; fi
+                if [ "$attempt" = 3 ]; then echo '::error::Derived redroid GApps image build failed'; exit 1; fi
+                sleep $((attempt * 20))
+              done
+              rm -rf "$G"
+              test "$(docker image inspect -f '{{.Architecture}}' "$RUN_IMAGE")" = arm64
+              BASE_LAYERS=$(docker image inspect -f '{{json .RootFS.Layers}}' "$IMAGE")
+              case "$(docker image inspect -f '{{json .RootFS.Layers}}' "$RUN_IMAGE")" in
+                "${BASE_LAYERS%]},"*) ;;
+                *) echo '::error::Derived image is not the pinned redroid image plus the GApps layer'; exit 1 ;;
+              esac
+              test "$(docker image inspect -f '{{json .Config.Entrypoint}}' "$RUN_IMAGE")" = \
+                "$(docker image inspect -f '{{json .Config.Entrypoint}}' "$IMAGE")"
+              docker image inspect "$RUN_IMAGE" > "$R/gapps-image-inspect.json"
+              docker create --name gapps-check "$RUN_IMAGE" > /dev/null
+              for path in product/priv-app/GmsCore product/priv-app/Phonesky system_ext/priv-app/GoogleServicesFramework \
+                  etc/sysconfig/qa-google-initial-package-state.xml; do
+                docker cp "gapps-check:/system/$path" - | tar --numeric-owner -tvf -
+              done > "$R/gapps-image-files.txt"
+              docker rm gapps-check > /dev/null
+              cat "$R/gapps-image-files.txt"
+              if grep -vE '^(drwxr-xr-x|-rw-r--r--) 0/0 ' "$R/gapps-image-files.txt"; then
+                echo '::error::GApps files in the derived image are not root-owned 0644/0755'; exit 1
+              fi
+              for name in GmsCore.apk Phonesky.apk GoogleServicesFramework.apk; do
+                if ! grep -qE "^-rw-r--r-- 0/0 .*/$name\$" "$R/gapps-image-files.txt"; then
+                  echo "::error::$name is missing from the derived image"; exit 1
+                fi
+              done
+              printf '%s\n' gapps=mindthegapps "gapps_release=$GAPPS_RELEASE" "gapps_url=$GAPPS_URL" \
+                "gapps_zip_sha256=$GAPPS_SHA256" "base_image=$IMAGE" "run_image=$RUN_IMAGE" \
+                "run_image_id=$(docker image inspect -f '{{.Id}}' "$RUN_IMAGE")" | tee "$R/gapps.txt"
+              ;;
+            *) echo "::error::unsupported gapps choice"; exit 1 ;;
+          esac
           case "$GUEST_DISPLAY" in
             540x1140) WIDTH=540; HEIGHT=1140; DPI=220 ;;
             1080x2280) WIDTH=1080; HEIGHT=2280; DPI=440 ;;
@@ -261,10 +346,11 @@ jobs:
           sudo rm -rf "$REDROID_DATA"
           mkdir -p "$REDROID_DATA"
           # Fresh /data on every job; adb published on the runner's loopback only.
+          BOOT_START=$SECONDS
           docker run -d --name redroid --privileged \
             -v "$REDROID_DATA:/data" \
             -p "127.0.0.1:${REDROID_SERIAL##*:}:5555" \
-            "$IMAGE" \
+            "$RUN_IMAGE" \
             androidboot.redroid_width="$WIDTH" androidboot.redroid_height="$HEIGHT" androidboot.redroid_dpi="$DPI" \
             androidboot.redroid_fps=30 androidboot.redroid_gpu_mode=guest \
             androidboot.use_memfd=true androidboot.use_redroid_c2=1
@@ -279,7 +365,7 @@ jobs:
             sleep 3
           done
           test -n "$booted"
-          echo "boot_completed_after_seconds=$SECONDS" | tee "$R/boot.txt"
+          printf '%s\n' "boot_completed_after_seconds=$SECONDS" "container_boot_seconds=$((SECONDS - BOOT_START))" | tee "$R/boot.txt"
           for attempt in $(seq 1 120); do
             if adb -s "$S" shell cmd package list packages >/dev/null 2>&1; then break; fi
             sleep 2
@@ -291,6 +377,15 @@ jobs:
             read -r namespace key value <<< "$setting"
             adb -s "$S" shell settings put "$namespace" "$key" "$value" || echo "::warning::settings put $setting failed"
           done
+          if [ "$REDROID_GAPPS" = mindthegapps ]; then
+            # With the Play Store present it is the package verifier: keep the QA APK adb installs
+            # unverified, and keep GMS heads-up notifications (uncertified guest) off the game.
+            for setting in 'global verifier_verify_adb_installs 0' 'global package_verifier_enable 0' \
+                'global heads_up_notifications_enabled 0'; do
+              read -r namespace key value <<< "$setting"
+              adb -s "$S" shell settings put "$namespace" "$key" "$value" || echo "::warning::settings put $setting failed"
+            done
+          fi
           # Keep launch and scene-preparation logs: the default ~256 KiB ring
           # covers only minutes of game logging.
           adb -s "$S" logcat -G 16M || echo "::warning::logcat buffer resize failed"
@@ -302,6 +397,55 @@ jobs:
             if adb -s "$S" shell dumpsys window windows | tr -d '\r' | grep -E 'mCurrentFocus=.*launcher' > "$R/launcher-focus.txt"; then break; fi
             sleep 2
           done
+      - name: Let Google Play services settle and record it (bounded; a slow start is recorded, not fatal)
+        if: env.REDROID_GAPPS == 'mindthegapps'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          set -uo pipefail
+          R="$EVIDENCE_DIR/redroid"
+          S="$REDROID_SERIAL"
+          LIMIT=180
+          start=$SECONDS listed=none running=none
+          while [ $((SECONDS - start)) -lt "$LIMIT" ]; do
+            adb connect "$S" > /dev/null 2>&1 || true
+            if [ "$listed" = none ] && adb -s "$S" shell pm path com.google.android.gms 2> /dev/null | tr -d '\r' | grep -q '^package:/'; then
+              listed=$((SECONDS - start))
+            fi
+            if [ "$listed" != none ] && adb -s "$S" shell pidof com.google.android.gms.persistent > /dev/null 2>&1; then
+              running=$((SECONDS - start))
+              break
+            fi
+            sleep 5
+          done
+          for package in com.google.android.gms com.google.android.gsf com.android.vending; do
+            printf '%s %s\n' "$package" "$(adb -s "$S" shell pm path "$package" | tr -d '\r' | tr '\n' ' ')"
+          done | tee "$R/gms-packages.txt"
+          for package in com.google.android.gms com.google.android.gsf com.android.vending; do
+            echo "== $package"
+            adb -s "$S" shell dumpsys package "$package" | tr -d '\r' | grep -m 24 -E \
+              'versionCode=|versionName=|codePath=|primaryCpuAbi=|pkgFlags=|privateFlags=|sharedUser=|signatures=|User 0:'
+          done > "$R/gms-dumpsys.txt"
+          VERSION=$(grep -A 24 '^== com.google.android.gms$' "$R/gms-dumpsys.txt" | grep -m1 -oE 'versionName=[^ ]+' | cut -d= -f2)
+          adb -s "$S" shell ps -A -o PID,USER,NAME | tr -d '\r' |
+            grep -E 'com\.google\.android\.(gms|gsf)|com\.android\.vending' > "$R/gms-processes.txt"
+          DISABLED=$(adb -s "$S" shell pm list packages -d | tr -d '\r' |
+            grep -E '^package:(com\.google\.android\.(gms|gsf)|com\.android\.vending)$' | tr '\n' ' ')
+          # Proves that no Google account is signed in; only the count line is kept.
+          ACCOUNTS=$(adb -s "$S" shell dumpsys account | tr -d '\r' | grep -m1 -oE 'Accounts: [0-9]+')
+          adb -s "$S" shell pm list features | tr -d '\r' |
+            grep -E 'GOOGLE_EXPERIENCE|type\.(watch|embedded|iot)' > "$R/gms-features.txt"
+          printf '%s\n' "settle_limit_seconds=$LIMIT" "gms_listed_after_seconds=$listed" \
+            "gms_persistent_process_after_seconds=$running" "gms_version_name=${VERSION:-none}" \
+            "gms_processes=$(wc -l < "$R/gms-processes.txt")" "disabled_google_packages=${DISABLED:-none}" \
+            "accounts=${ACCOUNTS:-unknown}" "ro.com.google.gmsversion=$(adb -s "$S" shell getprop ro.com.google.gmsversion | tr -d '\r')" |
+            tee "$R/gms-settle.txt"
+          cat "$R/gms-packages.txt" "$R/gms-processes.txt"
+          if [ "$listed" = none ]; then echo "::warning::com.google.android.gms was not listed within ${LIMIT}s"; fi
+          if [ "$running" = none ]; then
+            echo "::warning::GMS persistent process not running within ${LIMIT}s (recorded; it can also start on first bind)"
+          fi
+          exit 0
       - name: Record redroid environment evidence (properties, ABI, GLES/Vulkan, display, codecs, packages)
         # Best-effort evidence: a missing property or tool must not stop the game run.
         continue-on-error: true
@@ -389,6 +533,11 @@ jobs:
                   return {}
           report, probe = load("runtime/runtime-report.json"), load("environment/summary.json")
           print("### redroid ${{ matrix.case }}")
+          try:
+              gms = " ".join((root / "redroid/gms-settle.txt").read_text().split())
+          except OSError:
+              gms = "not recorded"
+          print("- google play services (" + os.environ["REDROID_GAPPS"] + "):", gms)
           print("- probe step:", os.environ["PROBE_OUTCOME"], "/ environment_compatible:", probe.get("environment_compatible"))
           print("- game step:", os.environ["GAME_OUTCOME"], "/ status:", report.get("status"))
           print("- failure:", report.get("failure_stage"), report.get("failure_code"))
