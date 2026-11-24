@@ -1518,7 +1518,9 @@ inline bool native_render_boundary(void* manager,double wall){
 inline void fresh_stage_wait(const char*timeout){
     const uint64_t now=milliseconds();
     if(!job.fresh_wait_error||strcmp(job.fresh_wait_error,timeout)||!job.fresh_stage_wait_started){job.fresh_wait_error=timeout;job.fresh_stage_wait_started=now;}
-    if(now>=job.fresh_stage_wait_started&&now-job.fresh_stage_wait_started>15000)terminal(timeout);
+    if(now>=job.fresh_stage_wait_started&&now-job.fresh_stage_wait_started>15000){
+        // The stage code says where; the scene's last wait says what for.
+        diagnostic_event("fresh_wait",fresh_scene_error("unnamed_wait"),job.frame,0,true);terminal(timeout);}
 }
 inline void fresh_stage_ready(const char*timeout){
     if(job.fresh_wait_error&&!strcmp(job.fresh_wait_error,timeout)){job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;}
@@ -1821,7 +1823,9 @@ inline void on_unity_tick_impl() {
     if(cancel_after_begin)terminal("cancelled_by_user",true);
     if(job.stage==Stage::frame_wait&&!job.captured&&job.activity&&milliseconds()-job.activity>5000)
         terminal("selected_camera_capture_timeout");
-    if(job.stage!=Stage::retiring&&job.activity&&milliseconds()-job.activity>120000)terminal("export_progress_timeout");
+    if(job.stage!=Stage::retiring&&job.activity&&milliseconds()-job.activity>120000){
+        if(job.fresh)diagnostic_event("fresh_wait",fresh_scene_error("unnamed_wait"),job.frame,0,true);
+        terminal("export_progress_timeout");}
     if(job.stage!=Stage::retiring&&!active_broker())terminal("audio_broker_retired");
     encoder_poll();
     switch(job.stage){

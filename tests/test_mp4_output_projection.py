@@ -45,7 +45,8 @@ struct Weak {void* value=nullptr;void* get(bool=false)const{return value&&static
     void set(void* next){value=next;}void clear(){value=nullptr;}};
 namespace idoly_mp4_runtime {struct Game {bool active=true,owned=true;
     bool manual()const{return active;}bool owned_scene_current()const{return active&&owned;}
-    bool owned_primary_scene_current()const{return active&&owned;}} game;}
+    bool owned_primary_scene_current()const{return active&&owned;}} game;
+    inline void diagnostic_event(const char*,const char*,uint64_t=0,uint64_t=0,bool=false){}}
 std::atomic<bool> ready{true};bool unity=true,internal_camera=false,resize_ok=true;
 unsigned aspect_writes=0,aspect_resets=0,lens_writes=0;bool owner_switch_on_resize=false;std::vector<std::array<int32_t,2>> calls;
 bool game_call(bool=false){return unity;}

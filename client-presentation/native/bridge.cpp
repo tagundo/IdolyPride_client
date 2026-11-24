@@ -10949,15 +10949,21 @@ public:
     }
     ~Mp4DynamicTargetScope(){if(active_)finish();}
 };
+// The first failing output-geometry check, traced so a device run names it.
+bool mp4_output_geometry_reject(const char* code){idoly_mp4_runtime::diagnostic_event("output_geometry",code,0,0,true);return false;}
 bool mp4_remember_output_projection(void* controller,void* camera,int32_t width,int32_t height){
-    if(!mp4_projection_api_available()||!camera||!mp4_alive(camera)||orthographic(camera,nullptr))return false;
+    if(!mp4_projection_api_available())return mp4_output_geometry_reject("projection_api_unavailable");
+    if(!camera||!mp4_alive(camera))return mp4_output_geometry_reject("projection_camera_missing");
+    if(orthographic(camera,nullptr))return mp4_output_geometry_reject("projection_camera_orthographic");
     Rect rect{};camera_rect_get(camera,&rect,nullptr);
     ProjectionMatrix matrix{};Frustum measured{};projection_get(camera,&matrix,nullptr);
     const float aspect=aspect_get_original(camera,nullptr),expected=static_cast<float>(width)/height;
     const float raw=fov_get_original(camera,nullptr),focal=focal_get_original(camera,nullptr);
-    if(!full_rect(rect)||!perspective_frustum(matrix,&measured)||std::fabs(frustum_aspect(measured)-expected)>.005f
-        ||!std::isfinite(aspect)||std::fabs(aspect-expected)>.005f||!std::isfinite(raw)||raw<=0||raw>=179
-        ||!std::isfinite(focal)||focal<=0)return false;
+    if(!full_rect(rect))return mp4_output_geometry_reject("projection_rect_not_full");
+    if(!perspective_frustum(matrix,&measured))return mp4_output_geometry_reject("projection_frustum_invalid");
+    if(std::fabs(frustum_aspect(measured)-expected)>.005f)return mp4_output_geometry_reject("projection_frustum_aspect_differs");
+    if(!std::isfinite(aspect)||std::fabs(aspect-expected)>.005f)return mp4_output_geometry_reject("projection_camera_aspect_differs");
+    if(!std::isfinite(raw)||raw<=0||raw>=179||!std::isfinite(focal)||focal<=0)return mp4_output_geometry_reject("projection_lens_invalid");
     mp4_geometry_camera.set(camera);if(mp4_geometry_camera.get(true)!=camera)return false;
     mp4_projection=Mp4Projection{};mp4_projection.saved=true;
     mp4_projection.reference_aspect=aspect;mp4_projection.base_fov=mp4_projection.restore_fov=raw;
@@ -10990,22 +10996,22 @@ bool mp4_output_projection(void* controller,bool apply){
     if(!game_call()||!mp4_output_geometry_owned(controller)||!mp4_projection_api_available())return false;
     if(!apply)return mp4_verify_output_projection(controller);
     void* camera=mp4_geometry_camera.get(true);
-    if(!camera||!mp4_alive(camera)||rt_camera(controller,nullptr)!=camera||orthographic(camera,nullptr))return false;
+    if(!camera||!mp4_alive(camera)||rt_camera(controller,nullptr)!=camera||orthographic(camera,nullptr))return mp4_output_geometry_reject("apply_camera_changed");
     int32_t width=0,height=0;if(!mp4_actual_source_geometry(controller,&width,&height)
-        ||width!=mp4_geometry_width||height!=mp4_geometry_height)return false;
-    Rect rect{};camera_rect_get(camera,&rect,nullptr);if(!full_rect(rect))return false;
+        ||width!=mp4_geometry_width||height!=mp4_geometry_height)return mp4_output_geometry_reject("apply_target_size_differs");
+    Rect rect{};camera_rect_get(camera,&rect,nullptr);if(!full_rect(rect))return mp4_output_geometry_reject("apply_rect_not_full");
     const float target_aspect=static_cast<float>(width)/height;
     // Prove that the original RT owns this aspect before borrowing a ratio.
     // A manual aspect that merely matched the old RT must fail without being
     // silently converted to automatic mode by ResetAspect.
-    if(std::fabs(aspect_get_original(camera,nullptr)-target_aspect)>.0001f)return false;
+    if(std::fabs(aspect_get_original(camera,nullptr)-target_aspect)>.0001f)return mp4_output_geometry_reject("apply_camera_aspect_not_target");
     ScopedValue<bool> internal(internal_camera,true);
     // Cinemachine getters see these baseline values, and its setters update
     // them. Never measure last frame's expanded lens as a new original lens.
     if(physical_get(camera,nullptr))focal_set_original(camera,mp4_projection.base_focal,nullptr);
     else fov_set_original(camera,mp4_projection.base_fov,nullptr);
     const float raw=fov_get_original(camera,nullptr),focal=focal_get_original(camera,nullptr);
-    if(!std::isfinite(raw)||raw<=0||raw>=179||!std::isfinite(focal)||focal<=0)return false;
+    if(!std::isfinite(raw)||raw<=0||raw>=179||!std::isfinite(focal)||focal<=0)return mp4_output_geometry_reject("apply_lens_invalid");
     mp4_projection.base_fov=raw;mp4_projection.base_focal=focal;
     ProjectionMatrix matrix{};Frustum required{},fitted{};
     if(std::fabs(mp4_projection.reference_aspect-target_aspect)<.0001f)projection_get(camera,&matrix,nullptr);
@@ -11015,13 +11021,13 @@ bool mp4_output_projection(void* controller,bool apply){
         camera_aspect_reset(camera,nullptr); // The actual RT remains the sole aspect owner.
     }
     if(!perspective_frustum(matrix,&required)
-        ||std::fabs(frustum_aspect(required)-mp4_projection.reference_aspect)>.005f)return false;
-    if(std::fabs(aspect_get_original(camera,nullptr)-target_aspect)>.0001f)return false;
+        ||std::fabs(frustum_aspect(required)-mp4_projection.reference_aspect)>.005f)return mp4_output_geometry_reject("apply_reference_frustum_differs");
+    if(std::fabs(aspect_get_original(camera,nullptr)-target_aspect)>.0001f)return mp4_output_geometry_reject("apply_camera_aspect_reset_failed");
     projection_get(camera,&matrix,nullptr);float expanded=0;
-    if(!perspective_frustum(matrix,&fitted)||!expanded_raw_fov(required,fitted,raw,&expanded))return false;
+    if(!perspective_frustum(matrix,&fitted)||!expanded_raw_fov(required,fitted,raw,&expanded))return mp4_output_geometry_reject("apply_expanded_fov_invalid");
     fov_set_original(camera,expanded,nullptr);
     mp4_projection.required=required;mp4_projection.required_known=true;
-    return mp4_verify_output_projection(controller);
+    return mp4_verify_output_projection(controller)?true:mp4_output_geometry_reject("apply_verification_failed");
 }
 bool mp4_set_output_geometry(void* controller,int32_t width,int32_t height){
     if(!game_call())return false;
@@ -11054,28 +11060,30 @@ bool mp4_set_output_geometry(void* controller,int32_t width,int32_t height){
         }
         mp4_clear_output_geometry();return good;
     }
-    if(!idoly_mp4_runtime::game.owned_primary_scene_current()||!mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")
-        ||!mp4_alive(controller)||width<16||height<16||width>8192||height>8192||width%2||height%2)return false;
+    if(!idoly_mp4_runtime::game.owned_primary_scene_current())return mp4_output_geometry_reject("geometry_scene_not_owned");
+    if(!mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")||!mp4_alive(controller))return mp4_output_geometry_reject("geometry_controller_invalid");
+    if(width<16||height<16||width>8192||height>8192||width%2||height%2)return mp4_output_geometry_reject("geometry_size_invalid");
     if(mp4_geometry_active&&!mp4_geometry_controller.get(true))mp4_clear_output_geometry();
-    if(mp4_geometry_active&&mp4_geometry_controller.get(true)!=controller)return false;
+    if(mp4_geometry_active&&mp4_geometry_controller.get(true)!=controller)return mp4_output_geometry_reject("geometry_other_controller_owned");
     if(!mp4_geometry_active){
         int32_t previous_width=0,previous_height=0;
         if(!mp4_actual_source_geometry(controller,&previous_width,&previous_height)
-            ||previous_width<16||previous_height<16||previous_width>8192||previous_height>8192)return false;
+            ||previous_width<16||previous_height<16||previous_width>8192||previous_height>8192)return mp4_output_geometry_reject("geometry_previous_target_missing");
         if(!mp4_remember_output_projection(controller,rt_camera(controller,nullptr),previous_width,previous_height)){
             mp4_clear_output_geometry();return false;
         }
         mp4_geometry_controller.set(controller);
-        if(mp4_geometry_controller.get(true)!=controller){mp4_clear_output_geometry();return false;}
+        if(mp4_geometry_controller.get(true)!=controller){mp4_clear_output_geometry();return mp4_output_geometry_reject("geometry_controller_root_failed");}
         mp4_geometry_previous_width=previous_width;mp4_geometry_previous_height=previous_height;
     }
     mp4_geometry_width=width;mp4_geometry_height=height;mp4_geometry_active=true;
     ScopedValue<bool> internal(internal_camera,true);
     Mp4DynamicTargetScope dynamic(controller);
     rt_original(controller,width,height,false,nullptr);
-    if(!dynamic.finish()){mp4_clear_output_geometry();return false;}
+    if(!dynamic.finish()){mp4_clear_output_geometry();return mp4_output_geometry_reject("geometry_dynamic_scope_lost");}
     int32_t actual_width=0,actual_height=0;
-    return mp4_actual_source_geometry(controller,&actual_width,&actual_height)&&actual_width==width&&actual_height==height;
+    if(!mp4_actual_source_geometry(controller,&actual_width,&actual_height))return mp4_output_geometry_reject("geometry_target_unreadable");
+    return actual_width==width&&actual_height==height?true:mp4_output_geometry_reject("geometry_target_size_differs");
 }
 // END_MP4_OUTPUT_PROJECTION
 
@@ -57366,7 +57374,7 @@ Mp4FreshResult mp4_fresh_hold(void*){
 Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job){
  auto&h=mp4_fresh_host;
  if(h.active&&(h.job!=job||!mp4_scene_same_source(source,h.source)))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_scene_already_owned");
- if(h.active&&h.roster&&h.roster->converted){const auto held=mp4_fresh_hold(nullptr);return held!=Mp4FreshResult::ok?held:(!mp4_fresh_play_gate.reset_required||mp4_fresh_play_gate.reset_returned)?Mp4FreshResult::ok:Mp4FreshResult::waiting;}
+ if(h.active&&h.roster&&h.roster->converted){const auto held=mp4_fresh_hold(nullptr);return held!=Mp4FreshResult::ok?held:(!mp4_fresh_play_gate.reset_required||mp4_fresh_play_gate.reset_returned)?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_delayed_actor_reset_wait");}
  if(!job||!source.generation||!idoly_mp4_runtime::native_clock_scope().held())return mp4_fresh_fail(Mp4FreshResult::invalid,"fresh_acquire_clock_missing");
  h.source=source;h.job=job;h.active=true;h.detached=false;mp4_fresh_withdrawn.store(false,std::memory_order_release);
  const auto played=mp4_fresh_release_deferred_play();if(played!=Mp4FreshResult::ok)return played;
@@ -57412,7 +57420,7 @@ Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job
    mp4_actor_graph_set(&graph,h.roster->path_graphs[i].desired_mode,nullptr);
    if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode||!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_clock_conversion_failed");}
   h.roster->converted=true;}
- const auto held=mp4_fresh_hold(nullptr);return held!=Mp4FreshResult::ok?held:(!mp4_fresh_play_gate.reset_required||mp4_fresh_play_gate.reset_returned)?Mp4FreshResult::ok:Mp4FreshResult::waiting;
+ const auto held=mp4_fresh_hold(nullptr);return held!=Mp4FreshResult::ok?held:(!mp4_fresh_play_gate.reset_required||mp4_fresh_play_gate.reset_returned)?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_delayed_actor_reset_wait");
 }
 Mp4FreshResult mp4_fresh_start(void*){
  auto&h=mp4_fresh_host;
@@ -57511,6 +57519,9 @@ bool mp4_fresh_render_call(Mp4RenderCamera original,Mp4RenderContext context,voi
    ||!mp4_shader_lease_set_time(&h,static_cast<float>(seconds))){h.error="fresh_render_clock_changed";complete();return true;}
   const auto draw=[&](){mp4_particle_render_observed(original,context,camera,method);};
   success=(prewarm?mp4_actor_mono_gate.isolate_preview(draw):mp4_actor_mono_gate.isolate_render(reinterpret_cast<uintptr_t>(camera),draw))&&mp4_fresh_current(nullptr);
+  // A failed draw ends as a generic camera code; trace the gate's or scene's reason.
+  if(!success){const char*gate=mp4_actor_mono_gate.error();
+   idoly_mp4_runtime::diagnostic_event("fresh_render",gate&&*gate&&std::strcmp(gate,"none")?gate:(h.error&&*h.error?h.error:"fresh_render_failed"),0,h.tick,true);}
  }catch(...){complete();throw;}
  complete();return true;
 }

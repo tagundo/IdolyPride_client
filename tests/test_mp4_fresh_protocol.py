@@ -335,6 +335,7 @@ bool mp4_shader_lease_set_time(void*owner,float seconds){
 struct RenderIsolationLeaf{
  template<class F>bool isolate_preview(const F&draw){++isolated_draws;draw();return true;}
  template<class F>bool isolate_render(uintptr_t owner,const F&draw){assert(owner==reinterpret_cast<uintptr_t>(ptr(camera)));++isolated_draws;draw();return true;}
+ const char*error()const{return "none";}
 }mp4_actor_mono_gate;
 void mp4_particle_render_observed(Mp4RenderCamera original,Mp4RenderContext context,void*selected_camera,Method*method){original(context,selected_camera,method);}
 // SHIPPING_FRESH_RENDER_CALL
