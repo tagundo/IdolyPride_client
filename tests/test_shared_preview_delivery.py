@@ -165,3 +165,39 @@ def test_apk_feature_proof_rejects_optional_native_omission_and_partial_language
         report.write_text(json.dumps(changed))
         with pytest.raises(ValueError, match="apk_shared_feature"):
             delivery.apk_files(tmp_path)
+
+
+def test_public_input_fetch_retries_rate_limits_from_an_empty_file(tmp_path, monkeypatch):
+    from io import BytesIO
+    from urllib.error import HTTPError
+    calls, sleeps = [], []
+
+    class Response(BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *args): self.close()
+
+    def opener(origin, timeout):
+        calls.append(origin)
+        if len(calls) == 1:
+            raise HTTPError(origin, 429, "Too Many Requests", {"Retry-After": "7"}, None)
+        if len(calls) == 2:
+            raise HTTPError(origin, 503, "Unavailable", {}, None)
+        return Response(b"payload")
+
+    monkeypatch.setattr(delivery, "urlopen", opener)
+    monkeypatch.setattr(delivery.time, "sleep", sleeps.append)
+    target = tmp_path / "input.bin"
+    delivery.fetch_public("https://example.invalid/input", target, 7)
+    assert target.read_bytes() == b"payload" and len(calls) == 3 and sleeps == [7, 30]
+
+
+def test_public_input_fetch_does_not_retry_a_missing_input(tmp_path, monkeypatch):
+    from urllib.error import HTTPError
+
+    def opener(origin, timeout):
+        raise HTTPError(origin, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(delivery, "urlopen", opener)
+    monkeypatch.setattr(delivery.time, "sleep", lambda _: pytest.fail("a 404 must not wait"))
+    with pytest.raises(HTTPError):
+        delivery.fetch_public("https://example.invalid/input", tmp_path / "input.bin", 7)

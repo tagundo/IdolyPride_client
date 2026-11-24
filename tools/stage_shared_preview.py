@@ -15,6 +15,7 @@ import stat
 import subprocess
 import tempfile
 import time
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from zipfile import ZipFile
 
@@ -59,6 +60,40 @@ def download_api(path, target):
                        stdout=stream, check=True, timeout=600)
 
 
+RETRYABLE_HTTP = {429, 500, 502, 503, 504}
+FETCH_ATTEMPTS = 6
+
+
+def fetch_public(origin, target, size):
+    """Download one pinned public input, retrying rate limits and server errors.
+
+    Several workflows started by one push fetch the same inputs at once, and the
+    host answers some of them with 429. Each retry restarts from an empty file;
+    the size and digest pins are still checked by the caller.
+    """
+    for attempt in range(FETCH_ATTEMPTS):
+        try:
+            with urlopen(origin, timeout=60) as source, target.open("xb") as output:
+                used = 0
+                while block := source.read(256 * 1024):
+                    used += len(block)
+                    need(used <= size, "public_input_size_exceeded")
+                    output.write(block)
+            return
+        except HTTPError as error:
+            if error.code not in RETRYABLE_HTTP or attempt == FETCH_ATTEMPTS - 1:
+                raise
+            advised = (error.headers.get("Retry-After") or "").strip() if error.headers else ""
+            delay = min(300, int(advised)) if advised.isdigit() else min(240, 15 * 2 ** attempt)
+        except URLError:
+            if attempt == FETCH_ATTEMPTS - 1:
+                raise
+            delay = min(240, 15 * 2 ** attempt)
+        target.unlink(missing_ok=True)
+        print(f"retrying public input {target.name} in {delay}s", flush=True)
+        time.sleep(delay)
+
+
 def fetch_inputs(folder):
     folder.mkdir(parents=True, exist_ok=False)
     for name, (origin, size, digest) in INPUTS.items():
@@ -66,12 +101,7 @@ def fetch_inputs(folder):
         if type(origin) is int:
             download_api(f"releases/assets/{origin}", target)
         else:
-            with urlopen(origin, timeout=60) as source, target.open("xb") as output:
-                used = 0
-                while block := source.read(256 * 1024):
-                    used += len(block)
-                    need(used <= size, "public_input_size_exceeded")
-                    output.write(block)
+            fetch_public(origin, target, size)
         need(target.stat().st_size == size and sha(target) == digest, "public_input_pin_differs")
     if __package__:
         from . import refresh_korean_translation_bundle as korean
