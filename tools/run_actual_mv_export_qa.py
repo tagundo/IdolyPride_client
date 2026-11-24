@@ -599,6 +599,22 @@ def load_ui():
 TITLE_RETAP_SECONDS, TITLE_TAP_LIMIT = 20, 15
 
 
+TERMS_SHEET = "/TermsOfServiceSheet(Clone)/"
+TERMS_AGREE_SUFFIX = "/Actions/Execute/TextButtonNormal"
+
+
+def terms_agree_target(snapshot):
+    """The single active, wired Agree button of the game's Terms of Service sheet."""
+    nodes = snapshot.get("nodes") if isinstance(snapshot, dict) else None
+    if not isinstance(nodes, list):
+        return None
+    found = [node for node in nodes if isinstance(node, dict) and node.get("kind") == "button"
+             and node.get("active") is True and node.get("interactable") is True
+             and node.get("callback_registered") is True
+             and TERMS_SHEET in str(node.get("path", "")) and str(node.get("path", "")).endswith(TERMS_AGREE_SUFFIX)]
+    return found[0] if len(found) == 1 else None
+
+
 def labels(name):
     found = set()
     for path in (ROOT / "android-server/app/src/main/res").glob("values*/strings*.xml"):
@@ -923,6 +939,12 @@ class ActualRun:
         return self.wait(attempt, 120, "observed_route_control_unavailable")
 
     def handle_dialog(self, snap):
+        # The game's own first-start Terms of Service sheet: its agree checkbox is
+        # pre-checked in the observed UI and its Agree action stays interactable.
+        terms = terms_agree_target(snap)
+        if terms is not None:
+            self.unity_touch(snap, terms, "observed_terms_agree")
+            return True
         for function, role in ((self.ui.notice_close_target, "observed_notice_close"),
                                (self.ui.manager_level_close_target, "observed_manager_level_close"),
                                (self.ui.lesson_reward_close_target, "observed_lesson_reward_close"),

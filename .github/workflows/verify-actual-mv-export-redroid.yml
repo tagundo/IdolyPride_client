@@ -397,6 +397,40 @@ jobs:
             if adb -s "$S" shell dumpsys window windows | tr -d '\r' | grep -E 'mCurrentFocus=.*launcher' > "$R/launcher-focus.txt"; then break; fi
             sleep 2
           done
+      - name: Keep the Play Store from self-updating Google Play services during the run
+        # Run 3 lost the game 7 minutes after boot: the Play Store updated GmsCore,
+        # and Android restarts every process bound to the replaced package, the
+        # game included. Cut only the Play Store's network; GmsCore, GSF and the
+        # game keep theirs, and every package stays installed and enabled (the
+        # game's Google Play services check requires an enabled Play Store).
+        if: env.REDROID_GAPPS == 'mindthegapps'
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          set -uo pipefail
+          R="$EVIDENCE_DIR/redroid"
+          S="$REDROID_SERIAL"
+          VUID=$(adb -s "$S" shell pm list packages -U com.android.vending | tr -d '\r' |
+            grep -m1 '^package:com.android.vending ' | grep -oE 'uid:[0-9]+' | cut -d: -f2)
+          ROOT=$(adb -s "$S" shell id -u | tr -d '\r')
+          {
+            echo "vending_uid=${VUID:-unknown}"
+            echo "adb_shell_uid=${ROOT:-unknown}"
+            echo "connectivity_block: $(adb -s "$S" shell cmd connectivity set-package-networking-enabled false com.android.vending 2>&1 | tr -d '\r' | head -c 300)"
+            if [ -n "${VUID:-}" ]; then
+              for tool in iptables ip6tables; do
+                if [ "$ROOT" = 0 ]; then
+                  out=$(adb -s "$S" shell "$tool" -I OUTPUT -m owner --uid-owner "$VUID" -j REJECT 2>&1)
+                else
+                  out=$(adb -s "$S" shell su 0 "$tool" -I OUTPUT -m owner --uid-owner "$VUID" -j REJECT 2>&1)
+                fi
+                echo "${tool}_owner_reject: rc=$? ${out:0:200}"
+              done
+            fi
+            adb -s "$S" shell am force-stop com.android.vending
+            echo "vending_enabled=$(adb -s "$S" shell pm list packages -e com.android.vending | tr -d '\r' | grep -c '^package:com.android.vending$')"
+          } 2>&1 | tee "$R/vending-network.txt"
+          exit 0
       - name: Let Google Play services settle and record it (bounded; a slow start is recorded, not fatal)
         if: env.REDROID_GAPPS == 'mindthegapps'
         continue-on-error: true

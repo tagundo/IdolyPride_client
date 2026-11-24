@@ -1135,3 +1135,26 @@ def test_observer_side_diagnostics_errors_keep_their_fixed_code(tmp_path):
     assert run.capture_mp4_diagnostics("final", force=True) is None
     assert run.report["mp4_diagnostics"]["errors"] == {"observer_mp4_diagnostics_oversized": 1}
     assert not list(tmp_path.glob("*.json"))
+
+
+def test_terms_of_service_sheet_is_agreed_through_its_own_wired_button():
+    base = "Title/TitleStartTutorial(Clone)/TermsOfServiceSheet(Clone)/Canvas/Root/UIContentArea/ActionBarContainer/AnchorAdjust/Actions/"
+    agree = {"path": base + "Execute/TextButtonNormal", "kind": "button", "active": True,
+             "interactable": True, "callback_registered": True}
+    cancel = dict(agree, path=base + "Cancel/TextButtonNormal")
+    title = {"path": "Canvas/TitleButton", "kind": "button", "active": True, "interactable": True, "callback_registered": True}
+    assert qa.terms_agree_target({"nodes": [title, cancel, agree]}) is agree
+    assert qa.terms_agree_target({"nodes": [title, cancel]}) is None
+    for broken in ({"interactable": False}, {"active": False}, {"callback_registered": None}, {"kind": "tmp_text"}):
+        assert qa.terms_agree_target({"nodes": [dict(agree, **broken)]}) is None
+    assert qa.terms_agree_target({"nodes": [agree, dict(agree)]}) is None
+    assert qa.terms_agree_target({"ok": False}) is None
+
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.journal, touched = [], []
+    run.explorer = SimpleNamespace(_tap=lambda snap, node, role, index: touched.append((node["path"], role)) or True)
+    run.ui = SimpleNamespace(notice_close_target=lambda s: None, manager_level_close_target=lambda s: None,
+                             lesson_reward_close_target=lambda s: None, download_confirmation=lambda s: None)
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase})
+    assert run.handle_dialog({"nodes": [title, cancel, agree]}) is True
+    assert touched == [(agree["path"], "observed_terms_agree")] and run.journal[-1]["phase"] == "observed_terms_agree"
