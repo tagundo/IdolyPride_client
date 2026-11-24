@@ -595,6 +595,10 @@ def load_ui():
     return module
 
 
+# The title ignores input while it fades in; re-tap a still-visible title.
+TITLE_RETAP_SECONDS, TITLE_TAP_LIMIT = 20, 15
+
+
 def labels(name):
     found = set()
     for path in (ROOT / "android-server/app/src/main/res").glob("values*/strings*.xml"):
@@ -989,6 +993,7 @@ class ActualRun:
                     "foreground_main_and_observed_control": True, "main_lifecycle_resumed": True})
         self.device.touch(launch)
         self.explorer = self.ui.UiExplorer(self.device)
+        title_taps = []
         def title_or_home():
             snapshot = self.explorer._snapshot()
             if snapshot.get("ok") is not True:
@@ -999,8 +1004,12 @@ class ActualRun:
                 return True
             title = [n for n in self.ui.buttons(snapshot) if n.get("path") == "Canvas/TitleButton"]
             if len(title) == 1 and self.ui.title_block_reason(snapshot, title[0]) is None:
-                if not any(e["phase"] == "observed_title" for e in self.journal):
-                    self.unity_touch(snapshot, title[0], "observed_title")
+                # A tap during the title fade-in is ignored by the game; while
+                # the same title stays up, tap it again at a bounded interval.
+                now = time.monotonic()
+                if not title_taps or (now - title_taps[-1] >= TITLE_RETAP_SECONDS and len(title_taps) < TITLE_TAP_LIMIT):
+                    self.unity_touch(snapshot, title[0], "observed_title" if not title_taps else "observed_title_retap")
+                    title_taps.append(now)
             return None
         self.wait(title_or_home, self.args.startup_timeout, "usable_home_not_observed")
         self.report["game_boot_verified"] = True
