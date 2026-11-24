@@ -116,7 +116,7 @@ void initialize_source(){
 
 namespace mp4actor=idoly_mp4_actor;
 mp4actor::MonoGate mp4_actor_mono_gate;
-mp4actor::MonoCallback mp4_actor_late_original=nullptr,mp4_actor_derived_late_ref_original=nullptr,mp4_actor_derived_late_shared_original=nullptr;
+mp4actor::MonoCallback mp4_actor_late_original=nullptr,mp4_actor_derived_late_ref_original=nullptr,mp4_actor_derived_late_shared_original=nullptr,mp4_actor_solis_late_original=nullptr;
 struct Mp4RenderContext{void*pointer;};
 using VoidMethod=void(*)(void*,Method*);using Mp4SrpAdd=void(*)(void*,void*,Method*);using Mp4SrpFrame=void(*)(void*,Mp4RenderContext,void*,Method*);
 namespace idoly_mp4_runtime {

@@ -3213,7 +3213,8 @@ const char* mp4_actor_collect_error="none";
 // - VLActorTalkFFT._windowArray (+0x40) is created by the first audio FFT,
 //   which has not run before the talk audio source is set.
 bool mp4_actor_presentation_collect(const mp4actor::Owner* owners,size_t owner_count,bool live,mp4actor::PresentationInventory& i,bool fresh=false){
-    const auto reject=[](const char* code){mp4_actor_collect_error=code;return false;};
+    // A full node table rejects every later node; name it as capacity.
+    const auto reject=[&i](const char* code){mp4_actor_collect_error=i.node_count>=256?"actor_collect_node_capacity":code;return false;};
     mp4_actor_collect_error="none";
     if(!owners||!owner_count||owner_count>32||!game_call())return reject("actor_collect_owners_invalid");
     for(size_t n=0;n<owner_count;++n){const auto& owner=owners[n];void* actor=owner.actor;
