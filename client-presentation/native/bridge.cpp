@@ -56329,13 +56329,22 @@ bool mp4_fresh_video_bindings(){
  const auto&p=mp4_video_native_pins.update;const auto at=mp4_native_base+p.rva;
  return at>=mp4_native_base&&mp4_native_mapped(at,16,5)&&!std::memcmp(reinterpret_cast<void*>(at),p.prefix,16);
 }
+// VideoImage._videoPlayer (+0xf0) is not serialized: only VideoImage.OnEnable
+// sets it, to GetComponent<VideoPlayer>() of its own GameObject, and the track
+// first enables the image in PrepareCompleted. Before that it is null, which
+// is the game's own state; a frame is published only once it is this player.
+bool mp4_fresh_video_image_bound(void*image,void*player,bool publishing){
+ void*bound=nullptr;
+ return player&&mp4_actor_field(image,mp4camp::RenderLayout::video_image_player,bound)
+  &&(bound==player||(!publishing&&!bound));
+}
 bool mp4_fresh_video_current(void*context,const mp4freshvideo::Identity&id){
- auto*e=static_cast<Mp4FreshVideoEntry*>(context);uintptr_t vp=0,clip=0,image=0;void*bound=nullptr;
+ auto*e=static_cast<Mp4FreshVideoEntry*>(context);uintptr_t vp=0,clip=0,image=0;
  if(!e||!e->active||!mp4freshvideo::same(e->identity,id)||!mp4_fresh_current(nullptr)||!mp4_fresh_video_program_current()||!mp4_fresh_video_bindings()
   ||id.source!=mp4_fresh_host.source.generation||id.job!=mp4_fresh_host.job
   ||!mp4_video_native(id.player,&vp)||vp!=id.player_native||!mp4_video_native(id.clip,&clip)||clip!=id.clip_native
   ||!mp4_video_native(e->image,&image)||image!=e->image_native
-  ||!mp4_actor_field(e->image,mp4camp::RenderLayout::video_image_player,bound)||bound!=id.player)return false;
+  ||!mp4_fresh_video_image_bound(e->image,id.player,false))return false;
  if(e->script){uint8_t recording=1;
   if(!mp4_root_track_field(e->script,"IsRecording",mp4camp::RenderLayout::video_mixer_isrecording)
    ||!mp4_actor_field(e->script,mp4camp::RenderLayout::video_mixer_isrecording,recording)||recording)return false;
@@ -56480,7 +56489,14 @@ bool mp4_fresh_video_step(void*context,const mp4freshvideo::Identity&id){
  return mp4_fresh_video_current(context,id);
 }
 bool mp4_fresh_video_publish(void*context,const mp4freshvideo::Identity&id,void*texture,uintptr_t native){
- auto*e=static_cast<Mp4FreshVideoEntry*>(context);return e&&mp4_fresh_video_current(context,id)&&mp4_fresh_video_write_image(*e,texture,native);
+ auto*e=static_cast<Mp4FreshVideoEntry*>(context);if(!e||!mp4_fresh_video_current(context,id))return false;
+ // A frame is published only after the original PrepareCompleted enabled the
+ // image, whose OnEnable bound it to this exact player.
+ if(!mp4_fresh_video_image_bound(e->image,id.player,true)){
+  static bool reported=false;if(!reported){reported=true;idoly_mp4_runtime::diagnostic_event("fresh_video","image_unbound_at_publish",0,0,true);}
+  return false;
+ }
+ return mp4_fresh_video_write_image(*e,texture,native);
 }
 void mp4_fresh_video_event(unsigned kind,void*script,void*player,int64_t frame){
  if(!game_call()){
@@ -56551,14 +56567,14 @@ bool mp4_fresh_video_add(void*player,void*image,bool loop){
  for(size_t i=0;i<mp4_fresh_video_count;++i)if(mp4_fresh_videos[i].identity.player==player)return false;
  using Ref=void*(*)(void*,Method*);using Tracks=uint16_t(*)(void*,Method*);using Count=uint64_t(*)(void*,Method*);using Rate=double(*)(void*,Method*);using Int=int32_t(*)(void*,Method*);
  Mp4ActorTempRoot clip(mp4_cam_call<Ref>(mp4_cam_profile.video_clip)(player,nullptr));
- auto&e=mp4_fresh_videos[mp4_fresh_video_count];uintptr_t vp=0,native=0,inative=0;void*bound=nullptr;
+ auto&e=mp4_fresh_videos[mp4_fresh_video_count];uintptr_t vp=0,native=0,inative=0;
  if(!mp4_video_exact(player,mp4_cam_types.video_player,mp4camp::type_names.video_player)
   ||!mp4_video_exact(clip.get(),mp4_cam_types.video_clip,mp4camp::type_names.video_clip)
   ||!mp4_video_exact(image,mp4_cam_types.video_image,mp4camp::type_names.video_image)
   ||mp4_cam_call<Int>(mp4_cam_profile.video_source)(player,nullptr)!=mp4camp::ExtraLayout::video_source_clip
   ||mp4_cam_call<Tracks>(mp4_cam_profile.video_clip_audio)(clip.get(),nullptr)!=0
   ||!mp4_video_native(player,&vp)||!mp4_video_native(clip.get(),&native)||!mp4_video_native(image,&inative)
-  ||!mp4_actor_field(image,mp4camp::RenderLayout::video_image_player,bound)||bound!=player
+  ||!mp4_fresh_video_image_bound(image,player,false)
   ||!mp4_fresh_keep(player)||!mp4_fresh_keep(clip.get())||!mp4_fresh_keep(image))return false;
  e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;
  e.clip={mp4_cam_call<Rate>(mp4_cam_profile.video_clip_rate)(clip.get(),nullptr),mp4_cam_call<Rate>(mp4_cam_profile.video_clip_length)(clip.get(),nullptr),mp4_cam_call<Count>(mp4_cam_profile.video_clip_frames)(clip.get(),nullptr),loop};
@@ -56750,11 +56766,20 @@ Mp4FreshResult mp4_fresh_video_inventory(void*player){
    Mp4ActorTempRoot clip(mp4_cam_call<Object>(mp4_cam_profile.video_clip)(t.player,nullptr));
    if(!mp4_video_exact(clip.get(),mp4_cam_types.video_clip,mp4camp::type_names.video_clip)||!mp4_alive(clip.get()))return fail("fresh_video_clip_unavailable");
    if(mp4_cam_call<Audio>(mp4_cam_profile.video_clip_audio)(clip.get(),nullptr)!=0)return fail("fresh_video_audio_pcm_unsupported");
+   // The game pairs them exactly like this: SolisVideoPlayerTrack.CreateTrackMixer
+   // takes the first VideoImage on the bound player's own GameObject, and
+   // VideoImage.OnEnable later binds GetComponent<VideoPlayer>() of that
+   // GameObject. _videoPlayer is not serialized, so before the first enable
+   // (PrepareCompleted) it is null; that is accepted, a different player is not.
    Mp4ActorTempRoot go(mp4_cam_call<Object>(mp4_cam_profile.component_object)(t.player,nullptr));
-   if(!mp4_type_is(go.get(),"UnityEngine.GameObject")||!mp4_alive(go.get()))return fail("fresh_video_image_binding_unsupported");
+   if(!mp4_type_is(go.get(),"UnityEngine.GameObject")||!mp4_alive(go.get()))return fail("fresh_video_player_gameobject_invalid");
    Mp4ActorTempRoot image(mp4_cam_call<Get>(mp4_cam_profile.game_object_get_component)(go.get(),image_type.get(),nullptr));t.image=image.get();void*bound=nullptr;
-   if(!mp4_video_exact(t.image,mp4_cam_types.video_image,mp4camp::type_names.video_image)
-    ||!mp4_actor_field(t.image,mp4camp::RenderLayout::video_image_player,bound)||bound!=t.player)return fail("fresh_video_image_binding_unsupported");
+   if(!t.image)return fail("fresh_video_image_missing");
+   if(!mp4_video_exact(t.image,mp4_cam_types.video_image,mp4camp::type_names.video_image))return fail("fresh_video_image_type_unsupported");
+   Mp4ActorTempRoot first(mp4_cam_call<Get>(mp4_cam_profile.game_object_get_component)(go.get(),player_type.get(),nullptr));
+   if(first.get()!=t.player)return fail("fresh_video_image_player_ambiguous");
+   if(!mp4_actor_field(t.image,mp4camp::RenderLayout::video_image_player,bound))return fail("fresh_video_image_field_unreadable");
+   if(bound&&bound!=t.player)return fail("fresh_video_image_bound_elsewhere");
    if(!mp4_fresh_keep(t.player)||!mp4_fresh_keep(t.image)||!mp4_fresh_keep(t.asset))return fail("fresh_video_inventory_root_failed");
    ++p.count;
   }

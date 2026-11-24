@@ -88,7 +88,7 @@ jobs:
         run: python -B tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/mp4-android-inputs"
       - name: Build current native bridge and signed MP4 preview APK
         env:
-          IDOLY_RELEASE_VERSION: 2026.11.23.6
+          IDOLY_RELEASE_VERSION: 2026.11.23.7
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
@@ -112,7 +112,7 @@ jobs:
             --password-file "$RUNNER_TEMP/mp4-public-development-password.txt" \
             --native-bridge "$RUNNER_TEMP/mp4-native/libidoly_presentation.so" \
             --native-receipt "$RUNNER_TEMP/mp4-native/build-receipt.json" \
-            --output "$RUNNER_TEMP/mp4-android-output/IdolyPride-Unified-2026.11.23.6-prototype.apk"
+            --output "$RUNNER_TEMP/mp4-android-output/IdolyPride-Unified-2026.11.23.7-prototype.apk"
           python -B tools/stage_mp4_preview.py check-android --source "$SOURCE_SHA" \
             --directory "$RUNNER_TEMP/mp4-android-output"
           test -z "$(git status --porcelain)"
@@ -201,7 +201,7 @@ jobs:
       - name: Build current-source IPA and verify five cold language processes in a fresh Simulator
         env:
           GH_TOKEN: ${{ github.token }}
-          IDOLY_RELEASE_VERSION: 2026.11.23.6
+          IDOLY_RELEASE_VERSION: 2026.11.23.7
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
