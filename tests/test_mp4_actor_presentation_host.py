@@ -28,6 +28,9 @@ def routes(tmp_path_factory):
 namespace mp4actor=idoly_mp4_actor;
 uintptr_t image_base=0x100000;
 struct Profile{mp4actor::ActorBinding actor_update{1,{}},actor_late{2,{}},derived_late_ref{3,{}},derived_late_shared{4,{}},eye_late{5,{}},face_late{6,{}},foot_apply{7,{}};}mp4_actor_profile;
+namespace pin{struct Entry{uintptr_t rva;};inline constexpr Entry mp4_actor_solis_late{9};}
+void solis_late_original(void*,mp4actor::Method*){}
+mp4actor::MonoCallback mp4_actor_solis_late_original=nullptr;
 uintptr_t method_pointer=0;bool found=true,mapped=true;std::string wanted;
 void* object_class(void* object){return object;}
 const void* method(void*,const char* name,int){wanted=name;return found?&method_pointer:nullptr;}
@@ -44,6 +47,10 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];void* obj
     if(mode=="foot"){phase=mp4actor::MonoPhase::foot_apply;rva=7;name="ApplyJob";}
     bool expected=true;
     if(mode=="foreign_override"){rva=8;expected=false;}
+    // SolisActorController.LateUpdate: accepted only while its own hook is installed.
+    if(mode=="solis_late"){rva=9;mp4_actor_solis_late_original=solis_late_original;}
+    if(mode=="solis_late_unhooked"){rva=9;expected=false;}
+    if(mode=="solis_late_for_update"){phase=mp4actor::MonoPhase::actor_update;name="Update";rva=9;mp4_actor_solis_late_original=solis_late_original;expected=false;}
     if(mode=="missing_method"){found=false;expected=false;}
     if(mode=="unmapped_method"){mapped=false;expected=false;}
     if(mode=="null_receiver"){object=nullptr;expected=false;}
@@ -60,7 +67,7 @@ int main(int argc,char**argv){assert(argc==2);std::string mode=argv[1];void* obj
     return binary
 
 
-@pytest.mark.parametrize('mode',['base','update','derived_ref','derived_shared','eye','face','foot','foreign_override','missing_method','unmapped_method','null_receiver','missing_capi'])
+@pytest.mark.parametrize('mode',['base','update','derived_ref','derived_shared','eye','face','foot','foreign_override','solis_late','solis_late_unhooked','solis_late_for_update','missing_method','unmapped_method','null_receiver','missing_capi'])
 def test_shipping_callback_route_requires_verified_actual_entry(routes,mode):
     result=subprocess.run([str(routes),mode],capture_output=True,text=True,timeout=5)
     assert result.returncode==0,result.stdout+result.stderr

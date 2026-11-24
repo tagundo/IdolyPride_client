@@ -364,6 +364,12 @@ inline constexpr Entry mp4_actor_derived_late_ref{"VL.VLDefaultActorController`3
 
 inline constexpr Entry mp4_actor_derived_late_shared{"VL.VLDefaultActorController`3.LateUpdate", 0x73d244cu, {0xfe, 0x0f, 0x1d, 0xf8, 0xf6, 0x57, 0x01, 0xa9, 0xf4, 0x4f, 0x02, 0xa9, 0x95, 0x64, 0x01, 0xb0}};
 
+// Every MV actor is a SolisActorController, which overrides LateUpdate: it
+// calls VLDefaultActorController`3.LateUpdate (0x73cf2d0) and then
+// UpdateLookAtEyePitchCorrection. il2cpp_class_get_method_from_name resolves
+// "LateUpdate" to this override.
+inline constexpr Entry mp4_actor_solis_late{"Solis.Common.SolisActorController.LateUpdate", 0x882c6fcu, {0xfe, 0x57, 0xbe, 0xa9, 0xf4, 0x4f, 0x01, 0xa9, 0x34, 0xc2, 0x00, 0x90, 0x35, 0x86, 0x00, 0xb0}};
+
 inline constexpr Entry mp4_animation_interval_add{"UnityEngine.Timeline.IntervalTree`1.Add", 0x686c3ecu, {0xff, 0x43, 0x01, 0xd1, 0xfe, 0x5f, 0x02, 0xa9, 0xf6, 0x57, 0x03, 0xa9, 0xf4, 0x4f, 0x04, 0xa9}};
 
 inline constexpr Entry mp4_monitor_pool_get{"UnityEngine.Pool.ObjectPool`1.Get", 0x6f04f60u, {0xfe, 0x0f, 0x1d, 0xf8, 0xf6, 0x57, 0x01, 0xa9, 0xf4, 0x4f, 0x02, 0xa9, 0xf3, 0x03, 0x00, 0xaa}};
@@ -625,6 +631,7 @@ inline constexpr Entry all[] = {
     mp4_director_play,
     mp4_actor_derived_late_ref,
     mp4_actor_derived_late_shared,
+    mp4_actor_solis_late,
     mp4_animation_interval_add,
     mp4_monitor_pool_get,
     mp4_monitor_pool_release,

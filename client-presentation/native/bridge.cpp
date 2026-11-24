@@ -3019,6 +3019,9 @@ bool mp4_actor_present_node(mp4actor::PresentationInventory& i,void* object,cons
     for(size_t n=0;n<i.node_count;++n)if(i.nodes[n].object==object)return i.nodes[n].schema==schema;
     if(i.node_count==256)return false;i.nodes[i.node_count++]={object,schema};return true;
 }
+#ifndef IDOLY_DARWIN_BRIDGE
+mp4actor::MonoCallback mp4_actor_solis_late_original=nullptr;
+#endif
 bool mp4_actor_present_callback_route(void* object,mp4actor::MonoPhase phase){
     if(!object||!font_method)return false;
     const char* name=phase==mp4actor::MonoPhase::actor_update?"Update":phase==mp4actor::MonoPhase::foot_apply?"ApplyJob":"LateUpdate";
@@ -3028,7 +3031,13 @@ bool mp4_actor_present_callback_route(void* object,mp4actor::MonoPhase phase){
     switch(phase){
         case mp4actor::MonoPhase::actor_update:return expected(mp4_actor_profile.actor_update);
         case mp4actor::MonoPhase::actor_late:return expected(mp4_actor_profile.actor_late)
-            ||expected(mp4_actor_profile.derived_late_ref)||expected(mp4_actor_profile.derived_late_shared);
+            ||expected(mp4_actor_profile.derived_late_ref)||expected(mp4_actor_profile.derived_late_shared)
+#ifndef IDOLY_DARWIN_BRIDGE
+            // The SolisActorController override is accepted only while its
+            // own hook gates the whole body (nested derived/base forward once).
+            ||(mp4_actor_solis_late_original&&pointer==image_base+pin::mp4_actor_solis_late.rva)
+#endif
+            ;
         case mp4actor::MonoPhase::eye_late:return expected(mp4_actor_profile.eye_late);
         case mp4actor::MonoPhase::face_late:return expected(mp4_actor_profile.face_late);
         case mp4actor::MonoPhase::foot_apply:return expected(mp4_actor_profile.foot_apply);
@@ -3194,62 +3203,78 @@ bool mp4_actor_fixed_held_fenced(void*,const mp4actor::FixedJobOwner& value){
     return false;
 }
 // END_MP4_ACTOR_FIXED_HOST
-bool mp4_actor_presentation_collect(const mp4actor::Owner* owners,size_t owner_count,bool live,mp4actor::PresentationInventory& i){
-    if(!owners||!owner_count||owner_count>32||!game_call())return false;
+// The first check that rejected the last collect, for the fresh acquire code.
+const char* mp4_actor_collect_error="none";
+// fresh: the disposable export scene, collected right after its load. Two
+// states the game always has there are accepted only on that path:
+// - VLAnimationClipPlayer.animatorController (+0x40) holds the controller
+//   SetupAnimation loads (SimpleIKAnimatorController or the settings one),
+//   connected at weight 0 inside the actor's own graph.
+// - VLActorTalkFFT._windowArray (+0x40) is created by the first audio FFT,
+//   which has not run before the talk audio source is set.
+bool mp4_actor_presentation_collect(const mp4actor::Owner* owners,size_t owner_count,bool live,mp4actor::PresentationInventory& i,bool fresh=false){
+    const auto reject=[](const char* code){mp4_actor_collect_error=code;return false;};
+    mp4_actor_collect_error="none";
+    if(!owners||!owner_count||owner_count>32||!game_call())return reject("actor_collect_owners_invalid");
     for(size_t n=0;n<owner_count;++n){const auto& owner=owners[n];void* actor=owner.actor;
-        if((live&&!mp4_actor_owner(nullptr,owner))||!mp4_actor_present_node(i,actor,"VL.Core.VLActorController")
-            ||!mp4_actor_present_callback(i,actor,mp4actor::MonoPhase::actor_update)||!mp4_actor_present_callback(i,actor,mp4actor::MonoPhase::actor_late))return false;
+        if((live&&!mp4_actor_owner(nullptr,owner))||!mp4_actor_present_node(i,actor,"VL.Core.VLActorController"))return reject("actor_collect_node_unsupported");
+        if(!mp4_actor_present_callback(i,actor,mp4actor::MonoPhase::actor_update))return reject("actor_collect_update_route_unrecognized");
+        if(!mp4_actor_present_callback(i,actor,mp4actor::MonoPhase::actor_late))return reject("actor_collect_late_route_unrecognized");
         void* player=nullptr;void* controller=nullptr;
         if(!mp4_actor_field(actor,mp4_actor_profile.fields.actor_player,player)
-            ||!mp4_type_is(player,"VL.VLAnimationClipPlayer")||!mp4_actor_field(player,0x40,controller)||controller)return false;
+            ||!mp4_type_is(player,"VL.VLAnimationClipPlayer")||!mp4_actor_field(player,0x40,controller))return reject("actor_collect_player_unsupported");
+        if(controller&&(!fresh||!mp4_type_is(controller,"UnityEngine.RuntimeAnimatorController")||!mp4_alive(controller)))
+            return reject("actor_collect_animator_controller_unsupported");
         void* list=nullptr;void** extensions=nullptr;size_t count=0;
-        if(!mp4_actor_field(actor,64,list)||!mp4_actor_list(list,&extensions,&count,64))return false;
+        if(!mp4_actor_field(actor,64,list)||!mp4_actor_list(list,&extensions,&count,64))return reject("actor_collect_extensions_unreadable");
         for(size_t k=0;k<count;++k){void* extension=extensions[k];
-            if(mp4_type_is(extension,"VL.VLActorActorSwing")){if(extension!=owner.extension)return false;continue;}
-            if(mp4_type_is(extension,"VL.VLActorFacialSystem")){if(!mp4_actor_present_node(i,extension,"VL.VLActorFacialSystem"))return false;continue;}
+            if(mp4_type_is(extension,"VL.VLActorActorSwing")){if(extension!=owner.extension)return reject("actor_collect_swing_owner_changed");continue;}
+            if(mp4_type_is(extension,"VL.VLActorFacialSystem")){if(!mp4_actor_present_node(i,extension,"VL.VLActorFacialSystem"))return reject("actor_collect_facial_unsupported");continue;}
             if(mp4_type_is(extension,"VL.VLActorTalk")){
-                if(!mp4_actor_present_node(i,extension,"VL.VLActorTalk"))return false;void* fft=nullptr;
-                if(!mp4_actor_field(extension,112,fft)||!fft||!mp4_actor_present_node(i,fft,"VL.VLActorTalkFFT"))return false;
-                void* audio=nullptr;if(!mp4_actor_field(fft,80,audio)||audio)return false;
+                if(!mp4_actor_present_node(i,extension,"VL.VLActorTalk"))return reject("actor_collect_talk_unsupported");void* fft=nullptr;
+                if(!mp4_actor_field(extension,112,fft)||!fft||!mp4_actor_present_node(i,fft,"VL.VLActorTalkFFT"))return reject("actor_collect_talk_fft_unsupported");
+                void* audio=nullptr;if(!mp4_actor_field(fft,80,audio)||audio)return reject("actor_collect_talk_audio_active");
                 constexpr size_t fft_arrays[]={24,32,40,48,56,64,96,104};
                 for(size_t at:fft_arrays){void* array=nullptr;
-                    if(!mp4_actor_field(fft,at,array)||!array||(!mp4_type_is(array,"System.Single[]")&&!mp4_type_is(array,"System.Int32[]"))
-                        ||!mp4_actor_present_add(i.arrays,i.array_count,array))return false;}
+                    if(!mp4_actor_field(fft,at,array))return reject("actor_collect_talk_fft_unreadable");
+                    if(!array&&fresh&&at==64)continue; // _windowArray: created by the first FFT
+                    if(!array||(!mp4_type_is(array,"System.Single[]")&&!mp4_type_is(array,"System.Int32[]"))
+                        ||!mp4_actor_present_add(i.arrays,i.array_count,array))return reject("actor_collect_talk_fft_arrays_unsupported");}
                 mp4actor::Handle playable{};const auto api=mp4_actor_state_api();
-                if(!mp4_actor_field(extension,256,playable)||!api.playable_valid(&playable,nullptr))return false;
+                if(!mp4_actor_field(extension,256,playable)||!api.playable_valid(&playable,nullptr))return reject("actor_collect_talk_playable_invalid");
                 if(!mp4_actor_talk_type){
-                    if(!mp4_resolved_type_class(mp4_actor_profile.talk_job_type,"VL.Unsafe.Jobs","VLActorTalkJob"))return false;
+                    if(!mp4_resolved_type_class(mp4_actor_profile.talk_job_type,"VL.Unsafe.Jobs","VLActorTalkJob"))return reject("actor_collect_talk_job_type_unavailable");
                     mp4_actor_talk_type=mp4_retain(mp4_type_get_object(reinterpret_cast<const void*>(image_base+mp4_actor_profile.talk_job_type.rva)));
                 }
-                if(!mp4_actor_talk_type||api.job_type(&playable,nullptr)!=weak_get(mp4_actor_talk_type))return false;
-                void* job=api.job_data(&playable,nullptr);if(!job||!mp4_actor_mapped(job,96,true)||!mp4_actor_present_add(i.talk_jobs,i.talk_job_count,job))return false;
+                if(!mp4_actor_talk_type||api.job_type(&playable,nullptr)!=weak_get(mp4_actor_talk_type))return reject("actor_collect_talk_job_type_changed");
+                void* job=api.job_data(&playable,nullptr);if(!job||!mp4_actor_mapped(job,96,true)||!mp4_actor_present_add(i.talk_jobs,i.talk_job_count,job))return reject("actor_collect_talk_job_unsupported");
                 continue;
             }
             if(mp4_type_is(extension,"VL.VLActorFootShadow")){void* mesh=nullptr;void* verts=nullptr;
                 if(!mp4_actor_present_node(i,extension,"VL.VLActorFootShadow")||!mp4_actor_present_callback(i,extension,mp4actor::MonoPhase::foot_apply)
                     ||!mp4_actor_field(extension,88,mesh)||!mp4_type_is(mesh,"UnityEngine.Mesh")||!mp4_alive(mesh)
                     ||!mp4_actor_present_add(i.shadow_meshes,i.shadow_mesh_count,mesh)||!mp4_actor_field(extension,112,verts)
-                    ||!mp4_type_is(verts,"UnityEngine.Vector3[]")||!mp4_actor_present_add(i.arrays,i.array_count,verts))return false;
+                    ||!mp4_type_is(verts,"UnityEngine.Vector3[]")||!mp4_actor_present_add(i.arrays,i.array_count,verts))return reject("actor_collect_foot_shadow_unsupported");
                 continue;
             }
             if(mp4_actor_fixed_schema(extension)){
-                if(!mp4_actor_present_fixed(i,owner,extension))return false;continue;
+                if(!mp4_actor_present_fixed(i,owner,extension))return reject("actor_collect_fixed_extension_unsupported");continue;
             }
             if(mp4_type_is(extension,"VL.VLActorBodyAdditiveAnimation")){
                 const auto* schema=mp4_actor_presentation_schema("VL.VLActorBodyAdditiveAnimation");
                 if(!schema||object_class(extension)!=mp4_actor_fixed_exact_class(schema->klass,schema->type)
-                    ||!mp4_actor_present_node(i,extension,schema->type))return false;
+                    ||!mp4_actor_present_node(i,extension,schema->type))return reject("actor_collect_additive_unsupported");
                 // The managed producer host separately proves the closed
                 // current/default/additive queue state before source mutation.
                 continue;
             }
-            return false;
+            return reject("actor_collect_extension_unknown");
         }
-        if(!mp4_actor_present_components(i,actor,"VL.VLActorEye",mp4actor::MonoPhase::eye_late)
-            ||!mp4_actor_present_components(i,actor,"VL.VLActorFaceTargetCorrection",mp4actor::MonoPhase::face_late)
-            ||!mp4_actor_present_parts(i,actor))return false;
+        if(!mp4_actor_present_components(i,actor,"VL.VLActorEye",mp4actor::MonoPhase::eye_late))return reject("actor_collect_eye_unsupported");
+        if(!mp4_actor_present_components(i,actor,"VL.VLActorFaceTargetCorrection",mp4actor::MonoPhase::face_late))return reject("actor_collect_face_unsupported");
+        if(!mp4_actor_present_parts(i,actor))return reject("actor_collect_parts_unsupported");
     }
-    return i.node_count&&i.callback_count;
+    return i.node_count&&i.callback_count?true:reject("actor_collect_empty");
 }
 bool mp4_actor_talk_job_current(void*,const void*);
 // BEGIN_MP4_ACTOR_TEMPORAL_HOST
@@ -4839,6 +4864,9 @@ mp4actor::MonoCallback mp4_actor_derived_late_ref_original=nullptr;
 void mp4_actor_derived_late_ref_hook(void* self,mp4actor::Method* method){mp4_actor_mono_gate.invoke(mp4actor::MonoPhase::actor_late,mp4_actor_derived_late_ref_original,self,method);}
 mp4actor::MonoCallback mp4_actor_derived_late_shared_original=nullptr;
 void mp4_actor_derived_late_shared_hook(void* self,mp4actor::Method* method){mp4_actor_mono_gate.invoke(mp4actor::MonoPhase::actor_late,mp4_actor_derived_late_shared_original,self,method);}
+#ifndef IDOLY_DARWIN_BRIDGE
+void mp4_actor_solis_late_hook(void* self,mp4actor::Method* method){mp4_actor_mono_gate.invoke(mp4actor::MonoPhase::actor_late,mp4_actor_solis_late_original,self,method);}
+#endif
 mp4actor::MonoCallback mp4_actor_foot_apply_original=nullptr;
 void mp4_actor_foot_apply_hook(void* self,mp4actor::Method* method){mp4_actor_mono_gate.invoke(mp4actor::MonoPhase::foot_apply,mp4_actor_foot_apply_original,self,method);}
 using Mp4ControlSimulate=void(*)(void*,float,bool,Method*);
@@ -34631,7 +34659,11 @@ bool mp4_srp_dispatch_mono_add(const Mp4SrpDispatchHost&h,void*action,uintptr_t 
  mp4actor::MonoInvocation invocation{};void*target=nullptr;uintptr_t pointer=0;
  if(!mp4_actor_mono_gate.invocation(invocation)||invocation.epoch!=h.epoch||!invocation.serial||!invocation.invocation
   ||invocation.phase!=mp4actor::MonoPhase::actor_late||!invocation.random_depth
-  ||(invocation.callback!=mp4_actor_late_original&&invocation.callback!=mp4_actor_derived_late_ref_original&&invocation.callback!=mp4_actor_derived_late_shared_original)
+  ||(invocation.callback!=mp4_actor_late_original&&invocation.callback!=mp4_actor_derived_late_ref_original&&invocation.callback!=mp4_actor_derived_late_shared_original
+#ifndef IDOLY_DARWIN_BRIDGE
+   &&invocation.callback!=mp4_actor_solis_late_original
+#endif
+  )
   ||!mp4_actor_field(action,32,target)||!mp4_actor_field(action,16,pointer)
   ||!mp4_renderer_srp_actor(h.state->source,invocation.receiver,false))return false;
  if(pointer==image_base+mp4_srp_pins.aabb.rva){
@@ -55150,6 +55182,7 @@ void *install(void *) {
         HOOK(mp4_actor_foot_apply,mp4_actor_foot_apply_hook,mp4_actor_foot_apply_original),
         HOOK(mp4_actor_derived_late_ref,mp4_actor_derived_late_ref_hook,mp4_actor_derived_late_ref_original),
         HOOK(mp4_actor_derived_late_shared,mp4_actor_derived_late_shared_hook,mp4_actor_derived_late_shared_original),
+        HOOK(mp4_actor_solis_late,mp4_actor_solis_late_hook,mp4_actor_solis_late_original),
         HOOK(mp4_particle_control_simulate,mp4_particle_control_simulate_hook,mp4_particle_control_simulate_original),
         HOOK(mp4_proflare_start,mp4_proflare_start_hook,mp4_proflare_start_original),
         HOOK(mp4_proflare_enable,mp4_proflare_enable_hook,mp4_proflare_enable_original),
@@ -56584,21 +56617,29 @@ bool mp4_fresh_video_add(void*player,void*image,bool loop){
  if(!e.frames.bind(api,e.identity,e.clip))return false;
  e.active=true;mp4_fresh_video_players[mp4_fresh_video_count].store(player,std::memory_order_release);++mp4_fresh_video_count;return true;
 }
+// A video wait ends only in a generic stage timeout; trace which receipt the
+// bank was waiting for (prepare, prime, seek, texture) each time it changes.
+const char*mp4_fresh_video_last_wait=nullptr;
+Mp4FreshResult mp4_fresh_video_waiting(const char*code){
+ if(code&&code!=mp4_fresh_video_last_wait){mp4_fresh_video_last_wait=code;idoly_mp4_runtime::diagnostic_event("fresh_video",code);}
+ return Mp4FreshResult::waiting;
+}
 Mp4FreshResult mp4_fresh_video_prepare_all(){
- bool waiting=false;
+ const char*wait=nullptr;
  for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];const auto r=e.frames.prepare();
-  if(r==mp4freshvideo::Result::waiting)waiting=true;
+  if(r==mp4freshvideo::Result::waiting){if(!wait)wait=e.frames.error();}
   else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
  }
- return waiting?Mp4FreshResult::waiting:Mp4FreshResult::ok;
+ return wait?mp4_fresh_video_waiting(wait):Mp4FreshResult::ok;
 }
 Mp4FreshResult mp4_fresh_video_frame_all(double seconds){
- bool waiting=false;
+ const char*wait=nullptr;
  for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];const auto r=e.frames.request(seconds);
-  if(r==mp4freshvideo::Result::waiting)waiting=true;
+  if(r==mp4freshvideo::Result::waiting){if(!wait)wait=e.frames.error();}
   else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
  }
- return waiting?Mp4FreshResult::waiting:Mp4FreshResult::ok;
+ // Per-frame receipt waits are routine; trace only the prewarm (time zero).
+ return wait?(seconds<=0?mp4_fresh_video_waiting(wait):Mp4FreshResult::waiting):Mp4FreshResult::ok;
 }
 // Synchronous terminal step BEFORE clock/shader/RT detachment and original End.
 // No decoder wait and no texture/history restoration. Stop cancels the fresh
@@ -56671,6 +56712,7 @@ bool mp4_fresh_video_restore_knobs(){
 // Must follow real disposable original End, after clocks/render globals have
 // detached. GC roots remain in FreshHost's independent root bank until then.
 void mp4_fresh_video_clear_after_end(){
+ mp4_fresh_video_last_wait=nullptr;
  mp4_fresh_video_event_sink.store(nullptr,std::memory_order_release);
  mp4_fresh_video_update_sink.store(nullptr,std::memory_order_release);
  for(size_t i=0;i<mp4_fresh_video_count;++i){mp4_fresh_video_players[i].store(nullptr,std::memory_order_release);mp4_fresh_video_scripts[i].store(nullptr,std::memory_order_release);mp4_fresh_videos[i].~Mp4FreshVideoEntry();new(idoly_mp4_actor_placement::Address{&mp4_fresh_videos[i]})Mp4FreshVideoEntry{};}
@@ -57324,8 +57366,12 @@ Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job
  for(size_t i=0;i<h.director_count;++i){h.directors[i]=h.roster->nodes[i].director;h.director_modes[i]=h.roster->nodes[i].desired_mode;}
  void*anchors[]={source.presenter,source.player,source.director,source.controller,source.camera,source.brain,source.bgm,source.voice,source.environment,source.camera_director,source.camera_asset,source.camera_track,timeline};
  for(auto*object:anchors)if(!mp4_fresh_keep(object))return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_root_failed");
- if(!mp4_scene_actor_inventory(source,h.actors,&h.actor_count,true)
-  ||!mp4_actor_presentation_collect(h.actors,h.actor_count,false,h.callbacks))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_actor_callbacks_unsupported");
+ if(!mp4_scene_actor_inventory(source,h.actors,&h.actor_count,true))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_actor_inventory_unsupported");
+ if(!mp4_actor_presentation_collect(h.actors,h.actor_count,false,h.callbacks,true)){
+  // Name the rejected check (fresh_ + actor_collect_*), so a device run
+  // reports which actor state differs rather than one generic code.
+  static char code[80];snprintf(code,sizeof code,"fresh_%s",mp4_actor_collect_error&&*mp4_actor_collect_error?mp4_actor_collect_error:"actor_callbacks_unsupported");
+  return mp4_fresh_fail(Mp4FreshResult::unsupported,code);}
  for(size_t i=0;i<h.actor_count;++i){const auto&a=h.actors[i];auto graph=a.graph;
   if(!mp4_actor_graph_mode(&graph,&h.actor_modes[i])||(h.actor_modes[i]!=1&&h.actor_modes[i]!=3))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_actor_clock_unsupported");
   for(auto*object:{a.actor,a.extension,a.rig,a.builder,a.animator})if(!mp4_fresh_keep(object))return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_actor_root_failed");}
