@@ -39,7 +39,33 @@ final class UnityDispatcher implements LoopbackUiServer.Actions {
         if (stopped || SystemClock.elapsedRealtime() >= sessionDeadline) return LoopbackUiServer.error("session_ended");
         return QaMp4Observation.snapshot(context);
     }
+    @Override public String mp4Diagnostics() {
+        if (stopped || SystemClock.elapsedRealtime() >= sessionDeadline) return LoopbackUiServer.error("session_ended");
+        // The app builds its diagnostics-export document on the main thread; do the same, bounded.
+        ApplicationDiagnostics read = new ApplicationDiagnostics(context);
+        main.post(read);
+        boolean finished;
+        try {
+            finished = read.finished.await(3000, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            finished = false;
+        }
+        return QaMp4Observation.diagnostics(context, finished ? read.document : null,
+            finished ? "app_diagnostics_unavailable" : "app_diagnostics_main_thread_timeout");
+    }
     @Override public String click(int instanceId, long generation) { return execute(true, instanceId, generation); }
+
+    private static final class ApplicationDiagnostics implements Runnable {
+        private final Context context;
+        final CountDownLatch finished = new CountDownLatch(1);
+        volatile String document;
+        ApplicationDiagnostics(Context context) { this.context = context; }
+        @Override public void run() {
+            try { document = QaMp4Observation.applicationDiagnostics(context); }
+            finally { finished.countDown(); }
+        }
+    }
 
     private String execute(boolean click, int instanceId, long generation) {
         if (stopped || SystemClock.elapsedRealtime() >= sessionDeadline) return LoopbackUiServer.error("session_ended");

@@ -80,7 +80,7 @@ public final class QaUiProvider extends ContentProvider {
 
     private static boolean emulatorHardware() {
         return "ranchu".equals(Build.HARDWARE) || "goldfish".equals(Build.HARDWARE)
-            || "cutf_cvm".equals(Build.HARDWARE);
+            || "cutf_cvm".equals(Build.HARDWARE) || "redroid".equals(Build.HARDWARE);
     }
 
     private static long markerSessionMillis(Context context) {
@@ -126,6 +126,12 @@ public final class QaUiProvider extends ContentProvider {
             if ("cutf_cvm".equals(hardware)) {
                 return "cutf_cvm".equals(bootHardware) && "vsoc_arm64_only".equals(device);
             }
+            if ("redroid".equals(hardware)) {
+                // Disposable redroid container (native ARM64, no ARM translation).
+                // Its init sets androidboot.hardware=redroid; only ARM64 products.
+                return "redroid".equals(bootHardware)
+                    && ("redroid_arm64".equals(device) || "redroid_arm64_only".equals(device));
+            }
             return ("ranchu".equals(hardware) || "goldfish".equals(hardware)) && "1".equals(qemu);
         }
     }
@@ -145,9 +151,9 @@ public final class QaUiProvider extends ContentProvider {
     }
 
     private static boolean emulatorProperty() {
-        if ("cutf_cvm".equals(Build.HARDWARE)) {
-            // Stock Cuttlefish has no ro.kernel.qemu property. Require its
-            // observed boot hardware and exact ARM64-only product instead.
+        if ("cutf_cvm".equals(Build.HARDWARE) || "redroid".equals(Build.HARDWARE)) {
+            // Stock Cuttlefish and redroid need no ro.kernel.qemu property. Require
+            // their observed boot hardware and exact ARM64 product instead.
             return EmulatorIndicators.matches(Build.HARDWARE, property("ro.boot.hardware", 3), Build.DEVICE, "");
         }
         return EmulatorIndicators.matches(Build.HARDWARE, "", Build.DEVICE, property("ro.kernel.qemu", 1));

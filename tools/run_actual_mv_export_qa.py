@@ -32,6 +32,31 @@ MAX_MOVIE = 24 * 1024 * 1024
 ENVIRONMENT_PROBE = "org.idolypride.environmentprobe"
 PERMISSION_CONTROLLERS = frozenset(("com.android.permissioncontroller", "com.google.android.permissioncontroller"))
 PERMISSION_ACTIVITY = "com.android.permissioncontroller.permission.ui.GrantPermissionsActivity"
+NOTIFICATION_PERMISSION = "android.permission.POST_NOTIFICATIONS"
+DOCUMENTSUI_PACKAGES = ("com.google.android.documentsui", "com.android.documentsui")
+MAX_DIAGNOSTICS = 64 * 1024
+TRANSLATED_GUEST, REDROID_GUEST = "translated-emulator", "redroid"
+# The default guest keeps the official translated emulator contract unchanged.
+# redroid is a separate, explicitly selected native ARM64 container whose
+# results are never presented as emulator or physical-phone evidence.
+GUESTS = {
+    TRANSLATED_GUEST: {"serial": r"emulator-[0-9]+", "serial_code": "disposable_emulator_serial_required",
+                       "scope": "actual_game_in_official_translated_guest",
+                       "status": "PASS_ACTUAL_MV_EXPORT_TRANSLATED_GUEST_ONLY", "install_timeout": 180},
+    # adb TCP transport bound to the runner's own loopback only; never a LAN device.
+    REDROID_GUEST: {"serial": r"(?:127\.0\.0\.1|localhost):[0-9]{2,5}",
+                    "serial_code": "disposable_redroid_loopback_serial_required",
+                    "scope": "actual_game_in_redroid_native_arm64_container",
+                    "status": "PASS_ACTUAL_MV_EXPORT_REDROID_ARM64_ONLY", "install_timeout": 600},
+}
+REDROID_DEVICES = frozenset(("redroid_arm64", "redroid_arm64_only"))
+REDROID_PROPERTIES = ("ro.hardware", "ro.boot.hardware", "ro.product.device", "ro.product.cpu.abi",
+    "ro.product.cpu.abilist", "ro.dalvik.vm.native.bridge", "ro.kernel.qemu", "ro.boot.qemu",
+    "ro.build.version.sdk", "ro.build.version.incremental", "ro.build.fingerprint", "ro.build.type",
+    "ro.hardware.egl", "ro.hardware.vulkan", "ro.hardware.gralloc", "ro.boot.redroid_gpu_mode",
+    "ro.opengles.version", "debug.stagefright.ccodec", "sys.use_memfd")
+SAVE_BLOCKED_DOCUMENTSUI = "save_blocked_documentsui_unavailable"
+MAX_ANR_WAITS = 32
 
 
 class Rejected(ValueError):
@@ -149,6 +174,109 @@ def launcher_main_control(tree, activities, lifecycle):
                 and (node.get("text") in names or node.get("content-desc") in names)]
     need(len(controls) <= 1, "unified_launch_control_ambiguous")
     return controls[0] if controls else None
+
+
+def redroid_guest_verified(properties):
+    """Exact native ARM64 redroid identity; no ARM translation can be present."""
+    return (isinstance(properties, dict)
+            and properties.get("ro.hardware") == "redroid" and properties.get("ro.boot.hardware") == "redroid"
+            and properties.get("ro.product.device") in REDROID_DEVICES
+            and properties.get("ro.product.cpu.abi") == "arm64-v8a"
+            and "arm64-v8a" in str(properties.get("ro.product.cpu.abilist", "")).split(",")
+            and properties.get("ro.dalvik.vm.native.bridge") in ("", "0")
+            and properties.get("uname_machine") == "aarch64")
+
+
+ANR_WINDOW = re.compile(r"Window\{[0-9a-f]+\s+u\d+\s+Application Not Responding:\s*([A-Za-z0-9_.]{1,256})\}")
+
+
+def system_anr_windows(raw):
+    """Package names of Android's own ANR dialog windows in `dumpsys window windows`."""
+    if not isinstance(raw, str) or len(raw) > 8 * 1024 * 1024:
+        return []
+    return sorted(set(ANR_WINDOW.findall(raw)))
+
+
+def system_anr_wait_control(tree):
+    """The single enabled Wait button of an English system "isn't responding" dialog.
+
+    Returns (title, node) or None. Close/report are never selected; an ambiguous
+    dialog is left on screen so the surrounding wait reports its own timeout.
+    """
+    def text(value):
+        return " ".join(re.sub(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]", "", value or "").split())
+    nodes = [node for node in tree.iter("node") if node.get("package") == "android"]
+    titles = [text(node.get("text")) for node in nodes
+              if re.fullmatch(r".{1,256} (?:isn't|isn\u2019t|is not) responding", text(node.get("text")))]
+    waits = [node for node in nodes if node.get("resource-id") == "android:id/aerr_wait"
+             and node.get("enabled") == "true" and node.get("clickable") == "true"]
+    if len(titles) != 1 or len(waits) != 1:
+        return None
+    return titles[0], waits[0]
+
+
+def notification_permission_granted(raw):
+    return isinstance(raw, str) and re.search(
+        r"^\s*" + re.escape(NOTIFICATION_PERMISSION) + r": granted=true\b", raw, re.MULTILINE) is not None
+
+
+def export_trace_summary(payload):
+    """Where the native export currently is or stopped; evidence only, never a verdict."""
+    if type(payload) is not dict:
+        return {}
+    summary = {}
+    status = payload.get("native_status")
+    if type(status) is dict:
+        for key in ("phase", "error_code", "readiness_error", "selection_error", "restoration_error",
+                    "pipeline_mode", "export_id", "frames", "total_frames", "audio_frames", "total_audio_frames"):
+            if key in status:
+                summary[key] = status[key]
+        if type(status.get("scene_diagnostics")) is dict:
+            summary["scene_diagnostics"] = status["scene_diagnostics"]
+    application = payload.get("app_diagnostics")
+    if type(application) is dict:
+        for key in ("job_stage", "cleanup_stage", "last_cancel", "last_java_crash", "last_save_failure_stage"):
+            if key in application:
+                summary[key] = application[key]
+        if type(application.get("last_failed_export_trace")) is dict:
+            summary["last_failed_export_trace"] = application["last_failed_export_trace"]
+    native = payload.get("native_diagnostics")
+    trace = native.get("export_trace") if type(native) is dict else None
+    if type(trace) is not dict and type(application) is dict:
+        trace = application.get("export_trace")
+    if type(trace) is dict:
+        events = [event for event in trace.get("events", []) if type(event) is dict][-16:] \
+            if type(trace.get("events")) is list else []
+        modules = trace.get("modules") if type(trace.get("modules")) is dict else {}
+        summary["export_trace"] = {"current_stage": trace.get("current_stage"), "last_error": trace.get("last_error"),
+            "events": events, "unbound_modules": sorted(k for k, v in modules.items() if v is False)}
+        if type(native) is dict and type(native.get("session_progress")) is dict:
+            summary["session_progress"] = native["session_progress"]
+    return summary
+
+
+PERSISTED_DIAGNOSTIC_KEYS = ("last_native_trace", "last_failed_native_trace", "last_cancel",
+                             "last_java_crash", "last_save_failure_stage")
+
+
+def persisted_mp4_diagnostics(raw):
+    """The app's own persisted export trace (SharedPreferences), readable after a crash."""
+    need(isinstance(raw, str) and len(raw) <= 1024 * 1024, "persisted_mp4_diagnostics_invalid")
+    start, end = raw.find("<map"), raw.rfind("</map>")
+    if start < 0 or end < start:
+        return {"available": False}
+    root = ET.fromstring(raw[start:end + len("</map>")])
+    result = {"available": True}
+    for node in root:
+        name = node.get("name")
+        if name not in PERSISTED_DIAGNOSTIC_KEYS or node.tag != "string":
+            continue
+        value = node.text or ""
+        try:
+            result[name] = json.loads(value) if value[:1] in "{[" else value[:256]
+        except ValueError:
+            result[name] = "unparseable"
+    return result
 
 
 def verified_observer_manifest(evidence):
@@ -477,8 +605,10 @@ def labels(name):
 
 
 class Device:
-    def __init__(self, adb, serial, output):
-        need(re.fullmatch(r"emulator-[0-9]+", serial), "disposable_emulator_serial_required")
+    def __init__(self, adb, serial, output, guest=TRANSLATED_GUEST):
+        need(guest in GUESTS, "qa_guest_kind_invalid")
+        need(re.fullmatch(GUESTS[guest]["serial"], serial), GUESTS[guest]["serial_code"])
+        self.guest = guest
         self.base, self.output = [str(adb), "-s", serial], output
         self.game_package, self.artifacts = PACKAGE, output
         self.input_source, self.touch_hold_ms = "touchscreen", 150
@@ -497,6 +627,13 @@ class Device:
         return int(value)
 
     def identity(self):
+        if getattr(self, "guest", TRANSLATED_GUEST) == REDROID_GUEST:
+            # No translator exists to hash; record the native GPU/codec stack instead.
+            properties = {name: self.adb("shell", "getprop", name).strip() for name in REDROID_PROPERTIES}
+            properties["uname_machine"] = self.adb("shell", "uname", "-m").strip()
+            need(redroid_guest_verified(properties), "redroid_native_arm64_guest_unavailable")
+            properties["guest"] = REDROID_GUEST
+            return properties
         properties = {name: self.adb("shell", "getprop", name).strip() for name in (
             "ro.kernel.qemu", "ro.product.cpu.abilist", "ro.dalvik.vm.native.bridge",
             "ro.build.version.sdk", "ro.build.version.incremental", "ro.hardware.egl")}
@@ -598,11 +735,15 @@ class ActualRun:
         self.args = args
         self.proof = args.output_directory
         self.proof.mkdir(parents=True, exist_ok=False)
-        self.device = Device(args.adb, args.serial, self.proof)
+        self.device = Device(args.adb, args.serial, self.proof, args.guest)
         self.ui, self.explorer, self.journal = load_ui(), None, []
-        self.report = {"schema": 1, "scope": "actual_game_in_official_translated_guest", "source_commit": args.source_commit,
+        self.report = {"schema": 1, "scope": GUESTS[args.guest]["scope"], "guest": args.guest,
+                       "source_commit": args.source_commit,
                        "game_sdk_aes_store_adaptations": False, "actual_mv_verified": False,
                        "export_file_verified": False, "restoration_verified": False, "physical_device_verified": False}
+
+    def guest(self):
+        return getattr(getattr(self, "args", None), "guest", TRANSLATED_GUEST)
 
     def record(self, phase, payload=None):
         need(len(self.journal) < 2048, "phase_journal_limit")
@@ -628,35 +769,123 @@ class ActualRun:
             "retained_records":evidence["retained_records"]}
         return context
 
-    def mp4(self):
+    def observer_get(self, path, limit, code):
         token = self.device.adb("exec-out", "run-as", PACKAGE, "cat", "files/idoly-qa-ui-token", check=False).strip()
         need(HEX64.fullmatch(token), "qa_observer_token_unavailable")
         connection = HTTPConnection("127.0.0.1", self.explorer.port, timeout=15)
         try:
-            connection.request("GET", "/mp4-status", headers={"Authorization": "Bearer " + token})
+            connection.request("GET", path, headers={"Authorization": "Bearer " + token})
             response = connection.getresponse()
-            raw = response.read(MAX_JSON + 1)
-            need(response.status == 200 and len(raw) <= MAX_JSON, "mp4_observation_rejected")
-            payload = json.loads(raw)
-            need(type(payload) is dict, "mp4_observation_shape_invalid")
-            # Keep the last complete read-only status even if admission never
-            # becomes ready. Otherwise a failed early game run would discard
-            # the concrete Actor/Camera/Stage/World code we need to investigate.
-            # The bearer token is only an HTTP header and is never in payload.
-            (self.proof / "latest-native-status.json").write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-            native = payload.get("native", {})
-            observation = native.get("observation", {}) if type(native) is dict else {}
-            if type(observation) is dict and observation.get("source_valid") is True and observation.get("source_kind") == "photography_3d":
-                (self.proof / "last-photography-native-status.json").write_text(
-                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-            return payload
+            raw = response.read(limit + 1)
+            need(response.status == 200 and len(raw) <= limit, code)
+            return json.loads(raw)
         finally:
             connection.close()
+
+    def capture_mp4_diagnostics(self, reason, force=False):
+        """Keep the app's own native export trace on success and failure alike.
+
+        This is evidence collection only: it never raises, never feeds a verdict
+        gate, and does not change the status/timing of any functional check.
+        """
+        try:
+            now = time.monotonic()
+            if not force and now - getattr(self, "diagnostics_at", -1e9) < 15:
+                return None
+            self.diagnostics_at = now
+            summary = self.report.setdefault("mp4_diagnostics", {"snapshots": 0, "errors": {}})
+            try:
+                need(getattr(self, "explorer", None) is not None, "qa_observer_not_started")
+                payload = self.observer_get("/mp4-diagnostics", MAX_DIAGNOSTICS, "mp4_diagnostics_rejected")
+                need(type(payload) is dict and payload.get("ok") is True, "mp4_diagnostics_unavailable")
+            except (Rejected, OSError, ValueError, HTTPException, subprocess.SubprocessError) as error:
+                code = str(error)[:96] if isinstance(error, Rejected) else type(error).__name__
+                summary["errors"][code] = summary["errors"].get(code, 0) + 1
+                summary["last_error_reason"] = reason
+                return None
+            trace = export_trace_summary(payload)
+            text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+            (self.proof / "latest-mp4-diagnostics.json").write_text(text)
+            key = json.dumps(trace, sort_keys=True)
+            if key != getattr(self, "diagnostics_key", None) and summary["snapshots"] < 256:
+                summary["snapshots"] += 1
+                (self.proof / ("mp4-diagnostics-%03d-%s.json" % (summary["snapshots"], reason))).write_text(text)
+                self.diagnostics_key = key
+            summary.update(last_reason=reason, trace=trace)
+            return payload
+        except Exception as error:  # Diagnostics must never alter a verdict.
+            self.report.setdefault("mp4_diagnostics_collection_errors", []).append(type(error).__name__)
+            return None
+
+    def capture_persisted_mp4_diagnostics(self):
+        try:
+            raw = self.device.adb("exec-out", "run-as", PACKAGE, "cat", "shared_prefs/mp4_export.xml", check=False)
+            document = persisted_mp4_diagnostics(raw)
+            (self.proof / "persisted-mp4-diagnostics.json").write_text(
+                json.dumps(document, ensure_ascii=False, indent=2) + "\n")
+            self.report["persisted_mp4_diagnostics"] = {key: document.get(key) for key in
+                ("available", "last_failed_native_trace", "last_cancel", "last_save_failure_stage") if key in document}
+        except Exception as error:  # Evidence only.
+            self.report["persisted_mp4_diagnostics_unavailable"] = type(error).__name__
+
+    def relieve_system_anr(self, force=False):
+        """redroid only: answer Android's own "isn't responding" dialog with Wait.
+
+        The official translated guest keeps refusing every system dialog.
+        """
+        if self.guest() != REDROID_GUEST:
+            return False
+        try:
+            now = time.monotonic()
+            if not force and now - getattr(self, "anr_checked_at", -1e9) < 10:
+                return False
+            self.anr_checked_at = now
+            waited = self.report.setdefault("system_anr_wait_selected", [])
+            if len(waited) >= MAX_ANR_WAITS:
+                return False
+            windows = system_anr_windows(self.device.adb("shell", "dumpsys", "window", "windows", check=False))
+            if not windows:
+                return False
+            tree = self.device.android()
+            found = system_anr_wait_control(tree)
+            if found is None:
+                self.report.setdefault("system_anr_unanswered", []).append({"windows": windows})
+                return False
+            title, control = found
+            self.device.screenshot("system-anr-%02d" % (len(waited) + 1))
+            self.device.touch(control)
+            entry = {"title": title[:256], "windows": windows, "choice": "wait",
+                     "monotonic_seconds": round(time.monotonic(), 3)}
+            waited.append(entry)
+            self.record("redroid_system_anr_wait_selected", entry)
+            return True
+        except (Rejected, OSError, ValueError, subprocess.SubprocessError) as error:
+            self.report.setdefault("system_anr_check_errors", []).append(
+                str(error)[:96] if isinstance(error, Rejected) else type(error).__name__)
+            return False
+
+    def mp4(self):
+        payload = self.observer_get("/mp4-status", MAX_JSON, "mp4_observation_rejected")
+        need(type(payload) is dict, "mp4_observation_shape_invalid")
+        # Keep the last complete read-only status even if admission never
+        # becomes ready. Otherwise a failed early game run would discard
+        # the concrete Actor/Camera/Stage/World code we need to investigate.
+        # The bearer token is only an HTTP header and is never in payload.
+        (self.proof / "latest-native-status.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        native = payload.get("native", {})
+        observation = native.get("observation", {}) if type(native) is dict else {}
+        if type(observation) is dict and observation.get("source_valid") is True and observation.get("source_kind") == "photography_3d":
+            (self.proof / "last-photography-native-status.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        return payload
 
     def wait(self, action, timeout, code):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # redroid only, throttled: a system ANR dialog over the game is
+            # answered with Wait. The awaited condition itself is unchanged.
+            self.relieve_system_anr()
             result = action()
             if result is not None and result is not False:
                 return result
@@ -697,7 +926,9 @@ class ActualRun:
     def launch(self):
         self.report["target"] = self.device.identity()
         need(not self.device.adb("shell", "pm", "path", PACKAGE, check=False).strip(), "fresh_disposable_install_required")
-        self.device.adb("install", str(self.args.apk), timeout=180)
+        self.device.adb("install", str(self.args.apk), timeout=GUESTS[self.guest()]["install_timeout"])
+        if self.guest() == REDROID_GUEST:
+            self.grant_redroid_notification_permission()
         # The preceding environment probe is our own disposable QA app. End
         # its Activity so a stale probe window cannot be mistaken for a game UI.
         self.device.adb("shell", "am", "force-stop", ENVIRONMENT_PROBE)
@@ -762,6 +993,22 @@ class ActualRun:
             return None
         self.wait(title_or_home, self.args.startup_timeout, "usable_home_not_observed")
         self.report["game_boot_verified"] = True
+
+    def grant_redroid_notification_permission(self):
+        """redroid only: pre-grant the app's own runtime notification permission.
+
+        The observed-dialog path below stays available if the grant does not
+        take effect; the translated guest never uses pm grant.
+        """
+        result = self.device.adb("shell", "pm", "grant", PACKAGE, NOTIFICATION_PERMISSION,
+                                 check=False, merge_error=True)
+        granted = notification_permission_granted(self.device.adb("shell", "dumpsys", "package", PACKAGE, check=False))
+        self.report["notification_permission_pregranted_via_adb"] = granted
+        self.record("redroid_notification_permission_pregranted" if granted
+                    else "redroid_notification_permission_pregrant_unverified",
+                    {"permission": NOTIFICATION_PERMISSION, "target_package": PACKAGE,
+                     "pm_grant_output": result.strip()[:512]})
+        return granted
 
     def open_mv(self):
         snap = self.explorer._snapshot()
@@ -908,6 +1155,7 @@ class ActualRun:
             state, obs = native_payload(payload)
             phase = state.get("phase")
             if phase == "completed":
+                self.capture_mp4_diagnostics("completed", force=True)
                 need(observed_running, "no_actual_native_render_progress_observed")
                 need(acquired, "native_export_acquisition_baseline_unavailable")
                 need(self.report.get("native_clock_hold_with_advancing_playerloop_verified") is True,
@@ -929,7 +1177,9 @@ class ActualRun:
             if time.monotonic() - last_record >= 20:
                 self.record("export_progress", payload)
                 last_record = time.monotonic()
+                self.capture_mp4_diagnostics("export_progress", force=True)
             need(bool(self.device.adb("shell", "pidof", PACKAGE, check=False).strip()), "game_process_exited")
+            self.relieve_system_anr()
             time.sleep(.25)
         raise Rejected("actual_full_export_timeout")
 
@@ -1036,6 +1286,26 @@ class ActualRun:
                                                             "location": "public_Download"}
         self.record("actual_save_completed_and_hash_verified")
 
+    def save_steps(self, path, expected, identifier):
+        """The unchanged cancel/save gates, or a distinct redroid-only blocked verdict.
+
+        A guest image without any DocumentsUI cannot show the system picker. That
+        is recorded separately from the already completed export/decode verdict
+        and never counts as a pass.
+        """
+        if self.guest() == REDROID_GUEST:
+            installed = [name for name in DOCUMENTSUI_PACKAGES
+                         if self.device.adb("shell", "pm", "path", name, check=False).strip()]
+            if not installed:
+                self.report["save_verdict"] = {"status": "BLOCKED", "code": SAVE_BLOCKED_DOCUMENTSUI,
+                                               "documentsui_packages": []}
+                self.record(SAVE_BLOCKED_DOCUMENTSUI)
+                return False
+        self.save_cancel(path, expected)
+        self.save_completed(path, expected, identifier)
+        self.report["save_verdict"] = {"status": "VERIFIED"}
+        return True
+
     def run(self):
         try:
             need(HEX40.fullmatch(self.args.source_commit), "exact_source_commit_required")
@@ -1056,8 +1326,7 @@ class ActualRun:
             self.configure_and_start()
             final, baseline = self.await_export(baseline)
             path, digest = self.retrieve_and_decode(final, "direct")
-            self.save_cancel(path, digest)
-            self.save_completed(path, digest, final["native"]["export_id"])
+            saved = self.save_steps(path, digest, final["native"]["export_id"])
             self.report["direct_playing_source_export_and_restore_verified"] = True
             if self.args.queue_replay:
                 before_queue = self.mp4()
@@ -1067,11 +1336,18 @@ class ActualRun:
                 queued_final, _ = self.await_export(before_queue, replay=True)
                 self.retrieve_and_decode(queued_final, "queue")
                 self.report["queue_replay_export_and_acquired_source_restore_verified"] = True
-            self.report["status"] = "PASS_ACTUAL_MV_EXPORT_TRANSLATED_GUEST_ONLY"
+            if saved:
+                self.report["status"] = GUESTS[self.guest()]["status"]
+            else:
+                # Export/decode passed independently; the Save gate could not run.
+                self.report["status"] = "EXPORT_VERIFIED_SAVE_BLOCKED"
+                self.report["failure_stage"] = "save"
+                self.report["failure_code"] = SAVE_BLOCKED_DOCUMENTSUI
         except (Rejected, OSError, ValueError, HTTPException, subprocess.SubprocessError) as error:
             self.report["status"] = "FAILED_OR_ENVIRONMENT_BLOCKED"
             self.report["failure_stage"] = self.journal[-1]["phase"] if self.journal else "input_or_target"
             self.report["failure_code"] = str(error)[:192] if isinstance(error, Rejected) else type(error).__name__
+            self.capture_mp4_diagnostics("failure", force=True)
             try:
                 self.device.android()
                 self.device.screenshot("failure-display")
@@ -1080,6 +1356,9 @@ class ActualRun:
             except (Rejected, OSError, ValueError, subprocess.SubprocessError):
                 pass
         finally:
+            # The app's own export trace, live and persisted, on every outcome.
+            self.capture_mp4_diagnostics("final", force=True)
+            self.capture_persisted_mp4_diagnostics()
             try:
                 self.capture_launch_evidence("final")
             except (Rejected,OSError,subprocess.SubprocessError):
@@ -1118,6 +1397,9 @@ def main():
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--adb", type=Path, default=Path("adb"))
     parser.add_argument("--serial", default="emulator-5554")
+    parser.add_argument("--guest", choices=tuple(GUESTS), default=TRANSLATED_GUEST,
+                        help="translated-emulator (default, official API35 ARM-translation emulator) or redroid "
+                             "(native ARM64 container on a loopback adb serial; separate evidence scope)")
     parser.add_argument("--song-label", default="Bittersweet Echo")
     parser.add_argument("--fps", type=int, choices=(30, 60), default=30)
     parser.add_argument("--width", type=int, default=256)

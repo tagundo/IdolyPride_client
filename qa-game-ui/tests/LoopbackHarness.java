@@ -20,6 +20,7 @@ public final class LoopbackHarness {
             return "{\"ok\":true,\"generation\":1,\"nodes\":[]}";
         }
         @Override public String mp4Status() { return "{\"ok\":true,\"qa_only\":true,\"read_only\":true,\"native\":{\"schema\":1}}"; }
+        @Override public String mp4Diagnostics() { return "{\"ok\":true,\"qa_only\":true,\"read_only\":true,\"native_initialized\":false}"; }
         @Override public String click(int instanceId, long generation) {
             if (instanceId != -7 || generation != 3) throw new AssertionError("Unexpected semantic click arguments");
             clicks.incrementAndGet();
@@ -71,6 +72,12 @@ public final class LoopbackHarness {
             status(observed, 200);
             if (!observed.contains("\"read_only\":true")) throw new AssertionError("Missing read-only MP4 observation");
             status(exchange(request("POST", "/mp4-status", "", "")), 404);
+            status(exchange("GET /mp4-diagnostics HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"), 401);
+            String diagnosed = exchange(request("GET", "/mp4-diagnostics", "", ""));
+            status(diagnosed, 200);
+            if (!diagnosed.contains("\"native_initialized\":false")) throw new AssertionError("Missing read-only MP4 diagnostics");
+            status(exchange(request("POST", "/mp4-diagnostics", "", "")), 404);
+            status(exchange(request("GET", "/mp4-diagnostics?all=1", "", "")), 404);
             status(exchange(request("GET", "/snapshot?unsafe=1", "", "")), 404);
             status(exchange(request("POST", "/arbitrary", "", "")), 404);
             status(exchange(request("POST", "/click", "", "")), 411);
