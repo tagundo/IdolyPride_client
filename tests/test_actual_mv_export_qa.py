@@ -153,11 +153,17 @@ def permission_ui(message="Allow 아이프라 로컬 to send you notifications?"
     return tree
 
 
-def main_ui():
+def main_ui(server="status_running"):
     tree = ET.Element("hierarchy")
     ET.SubElement(tree, "node", {"package": qa.PACKAGE, "class": "android.widget.Button", "enabled": "true",
                                "clickable": "true", "text": sorted(qa.labels("launch_diagnostic_client"))[0],
                                "bounds": "[20,400][500,460]"})
+    # The real Main UI always shows the embedded server status and its Start control.
+    ET.SubElement(tree, "node", {"package": qa.PACKAGE, "class": "android.widget.TextView", "enabled": "true",
+                               "clickable": "false", "text": sorted(qa.labels(server))[0], "bounds": "[20,100][500,160]"})
+    ET.SubElement(tree, "node", {"package": qa.PACKAGE, "class": "android.widget.Button",
+                               "enabled": "false" if server == "status_running" else "true", "clickable": "true",
+                               "text": sorted(qa.labels("start_server"))[0], "bounds": "[20,170][260,240]"})
     return tree
 
 
@@ -336,7 +342,7 @@ def test_normal_launcher_handles_only_notification_ui_then_reverifies_resumed_ma
     assert run.report["launcher_main_verified"] and run.report["game_boot_verified"]
     assert [event["phase"] for event in run.journal] == ["unified_launcher_start_requested",
         "unified_launcher_notification_interruption_reported", "fresh_qa_notification_permission_allowed",
-        "unified_launcher_start_accepted"]
+        "embedded_server_already_running", "unified_launcher_start_accepted"]
     assert (tmp_path / "notification-permission-ui.xml").read_text() == ET.tostring(permission, encoding="unicode")
     assert (tmp_path / "launcher-main-lifecycle.txt").is_file()
     assert ("shell", "am", "start", "-W", "-a", "android.intent.action.MAIN", "-c",
@@ -855,8 +861,55 @@ def test_redroid_pregrants_only_notification_permission_then_launches_main_witho
     assert [c for c in commands if "grant" in c] == [grant] and not any("appops" in c for c in commands)
     assert run.report["notification_permission_pregranted_via_adb"] is True
     assert [event["phase"] for event in run.journal] == ["redroid_notification_permission_pregranted",
-        "unified_launcher_start_requested", "unified_launcher_start_reported", "unified_launcher_start_accepted"]
+        "unified_launcher_start_requested", "unified_launcher_start_reported", "embedded_server_already_running",
+        "unified_launcher_start_accepted"]
     assert run.device.touches == [launcher[0]]
+
+
+def test_stopped_embedded_server_is_started_through_its_ui_before_launch(tmp_path):
+    stopped, running = main_ui("status_stopped"), main_ui()
+    storage = ET.Element("hierarchy")
+    ET.SubElement(storage, "node", {"package": qa.PACKAGE, "class": "android.widget.Button", "enabled": "true",
+                                    "clickable": "true", "text": sorted(qa.labels("resource_storage_use_private"))[0],
+                                    "bounds": "[20,600][500,660]"})
+    screens = [stopped, storage, running]
+
+    class Device:
+        def __init__(self):
+            self.touches, self.shots = [], []
+
+        def android(self):
+            return screens[0]
+
+        def touch(self, node):
+            self.touches.append(node.get("text"))
+            screens.pop(0)
+
+        def screenshot(self, name):
+            self.shots.append(name)
+
+    run = bare_run(tmp_path, qa.REDROID_GUEST)
+    run.device = Device()
+
+    def wait(action, timeout, code):
+        for _ in range(5):
+            result = action()
+            if result is not None and result is not False:
+                return result
+        raise qa.Rejected(code)
+    run.wait = wait
+    assert run.start_embedded_server() is True
+    assert run.device.touches == [sorted(qa.labels("start_server"))[0], sorted(qa.labels("resource_storage_use_private"))[0]]
+    assert [event["phase"] for event in run.journal] == ["embedded_server_start_requested",
+        "embedded_server_private_storage_selected", "embedded_server_running"]
+    assert run.device.shots == ["embedded-server-running"]
+    # Already running: nothing is touched.
+    run.journal.clear(); run.device.touches.clear(); screens[:] = [main_ui()]
+    assert run.start_embedded_server() is False and not run.device.touches
+    # A failed start is a named stop, never a silent wait.
+    failed = main_ui("status_failed"); screens[:] = [main_ui("status_stopped"), failed]
+    with pytest.raises(qa.Rejected, match="embedded_server_start_failed"):
+        run.start_embedded_server()
 
 
 def test_unverified_redroid_pregrant_keeps_the_observed_dialog_path(tmp_path):

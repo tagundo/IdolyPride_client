@@ -979,6 +979,11 @@ class ActualRun:
             (self.proof / "launcher-main-lifecycle.txt").write_text(lifecycle)
             return launcher_main_control(tree, activities, lifecycle)
         launch = self.wait(launcher_control, 120, "unified_launch_control_unavailable")
+        # The unified app launches the game only while its resource server runs
+        # (MainActivity.prepareUnifiedClient); otherwise Launch only shows the
+        # "Start the server first" toast. Start it through the real UI control.
+        if self.start_embedded_server():
+            launch = self.wait(launcher_control, 120, "unified_launch_control_unavailable")
         self.report["launcher_main_verified"] = True
         self.record("unified_launcher_start_accepted", {"requested_component": MAIN,
                     "foreground_main_and_observed_control": True, "main_lifecycle_resumed": True})
@@ -999,6 +1004,45 @@ class ActualRun:
             return None
         self.wait(title_or_home, self.args.startup_timeout, "usable_home_not_observed")
         self.report["game_boot_verified"] = True
+
+    def start_embedded_server(self):
+        """Start the unified app's resource server with its own Start control.
+
+        Returns True when a start was requested (the caller re-reads the Main
+        UI), False when it was already running. Only observed UI controls are
+        used; a storage-choice dialog is answered with app-private storage.
+        """
+        running, failed = labels("status_running"), labels("status_failed")
+        start_names, private = labels("start_server"), labels("resource_storage_use_private")
+        def texts(tree):
+            return [node.get("text") or "" for node in tree.iter("node") if node.get("package") == PACKAGE]
+        def is_running(values):
+            return any(value == name or value.startswith(name + " ") for value in values for name in running)
+        tree = self.device.android()
+        if is_running(texts(tree)):
+            self.record("embedded_server_already_running")
+            return False
+        controls = [node for node in tree.iter("node") if node.get("package") == PACKAGE
+                    and node.get("class") == "android.widget.Button" and node.get("enabled") == "true"
+                    and node.get("clickable") == "true" and node.get("text") in start_names]
+        need(len(controls) == 1, "embedded_server_start_control_unavailable")
+        self.device.touch(controls[0])
+        self.record("embedded_server_start_requested")
+        def server_running():
+            current = self.device.android()
+            values = texts(current)
+            need(not any(value in failed for value in values), "embedded_server_start_failed")
+            choice = [node for node in current.iter("node") if node.get("text") in private
+                      and node.get("clickable") == "true" and node.get("enabled") == "true"]
+            if choice:
+                self.device.touch(choice[0])
+                self.record("embedded_server_private_storage_selected")
+                return None
+            return True if is_running(values) else None
+        self.wait(server_running, 600, "embedded_server_not_running")
+        self.device.screenshot("embedded-server-running")
+        self.record("embedded_server_running")
+        return True
 
     def grant_redroid_notification_permission(self):
         """redroid only: pre-grant the app's own runtime notification permission.
