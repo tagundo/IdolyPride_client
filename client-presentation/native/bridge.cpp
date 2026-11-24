@@ -56331,6 +56331,9 @@ struct Mp4FreshSceneHost {
  uint32_t roots[1024]{};size_t root_count=0;
  unsigned render_depth=0;
  bool active=false,mono=false,shader=false,started=false,start_returned=false,prepared=false,detached=false,held=false,camera_started=false,camera_returned=false,path_reset_started=false,path_reset_returned=false,pre_release_done=false,pre_release_failed=false,conversion_begun=false;
+ // Warm-at-zero readiness (see mp4_fresh_warm): boundaries are native entries.
+ bool warming=false,warmed=false,warm_ready=false;uint64_t warm_ready_at=0,warm_ready_ms=0,warm_size_at=0;
+ uint32_t warm_draws=0,warm_draws_at_size=0;int32_t warm_width=0,warm_height=0;
  const char*error="none";
  idoly_mp4_timeline_audio::ListenerLease listener{};
  idoly_mp4_fresh_qos::State qos{};bool qos_failed=false;
@@ -57371,13 +57374,66 @@ Mp4FreshResult mp4_fresh_hold(void*){
  }
  return mp4_fresh_current(nullptr)?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::stale,"fresh_scene_changed");
 }
+// Elichika-style readiness. Elichika never snapshots a scene the game has not
+// visibly run and rendered. Acquire used to snapshot the reloaded MV in the
+// same call that released its deferred Play, so every check read pre-first-
+// frame state (VideoImage binding, MaterialInfo, camera aspect). Here the MV
+// runs zero-delta engine frames at t=0, with the selected camera and brain
+// drawing normally, until the game's delayed ResetActorModel has returned, a
+// few frames have passed, the camera has drawn at the settled target size and
+// its aspect matches that target. Nothing is held or gated yet, and the
+// timeline cannot leave 0, so no rewind is needed. Only the delayed reset is
+// strict (a late reset would replace actors after the snapshot); draw and
+// aspect fall back after a bounded wait with a named trace.
+constexpr uint64_t mp4_fresh_warm_frames=10,mp4_fresh_warm_fallback_ms=4000;
+Mp4FreshResult mp4_fresh_warm(){
+ auto&h=mp4_fresh_host;const auto&g=mp4_fresh_play_gate;const uint64_t now=idoly_mp4_runtime::native_entries;
+ if(!h.warming){h.warming=true;h.warm_ready=false;idoly_mp4_runtime::diagnostic_event("fresh_warm","started");}
+ if(g.failed)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_play_staging_failed");
+ if(g.reset_required&&!g.reset_returned)return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_warm_reset_wait");
+ if(!h.warm_ready){h.warm_ready=true;h.warm_ready_at=h.warm_size_at=now;h.warm_ready_ms=idoly_mp4_runtime::milliseconds();
+  h.warm_draws=h.warm_draws_at_size=0;h.warm_width=h.warm_height=0;}
+ // The reload turns the window and resizes the controller target, often
+ // after Play; a draw only counts once it was made at the current size.
+ int32_t width=0,height=0;const bool sized=mp4_actual_source_geometry(h.source.controller,&width,&height)&&width>0&&height>0;
+ if(sized&&(width!=h.warm_width||height!=h.warm_height)){
+  h.warm_width=width;h.warm_height=height;h.warm_size_at=now;h.warm_draws_at_size=h.warm_draws;
+  idoly_mp4_runtime::diagnostic_event("fresh_warm","target_size",uint64_t(width),uint64_t(height));}
+ if(now-h.warm_ready_at<mp4_fresh_warm_frames)return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_warm_frame_wait");
+ const uint64_t ms=idoly_mp4_runtime::milliseconds();
+ const bool expired=ms>=h.warm_ready_ms&&ms-h.warm_ready_ms>=mp4_fresh_warm_fallback_ms;
+ const bool drawn=h.warm_draws>h.warm_draws_at_size;
+ bool aspect=!sized;
+ if(sized&&mp4_projection_api_available()){void*camera=rt_camera(h.source.controller,nullptr);
+  if(camera&&mp4_alive(camera)){const float a=aspect_get_original(camera,nullptr);aspect=std::isfinite(a)&&std::fabs(a-float(width)/float(height))<=.005f;}}
+ const bool settled=!sized||now-h.warm_size_at>=mp4_fresh_warm_frames;
+ if(!expired){
+  if(!drawn)return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_warm_draw_wait");
+  if(!settled||!aspect)return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_warm_target_wait");
+ }
+ h.warming=false;h.warmed=true;
+ // frame=draws at the settled size, tick=engine frames since the reset.
+ idoly_mp4_runtime::diagnostic_event("fresh_warm",!drawn?"observed_without_draw":!settled||!aspect?"observed_target_unsettled":"observed",
+  uint64_t(h.warm_draws-h.warm_draws_at_size),now-h.warm_ready_at);
+ return Mp4FreshResult::ok;
+}
+// Acquire's last step. Clears the waits acquire named on the way, so a later
+// stage's unnamed wait or failure is not reported as a stale acquire wait.
+Mp4FreshResult mp4_fresh_acquired(){
+ const auto held=mp4_fresh_hold(nullptr);if(held!=Mp4FreshResult::ok)return held;
+ if(mp4_fresh_play_gate.reset_required&&!mp4_fresh_play_gate.reset_returned)return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_delayed_actor_reset_wait");
+ mp4_fresh_host.error="none";return Mp4FreshResult::ok;
+}
 Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job){
  auto&h=mp4_fresh_host;
  if(h.active&&(h.job!=job||!mp4_scene_same_source(source,h.source)))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_scene_already_owned");
- if(h.active&&h.roster&&h.roster->converted){const auto held=mp4_fresh_hold(nullptr);return held!=Mp4FreshResult::ok?held:(!mp4_fresh_play_gate.reset_required||mp4_fresh_play_gate.reset_returned)?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_delayed_actor_reset_wait");}
+ if(h.active&&h.roster&&h.roster->converted)return mp4_fresh_acquired();
  if(!job||!source.generation||!idoly_mp4_runtime::native_clock_scope().held())return mp4_fresh_fail(Mp4FreshResult::invalid,"fresh_acquire_clock_missing");
+ // A queued entry can reuse the host without the full reset in save_origin.
+ if(!h.active){h.warming=h.warmed=h.warm_ready=false;h.warm_draws=h.warm_draws_at_size=0;}
  h.source=source;h.job=job;h.active=true;h.detached=false;mp4_fresh_withdrawn.store(false,std::memory_order_release);
  const auto played=mp4_fresh_release_deferred_play();if(played!=Mp4FreshResult::ok)return played;
+ if(!h.warmed){const auto warm=mp4_fresh_warm();if(warm!=Mp4FreshResult::ok)return warm;}
  if(!h.roster){void*storage=::malloc(sizeof(Mp4FreshControlRoster));if(!storage)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_control_roster_allocation_failed");h.roster=new(idoly_mp4_actor_placement::Address{storage})Mp4FreshControlRoster{};}
  if(!h.roster->ready){void*timeline=nullptr;if(!mp4_actor_field(source.player,mp4game::Layout{}.player_director_controller,timeline))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_timeline_missing");
   if(!mp4_fresh_control_roster_build(timeline,*h.roster,source.player,source.environment))return mp4_fresh_fail(Mp4FreshResult::unsupported,h.roster->error);
@@ -57410,6 +57466,10 @@ Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job
  for(size_t i=0;i<h.actor_count;++i){uintptr_t native=0;if(!mp4_actor_field(h.actors[i].animator,16,native)||!native
    ||!mp4_fresh_complete_handle(reinterpret_cast<void*>(native+0x238)))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_initial_animator_job_wait");}
  if(!h.roster->converted){h.conversion_begun=true;for(size_t i=0;i<h.director_count;++i){
+   // A DSP-clock root started by Play can advance during the warm-up; name
+   // it (frame=roster index, tick=ms) so an offset effect is attributable.
+   {const double t=mp4_api.director_get_time(h.directors[i],nullptr);
+    if(std::isfinite(t)&&std::fabs(t)>0.001)idoly_mp4_runtime::diagnostic_event("fresh_warm","director_time_advanced",uint64_t(i),uint64_t(std::fabs(t)*1000));}
    mp4_api.director_set_mode(h.directors[i],h.director_modes[i],nullptr);
    if(!mp4_fresh_current(nullptr)||mp4_api.director_get_mode(h.directors[i],nullptr)!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_clock_conversion_failed");
    mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
@@ -57420,7 +57480,7 @@ Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job
    mp4_actor_graph_set(&graph,h.roster->path_graphs[i].desired_mode,nullptr);
    if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode||!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_clock_conversion_failed");}
   h.roster->converted=true;}
- const auto held=mp4_fresh_hold(nullptr);return held!=Mp4FreshResult::ok?held:(!mp4_fresh_play_gate.reset_required||mp4_fresh_play_gate.reset_returned)?Mp4FreshResult::ok:mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_delayed_actor_reset_wait");
+ return mp4_fresh_acquired();
 }
 Mp4FreshResult mp4_fresh_start(void*){
  auto&h=mp4_fresh_host;
@@ -57493,6 +57553,8 @@ Mp4FreshResult mp4_fresh_prepare_render(void*,uint64_t tick){
 }
 bool mp4_fresh_permit_brain(void*brain){
  auto&h=mp4_fresh_host;if(!h.active||h.detached||brain!=h.source.brain)return true;
+ // Warm-up frames run the original camera brain like an ordinary frame.
+ if(h.warming)return true;
  if(!mp4_fresh_current(nullptr)||!h.brain_serial)return false;h.brain_serial=0;return true;
 }
 void mp4_fresh_withdraw(void*){
@@ -57504,6 +57566,9 @@ void mp4_fresh_withdraw(void*){
 // Return true when this is the fresh selected route, including suppression.
 bool mp4_fresh_render_call(Mp4RenderCamera original,Mp4RenderContext context,void*camera,Method*method){
  auto&h=mp4_fresh_host;if(!h.active||h.detached||camera!=h.source.camera)return false;
+ // Warm-up: an ordinary original draw at t=0 (nothing is owned yet); count
+ // only draws that returned, as Elichika's observed-render readiness does.
+ if(h.warming){mp4_particle_render_observed(original,context,camera,method);if(h.warm_draws!=~uint32_t(0))++h.warm_draws;return true;}
  if(!mp4_fresh_current(nullptr))return true;
  if(h.render_depth){++h.render_depth;try{mp4_particle_render_observed(original,context,camera,method);}catch(...){--h.render_depth;throw;}--h.render_depth;return true;}
  const auto prewarm=idoly_mp4_runtime::claim_native_prewarm_render();
@@ -57553,7 +57618,7 @@ Mp4FreshResult mp4_fresh_prepare_finish(void*){
  // Un-hold only what acquire actually changed. An acquire that failed before
  // any clock conversion or video knob capture changed nothing; reporting a
  // release failure for it hid the real cause and failed a good origin restore.
- const char*why=nullptr;h.brain_serial=0;
+ const char*why=nullptr;h.brain_serial=0;h.warming=false;
  const auto failed=[&why](const char*code){if(!why)why=code;};
  bool videos=false;for(size_t i=0;i<mp4_fresh_video_count;++i)if(mp4_fresh_videos[i].saved.captured&&!mp4_fresh_videos[i].saved.restored)videos=true;
  if(videos&&!mp4_fresh_video_restore_knobs())failed("fresh_release_video_knobs_failed");

@@ -1515,12 +1515,12 @@ inline bool native_render_boundary(void* manager,double wall){
 // BEGIN_MP4_FRESH_NATIVE_BOUNDARY
 // Explicit disposable-original-scene protocol. These callbacks owe real
 // current writer gates and render completion, not old history restoration.
-inline void fresh_stage_wait(const char*timeout){
+inline void fresh_stage_wait(const char*timeout,const char*detail=nullptr){
     const uint64_t now=milliseconds();
     if(!job.fresh_wait_error||strcmp(job.fresh_wait_error,timeout)||!job.fresh_stage_wait_started){job.fresh_wait_error=timeout;job.fresh_stage_wait_started=now;}
     if(now>=job.fresh_stage_wait_started&&now-job.fresh_stage_wait_started>15000){
-        // The stage code says where; the scene's last wait says what for.
-        diagnostic_event("fresh_wait",fresh_scene_error("unnamed_wait"),job.frame,0,true);terminal(timeout);}
+        // The stage code says where; the scene's (or capture's) last wait says what for.
+        diagnostic_event("fresh_wait",detail&&detail[0]&&strcmp(detail,"none")?detail:fresh_scene_error("unnamed_wait"),job.frame,0,true);terminal(timeout);}
 }
 inline void fresh_stage_ready(const char*timeout){
     if(job.fresh_wait_error&&!strcmp(job.fresh_wait_error,timeout)){job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;}
@@ -1635,23 +1635,31 @@ inline bool native_fresh_render_boundary_impl(void*manager,double wall){
             fresh_stage_ready("fresh_scene_graph_adoption_timeout");
             job.fresh_started=true;
         }
+        // Each first-capture wait has its own 15 s budget and code, instead of
+        // only the 120 s progress watchdog (capture_texture_not_ready etc.).
         if(!job.capture_requested){
             const Result requested=game.request_capture();
-            if(requested==Result::ok){diagnostic_event("fresh_capture","first_request_returned");if(prepare_frame_output()){
+            if(requested==Result::ok){fresh_stage_ready("fresh_capture_request_timeout");diagnostic_event("fresh_capture","first_request_returned");if(prepare_frame_output()){
                 job.capture_requested=true;job.captured=false;job.prewarm_completed=false;job.prewarm_requested=true;progress();}}
             else if(requested!=Result::waiting)terminal(game.last_error());
+            else fresh_stage_wait("fresh_capture_request_timeout",game.last_error());
             return native_boundary_clock_tick(manager,wall);
         }
         if(!job.prewarm_completed){
             const Result ready=api.prepare_render(api.context,0);
-            if(ready==Result::waiting)return native_boundary_clock_tick(manager,wall);
+            if(ready==Result::waiting){fresh_stage_wait("fresh_prewarm_prepare_timeout");return native_boundary_clock_tick(manager,wall);}
+            fresh_stage_ready("fresh_prewarm_prepare_timeout");
             if(ready!=Result::ok){terminal(fresh_scene_error("fresh_prewarm_prepare_failed"));return native_boundary_clock_tick(manager,wall);}
             job.fresh_render_tick=0;job.fresh_render_ready=true;
         }
-        if(!job.prewarm_completed||job.prewarm_inflight||!job.captured)return native_boundary_clock_tick(manager,wall);
+        if(!job.prewarm_completed||job.prewarm_inflight||!job.captured){
+            fresh_stage_wait("fresh_prewarm_render_timeout",!job.prewarm_completed?"prewarm_render_not_completed":job.prewarm_inflight?"prewarm_render_inflight":"prewarm_capture_not_received");
+            return native_boundary_clock_tick(manager,wall);}
+        fresh_stage_ready("fresh_prewarm_render_timeout");
         size_t count=0;int32_t width=0,height=0;
         const Result read=game.readback_rgba(job.rgba,job.rgba_capacity,count,width,height);
-        if(read==Result::waiting)return native_boundary_clock_tick(manager,wall);
+        if(read==Result::waiting){fresh_stage_wait("fresh_prewarm_readback_timeout",game.last_error());return native_boundary_clock_tick(manager,wall);}
+        fresh_stage_ready("fresh_prewarm_readback_timeout");
         if(read!=Result::ok)terminal(game.last_error());
         else if(count!=job.rgba_capacity||uint32_t(width)!=job.status.width||uint32_t(height)!=job.status.height)
             terminal("fresh_prewarm_capture_identity_changed");

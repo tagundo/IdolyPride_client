@@ -326,7 +326,7 @@ void emit_capture(){
 }
 struct Mp4RenderContext{void*pointer=nullptr;};
 using Mp4RenderCamera=void(*)(Mp4RenderContext,void*,Method*);
-struct{bool active=false,detached=false;idoly_mp4_game::SceneWitness source{};uint64_t tick=0;unsigned render_depth=0;const char*error="none";}mp4_fresh_host;
+struct{bool active=false,detached=false,warming=false;idoly_mp4_game::SceneWitness source{};uint64_t tick=0;unsigned render_depth=0;uint32_t warm_draws=0;const char*error="none";}mp4_fresh_host;
 Api mp4_api{};unsigned isolated_draws=0,shader_rebases=0;
 bool mp4_fresh_current(void*){return fresh_current(nullptr);}
 bool mp4_shader_lease_set_time(void*owner,float seconds){
