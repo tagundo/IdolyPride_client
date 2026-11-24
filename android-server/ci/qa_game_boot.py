@@ -219,11 +219,12 @@ def prepare_restarted_tutorial(schema, port, *, caller=None):
             "tutorial_progress_or_skip_called": False, "purchase_or_grant_called": False}
 
 
-def prepare_completed_opening(schema, port, master_dir):
+def prepare_completed_opening(schema, port, master_dir, *, timeout=20):
     """Create a disposable post-tutorial fixture through verified local RPCs.
 
     This is setup for exploring the actual game's later UI, never evidence
     that this emulator played the tutorial. It grants no arbitrary inventory.
+    `timeout` bounds each RPC; nothing is retried.
     """
     from idoly_local.tutorial_qa import run_tutorial_continuation
     with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
@@ -232,7 +233,7 @@ def prepare_completed_opening(schema, port, master_dir):
 
         def invoke(path, request):
             call = channel.unary_unary(path, request_serializer=codec.encode, response_deserializer=codec.decode)
-            raw = call(request.SerializeToString(), metadata=(("x-auth-token", token),) if token else (), timeout=20)
+            raw = call(request.SerializeToString(), metadata=(("x-auth-token", token),) if token else (), timeout=timeout)
             calls.append({"method": path, "status": "OK", "origin": "profile_fixture"})
             return schema.response_type(path).FromString(raw)
 

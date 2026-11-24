@@ -1158,3 +1158,352 @@ def test_terms_of_service_sheet_is_agreed_through_its_own_wired_button():
     run.record = lambda phase, observation=None: run.journal.append({"phase": phase})
     assert run.handle_dialog({"nodes": [title, cancel, agree]}) is True
     assert touched == [(agree["path"], "observed_terms_agree")] and run.journal[-1]["phase"] == "observed_terms_agree"
+
+
+# QA-only completed-opening profile fixture (explicit --prepare-completed-opening).
+FIXTURE_TOKEN = "local-" + "Q7v" * 14 + "x"  # shaped like the embedded server's session token
+
+
+class FakeRpcError(Exception):
+    def __init__(self, name, details):
+        super().__init__(details)
+        self.status_name = name
+
+    def code(self):
+        return SimpleNamespace(name=self.status_name)
+
+
+def fixture_result(**changes):
+    methods = ("/api.Auth/Login", "/api.Tutorial/Init", "/api.User/Get", "/api.Tutorial/Progress")
+    result = {"enabled": True, "qa_only": True, "status": "ready",
+              "rpc_calls": [{"method": method, "status": "OK", "origin": "profile_fixture"} for method in methods],
+              "completed_tutorial_step": 150, "tutorial_cleared": True, "actual_game_tutorial_played": False,
+              "continuation": {"platform": "actual-game fixture setup", "completed_step": 150,
+                               "snapshot_sha256": "c" * 64}}
+    result.update(changes)
+    return result
+
+
+def fixture_boot(events, *, result=None, error=None, stage=None):
+    def fail(name):
+        if error is not None and stage == name:
+            raise error
+
+    def from_descriptor_set(path):
+        events.append(("schema", Path(path).name))
+        fail("descriptor_set")
+        return "schema"
+
+    def wait_server(schema, port, timeout):
+        events.append(("wait_server", port, timeout))
+        fail("server_wait")
+
+    def prepare(schema, port, master_dir, *, timeout):
+        events.append(("prepare", port, Path(master_dir).name, timeout))
+        fail("prepare")
+        return fixture_result() if result is None else result
+    return SimpleNamespace(Schema=SimpleNamespace(from_descriptor_set=from_descriptor_set), wait_server=wait_server,
+                           prepare_completed_opening=prepare, grpc=SimpleNamespace(RpcError=FakeRpcError))
+
+
+class FixtureDevice:
+    """The unified Main UI; its embedded server starts through the Start control."""
+
+    def __init__(self, events, running=False, forward_error=None):
+        self.events, self.running, self.forward_error = events, running, forward_error
+
+    def identity(self):
+        return {"guest": "redroid"}
+
+    def adb(self, *args, **kwargs):
+        if args[:2] == ("forward", "--remove"):
+            self.events.append(("forward_removed", args[2]))
+        if args[:5] == ("shell", "am", "start", "-W", "-a"):
+            return "Starting: Intent\nStatus: ok\nActivity: " + qa.MAIN + "\nComplete\n"
+        if args == ("shell", "dumpsys", "activity", "activities"):
+            self.events.append(("launcher_read",))
+            return activity_context(qa.MAIN)
+        if args[:4] == ("shell", "run-as", qa.PACKAGE, "cat"):
+            return main_lifecycle("precreated", "created", "started", "resumed")
+        return ""
+
+    def forward(self, port):
+        self.events.append(("forward", port))
+        if self.forward_error is not None:
+            raise self.forward_error
+        return 41234
+
+    def android(self):
+        return main_ui() if self.running else main_ui("status_stopped")
+
+    def touch(self, node):
+        if node.get("text") in qa.labels("start_server"):
+            self.running = True
+            self.events.append(("start_server",))
+        else:
+            self.events.append(("touch", node.get("text")))
+
+    def screenshot(self, name):
+        pass
+
+
+def fixture_run(tmp_path, events, enabled=True, running=False, forward_error=None):
+    arguments = {"apk": tmp_path / "actual.apk", "startup_timeout": 10}
+    if enabled:
+        arguments.update(prepare_completed_opening=True, descriptor_set=tmp_path / "idolypride-6.1.1.pb",
+                         master_dir=tmp_path / "master-json")
+    proof = tmp_path / "runtime"
+    proof.mkdir()
+    run = bare_run(proof, qa.REDROID_GUEST, **arguments)
+    run.device = FixtureDevice(events, running, forward_error)
+    run.capture_launch_evidence = lambda stage: ""
+    run.handle_dialog = lambda snapshot: False
+    run.ui = SimpleNamespace(UiExplorer=lambda device: SimpleNamespace(_snapshot=lambda: {"ok": True}),
+                             _home_role=lambda snapshot, role: True)
+
+    def wait(action, timeout, code):
+        for _ in range(5):
+            result = action()
+            if result is not None and result is not False:
+                return result
+        raise qa.Rejected(code)
+    run.wait = wait
+    original = run.record
+
+    def record(phase, payload=None):
+        events.append(("phase", phase))
+        original(phase, payload)
+    run.record = record
+    return run, proof
+
+
+def written(proof):
+    return "".join(path.read_text() for path in proof.iterdir() if path.is_file())
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_completed_opening_fixture_runs_after_server_running_and_before_launch(tmp_path, monkeypatch, running):
+    events = []
+    monkeypatch.setattr(qa, "load_fixture_boot", lambda: fixture_boot(events))
+    run, proof = fixture_run(tmp_path, events, running=running)
+    run.launch()
+    launch_label = sorted(qa.labels("launch_diagnostic_client"))[0]
+    server = ("phase", "embedded_server_already_running" if running else "embedded_server_running")
+    order = [server, ("phase", "profile_fixture_requested"), ("schema", "idolypride-6.1.1.pb"),
+             ("forward", qa.FIXTURE_SERVER_PORT), ("wait_server", 41234, qa.FIXTURE_SERVER_TIMEOUT),
+             ("prepare", 41234, "master-json", qa.FIXTURE_RPC_TIMEOUT), ("forward_removed", "tcp:41234"),
+             ("phase", "profile_fixture_ready"), ("launcher_read",), ("touch", launch_label)]
+    positions = [max(i for i, event in enumerate(events) if event == wanted) for wanted in order]
+    assert positions == sorted(positions), events
+    # The Launch node is read again after the fixture, then touched exactly once.
+    assert [event for event in events if event[0] == "touch"] == [("touch", launch_label)]
+    assert events.index(("phase", "profile_fixture_ready")) < max(
+        i for i, event in enumerate(events) if event == ("launcher_read",))
+    document = qa.json.loads((proof / "profile-fixture.json").read_text())
+    assert document["status"] == "ready" and document["qa_only"] is True
+    assert document["actual_game_tutorial_played"] is False and document["gameplay_evidence"] is False
+    assert document["prepared_before_game_launch"] is True and document["completed_tutorial_step"] == 150
+    assert all(set(row) == {"method", "status", "origin"} for row in document["rpc_calls"])
+    assert run.report["profile_fixture"] == document
+    ready = next(event for event in run.journal if event["phase"] == "profile_fixture_ready")["observation"]
+    assert ready["actual_game_tutorial_played"] is False and ready["rpc_methods"][:2] == [
+        "/api.Auth/Login", "/api.Tutorial/Init"]
+    assert "local-" not in written(proof) and run.report["game_boot_verified"] is True
+
+
+@pytest.mark.parametrize("stage,error,code,check", [
+    ("load", ModuleNotFoundError("No module named 'grpc'"), "profile_fixture_failed_load_ModuleNotFoundError", None),
+    ("descriptor_set", FileNotFoundError("missing"), "profile_fixture_failed_descriptor_set_FileNotFoundError", None),
+    ("forward", qa.Rejected("loopback_forward_failed"), "profile_fixture_failed_forward_loopback_forward_failed", None),
+    ("server_wait", RuntimeError("Server did not start before the timeout"),
+     "profile_fixture_failed_server_wait_RuntimeError", None),
+    ("prepare", FakeRpcError("UNAVAILABLE", "details x-auth-token " + FIXTURE_TOKEN),
+     "profile_fixture_failed_prepare_rpc_unavailable", None),
+    ("prepare", FakeRpcError("DEADLINE_EXCEEDED", "Deadline Exceeded"),
+     "profile_fixture_failed_prepare_rpc_deadline_exceeded", None),
+    ("prepare", RuntimeError("Tutorial continuation QA: lesson reward definitions differ"),
+     "profile_fixture_failed_prepare_RuntimeError", "lesson_reward_definitions_differ"),
+    ("prepare", KeyError(FIXTURE_TOKEN), "profile_fixture_failed_prepare_KeyError", None),
+    ("record", None, "profile_fixture_failed_record_profile_fixture_result_invalid", None),
+])
+def test_completed_opening_fixture_failure_is_a_named_stop_before_launch(tmp_path, monkeypatch, stage, error, code, check):
+    events = []
+    if stage == "load":
+        def unavailable():
+            raise error
+        monkeypatch.setattr(qa, "load_fixture_boot", unavailable)
+    else:
+        result = fixture_result(actual_game_tutorial_played=True) if stage == "record" else None
+        monkeypatch.setattr(qa, "load_fixture_boot", lambda: fixture_boot(events, result=result, error=error, stage=stage))
+    run, proof = fixture_run(tmp_path, events, forward_error=error if stage == "forward" else None)
+    with pytest.raises(qa.Rejected) as rejected:
+        run.launch()
+    assert str(rejected.value) == code
+    assert not [event for event in events if event[0] == "touch"]  # Launch is never pressed.
+    assert run.journal[-1]["phase"] == code and "game_boot_verified" not in run.report
+    assert run.report["profile_fixture"] == dict({"enabled": True, "qa_only": True, "status": "failed",
+        "failure_code": code, "actual_game_tutorial_played": False}, **({"failed_check": check} if check else {}))
+    assert not (proof / "profile-fixture.json").exists()
+    forwarded = stage in ("server_wait", "prepare", "record")
+    assert (("forward_removed", "tcp:41234") in events) is forwarded
+    # Exception text (RPC details, keys) never reaches the report or journal.
+    assert FIXTURE_TOKEN not in written(proof) + qa.json.dumps(run.report)
+
+
+def test_fixture_result_with_a_token_shaped_value_is_never_written(tmp_path, monkeypatch):
+    events = []
+    leaked = fixture_result(continuation={"completed_step": 150, "note": FIXTURE_TOKEN})
+    monkeypatch.setattr(qa, "load_fixture_boot", lambda: fixture_boot(events, result=leaked))
+    run, proof = fixture_run(tmp_path, events)
+    with pytest.raises(qa.Rejected, match="^profile_fixture_failed_record_profile_fixture_secret_shaped_value$"):
+        run.launch()
+    assert not (proof / "profile-fixture.json").exists() and FIXTURE_TOKEN not in written(proof)
+    for change in ({"rpc_calls": [{"method": "/api.Auth/Login", "status": "OK", "origin": "profile_fixture",
+                                   "token": "x"}] * 3},
+                   {"rpc_calls": []}, {"tutorial_cleared": False}, {"status": "preparing"}):
+        with pytest.raises(qa.Rejected):
+            qa.completed_opening_document(fixture_result(**change))
+
+
+def test_fixture_failure_stops_the_run_with_its_named_code(tmp_path, monkeypatch):
+    run, proof, _ = run_with_stubbed_flow(tmp_path, monkeypatch, qa.REDROID_GUEST)
+    events = []
+    run.args.descriptor_set, run.args.master_dir = tmp_path / "set.pb", tmp_path / "master-json"
+    run.device.forward = lambda port: 41234
+    monkeypatch.setattr(qa, "load_fixture_boot", lambda: fixture_boot(
+        events, error=RuntimeError("Tutorial continuation QA: requires the dedicated uncompleted synthetic QA profile"),
+        stage="prepare"))
+    run.launch = run.prepare_completed_opening_fixture
+    assert run.run() is False
+    report = qa.json.loads((proof / "runtime-report.json").read_text())
+    code = "profile_fixture_failed_prepare_RuntimeError"
+    assert report["status"] == "FAILED_OR_ENVIRONMENT_BLOCKED"
+    assert report["failure_code"] == report["failure_stage"] == code
+    assert report["profile_fixture"]["failed_check"] == "requires_the_dedicated_uncompleted_synthetic_qa_profile"
+    assert "actual_mv_verified" not in report or report["actual_mv_verified"] is False
+
+
+def test_without_the_option_no_fixture_forward_or_rpc_happens(tmp_path, monkeypatch):
+    events = []
+
+    def forbidden():
+        raise AssertionError("fixture loader must not run without the explicit option")
+    monkeypatch.setattr(qa, "load_fixture_boot", forbidden)
+    run, proof = fixture_run(tmp_path, events, enabled=False)
+    run.launch()
+    assert not [event for event in events if event[0] in ("forward", "forward_removed")]
+    assert [event["phase"] for event in run.journal] == ["redroid_notification_permission_pregrant_unverified",
+        "unified_launcher_start_requested", "unified_launcher_start_reported", "embedded_server_start_requested",
+        "embedded_server_running", "unified_launcher_start_accepted"]
+    assert "profile_fixture" not in run.report and not (proof / "profile-fixture.json").exists()
+
+
+def test_fixture_failure_codes_never_carry_exception_text():
+    boot = SimpleNamespace(grpc=SimpleNamespace(RpcError=FakeRpcError))
+    assert qa.fixture_failure_code("prepare", FakeRpcError("UNAUTHENTICATED", FIXTURE_TOKEN), boot) == \
+        "profile_fixture_failed_prepare_rpc_unauthenticated"
+
+    class Statusless(FakeRpcError):
+        def code(self):
+            raise AttributeError("no status")
+    assert qa.fixture_failure_code("prepare", Statusless("X", FIXTURE_TOKEN), boot) == "profile_fixture_failed_prepare_rpc_error"
+    # Without the loaded grpc module a .code() method is not trusted.
+    assert qa.fixture_failure_code("prepare", FakeRpcError("UNAVAILABLE", "x")) == "profile_fixture_failed_prepare_FakeRpcError"
+    assert qa.fixture_failed_check(RuntimeError("Tutorial continuation QA: message has no local identity/time")) == \
+        "message_has_no_local_identity_time"
+    for other in (RuntimeError("Server did not start " + FIXTURE_TOKEN), ValueError("Tutorial continuation QA: x"),
+                  RuntimeError("Tutorial continuation QA: " + "\n" + FIXTURE_TOKEN)):
+        assert qa.fixture_failed_check(other) is None
+
+
+def test_cli_fixture_option_is_off_by_default_and_requires_its_inputs(monkeypatch, tmp_path):
+    seen = []
+
+    class Recorder:
+        def __init__(self, args):
+            seen.append(args)
+
+        def run(self):
+            return True
+    monkeypatch.setattr(qa, "ActualRun", Recorder)
+    base = ["driver", "--apk", "a.apk", "--qa-evidence", "e.json", "--source-commit", "a" * 40,
+            "--output-directory", str(tmp_path / "out"), "--guest", "redroid", "--serial", "127.0.0.1:15555"]
+
+    def main(*extra):
+        monkeypatch.setattr(sys, "argv", base + list(extra))
+        with pytest.raises(SystemExit) as exit_code:
+            qa.main()
+        return exit_code.value.code
+    assert main() == 0 and seen[-1].prepare_completed_opening is False
+    assert seen[-1].descriptor_set is None and seen[-1].master_dir is None
+    descriptor, master = tmp_path / "idolypride-6.1.1.pb", tmp_path / "master-json"
+    descriptor.write_bytes(b"descriptor")
+    master.mkdir()
+    for name in qa.FIXTURE_TABLES[:-1]:
+        (master / name).write_text("[]")
+    for extra in ([], ["--descriptor-set", str(descriptor)], ["--descriptor-set", str(descriptor), "--master-dir", str(master)],
+                  ["--descriptor-set", str(tmp_path / "missing.pb"), "--master-dir", str(master)]):
+        with pytest.raises(qa.Rejected, match="^profile_fixture_inputs_required$"):
+            main("--prepare-completed-opening", *extra)
+    (master / qa.FIXTURE_TABLES[-1]).write_text("[]")  # Mission.json backs the continuation's mission check.
+    assert main("--prepare-completed-opening", "--descriptor-set", str(descriptor), "--master-dir", str(master)) == 0
+    assert seen[-1].prepare_completed_opening is True and seen[-1].master_dir == master
+    with pytest.raises(qa.Rejected, match="^profile_fixture_inputs_without_option$"):
+        main("--descriptor-set", str(descriptor), "--master-dir", str(master))
+
+
+def test_driver_reuses_qa_game_boot_fixture_and_keeps_the_session_token_out_of_files(tmp_path, monkeypatch):
+    pytest.importorskip("grpc")
+    pytest.importorskip("google.protobuf")
+    boot = qa.load_fixture_boot()
+    assert boot is sys.modules["qa_game_boot"] and boot.prepare_completed_opening.__module__ == "qa_game_boot"
+    from idoly_local import tutorial_qa
+    sent = []
+
+    class Channel:
+        def __init__(self, target):
+            self.target = target
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def unary_unary(self, path, request_serializer=None, response_deserializer=None):
+            def call(raw, metadata=(), timeout=None):
+                sent.append((self.target, path, dict(metadata), timeout))
+                return b""
+            return call
+
+    class Request(SimpleNamespace):
+        def SerializeToString(self):
+            return b"request"
+    login = SimpleNamespace(gameAuthToken=FIXTURE_TOKEN)
+    schema = SimpleNamespace(request_type=lambda path: Request, response_type=lambda path: SimpleNamespace(
+        FromString=lambda raw: login if path == "/api.Auth/Login" else SimpleNamespace()))
+    waited = []
+
+    def continuation(schema, invoke, master_dir, *, label):
+        invoke("/api.User/Get", schema.request_type("/api.User/Get")())
+        invoke("/api.Tutorial/Progress", schema.request_type("/api.Tutorial/Progress")(type=1, step=150))
+        return {"platform": label, "completed_step": 150, "snapshot_sha256": "d" * 64}
+    monkeypatch.setattr(boot.grpc, "insecure_channel", Channel)
+    monkeypatch.setattr(boot, "Schema", SimpleNamespace(from_descriptor_set=lambda path: schema))
+    monkeypatch.setattr(boot, "wait_server", lambda schema, port, timeout: waited.append((port, timeout)))
+    monkeypatch.setattr(tutorial_qa, "run_tutorial_continuation", continuation)
+    removed = []
+    run = bare_run(tmp_path, qa.REDROID_GUEST, descriptor_set=tmp_path / "set.pb", master_dir=tmp_path / "master-json")
+    run.device = SimpleNamespace(forward=lambda port: 41234 if port == qa.FIXTURE_SERVER_PORT else 0,
+                                 adb=lambda *args, **kwargs: removed.append(args) or "")
+    document = run.prepare_completed_opening_fixture()
+    assert waited == [(41234, qa.FIXTURE_SERVER_TIMEOUT)] and removed == [("forward", "--remove", "tcp:41234")]
+    assert [path for _, path, _, _ in sent] == ["/api.Auth/Login", "/api.Tutorial/Init", "/api.User/Get",
+                                                "/api.Tutorial/Progress"]
+    assert {target for target, _, _, _ in sent} == {"127.0.0.1:41234"}
+    assert {timeout for _, _, _, timeout in sent} == {qa.FIXTURE_RPC_TIMEOUT}
+    # The token authenticates the setup RPCs only as metadata; it is never written.
+    assert sent[0][2] == {} and all(metadata == {"x-auth-token": FIXTURE_TOKEN} for _, _, metadata, _ in sent[1:])
+    assert [row["method"] for row in document["rpc_calls"]] == [path for _, path, _, _ in sent]
+    assert document["actual_game_tutorial_played"] is False and document["continuation"]["completed_step"] == 150
+    assert FIXTURE_TOKEN not in written(tmp_path) + qa.json.dumps(run.report) + qa.json.dumps(run.journal)

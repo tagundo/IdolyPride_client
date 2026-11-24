@@ -129,3 +129,45 @@ def test_server_capture_does_not_mask_persistent_or_other_failures(tmp_path, mon
     monkeypatch.setattr(qa, "capture", unrelated)
     with pytest.raises(RuntimeError, match="adb command failed"):
         qa.capture_server("unrelated")
+
+
+@pytest.mark.parametrize("timeout", [None, 60])
+def test_completed_opening_fixture_bounds_each_rpc_and_keeps_the_token_in_metadata(monkeypatch, timeout):
+    from idoly_local import tutorial_qa
+    token = "private-completed-opening-session-not-in-report"
+    sent = []
+
+    class Channel:
+        def __init__(self, target):
+            self.target = target
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def unary_unary(self, path, request_serializer=None, response_deserializer=None):
+            def call(raw, metadata=(), timeout=None):
+                sent.append((self.target, path, dict(metadata), timeout))
+                return b""
+            return call
+
+    class Request(SimpleNamespace):
+        def SerializeToString(self):
+            return b"request"
+    schema = SimpleNamespace(request_type=lambda path: Request, response_type=lambda path: SimpleNamespace(
+        FromString=lambda raw: SimpleNamespace(gameAuthToken=token) if path == "/api.Auth/Login" else SimpleNamespace()))
+
+    def continuation(schema, invoke, master_dir, *, label):
+        invoke("/api.User/Get", schema.request_type("/api.User/Get")())
+        return {"platform": label, "completed_step": 150}
+    monkeypatch.setattr(qa_game_boot.grpc, "insecure_channel", Channel)
+    monkeypatch.setattr(tutorial_qa, "run_tutorial_continuation", continuation)
+    options = {} if timeout is None else {"timeout": timeout}
+    report = qa_game_boot.prepare_completed_opening(schema, 41234, "master-json", **options)
+    assert [path for _, path, _, _ in sent] == ["/api.Auth/Login", "/api.Tutorial/Init", "/api.User/Get"]
+    assert {deadline for _, _, _, deadline in sent} == {20 if timeout is None else timeout}
+    assert sent[0][2] == {} and all(metadata == {"x-auth-token": token} for _, _, metadata, _ in sent[1:])
+    assert token not in json.dumps(report) and report["actual_game_tutorial_played"] is False
+    assert report["completed_tutorial_step"] == 150 and report["tutorial_cleared"] is True

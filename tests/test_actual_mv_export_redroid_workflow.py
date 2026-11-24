@@ -301,3 +301,86 @@ def test_gapps_context_fails_closed(tmp_path, defect):
                 "nonempty": "not empty"}[defect]
     with pytest.raises(SystemExit, match=re.escape(expected)):
         gapps.prepare(tmp_path / "gapps.zip", digest, base, context, apk_pins=pins)
+
+
+def uv_lock_wheel_hashes(package):
+    """Every wheel uv.lock pins for one package, by hash, with its locked version."""
+    lock = (ROOT / "uv.lock").read_text()
+    block = re.search(r'\n\[\[package\]\]\nname = "' + re.escape(package) + r'"\nversion = "([^"]+)"\n(.*?)(?=\n\[\[package\]\]|\Z)',
+                      lock, re.S)
+    return block.group(1), {digest: wheel for wheel, digest in
+                            re.findall(r'/([^/"]+)\.whl", hash = "sha256:([0-9a-f]{64})"', block.group(2))}
+
+
+def installs_on_the_arm_runner(wheel):
+    """True for a wheel pip takes on CPython 3.13, Linux aarch64 (the setup-python job)."""
+    python, abi, platform = wheel.split("-")[-3:]
+    if (python, abi, platform) == ("py3", "none", "any"):
+        return True
+    arm = all(tag.endswith("_aarch64") and tag.startswith("manylinux") for tag in platform.split("."))
+    if abi == "abi3":
+        return arm and python.startswith("cp3") and python[3:].isdigit() and int(python[3:]) <= 13
+    return arm and python == abi == "cp313"
+
+
+def runtime_steps():
+    yaml = pytest.importorskip("yaml")
+    return yaml.safe_load(text())["jobs"]["actual-game-redroid"]["steps"]
+
+
+def test_fixture_rpc_packages_are_the_uv_lock_pins_hash_checked_and_binary_only():
+    runtime = job("actual-game-redroid")
+    step = runtime[runtime.index("- name: Install the pinned host RPC packages"):runtime.index("- uses: actions/download-artifact@v4")]
+    requirements = re.findall(r"^ {10}([a-z-]+)==(\S+) --hash=sha256:([0-9a-f]{64})$", step, re.M)
+    assert len(requirements) == 4
+    assert {name for name, _, _ in requirements} == {"grpcio", "protobuf", "pycryptodome", "typing-extensions"}
+    for name, version, digest in requirements:
+        locked, wheels = uv_lock_wheel_hashes(name)
+        assert version == locked and digest in wheels, name
+        # The pinned wheel itself must install on the runner, not just any wheel of the package.
+        assert installs_on_the_arm_runner(wheels[digest]), wheels[digest]
+    assert "python -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes \\" in step
+    assert '-r "$RUNNER_TEMP/profile-fixture-requirements.txt"' in step and "cat > \"$RUNNER_TEMP/profile-fixture-requirements.txt\" <<'EOF'" in step
+    # The driver's real fixture import is proven here, before the long redroid setup.
+    assert ("python -B -c 'import sys; sys.path.insert(0, \"tools\"); import run_actual_mv_export_qa as q; "
+            "print(q.load_fixture_boot().prepare_completed_opening.__name__)'") in step
+    # After Python is set up and before anything uses it.
+    assert runtime.index("uses: actions/setup-python@v5") < runtime.index("- name: Install the pinned host RPC packages")
+    assert runtime.index("- name: Install the pinned host RPC packages") < runtime.index("id: game")
+
+
+def test_fixture_inputs_come_from_the_tested_apk_before_the_game_and_outside_the_evidence():
+    runtime = job("actual-game-redroid")
+    assert '"FIXTURE_DIR=$RUNNER_TEMP/actual-mv-fixture"' in runtime
+    step = runtime[runtime.index("- name: Extract the profile fixture inputs"):runtime.index("- name: Host gate")]
+    assert 'python -B tools/actual_mv_fixture_inputs.py --apk "$INPUT_DIR/current-unified-observer.apk" \\' in step
+    assert '--output "$FIXTURE_DIR" --receipt "$EVIDENCE_DIR/profile-fixture-inputs.json"' in step
+    assert runtime.index("- name: Verify exact input checkout") < runtime.index("- name: Extract the profile fixture inputs")
+    assert runtime.index("- name: Extract the profile fixture inputs") < runtime.index("id: game")
+    # The large master tables never enter the uploaded proof or the transport artifact.
+    fixture = re.search(r'"FIXTURE_DIR=([^"]+)"', runtime).group(1)
+    evidence = re.search(r'"EVIDENCE_DIR=([^"]+)"', runtime).group(1)
+    assert not fixture.startswith(evidence) and not fixture.startswith(re.search(r'"INPUT_DIR=([^"]+)"', runtime).group(1))
+    assert "actual-mv-fixture" not in job("current-input")
+    assert runtime.index("- name: Install the pinned host RPC packages") < runtime.index("- name: Extract the profile fixture inputs")
+
+
+def test_fixture_steps_are_real_steps_in_order():
+    names = [step.get("name", "") for step in runtime_steps()]
+    extract = next(name for name in names if name.startswith("Extract the profile fixture inputs"))
+    install = next(name for name in names if name.startswith("Install the pinned host RPC packages"))
+    game = next(step["name"] for step in runtime_steps() if step.get("id") == "game")
+    assert names.index(install) < names.index(extract) < names.index(game)
+
+
+def test_game_step_prepares_the_completed_opening_fixture_and_the_x86_workflow_does_not():
+    runtime = job("actual-game-redroid")
+    game = runtime[runtime.index("id: game"):runtime.index("Collect bounded container")]
+    command = game[game.index("python -B tools/run_actual_mv_export_qa.py"):]
+    for argument in ("--prepare-completed-opening", '--descriptor-set "$FIXTURE_DIR/protocol/idolypride-6.1.1.pb"',
+                     '--master-dir "$FIXTURE_DIR/master-json"'):
+        assert command.count(argument) == 1, argument
+    assert "--startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}" in command
+    x86 = X86_WORKFLOW.read_text()
+    for absent in ("--prepare-completed-opening", "--descriptor-set", "--master-dir", "actual_mv_fixture_inputs", "grpcio"):
+        assert absent not in x86

@@ -105,7 +105,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
           python -m pip install --disable-pip-version-check pytest==8.4.2 protobuf==6.33.0 pycryptodome==3.23.0
-          python -B -m pytest -q -p no:cacheprovider tests/test_actual_mv_export_qa.py tests/test_actual_mv_qa_input.py tests/test_android_native_source_receipt.py tests/test_package_qa_ui_client.py qa-game-ui/tests/test_loopback_server.py qa-game-ui/tests/test_session_policy.py tests/test_actual_mv_export_redroid_workflow.py tools/emulator_environment_probe/test_driver.py
+          python -B -m pytest -q -p no:cacheprovider tests/test_actual_mv_export_qa.py tests/test_actual_mv_qa_input.py tests/test_android_native_source_receipt.py tests/test_package_qa_ui_client.py qa-game-ui/tests/test_loopback_server.py qa-game-ui/tests/test_session_policy.py tests/test_actual_mv_export_redroid_workflow.py tests/test_actual_mv_fixture_inputs.py tools/emulator_environment_probe/test_driver.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -202,10 +202,25 @@ jobs:
       - name: Set runner-local evidence directories
         run: |
           printf '%s\n' "INPUT_DIR=$RUNNER_TEMP/actual-mv-input" "EVIDENCE_DIR=$RUNNER_TEMP/redroid-mv-evidence" \
-            "REDROID_DATA=$RUNNER_TEMP/redroid-data" >> "$GITHUB_ENV"
+            "REDROID_DATA=$RUNNER_TEMP/redroid-data" "FIXTURE_DIR=$RUNNER_TEMP/actual-mv-fixture" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Install the pinned host RPC packages for the QA-only profile fixture
+        # The driver reuses qa_game_boot's fixture, which talks to the embedded server with
+        # grpcio. uv.lock versions; aarch64/cp313 wheels only, each checked by its uv.lock hash.
+        run: |
+          cat > "$RUNNER_TEMP/profile-fixture-requirements.txt" <<'EOF'
+          grpcio==1.85.1 --hash=sha256:0bde4264ca71aaf3bc56c587380c426b1c959d1db0ab0a3f632bc66515f9726f
+          protobuf==7.36.2 --hash=sha256:e11e1f0180583a2af89db6a2ecd9e8dc40aa6d2988ca175bfd0e6d12ea72d74e
+          pycryptodome==4.4.0 --hash=sha256:33e69ac53f745e5d1c8f06dc9b0d43a8236d2026f6de7a19e1a160aa307d933b
+          typing-extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+          EOF
+          python -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes \
+            -r "$RUNNER_TEMP/profile-fixture-requirements.txt"
+          python -B -c 'import grpc, google.protobuf, Crypto; print(grpc.__version__, google.protobuf.__version__, Crypto.__version__)'
+          # The driver's own lazy import, checked here instead of after the redroid boot.
+          python -B -c 'import sys; sys.path.insert(0, "tools"); import run_actual_mv_export_qa as q; print(q.load_fixture_boot().prepare_completed_opening.__name__)'
       - uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ needs.current-input.outputs.artifact_id }}
@@ -219,6 +234,12 @@ jobs:
           mkdir -p "$EVIDENCE_DIR/redroid"
           cp "$INPUT_DIR"/*.json "$EVIDENCE_DIR/"
           printf '%s\n' '${{ needs.current-input.outputs.artifact_digest }}' > "$EVIDENCE_DIR/transport-artifact-digest.txt"
+      - name: Extract the profile fixture inputs from the app under test (pinned; setup, not gameplay evidence)
+        # The descriptor set and master tables of the APK's own assets/ServerData.zip, every byte
+        # checked against data/korean-master-data-pin.json; nothing is added to the transport.
+        run: |
+          python -B tools/actual_mv_fixture_inputs.py --apk "$INPUT_DIR/current-unified-observer.apk" \
+            --output "$FIXTURE_DIR" --receipt "$EVIDENCE_DIR/profile-fixture-inputs.json"
       - name: Host gate (native ARM64 kernel, binder, FUSE; record DMA-BUF heap and memfd)
         run: |
           set -euo pipefail
@@ -523,9 +544,13 @@ jobs:
           ( while sleep 20; do adb connect "$REDROID_SERIAL" >/dev/null 2>&1 || true; done ) &
           keepalive=$!
           trap 'kill "$keepalive" 2>/dev/null || true' EXIT
+          # QA-only setup: before Launch, qa_game_boot's verified local RPCs prepare the disposable profile
+          # past the opening tutorial (profile-fixture.json); never evidence that the tutorial was played.
           python -B tools/run_actual_mv_export_qa.py --guest redroid --serial "$REDROID_SERIAL" \
             --apk "$INPUT_DIR/current-unified-observer.apk" \
             --qa-evidence "$INPUT_DIR/current-unified-observer.apk.evidence.json" \
+            --prepare-completed-opening --descriptor-set "$FIXTURE_DIR/protocol/idolypride-6.1.1.pb" \
+            --master-dir "$FIXTURE_DIR/master-json" \
             --source-commit "$SOURCE_SHA" --output-directory "$EVIDENCE_DIR/runtime" --song-label "$SONG_LABEL" \
             --fps '${{ matrix.fps }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}' \
             --startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}
@@ -574,6 +599,7 @@ jobs:
           print("- google play services (" + os.environ["REDROID_GAPPS"] + "):", gms)
           print("- probe step:", os.environ["PROBE_OUTCOME"], "/ environment_compatible:", probe.get("environment_compatible"))
           print("- game step:", os.environ["GAME_OUTCOME"], "/ status:", report.get("status"))
+          print("- profile fixture (QA-only setup):", (report.get("profile_fixture") or {}).get("status"))
           print("- failure:", report.get("failure_stage"), report.get("failure_code"))
           trace = report.get("mp4_diagnostics", {}).get("trace", {})
           print("- native export trace:", json.dumps(trace.get("export_trace", {}))[:3000])

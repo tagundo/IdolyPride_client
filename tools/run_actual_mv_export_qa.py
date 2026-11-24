@@ -4,6 +4,8 @@
 This never creates synthetic video or invokes gameplay/button delegates. Every
 functional verdict is separate from successful evidence collection. The only
 HTTP calls are authenticated read-only observations in an emulator-only addon.
+Only the explicit QA-only --prepare-completed-opening option adds local server
+RPCs: qa_game_boot's setup-only completed-opening profile, before Launch.
 """
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ import argparse
 from fractions import Fraction
 import hashlib
 from http.client import HTTPConnection, HTTPException
+import importlib
 import importlib.util
 import json
 import math
@@ -18,6 +21,7 @@ from pathlib import Path, PurePosixPath
 import re
 import struct
 import subprocess
+import sys
 import time
 import xml.etree.ElementTree as ET
 
@@ -595,6 +599,71 @@ def load_ui():
     return module
 
 
+# QA ONLY, explicit option: the unified app's embedded server listens on this
+# guest-loopback gRPC port (reached through an adb forward on the selected serial).
+FIXTURE_SERVER_PORT = 50051
+FIXTURE_SERVER_TIMEOUT, FIXTURE_RPC_TIMEOUT = 300, 60
+# Master tables the tutorial continuation reads (Mission.json is required for
+# its card-level mission delta check).
+FIXTURE_TABLES = ("Setting.json", "CardLevel.json", "Message.json", "Mission.json")
+FIXTURE_CHECK_PREFIX = "Tutorial continuation QA: "
+
+
+def load_fixture_boot():
+    """qa_game_boot, reused as is for its completed-opening fixture.
+
+    grpc (and protobuf/pycryptodome through idoly_local) is imported only here,
+    so the default driver path and its tests never need them.
+    """
+    for path in (ROOT / "src", ROOT / "android-server/ci"):
+        if str(path) not in sys.path:
+            sys.path.append(str(path))
+    return importlib.import_module("qa_game_boot")
+
+
+def fixture_failure_code(stage, error, boot=None):
+    """A fixed code: never exception text, which for an RPC can carry details."""
+    rpc_error = getattr(getattr(boot, "grpc", None), "RpcError", ())
+    if isinstance(error, Rejected):
+        reason = str(error)
+    elif isinstance(error, rpc_error):
+        try:
+            reason = "rpc_" + error.code().name.lower()
+        except Exception:  # A non-call RpcError has no status code.
+            reason = "rpc_error"
+    else:
+        reason = type(error).__name__
+    return "profile_fixture_failed_" + stage + "_" + re.sub(r"[^A-Za-z0-9_]", "_", reason)[:64]
+
+
+def fixture_failed_check(error):
+    """The continuation's own literal check name; nothing else is kept."""
+    text = str(error) if type(error) is RuntimeError else ""
+    found = re.fullmatch(re.escape(FIXTURE_CHECK_PREFIX) + r"([A-Za-z][A-Za-z0-9 ./=-]{0,159})", text)
+    return re.sub(r"[^a-z0-9]+", "_", found[1].lower()).strip("_") if found else None
+
+
+def completed_opening_document(fixture):
+    """qa_game_boot's fixture result, accepted only as credential-free setup."""
+    need(type(fixture) is dict and fixture.get("enabled") is True and fixture.get("qa_only") is True
+         and fixture.get("status") == "ready" and fixture.get("completed_tutorial_step") == 150
+         and fixture.get("tutorial_cleared") is True and fixture.get("actual_game_tutorial_played") is False,
+         "profile_fixture_result_invalid")
+    calls = fixture.get("rpc_calls")
+    need(type(calls) is list and len(calls) >= 3 and all(
+        type(row) is dict and set(row) == {"method", "status", "origin"} and row["status"] == "OK"
+        and row["origin"] == "profile_fixture" and type(row["method"]) is str
+        and re.fullmatch(r"/api\.[A-Za-z0-9_]+/[A-Za-z0-9_]+", row["method"]) for row in calls)
+         and [row["method"] for row in calls[:2]] == ["/api.Auth/Login", "/api.Tutorial/Init"],
+         "profile_fixture_calls_invalid")
+    document = dict(fixture, server="embedded_unified_server", prepared_before_game_launch=True,
+                    gameplay_evidence=False)
+    text = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+    # Defense in depth: a local session token ("local-" + urlsafe) is never written.
+    need(not re.search(r"local-[A-Za-z0-9_-]{16,}", text), "profile_fixture_secret_shaped_value")
+    return document, text
+
+
 # The title ignores input while it fades in; re-tap a still-visible title.
 TITLE_RETAP_SECONDS, TITLE_TAP_LIMIT = 20, 15
 
@@ -983,7 +1052,8 @@ class ActualRun:
         (self.proof / "launcher-constructor.txt").write_text(factory[-16384:])
         starts = self.device.adb("logcat", "-b", "system", "-d", "-t", "5000", "-v", "brief", "-s", "ActivityTaskManager", check=False)
         (self.proof / "initial-own-activity-launch-log.txt").write_text("\n".join(line for line in starts.splitlines() if PACKAGE in line)[-65536:])
-        # The exact launcher control is source-localized; no startup RPC is injected.
+        # The exact launcher control is source-localized; no startup RPC is
+        # injected into the game (the optional fixture below precedes Launch).
         def launcher_control():
             tree = self.device.android()
             activities = self.device.adb("shell", "dumpsys", "activity", "activities", check=False)
@@ -1008,7 +1078,14 @@ class ActualRun:
         # The unified app launches the game only while its resource server runs
         # (MainActivity.prepareUnifiedClient); otherwise Launch only shows the
         # "Start the server first" toast. Start it through the real UI control.
-        if self.start_embedded_server():
+        started = self.start_embedded_server()
+        # QA ONLY, explicit option: the fixture needs the running server and must
+        # exist before the game's own first login, so it runs before Launch,
+        # also when the server was already running.
+        prepared = getattr(self.args, "prepare_completed_opening", False) is True
+        if prepared:
+            self.prepare_completed_opening_fixture()
+        if started or prepared:
             launch = self.wait(launcher_control, 120, "unified_launch_control_unavailable")
         self.report["launcher_main_verified"] = True
         self.record("unified_launcher_start_accepted", {"requested_component": MAIN,
@@ -1074,6 +1151,57 @@ class ActualRun:
         self.device.screenshot("embedded-server-running")
         self.record("embedded_server_running")
         return True
+
+    def prepare_completed_opening_fixture(self):
+        """QA ONLY: qa_game_boot's completed-opening profile, after Running, before Launch.
+
+        The embedded server keeps one local profile. qa_game_boot's verified
+        Auth.Login, Tutorial.Init(QAManager) and tutorial continuation prepare
+        it, so the game's own first login lands after the opening tutorial.
+        This is setup, never evidence that the game played the tutorial. Only
+        method/status rows are written; the local session token never leaves
+        the fixture call. Nothing is retried: the continuation refuses a
+        partially progressed profile, so any failure stops the run.
+        """
+        self.record("profile_fixture_requested", {"kind": "completed_opening", "qa_only": True,
+                                                  "server_port": FIXTURE_SERVER_PORT})
+        stage, boot, port = "load", None, None
+        try:
+            boot = load_fixture_boot()
+            stage = "descriptor_set"
+            schema = boot.Schema.from_descriptor_set(Path(self.args.descriptor_set))
+            stage = "forward"
+            port = self.device.forward(FIXTURE_SERVER_PORT)
+            stage = "server_wait"
+            boot.wait_server(schema, port, timeout=FIXTURE_SERVER_TIMEOUT)
+            stage = "prepare"
+            fixture = boot.prepare_completed_opening(schema, port, Path(self.args.master_dir),
+                                                     timeout=FIXTURE_RPC_TIMEOUT)
+            stage = "record"
+            document, text = completed_opening_document(fixture)
+            (self.proof / "profile-fixture.json").write_text(text)
+        except Exception as error:  # Every cause, also RpcError/RuntimeError, is a named stop.
+            code = fixture_failure_code(stage, error, boot)
+            failure = {"enabled": True, "qa_only": True, "status": "failed", "failure_code": code,
+                       "actual_game_tutorial_played": False}
+            check = fixture_failed_check(error)
+            if check:
+                failure["failed_check"] = check
+            self.report["profile_fixture"] = failure
+            self.record(code)
+            raise Rejected(code) from None
+        finally:
+            if port is not None:
+                try:
+                    self.device.adb("forward", "--remove", "tcp:" + str(port), check=False)
+                except (OSError, subprocess.SubprocessError):
+                    self.report["profile_fixture_forward_removal_unavailable"] = True
+        self.report["profile_fixture"] = document
+        self.record("profile_fixture_ready", {
+            "rpc_methods": [row["method"] for row in document["rpc_calls"]],
+            "completed_tutorial_step": 150, "tutorial_cleared": True,
+            "actual_game_tutorial_played": False, "gameplay_evidence": False})
+        return document
 
     def grant_redroid_notification_permission(self):
         """redroid only: pre-grant the app's own runtime notification permission.
@@ -1488,11 +1616,21 @@ def main():
     parser.add_argument("--queue-replay", action="store_true", help="Also export the queued MV and gate its native acquired-source restoration")
     parser.add_argument("--startup-timeout", type=int, default=1800)
     parser.add_argument("--export-timeout", type=int, default=14400)
+    parser.add_argument("--prepare-completed-opening", action="store_true",
+                        help="QA ONLY: once the embedded server runs and before Launch, prepare qa_game_boot's "
+                             "completed-opening profile through local RPCs (setup, never tutorial evidence)")
+    parser.add_argument("--descriptor-set", type=Path, help="server protocol descriptor set for the fixture")
+    parser.add_argument("--master-dir", type=Path, help="server master-json directory for the fixture")
     args = parser.parse_args()
     need(16 <= args.width <= 4096 and 16 <= args.height <= 4096 and not args.width % 2 and not args.height % 2,
          "requested_render_geometry_invalid")
     need(1 <= len(args.song_label) <= 128 and not any(ord(c) < 32 for c in args.song_label), "song_label_invalid")
     need(1 <= args.startup_timeout <= 3600 and 1 <= args.export_timeout <= 18000, "driver_deadline_invalid")
+    if args.prepare_completed_opening:
+        need(args.descriptor_set is not None and args.descriptor_set.is_file() and args.master_dir is not None
+             and all((args.master_dir / name).is_file() for name in FIXTURE_TABLES), "profile_fixture_inputs_required")
+    else:
+        need(args.descriptor_set is None and args.master_dir is None, "profile_fixture_inputs_without_option")
     raise SystemExit(0 if ActualRun(args).run() else 1)
 
 
