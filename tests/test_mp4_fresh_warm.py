@@ -55,9 +55,9 @@ uint64_t milliseconds(){return now_ms;}
 void diagnostic_event(const char*stage,const char*code,uint64_t frame=0,uint64_t tick=0,bool=false){events.push_back({stage,code,frame,tick});}
 }
 Mp4FreshResult mp4_fresh_fail(Mp4FreshResult r,const char*error){mp4_fresh_host.error=error;return r;}
-int controller=0,camera=0;int32_t target_w=1280,target_h=720;float camera_aspect=1280.f/720.f;bool typed=true;
+int controller=0,camera=0;int32_t target_w=1280,target_h=720;float camera_aspect=1280.f/720.f;bool typed=true,lens_api=true;
 bool mp4_actual_source_geometry(void*c,int32_t*w,int32_t*h){if(!typed||c!=&controller)return false;*w=target_w;*h=target_h;return true;}
-bool mp4_projection_api_available(){return true;}
+bool mp4_projection_api_available(){return lens_api;}
 void*rt_camera(void*c,Method*){return c==&controller?&camera:nullptr;}
 bool mp4_alive(void*p){return p==&camera;}
 float aspect_get_original(void*,Method*){return camera_aspect;}
@@ -73,7 +73,7 @@ R step(unsigned draws=0,uint64_t ms=16){
  return mp4_fresh_warm();
 }
 bool traced(const char*code){for(auto&e:events)if(e.stage=="fresh_warm"&&e.code==code)return true;return false;}
-void reset_state(){h={};h.source.controller=&controller;g={};events.clear();target_w=1280;target_h=720;camera_aspect=1280.f/720.f;typed=true;}
+void reset_state(){h={};h.source.controller=&controller;g={};events.clear();target_w=1280;target_h=720;camera_aspect=1280.f/720.f;typed=true;lens_api=true;}
 int main(int argc,char**argv){
  assert(argc==2);const std::string scenario=argv[1];reset_state();
  if(scenario=="observed"){
@@ -124,6 +124,10 @@ int main(int argc,char**argv){
  }else if(scenario=="untyped_controller"){
   typed=false;for(int i=0;i<10;++i)assert(step(1)==R::waiting);
   assert(step(1)==R::ok&&traced("observed")&&!traced("target_size"));
+ }else if(scenario=="lens_api_unavailable"){
+  // The aspect cannot be read: never wait 4 s for it.
+  lens_api=false;camera_aspect=1.f;for(int i=0;i<10;++i)assert(step(1)==R::waiting);
+  assert(step(1)==R::ok&&traced("observed")&&!traced("observed_target_unsettled"));
  }else if(scenario=="staging_failed"){
   g.failed=true;assert(step(1)==R::failed&&!std::strcmp(h.error,"fresh_play_staging_failed"));
  }else return 2;
@@ -150,7 +154,7 @@ def warm_binary(tmp_path_factory):
 
 @pytest.mark.parametrize("scenario", [
     "observed", "no_reset_required", "reset_never_returns", "draw_wait_then_draw", "resize_restarts_settle",
-    "aspect_never_settles", "never_draws", "untyped_controller", "staging_failed"])
+    "aspect_never_settles", "never_draws", "untyped_controller", "lens_api_unavailable", "staging_failed"])
 def test_fresh_warm_gate(warm_binary, scenario):
     run = subprocess.run([str(warm_binary), scenario], capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stdout + run.stderr

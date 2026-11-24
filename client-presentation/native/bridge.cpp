@@ -57403,8 +57403,9 @@ Mp4FreshResult mp4_fresh_warm(){
  const uint64_t ms=idoly_mp4_runtime::milliseconds();
  const bool expired=ms>=h.warm_ready_ms&&ms-h.warm_ready_ms>=mp4_fresh_warm_fallback_ms;
  const bool drawn=h.warm_draws>h.warm_draws_at_size;
- bool aspect=!sized;
- if(sized&&mp4_projection_api_available()){void*camera=rt_camera(h.source.controller,nullptr);
+ // Without the camera lens API the aspect is not checkable; do not wait for it.
+ bool aspect=!sized||!mp4_projection_api_available();
+ if(!aspect){void*camera=rt_camera(h.source.controller,nullptr);
   if(camera&&mp4_alive(camera)){const float a=aspect_get_original(camera,nullptr);aspect=std::isfinite(a)&&std::fabs(a-float(width)/float(height))<=.005f;}}
  const bool settled=!sized||now-h.warm_size_at>=mp4_fresh_warm_frames;
  if(!expired){
@@ -57465,11 +57466,14 @@ Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job
  // DSP settings through the original typed setter, never grant DSP authority.
  for(size_t i=0;i<h.actor_count;++i){uintptr_t native=0;if(!mp4_actor_field(h.actors[i].animator,16,native)||!native
    ||!mp4_fresh_complete_handle(reinterpret_cast<void*>(native+0x238)))return mp4_fresh_fail(Mp4FreshResult::waiting,"fresh_initial_animator_job_wait");}
- if(!h.roster->converted){h.conversion_begun=true;for(size_t i=0;i<h.director_count;++i){
-   // A DSP-clock root started by Play can advance during the warm-up; name
-   // it (frame=roster index, tick=ms) so an offset effect is attributable.
-   {const double t=mp4_api.director_get_time(h.directors[i],nullptr);
-    if(std::isfinite(t)&&std::fabs(t)>0.001)idoly_mp4_runtime::diagnostic_event("fresh_warm","director_time_advanced",uint64_t(i),uint64_t(std::fabs(t)*1000));}
+ if(!h.roster->converted){h.conversion_begun=true;
+  // A DSP-clock root started by Play advances in real time during the
+  // warm-up (start() rewinds it). One summary event: frame=roots, tick=max ms.
+  {uint64_t moved=0,most=0;for(size_t i=0;i<h.director_count;++i){if(h.roster->nodes[i].controlled)continue;
+    const double t=mp4_api.director_get_time(h.directors[i],nullptr);
+    if(std::isfinite(t)&&std::fabs(t)>0.001){++moved;most=std::max<uint64_t>(most,uint64_t(std::fabs(t)*1000));}}
+   if(moved)idoly_mp4_runtime::diagnostic_event("fresh_warm","root_time_advanced",moved,most);}
+  for(size_t i=0;i<h.director_count;++i){
    mp4_api.director_set_mode(h.directors[i],h.director_modes[i],nullptr);
    if(!mp4_fresh_current(nullptr)||mp4_api.director_get_mode(h.directors[i],nullptr)!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_clock_conversion_failed");
    mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
@@ -57500,7 +57504,16 @@ Mp4FreshResult mp4_fresh_start(void*){
  }
  if(!h.path_reset_returned)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_path_initial_reset_incomplete");
  if(!h.started){const auto held=mp4_fresh_hold(nullptr);if(held!=Mp4FreshResult::ok)return held;
-  h.started=true;{ScopedValue<unsigned> injecting(mp4_fresh_injected_reset_depth,mp4_fresh_injected_reset_depth+1);mp4_api.player_set_time(h.source.player,0,nullptr);}h.start_returned=true;h.held=false;idoly_mp4_runtime::diagnostic_event("fresh_prepare","initial_zero_returned");}
+  h.started=true;{ScopedValue<unsigned> injecting(mp4_fresh_injected_reset_depth,mp4_fresh_injected_reset_depth+1);mp4_api.player_set_time(h.source.player,0,nullptr);}h.start_returned=true;h.held=false;idoly_mp4_runtime::diagnostic_event("fresh_prepare","initial_zero_returned");
+  // Roots that ran on the DSP clock before conversion (now GameTime, held)
+  // advanced in real time during the warm-up; start them at 0 with the MV,
+  // as they were when Play and conversion shared one acquire call.
+  uint64_t rewound=0;
+  for(size_t i=0;i<h.director_count&&i<h.roster->count;++i){const auto&n=h.roster->nodes[i];
+   if(n.controlled||n.director_mode!=0||!n.asset||h.directors[i]==h.source.director)continue;
+   const double t=mp4_api.director_get_time(h.directors[i],nullptr);
+   if(std::isfinite(t)&&std::fabs(t)>0.000001){mp4_api.director_set_time(h.directors[i],0,nullptr);++rewound;}}
+  if(rewound)idoly_mp4_runtime::diagnostic_event("fresh_prepare","dsp_roots_rewound",rewound);}
  if(!h.start_returned)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_initial_seek_incomplete");
  if(!mp4_fresh_current(nullptr)||std::fabs(mp4_api.director_get_time(h.source.director,nullptr))>0.0001)
   return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_initial_time_invalid");
@@ -57586,7 +57599,7 @@ bool mp4_fresh_render_call(Mp4RenderCamera original,Mp4RenderContext context,voi
   success=(prewarm?mp4_actor_mono_gate.isolate_preview(draw):mp4_actor_mono_gate.isolate_render(reinterpret_cast<uintptr_t>(camera),draw))&&mp4_fresh_current(nullptr);
   // A failed draw ends as a generic camera code; trace the gate's or scene's reason.
   if(!success){const char*gate=mp4_actor_mono_gate.error();
-   idoly_mp4_runtime::diagnostic_event("fresh_render",gate&&*gate&&std::strcmp(gate,"none")?gate:(h.error&&*h.error?h.error:"fresh_render_failed"),0,h.tick,true);}
+   idoly_mp4_runtime::diagnostic_event("fresh_render",gate&&*gate&&std::strcmp(gate,"none")?gate:(h.error&&*h.error&&std::strcmp(h.error,"none")?h.error:"fresh_render_failed"),0,h.tick,true);}
  }catch(...){complete();throw;}
  complete();return true;
 }

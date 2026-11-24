@@ -1658,7 +1658,7 @@ inline bool native_fresh_render_boundary_impl(void*manager,double wall){
         fresh_stage_ready("fresh_prewarm_render_timeout");
         size_t count=0;int32_t width=0,height=0;
         const Result read=game.readback_rgba(job.rgba,job.rgba_capacity,count,width,height);
-        if(read==Result::waiting){fresh_stage_wait("fresh_prewarm_readback_timeout",game.last_error());return native_boundary_clock_tick(manager,wall);}
+        if(read==Result::waiting){fresh_stage_wait("fresh_prewarm_readback_timeout","prewarm_readback_pending");return native_boundary_clock_tick(manager,wall);}
         fresh_stage_ready("fresh_prewarm_readback_timeout");
         if(read!=Result::ok)terminal(game.last_error());
         else if(count!=job.rgba_capacity||uint32_t(width)!=job.status.width||uint32_t(height)!=job.status.height)
