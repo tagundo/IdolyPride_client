@@ -3073,29 +3073,42 @@ bool mp4_actor_present_components(mp4actor::PresentationInventory& i,void* actor
     }
     return true;
 }
-bool mp4_actor_present_parts(mp4actor::PresentationInventory& i,void* actor){
+// fresh: the disposable export scene right after its load. Its parts are
+// never snapshotted or restored, so renderer/material/block bookkeeping (and
+// its capacities) is skipped there, and a MaterialInfo that the first
+// VLDefaultActorController`3.UpdateMaterial (LateUpdate) has not initialized
+// yet is accepted; the gated LateUpdate initializes it like the game does.
+bool mp4_actor_present_parts(mp4actor::PresentationInventory& i,void* actor,bool fresh,const char** why){
+    const auto reject=[why](const char* code){if(why)*why=code;return false;};
     void* list=nullptr;void** parts=nullptr;size_t count=0;
-    if(!mp4_actor_field(actor,72,list)||!mp4_actor_list(list,&parts,&count,64))return false;
+    if(!mp4_actor_field(actor,72,list)||!mp4_actor_list(list,&parts,&count,64))return reject("actor_collect_parts_list_unreadable");
     for(size_t n=0;n<count;++n){void* part=parts[n];
-        if(!mp4_actor_present_node(i,part,"VL.Core.VLActorModelParts"))return false;
+        if(!mp4_actor_present_node(i,part,"VL.Core.VLActorModelParts"))return reject("actor_collect_part_unsupported");
         void* values_list=nullptr;void** values=nullptr;size_t size=0;
-        if(!mp4_actor_field(part,88,values_list)||!mp4_actor_list(values_list,&values,&size,128))return false;
-        for(size_t k=0;k<size;++k)if(!mp4_type_is(values[k],"UnityEngine.Renderer")||!mp4_alive(values[k])
-            ||!mp4_actor_present_add(i.bounds_renderers,i.bounds_renderer_count,values[k]))return false;
-        if(!mp4_actor_field(part,104,values_list)||!mp4_actor_list(values_list,&values,&size,128))return false;
-        for(size_t k=0;k<size;++k)if(!mp4_type_is(values[k],"UnityEngine.SkinnedMeshRenderer")||!mp4_alive(values[k])
-            ||!mp4_actor_present_add(i.renderers,i.renderer_count,values[k]))return false;
-        if(!mp4_actor_field(part,112,values_list)||!mp4_actor_list(values_list,&values,&size,128))return false;
+        if(!mp4_actor_field(part,88,values_list)||!mp4_actor_list(values_list,&values,&size,128))return reject("actor_collect_part_renderers_unreadable");
+        for(size_t k=0;k<size;++k){if(!mp4_type_is(values[k],"UnityEngine.Renderer")||!mp4_alive(values[k]))return reject("actor_collect_part_renderer_invalid");
+            if(!fresh&&!mp4_actor_present_add(i.bounds_renderers,i.bounds_renderer_count,values[k]))return reject("actor_collect_part_renderer_capacity");}
+        if(!mp4_actor_field(part,104,values_list)||!mp4_actor_list(values_list,&values,&size,128))return reject("actor_collect_part_skins_unreadable");
+        for(size_t k=0;k<size;++k){if(!mp4_type_is(values[k],"UnityEngine.SkinnedMeshRenderer")||!mp4_alive(values[k]))return reject("actor_collect_part_skin_invalid");
+            if(!fresh&&!mp4_actor_present_add(i.renderers,i.renderer_count,values[k]))return reject("actor_collect_part_skin_capacity");}
+        if(!mp4_actor_field(part,112,values_list)||!mp4_actor_list(values_list,&values,&size,128))return reject("actor_collect_part_materials_unreadable");
         for(size_t k=0;k<size;++k){void* info=values[k];void* material=nullptr;void* renderer=nullptr;void* block=nullptr;int32_t index=-1;uint8_t initialized=0,modifiable=0;
-            if(!mp4_actor_present_node(i,info,"VL.Core.MaterialInfo")||!mp4_actor_field(info,56,initialized)||initialized!=1
-                ||!mp4_actor_field(info,16,material)||!mp4_actor_field(info,32,renderer)||!mp4_actor_field(info,40,index)
+            if(fresh){
+                // Only the type and the initialized flag are read: the rest is
+                // written by InitializeProperty on the first UpdateMaterial.
+                if(!mp4_type_is(info,"VL.Core.MaterialInfo")||!mp4_actor_field(info,56,initialized)||initialized>1)return reject("actor_collect_material_info_invalid");
+                continue;
+            }
+            if(!mp4_actor_present_node(i,info,"VL.Core.MaterialInfo")||!mp4_actor_field(info,56,initialized))return reject("actor_collect_material_info_invalid");
+            if(initialized!=1)return reject("actor_collect_material_info_uninitialized");
+            if(!mp4_actor_field(info,16,material)||!mp4_actor_field(info,32,renderer)||!mp4_actor_field(info,40,index)
                 ||!mp4_actor_field(info,44,modifiable)||modifiable>1||!mp4_actor_field(info,48,block)||index<0||index>255
-                ||!mp4_type_is(renderer,"UnityEngine.Renderer")||!mp4_alive(renderer))return false;
-            if(material&&(!mp4_type_is(material,"UnityEngine.Material")||!mp4_alive(material)||!mp4_actor_present_add(i.full_materials,i.full_material_count,material)))return false;
-            if(modifiable&&!material)return false;
+                ||!mp4_type_is(renderer,"UnityEngine.Renderer")||!mp4_alive(renderer))return reject("actor_collect_material_info_invalid");
+            if(material&&(!mp4_type_is(material,"UnityEngine.Material")||!mp4_alive(material)||!mp4_actor_present_add(i.full_materials,i.full_material_count,material)))return reject("actor_collect_material_invalid");
+            if(modifiable&&!material)return reject("actor_collect_material_missing");
             bool found=false;for(size_t j=0;j<i.block_count;++j)if(i.blocks[j].renderer==renderer&&i.blocks[j].index==index){
-                if(i.blocks[j].original!=block)return false;found=true;break;}
-            if(!found){if(i.block_count==512)return false;i.blocks[i.block_count++]={renderer,block,index};}
+                if(i.blocks[j].original!=block)return reject("actor_collect_material_block_conflict");found=true;break;}
+            if(!found){if(i.block_count==512)return reject("actor_collect_material_block_capacity");i.blocks[i.block_count++]={renderer,block,index};}
         }
     }
     return true;
@@ -3273,7 +3286,8 @@ bool mp4_actor_presentation_collect(const mp4actor::Owner* owners,size_t owner_c
         }
         if(!mp4_actor_present_components(i,actor,"VL.VLActorEye",mp4actor::MonoPhase::eye_late))return reject("actor_collect_eye_unsupported");
         if(!mp4_actor_present_components(i,actor,"VL.VLActorFaceTargetCorrection",mp4actor::MonoPhase::face_late))return reject("actor_collect_face_unsupported");
-        if(!mp4_actor_present_parts(i,actor))return reject("actor_collect_parts_unsupported");
+        const char* parts_error="actor_collect_parts_unsupported";
+        if(!mp4_actor_present_parts(i,actor,fresh,&parts_error))return reject(parts_error);
     }
     return i.node_count&&i.callback_count?true:reject("actor_collect_empty");
 }
