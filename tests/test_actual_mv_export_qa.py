@@ -1879,7 +1879,7 @@ def test_orientation_wait_is_unchecked_through_the_graphics_tab_before_start(tmp
         def android(self):
             return tree()
 
-        def android_control(self, values, cls=None, scroll=True):
+        def android_control(self, values, cls=None, scroll=True, scrolls=12):
             return next((n for n in tree().iter("node") if n.get("content-desc") in values or n.get("text") in values), None)
 
         def touch(self, node):
@@ -1900,3 +1900,32 @@ def test_orientation_wait_is_unchecked_through_the_graphics_tab_before_start(tmp
     touches.clear()
     run.disable_orientation_wait()
     assert touches == ["idoly.nav.graphics"] and state["checked"] == "false"
+
+
+def test_android_control_pages_the_scroll_view_not_a_spinner(tmp_path):
+    # Run 14: the Graphics tab's spinners also report scrollable, so paging
+    # gave up after the first screen and the MV playback option was missed.
+    pages = {"n": 0}
+    swipes = []
+
+    def tree():
+        root = ET.Element("hierarchy")
+        ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.ScrollView", "scrollable": "true",
+                                     "enabled": "true", "bounds": "[22,400][518,1129]"})
+        ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.Spinner", "scrollable": "true",
+                                     "enabled": "true", "bounds": "[50,676][490,742]"})
+        if pages["n"] >= 3:
+            ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.CheckBox", "enabled": "true",
+                                         "text": "Wait", "bounds": "[0,900][300,950]"})
+        return root
+    device = qa.Device.__new__(qa.Device)
+    device.android = tree
+
+    def adb(*args, **kwargs):
+        swipes.append(args)
+        pages["n"] += 1
+        return ""
+    device.adb = adb
+    found = device.android_control({"Wait"}, cls="android.widget.CheckBox", scrolls=40)
+    assert found.get("text") == "Wait" and len(swipes) == 3
+    assert all(args[:3] == ("shell", "input", "swipe") and args[3] == "270" for args in swipes)

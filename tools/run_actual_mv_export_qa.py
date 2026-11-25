@@ -837,8 +837,8 @@ class Device:
         x, y = self.point(node)
         self.adb("shell", "input", "touchscreen", "swipe", str(x), str(y), str(x), str(y), "150")
 
-    def android_control(self, values, *, cls=None, scroll=True, packages=(PACKAGE,)):
-        for attempt in range(12 if scroll else 1):
+    def android_control(self, values, *, cls=None, scroll=True, packages=(PACKAGE,), scrolls=12):
+        for attempt in range(scrolls if scroll else 1):
             tree = self.android()
             nodes = [n for n in tree.iter("node") if n.get("package") in packages
                      and n.get("enabled") == "true" and (cls is None or n.get("class") == cls)
@@ -848,7 +848,9 @@ class Device:
                 return nodes[0]
             if not scroll:
                 return None
-            scrollable = [n for n in tree.iter("node") if n.get("package") == PACKAGE and n.get("scrollable") == "true"]
+            # Spinners also report scrollable (run 14, Graphics tab): page the ScrollView.
+            scrollable = [n for n in tree.iter("node") if n.get("package") == PACKAGE and n.get("scrollable") == "true"
+                          and n.get("class") in ("android.widget.ScrollView", "androidx.core.widget.NestedScrollView")]
             if len(scrollable) != 1:
                 break
             x, y = self.point(scrollable[0])
@@ -1426,7 +1428,8 @@ class ActualRun:
         # ElementTree nodes without children are falsy: compare with None.
         box = checkbox()
         if box is None:
-            box = self.device.android_control(names, cls="android.widget.CheckBox")
+            # The MV playback panel follows the long Graphics and photography panel.
+            box = self.device.android_control(names, cls="android.widget.CheckBox", scrolls=40)
         if box.get("checked") == "true":
             self.device.touch(box)
 
