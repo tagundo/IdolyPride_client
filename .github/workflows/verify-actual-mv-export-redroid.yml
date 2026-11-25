@@ -48,6 +48,14 @@ on:
         default: mindthegapps
         type: choice
         options: [mindthegapps, none]
+      profile_setup:
+        description: >-
+          QA-only profile setup before Launch: the server's own Viewing mode (unlocked viewing
+          profile) or the local-RPC completed-opening fixture (Photography stays locked there)
+        required: true
+        default: viewing-mode
+        type: choice
+        options: [viewing-mode, completed-opening]
 
 permissions:
   contents: read
@@ -191,6 +199,7 @@ jobs:
       # The game's Firebase start needs genuine Google Play services: GmsCore, GSF and the
       # Play Store (its availability check rejects a guest without the Play Store).
       REDROID_GAPPS: ${{ inputs.gapps || 'mindthegapps' }}
+      PROFILE_SETUP: ${{ inputs.profile_setup || 'viewing-mode' }}
       # Loopback only and outside adb's emulator scan range 5555-5585, so the
       # container has exactly one adb serial and can never be a LAN device.
       REDROID_SERIAL: 127.0.0.1:15555
@@ -544,13 +553,21 @@ jobs:
           ( while sleep 20; do adb connect "$REDROID_SERIAL" >/dev/null 2>&1 || true; done ) &
           keepalive=$!
           trap 'kill "$keepalive" 2>/dev/null || true' EXIT
-          # QA-only setup: before Launch, qa_game_boot's verified local RPCs prepare the disposable profile
-          # past the opening tutorial (profile-fixture.json); never evidence that the tutorial was played.
+          # QA-only profile setup before Launch (never gameplay evidence):
+          # - viewing-mode: check the server's own "Viewing mode · Unlock all" before Start, which
+          #   selects the unlocked viewing profile store (tutorial cleared, Photography available);
+          # - completed-opening: qa_game_boot's verified local RPCs prepare the normal profile past
+          #   the opening tutorial (profile-fixture.json); run 8 showed Photography locked there.
+          case "$PROFILE_SETUP" in
+            viewing-mode) SETUP=(--viewing-mode) ;;
+            completed-opening) SETUP=(--prepare-completed-opening
+              --descriptor-set "$FIXTURE_DIR/protocol/idolypride-6.1.1.pb" --master-dir "$FIXTURE_DIR/master-json") ;;
+            *) echo "::error::unknown profile setup $PROFILE_SETUP"; exit 2 ;;
+          esac
           python -B tools/run_actual_mv_export_qa.py --guest redroid --serial "$REDROID_SERIAL" \
             --apk "$INPUT_DIR/current-unified-observer.apk" \
             --qa-evidence "$INPUT_DIR/current-unified-observer.apk.evidence.json" \
-            --prepare-completed-opening --descriptor-set "$FIXTURE_DIR/protocol/idolypride-6.1.1.pb" \
-            --master-dir "$FIXTURE_DIR/master-json" \
+            "${SETUP[@]}" \
             --source-commit "$SOURCE_SHA" --output-directory "$EVIDENCE_DIR/runtime" --song-label "$SONG_LABEL" \
             --fps '${{ matrix.fps }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}' \
             --startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}

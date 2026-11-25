@@ -377,9 +377,12 @@ def test_game_step_prepares_the_completed_opening_fixture_and_the_x86_workflow_d
     runtime = job("actual-game-redroid")
     game = runtime[runtime.index("id: game"):runtime.index("Collect bounded container")]
     command = game[game.index("python -B tools/run_actual_mv_export_qa.py"):]
+    setup = game[game.index('case "$PROFILE_SETUP" in'):game.index("esac")]
+    assert '"${SETUP[@]}"' in command and "viewing-mode) SETUP=(--viewing-mode)" in setup
     for argument in ("--prepare-completed-opening", '--descriptor-set "$FIXTURE_DIR/protocol/idolypride-6.1.1.pb"',
                      '--master-dir "$FIXTURE_DIR/master-json"'):
-        assert command.count(argument) == 1, argument
+        assert setup.count(argument) == 1, argument
+    assert "PROFILE_SETUP: ${{ inputs.profile_setup || 'viewing-mode' }}" in WORKFLOW.read_text()
     assert "--startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}" in command
     x86 = X86_WORKFLOW.read_text()
     for absent in ("--prepare-completed-opening", "--descriptor-set", "--master-dir", "actual_mv_fixture_inputs", "grpcio"):

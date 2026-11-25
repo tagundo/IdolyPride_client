@@ -1107,6 +1107,11 @@ class ActualRun:
         # The unified app launches the game only while its resource server runs
         # (MainActivity.prepareUnifiedClient); otherwise Launch only shows the
         # "Start the server first" toast. Start it through the real UI control.
+        # QA ONLY, explicit option: the server's own "Viewing mode · Unlock all"
+        # switch must be set before the server starts (it selects the profile
+        # store). A fresh post-tutorial profile has Photography locked (run 8).
+        if getattr(self.args, "viewing_mode", False) is True:
+            self.enable_viewing_mode()
         started = self.start_embedded_server()
         # QA ONLY, explicit option: the fixture needs the running server and must
         # exist before the game's own first login, so it runs before Launch,
@@ -1143,6 +1148,31 @@ class ActualRun:
             return None
         self.wait(title_or_home, self.args.startup_timeout, "usable_home_not_observed")
         self.report["game_boot_verified"] = True
+
+    def enable_viewing_mode(self):
+        """Check the Main UI's own Viewing mode checkbox (Server tab) before Start."""
+        tab = self.device.android_control({"idoly.nav.server"}, scroll=False)
+        need(tab is not None, "viewing_mode_server_tab_unavailable")
+        self.device.touch(tab)
+
+        def checkbox():
+            nodes = [node for node in self.device.android().iter("node") if node.get("package") == PACKAGE
+                     and node.get("content-desc") == "idoly.options.media-mode" and node.get("enabled") == "true"]
+            need(len(nodes) <= 1, "viewing_mode_control_ambiguous")
+            return nodes[0] if nodes else None
+        # ElementTree nodes without children are falsy: compare with None.
+        box = checkbox()
+        if box is None:
+            box = self.device.android_control({"idoly.options.media-mode"})
+        if box.get("checked") != "true":
+            self.device.touch(box)
+
+        def enabled():
+            current = checkbox()
+            return True if current is not None and current.get("checked") == "true" else None
+        self.wait(enabled, 30, "viewing_mode_not_enabled")
+        self.device.screenshot("viewing-mode-enabled")
+        self.record("viewing_mode_enabled", {"control": "idoly.options.media-mode", "qa_only": True})
 
     def start_embedded_server(self):
         """Start the unified app's resource server with its own Start control.
@@ -1658,6 +1688,9 @@ def main():
     parser.add_argument("--prepare-completed-opening", action="store_true",
                         help="QA ONLY: once the embedded server runs and before Launch, prepare qa_game_boot's "
                              "completed-opening profile through local RPCs (setup, never tutorial evidence)")
+    parser.add_argument("--viewing-mode", action="store_true",
+                        help="QA ONLY: check the server's own 'Viewing mode · Unlock all' before Start; it selects "
+                             "the unlocked viewing profile store (tutorial cleared), so no fixture is needed")
     parser.add_argument("--descriptor-set", type=Path, help="server protocol descriptor set for the fixture")
     parser.add_argument("--master-dir", type=Path, help="server master-json directory for the fixture")
     args = parser.parse_args()
@@ -1665,6 +1698,7 @@ def main():
          "requested_render_geometry_invalid")
     need(1 <= len(args.song_label) <= 128 and not any(ord(c) < 32 for c in args.song_label), "song_label_invalid")
     need(1 <= args.startup_timeout <= 3600 and 1 <= args.export_timeout <= 18000, "driver_deadline_invalid")
+    need(not (args.viewing_mode and args.prepare_completed_opening), "viewing_mode_and_fixture_are_exclusive")
     if args.prepare_completed_opening:
         need(args.descriptor_set is not None and args.descriptor_set.is_file() and args.master_dir is not None
              and all((args.master_dir / name).is_file() for name in FIXTURE_TABLES), "profile_fixture_inputs_required")

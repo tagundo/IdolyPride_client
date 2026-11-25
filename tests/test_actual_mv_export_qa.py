@@ -1556,3 +1556,45 @@ def test_idols_route_waits_for_released_home_and_retries_a_refused_touch():
     with pytest.raises(StopIteration):
         run.open_mv()
     assert taps == ["route_idols", "route_idols"] and [e["phase"] for e in run.journal] == ["route_idols"]
+
+
+def test_viewing_mode_is_checked_through_the_server_tab_before_start(tmp_path):
+    def tree(checked):
+        root = ET.Element("hierarchy")
+        ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.Button", "enabled": "true",
+                                     "clickable": "true", "content-desc": "idoly.nav.server", "text": "Server",
+                                     "bounds": "[0,0][100,50]"})
+        ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.CheckBox", "enabled": "true",
+                                     "clickable": "true", "content-desc": "idoly.options.media-mode",
+                                     "checked": checked, "bounds": "[0,100][300,150]"})
+        return root
+    state = {"checked": "false"}
+
+    class Device:
+        def __init__(self):
+            self.touches, self.shots = [], []
+
+        def android(self):
+            return tree(state["checked"])
+
+        def android_control(self, values, *, cls=None, scroll=True, packages=(qa.PACKAGE,)):
+            return next((n for n in self.android().iter("node") if n.get("content-desc") in values), None)
+
+        def touch(self, node):
+            self.touches.append(node.get("content-desc"))
+            if node.get("content-desc") == "idoly.options.media-mode":
+                state["checked"] = "true"
+
+        def screenshot(self, name):
+            self.shots.append(name)
+
+    run = bare_run(tmp_path, qa.REDROID_GUEST)
+    run.device = Device()
+    run.wait = lambda action, timeout, code: action() or (_ for _ in ()).throw(qa.Rejected(code))
+    run.enable_viewing_mode()
+    assert run.device.touches == ["idoly.nav.server", "idoly.options.media-mode"]
+    assert run.journal[-1]["phase"] == "viewing_mode_enabled" and run.device.shots == ["viewing-mode-enabled"]
+    # Already checked: only the tab is touched.
+    run.device.touches.clear()
+    run.enable_viewing_mode()
+    assert run.device.touches == ["idoly.nav.server"]
