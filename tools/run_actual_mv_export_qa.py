@@ -1341,6 +1341,8 @@ class ActualRun:
         # store). A fresh post-tutorial profile has Photography locked (run 8).
         if getattr(self.args, "viewing_mode", False) is True:
             self.enable_viewing_mode()
+        if getattr(self.args, "no_orientation_wait", False) is True:
+            self.disable_orientation_wait()
         started = self.start_embedded_server()
         # QA ONLY, explicit option: the fixture needs the running server and must
         # exist before the game's own first login, so it runs before Launch,
@@ -1402,6 +1404,38 @@ class ActualRun:
         self.wait(enabled, 30, "viewing_mode_not_enabled")
         self.device.screenshot("viewing-mode-enabled")
         self.record("viewing_mode_enabled", {"control": "idoly.options.media-mode", "qa_only": True})
+
+    def disable_orientation_wait(self):
+        """Uncheck the Main UI's own "wait for rotation at MV entry/exit" (Graphics tab).
+
+        The portrait guest cannot be turned; the game's rotation view has no
+        wired tap (run 13: TouchScreen callback_registered false). With the
+        option off, the app's existing bypass starts the MV in portrait.
+        """
+        tab = self.device.android_control({"idoly.nav.graphics"}, scroll=False)
+        need(tab is not None, "orientation_wait_graphics_tab_unavailable")
+        self.device.touch(tab)
+        names = labels("playback_wait_for_orientation")
+
+        def checkbox():
+            nodes = [node for node in self.device.android().iter("node") if node.get("package") == PACKAGE
+                     and node.get("class") == "android.widget.CheckBox" and node.get("text") in names
+                     and node.get("enabled") == "true"]
+            need(len(nodes) <= 1, "orientation_wait_control_ambiguous")
+            return nodes[0] if nodes else None
+        # ElementTree nodes without children are falsy: compare with None.
+        box = checkbox()
+        if box is None:
+            box = self.device.android_control(names, cls="android.widget.CheckBox")
+        if box.get("checked") == "true":
+            self.device.touch(box)
+
+        def disabled():
+            current = checkbox()
+            return True if current is not None and current.get("checked") == "false" else None
+        self.wait(disabled, 30, "orientation_wait_not_disabled")
+        self.device.screenshot("orientation-wait-disabled")
+        self.record("orientation_wait_disabled", {"control": "playback_wait_for_orientation", "qa_only": True})
 
     def start_embedded_server(self):
         """Start the unified app's resource server with its own Start control.
@@ -1940,6 +1974,9 @@ def main():
     parser.add_argument("--viewing-mode", action="store_true",
                         help="QA ONLY: check the server's own 'Viewing mode · Unlock all' before Start; it selects "
                              "the unlocked viewing profile store (tutorial cleared), so no fixture is needed")
+    parser.add_argument("--no-orientation-wait", action="store_true",
+                        help="QA ONLY: uncheck the app's own 'wait for rotation at MV entry/exit' before Start "
+                             "(a portrait guest cannot be turned; the game's rotation view has no wired tap)")
     parser.add_argument("--descriptor-set", type=Path, help="server protocol descriptor set for the fixture")
     parser.add_argument("--master-dir", type=Path, help="server master-json directory for the fixture")
     args = parser.parse_args()

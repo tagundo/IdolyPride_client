@@ -1858,3 +1858,45 @@ def test_portrait_rotation_prompt_is_started_by_its_own_tap_area(monkeypatch):
     qa.time.monotonic = (lambda base: (lambda: base + 11))(qa.time.monotonic())
     assert run.tap_to_start(rotation_prompt()) is True
     assert [role for role, _ in run.taps] == ["observed_rotation_tap_to_start"] * 2
+
+
+def test_orientation_wait_is_unchecked_through_the_graphics_tab_before_start(tmp_path):
+    # Run 13: the portrait guest waited on the game's rotation view, whose
+    # TouchScreen has no wired click; the app's own option bypasses the wait.
+    names = qa.labels("playback_wait_for_orientation")
+    state = {"checked": "true"}
+
+    def tree():
+        root = ET.Element("hierarchy")
+        ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.Button", "enabled": "true",
+                                     "content-desc": "idoly.nav.graphics", "text": "Graphics", "bounds": "[0,0][100,50]"})
+        ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.CheckBox", "enabled": "true",
+                                     "text": sorted(names)[0], "checked": state["checked"], "bounds": "[0,100][300,150]"})
+        return root
+    touches, shots = [], []
+
+    class Device:
+        def android(self):
+            return tree()
+
+        def android_control(self, values, cls=None, scroll=True):
+            return next((n for n in tree().iter("node") if n.get("content-desc") in values or n.get("text") in values), None)
+
+        def touch(self, node):
+            touches.append(node.get("content-desc") or node.get("text"))
+            if node.get("class") == "android.widget.CheckBox":
+                state["checked"] = "false" if state["checked"] == "true" else "true"
+
+        def screenshot(self, name):
+            shots.append(name)
+    run = bare_run(tmp_path)
+    run.device = Device()
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase, "observation": observation})
+    run.wait = lambda action, timeout, code: action() or (_ for _ in ()).throw(qa.Rejected(code))
+    run.disable_orientation_wait()
+    assert touches == ["idoly.nav.graphics", sorted(names)[0]] and state["checked"] == "false"
+    assert shots == ["orientation-wait-disabled"] and run.journal[-1]["phase"] == "orientation_wait_disabled"
+    # Already off: never toggled back on.
+    touches.clear()
+    run.disable_orientation_wait()
+    assert touches == ["idoly.nav.graphics"] and state["checked"] == "false"
