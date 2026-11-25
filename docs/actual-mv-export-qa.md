@@ -23,8 +23,16 @@ times per second while idle. Collecting these codes cannot enable an unfinished
 render pipeline or count as a rendering pass. Its bearer token is read from the fresh app's private files into memory
 and is excluded from artifacts.
 
-The driver opens **Idols → Photography / Viewing → Live → Bittersweet Echo →
-View** and observes a real normal 3D source with an advancing PlayerLoop and
+The driver opens **Idols → Photography / Viewing → Live**. The Live tab first
+shows idol selection, so the driver touches the page's **Match the stage song**
+checkbox label (its TouchArea is not a typed button; at most two touches, 15 s
+apart) and **Decide**. In the song list it touches **Bittersweet Echo**,
+swiping the observed list along its axis and reversing once at an unchanged end;
+every title it saw is reported. It then touches the song list's **Decide**
+(choosing one stage if the confirmation sheet did not open within 15 s) and the
+sheet's **View**, never the film-consuming shoot action. List cells are clones
+with one shared path, so each cell keeps only the labels drawn inside its own
+bounds. The driver then observes a real normal 3D source with an advancing PlayerLoop and
 timeline. IDOLY PRIDE has no user-facing Pause button during this MV; the driver
 does not search for or require one. The exporter itself saves the actual source
 state and acquires its internal held clock before stepping frames. During export

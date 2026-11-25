@@ -694,6 +694,53 @@ def home_input_blocked(snapshot):
     return isinstance(startup, dict) and (startup.get("content_blocking") is True or startup.get("input_releasing") is True)
 
 
+# Photography Live route (Korean 6.1.1 hierarchy observed in redroid run 9;
+# the screens after the Live page are from the game's own type names:
+# PhotographyTopPage decide -> LivePhotographyScreen music/stage lists and
+# decide -> PhotographyConfirmSheet preview).
+ORIGINAL_MEMBER_SUFFIX = "/PhotographyLivePage/Lower/Checkbox/TouchArea/Label"
+DECIDE_LABEL = r"^(決定|결정|次へ|다음|Decide|Next|OK)(する|하기)?$"
+DECIDE_NAME = r"Decide"
+VIEW_LABEL = r"^(鑑賞|감상|プレビュー|미리\s*보기|Preview|View|Watch)(する|하기)?$"
+VIEW_NAME = r"^(Viewing|View|Watch|Preview)(Button)?$"
+OVERLAY_PATH = re.compile(r"Sheet|Dialog")
+MUSIC_CELL_PATH = re.compile(r"Music[A-Za-z]*(List|Cell)")
+STAGE_CELL_PATH = re.compile(r"Stage[A-Za-z]*(List|Cell)")
+SONG_SWIPE_LIMIT = 40
+
+
+def original_member_label(ui, snapshot):
+    """The Live page's "match the stage song" checkbox label (its TouchArea is no button)."""
+    found = [node for node in ui.label_nodes(snapshot) if str(node.get("path", "")).endswith(ORIGINAL_MEMBER_SUFFIX)]
+    return found[0] if len(found) == 1 else None
+
+
+def choose_route_button(ui, snapshot, label, name=None, exclude=(), prefer=None):
+    """A unique button by label (exact, then contained), then by object name.
+
+    With several matches, a single one on a sheet or dialog (``prefer``) is
+    the control on top.
+    """
+    candidates = [b for b in ui.buttons(snapshot) if not any(part in b["path"] for part in exclude)]
+    def unique(rows):
+        if len(rows) > 1 and prefer is not None:
+            top = [row for row in rows if prefer.search(row["path"])]
+            rows = top if len(top) == 1 else rows
+        return rows[0] if len(rows) == 1 else None
+    exact = [b for b in candidates if re.fullmatch(label, b["label"], re.I)]
+    if exact:
+        return unique(exact)
+    matched = [b for b in candidates if re.search(label, b["label"], re.I)]
+    if matched:
+        return unique(matched)
+    if name:
+        # A text button's touch target can be a generic child (the Terms
+        # sheet's .../Execute/TextButtonNormal): its parent names the action.
+        return unique([b for b in candidates if re.search(name, str(b.get("name", "")), re.I)
+                       or re.search(name, b["path"].rsplit("/", 2)[-2] if b["path"].count("/") else "", re.I)])
+    return None
+
+
 def labels(name):
     found = set()
     for path in (ROOT / "android-server/app/src/main/res").glob("values*/strings*.xml"):
@@ -1023,6 +1070,159 @@ class ActualRun:
             return attempt()
         return self.wait(attempt, 120, "observed_route_control_unavailable")
 
+    def route_snapshot(self):
+        """A current Unity tree with no dialog to answer and input released."""
+        snap = self.explorer._snapshot()
+        if snap.get("ok") is not True or self.handle_dialog(snap) or home_input_blocked(snap):
+            return None
+        return snap
+
+    def route_touch(self, snap, node, role, detail=None):
+        """Touch through the explorer; a control gone before the touch is re-observed."""
+        if not self.explorer._tap(snap, node, role, len(self.journal)):
+            return False
+        self.record(role, detail)
+        return True
+
+    def live_members_decide(self):
+        """Photography Live page: "match the stage song", then its Decide.
+
+        The checkbox makes the song's original members the selection, so the
+        song list is not filtered by a hand-picked member count. It toggles,
+        so it is touched at most twice, 15 s apart, and only while no Decide
+        is visible.
+        """
+        touches = []
+        def attempt():
+            snap = self.route_snapshot()
+            if snap is None:
+                return None
+            if touches:
+                decide = choose_route_button(self.ui, snap, DECIDE_LABEL, DECIDE_NAME)
+                if decide is not None:
+                    return True if self.route_touch(snap, decide, "qa_mv_live_members_decided",
+                                                    {"label": decide["label"], "original_member_touches": len(touches)}) else None
+                if len(touches) >= 2 or time.monotonic() - touches[-1] < 15:
+                    return None
+            label = original_member_label(self.ui, snap)
+            if label is not None and self.explorer._tap(snap, label, "qa_mv_original_member", len(self.journal)):
+                touches.append(time.monotonic())
+                self.record("qa_mv_original_member", {"touch": len(touches), "label": label["label"]})
+            return None
+        self.wait(attempt, 120, "photography_live_decide_unavailable")
+
+    def select_song(self):
+        """Touch the requested song in the Live photography song list.
+
+        The list is scrolled along its observed axis; at an unchanged end it
+        reverses once. Every song label seen is reported.
+        """
+        pattern = re.escape(self.args.song_label)
+        seen = self.report.setdefault("photography_song_labels_seen", [])
+        state = {"swipes": 0, "direction": 1, "reversals": 0, "last": None, "list_seen_at": None}
+        def attempt():
+            snap = self.route_snapshot()
+            if snap is None:
+                return None
+            candidates = [b for b in self.ui.buttons(snap) if "PhotographyTopScreen" not in b["path"]]
+            found = [b for b in candidates if re.search(pattern, b["label"], re.I)]
+            if len(found) == 1:
+                return True if self.route_touch(snap, found[0], "qa_mv_song",
+                                                {"label": found[0]["label"], "swipes": state["swipes"]}) else None
+            cells = [b for b in candidates if MUSIC_CELL_PATH.search(b["path"]) and b["label"]]
+            for cell in cells:
+                if cell["label"] not in seen and len(seen) < 200:
+                    seen.append(cell["label"][:128])
+            if not cells:
+                return None
+            now = time.monotonic()
+            if state["list_seen_at"] is None:
+                state["list_seen_at"] = now
+            if now - state["list_seen_at"] < 3:
+                return None  # let the list finish its open animation first
+            signature = tuple(sorted((c["label"], tuple(c["bounds"])) for c in cells))
+            if signature == state["last"]:
+                if state["reversals"] >= 1:
+                    raise Rejected("requested_song_not_in_photography_list")
+                state["reversals"] += 1
+                state["direction"] = -state["direction"]
+            state["last"] = signature
+            if state["swipes"] >= SONG_SWIPE_LIMIT:
+                raise Rejected("requested_song_not_in_photography_list")
+            self.unity_list_swipe(snap, cells, state["direction"])
+            state["swipes"] += 1
+            return None
+        self.wait(attempt, 300, "photography_song_list_unavailable")
+
+    def live_song_decide_and_view(self):
+        """Song list Decide, then the confirmation sheet's watch control.
+
+        If Decide did not open the sheet within 15 s, one stage is chosen
+        (when a stage list is shown) and Decide is touched again.
+        """
+        state = {"decides": 0, "at": 0.0, "stages": 0}
+        def attempt():
+            snap = self.route_snapshot()
+            if snap is None:
+                return None
+            now = time.monotonic()
+            if state["decides"]:
+                view = choose_route_button(self.ui, snap, VIEW_LABEL, VIEW_NAME, prefer=OVERLAY_PATH)
+                if view is not None:
+                    return True if self.route_touch(snap, view, "qa_mv_view", {"label": view["label"]}) else None
+                if now - state["at"] < 15:
+                    return None
+                if state["stages"] < 1:
+                    stages = [b for b in self.ui.buttons(snap) if "PhotographyTopScreen" not in b["path"]
+                              and STAGE_CELL_PATH.search(b["path"])]
+                    if stages:
+                        stage = min(stages, key=lambda b: (b["bounds"][1], b["bounds"][0]))
+                        if self.route_touch(snap, stage, "qa_mv_stage", {"label": stage["label"]}):
+                            state["stages"] += 1
+                            state["at"] = now - 12  # Decide again shortly after
+                        return None
+                if state["decides"] >= 3:
+                    return None
+            decide = choose_route_button(self.ui, snap, DECIDE_LABEL, DECIDE_NAME,
+                                         exclude=("PhotographyTopScreen",), prefer=OVERLAY_PATH)
+            if decide is not None and self.route_touch(snap, decide, "qa_mv_song_decided", {"label": decide["label"]}):
+                state["decides"] += 1
+                state["at"] = now
+            return None
+        self.wait(attempt, 180, "photography_confirm_view_unavailable")
+
+    def unity_list_swipe(self, snap, cells, direction):
+        """Swipe inside the observed list cells, along their spread axis."""
+        left = min(c["bounds"][0] for c in cells)
+        top = min(c["bounds"][1] for c in cells)
+        right = max(c["bounds"][2] for c in cells)
+        bottom = max(c["bounds"][3] for c in cells)
+        xs = [(c["bounds"][0] + c["bounds"][2]) / 2 for c in cells]
+        ys = [(c["bounds"][1] + c["bounds"][3]) / 2 for c in cells]
+        horizontal = max(xs) - min(xs) > max(ys) - min(ys)
+        cx, cy = (left + right) / 2, (top + bottom) / 2
+        if horizontal:
+            a, b = (left + (right - left) * 0.8, cy), (left + (right - left) * 0.2, cy)
+        else:
+            a, b = (cx, top + (bottom - top) * 0.8), (cx, top + (bottom - top) * 0.2)
+        if direction < 0:
+            a, b = b, a
+        raw = self.device.adb("exec-out", "screencap", "-p", binary=True)
+        need(raw[:8] == b"\x89PNG\r\n\x1a\n", "display_capture_unavailable")
+        size = struct.unpack_from(">II", raw, 16)
+        xml = self.device.adb("exec-out", "uiautomator", "dump", "/dev/tty")
+        begin, end = xml.find("<hierarchy"), xml.rfind("</hierarchy>")
+        need(begin >= 0 and end >= begin, "android_ui_tree_unavailable")
+        xml = xml[begin:end + len("</hierarchy>")]
+        try:
+            points = [self.ui.mapped_point(snap, {"bounds": [x - 1, y - 1, x + 1, y + 1]}, xml, PACKAGE, size)
+                      for x, y in (a, b)]
+        except ValueError:
+            raise Rejected("photography_list_swipe_unmapped") from None
+        self.device.adb("shell", "input", "touchscreen", "swipe", str(points[0][0]), str(points[0][1]),
+                        str(points[1][0]), str(points[1][1]), "600")
+        self.record("qa_mv_song_list_swipe", {"horizontal": horizontal, "direction": direction})
+
     def handle_dialog(self, snap):
         # The game's own first-start Terms of Service sheet: its agree checkbox is
         # pre-checked in the observed UI and its Agree action stays interactable.
@@ -1295,9 +1495,12 @@ class ActualRun:
         self.wait(idols, 600, "home_character_page_control_unavailable")
         self.route(r"撮影\s*[・·･]\s*鑑賞|촬영\s*[・·･]\s*감상|Shooting.*Viewing|Photography", r"^(Photography|PhotoButton)$")
         self.route(r"ライブ|라이브|Live", r"^Live(Tab|Button)?$")
-        self.route(re.escape(self.args.song_label))
-        self.route(r"決定|결정|Confirm", r"^(Decide|Confirm)Button$", optional=True)
-        self.route(r"鑑賞する|감상하기|View|Watch", r"^(Viewing|View|Watch)Button$")
+        # Live page -> "match the stage song" -> Decide -> song list -> Decide
+        # -> confirmation sheet -> watch (run 9: the Live tab opens idol
+        # selection, not a song list).
+        self.live_members_decide()
+        self.select_song()
+        self.live_song_decide_and_view()
         self.route(r"画面回転|화면\s*회전|Rotate\s*(screen)?", r"^Rotate(Button)?$", optional=True)
         def scene_ready():
             try:

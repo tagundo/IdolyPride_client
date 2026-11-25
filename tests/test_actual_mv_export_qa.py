@@ -423,6 +423,9 @@ def test_open_mv_uses_the_real_view_route_without_searching_for_a_pause_button(t
     routes, shots = [], []
     run.unity_touch = lambda *args: None
     run.route = lambda pattern, *args, **kwargs: routes.append(pattern)
+    run.live_members_decide = lambda: routes.append("live_members_decide")
+    run.select_song = lambda: routes.append("select_song")
+    run.live_song_decide_and_view = lambda: routes.append("live_song_decide_and_view")
     run.device = SimpleNamespace(screenshot=shots.append)
     first, second = playing_snapshot(), playing_snapshot(102, 1.5)
     first["native"]["ready"] = second["native"]["ready"] = False
@@ -431,6 +434,9 @@ def test_open_mv_uses_the_real_view_route_without_searching_for_a_pause_button(t
     run.wait = lambda action, timeout, code: action()
     assert run.open_mv() is second
     assert routes and not any("Pause" in route or "一時停止" in route or "정지" in route for route in routes)
+    # Live tab, then the idol page's decide, the song, and the sheet's watch control.
+    live = next(i for i, route in enumerate(routes) if "라이브" in route)
+    assert routes[live + 1:live + 4] == ["live_members_decide", "select_song", "live_song_decide_and_view"]
     assert shots == ["real-mv-playing"]
     assert run.report["actual_mv_verified"] is True
     assert run.journal[-1]["phase"] == "real_mv_playing"
@@ -1598,3 +1604,198 @@ def test_viewing_mode_is_checked_through_the_server_tab_before_start(tmp_path):
     run.device.touches.clear()
     run.enable_viewing_mode()
     assert run.device.touches == ["idoly.nav.server"]
+
+
+# --- Photography Live route (run 9: the Live tab opens idol selection) -------
+UI = qa.load_ui()
+LIVE_PAGE = ("WindowSystem/WindowRoot/PhotographyWindow(Clone)/PhotographyTopScreen(Clone)/ScreenCanvas/ScreenRoot/"
+             "PhotographyTab/TabPageContainer/PhotographyLivePage")
+LIVE_SCREEN = "WindowSystem/WindowRoot/PhotographyWindow(Clone)/LivePhotographyScreen(Clone)/ScreenCanvas/ScreenRoot"
+SHEET = "WindowSystem/SheetRoot/PhotographyConfirmSheet(Clone)/Canvas/Root/Actions"
+
+
+def ui_node(kind, path, bounds, text="", iid=None):
+    return {"instance_id": iid if iid is not None else sum(map(ord, path)) + len(path) * 7919, "kind": kind,
+            "name": path.rsplit("/", 1)[-1], "path": path, "text": text, "active": True,
+            "interactable": True if kind == "button" else False, "bounds": list(bounds)}
+
+
+def ui_snapshot(*nodes):
+    return {"ok": True, "screen": {"width": 540, "height": 1140, "origin": "top-left", "units": "unity-screen-pixels"},
+            "nodes": list(nodes)}
+
+
+def labelled_button(path, bounds, label, iid=None):
+    return [ui_node("button", path, bounds, iid=iid), ui_node("tmp_text", path + "/Text", bounds, label)]
+
+
+def live_page(decide=False):
+    nodes = [ui_node("tmp_text", LIVE_PAGE + "/Lower/Checkbox/TouchArea/Label", (360.7, 483.5, 513, 507.5), "무대곡에 맞추기"),
+             ui_node("tmp_text", LIVE_PAGE + "/Lower/Description", (27, 485, 347, 505), "아이돌을 선택해 주세요."),
+             ui_node("button", LIVE_PAGE + "/Lower/CharacterListViewport/Viewport/CharacterList/PhotographyCharacterCell(Clone)",
+                     (27, 530, 117, 620))]
+    if decide:
+        nodes += labelled_button(LIVE_PAGE + "/Lower/DecideButton", (300, 980, 520, 1040), "결정")
+    return ui_snapshot(*nodes)
+
+
+def route_run(snapshot, monkeypatch, iterations=400):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(qa.time, "monotonic", lambda: clock["now"])
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.args = SimpleNamespace(song_label="Bittersweet Echo")
+    run.report, run.journal, run.ui, run.taps = {}, [], UI, []
+    run.explorer = SimpleNamespace(_snapshot=snapshot,
+                                   _tap=lambda snap, node, role, index: run.taps.append((role, node.get("label"))) or True)
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase, "observation": observation})
+
+    def wait(action, timeout, code):
+        for _ in range(iterations):
+            result = action()
+            if result is not None and result is not False:
+                return result
+            clock["now"] += 1
+        raise qa.Rejected(code)
+    run.wait = wait
+    return run
+
+
+def test_live_page_checks_match_the_stage_song_then_decides(monkeypatch):
+    run = route_run(lambda: live_page(decide=any(role == "qa_mv_original_member" for role, _ in run.taps)), monkeypatch)
+    run.live_members_decide()
+    assert run.taps == [("qa_mv_original_member", "무대곡에 맞추기"), ("qa_mv_live_members_decided", "결정")]
+    assert run.journal[-1]["observation"]["original_member_touches"] == 1
+
+
+def test_live_page_checkbox_comes_before_an_already_visible_decide(monkeypatch):
+    run = route_run(lambda: live_page(decide=True), monkeypatch)
+    run.live_members_decide()
+    assert [role for role, _ in run.taps] == ["qa_mv_original_member", "qa_mv_live_members_decided"]
+
+
+def test_live_page_checkbox_toggles_at_most_twice_15_seconds_apart(monkeypatch):
+    run = route_run(lambda: live_page(decide=False), monkeypatch, iterations=120)
+    with pytest.raises(qa.Rejected, match="photography_live_decide_unavailable"):
+        run.live_members_decide()
+    touched = [entry for entry in run.journal if entry["phase"] == "qa_mv_original_member"]
+    assert [entry["observation"]["touch"] for entry in touched] == [1, 2]
+    assert run.taps == [("qa_mv_original_member", "무대곡에 맞추기")] * 2
+
+
+def test_checkbox_label_is_touchable_only_for_its_reason():
+    snapshot = live_page()
+    label = qa.original_member_label(UI, snapshot)
+    assert label["label"] == "무대곡에 맞추기"
+    errors = []
+    explorer = SimpleNamespace(_input_error=lambda code: errors.append(code))
+    assert UI.UiExplorer._input_target(explorer, snapshot, label, "qa_mv_original_member")["path"] == label["path"]
+    # A label is never a target for an ordinary button touch.
+    assert UI.UiExplorer._input_target(explorer, snapshot, label, "qa_mv_route") is None
+    assert errors == ["selected_node_no_longer_present"]
+    # A changed label (another control in that place) is refused.
+    changed = deepcopy(snapshot)
+    changed["nodes"][0]["text"] = "다른 항목"
+    assert UI.UiExplorer._input_target(explorer, changed, label, "qa_mv_original_member") is None
+
+
+def song_list(labels, offset=0):
+    nodes = []
+    for index, label in enumerate(labels):
+        top = 300 + 120 * index - offset
+        nodes += labelled_button(LIVE_SCREEN + "/MusicList/Viewport/Content/LivePhotographyMusicListCell(Clone)",
+                                 (20, top, 520, top + 100), label, iid=500 + index)
+    nodes += labelled_button(LIVE_SCREEN + "/Footer/DecideButton", (300, 980, 520, 1040), "결정")
+    return ui_snapshot(*nodes)
+
+
+def test_song_is_found_by_scrolling_the_observed_list(monkeypatch):
+    pages = [["Song A", "Song B", "Song C"], ["Song C", "Song D", "Bittersweet Echo"]]
+    state = {"page": 0}
+    run = route_run(lambda: song_list(pages[state["page"]]), monkeypatch)
+    swipes = []
+    run.unity_list_swipe = lambda snap, cells, direction: swipes.append(direction) or state.update(page=1)
+    run.select_song()
+    assert swipes == [1] and run.taps == [("qa_mv_song", "Bittersweet Echo")]
+    assert run.journal[-1]["observation"]["swipes"] == 1
+    assert run.report["photography_song_labels_seen"] == ["Song A", "Song B", "Song C"]
+
+
+def test_missing_song_reverses_once_at_the_list_end_then_fails(monkeypatch):
+    run = route_run(lambda: song_list(["Song A", "Song B"]), monkeypatch)
+    swipes = []
+    run.unity_list_swipe = lambda snap, cells, direction: swipes.append(direction)
+    with pytest.raises(qa.Rejected, match="requested_song_not_in_photography_list"):
+        run.select_song()
+    assert swipes == [1, -1] and run.taps == []
+
+
+def confirm_sheet():
+    return (labelled_button(SHEET + "/Preview/TextButtonNormal", (40, 900, 260, 960), "감상")
+            + labelled_button(SHEET + "/Execute/TextButtonNormal", (280, 900, 500, 960), "촬영"))
+
+
+def test_song_decide_opens_the_sheet_and_watches_without_shooting(monkeypatch):
+    def snapshot():
+        base = song_list(["Bittersweet Echo"])
+        if any(role == "qa_mv_song_decided" for role, _ in run.taps):
+            base["nodes"] += confirm_sheet()
+        return base
+    run = route_run(snapshot, monkeypatch)
+    run.live_song_decide_and_view()
+    assert run.taps == [("qa_mv_song_decided", "결정"), ("qa_mv_view", "감상")]
+
+
+def test_song_decide_chooses_a_stage_when_the_sheet_did_not_open(monkeypatch):
+    def snapshot():
+        base = song_list(["Bittersweet Echo"])
+        base["nodes"] += labelled_button(LIVE_SCREEN + "/StageList/Viewport/Content/LivePhotographyStageListCell(Clone)",
+                                         (20, 700, 260, 800), "Stage 1", iid=900)
+        roles = [role for role, _ in run.taps]
+        if "qa_mv_stage" in roles and roles[-1] == "qa_mv_song_decided":
+            base["nodes"] += confirm_sheet()
+        return base
+    run = route_run(snapshot, monkeypatch)
+    run.live_song_decide_and_view()
+    assert [role for role, _ in run.taps] == ["qa_mv_song_decided", "qa_mv_stage", "qa_mv_song_decided", "qa_mv_view"]
+
+
+def test_route_button_prefers_the_sheet_and_names_a_text_button_by_its_parent():
+    snapshot = song_list(["Song"])
+    snapshot["nodes"] += labelled_button(SHEET + "/Decide/TextButtonNormal", (40, 900, 260, 960), "결정")
+    chosen = qa.choose_route_button(UI, snapshot, qa.DECIDE_LABEL, qa.DECIDE_NAME, prefer=qa.OVERLAY_PATH)
+    assert chosen["path"] == SHEET + "/Decide/TextButtonNormal"
+    unlabeled = ui_snapshot(ui_node("button", SHEET + "/Preview/TextButtonNormal", (40, 900, 260, 960)))
+    assert qa.choose_route_button(UI, unlabeled, qa.VIEW_LABEL, qa.VIEW_NAME)["path"].endswith("/Preview/TextButtonNormal")
+    # A song title that merely contains a control word is not that control.
+    titled = song_list(["Watch me now", "OK Go"])
+    titled["nodes"] = [n for n in titled["nodes"] if "DecideButton" not in n["path"]]
+    assert qa.choose_route_button(UI, titled, qa.VIEW_LABEL, qa.VIEW_NAME) is None
+    assert qa.choose_route_button(UI, titled, qa.DECIDE_LABEL, qa.DECIDE_NAME) is None
+
+
+def test_list_swipe_runs_along_the_observed_axis_in_android_pixels(tmp_path):
+    run = bare_run(tmp_path)
+    run.journal = []
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase, "observation": observation})
+    run.ui = UI
+    sent = []
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + qa.struct.pack(">II", 1080, 2280)
+    xml = ('<hierarchy><node package="%s" resource-id="%s:id/unitySurfaceView" bounds="[0,0][1080,2280]"/></hierarchy>'
+           % (qa.PACKAGE, qa.PACKAGE))
+
+    def adb(*args, **kwargs):
+        if args[:2] == ("exec-out", "screencap"):
+            return png
+        if args[:2] == ("exec-out", "uiautomator"):
+            return "dump\n" + xml
+        sent.append(args)
+        return ""
+    run.device = SimpleNamespace(adb=adb)
+    cells = [n for n in UI.buttons(song_list(["A", "B", "C"])) if "MusicList" in n["path"]]
+    run.unity_list_swipe(song_list(["A", "B", "C"]), cells, 1)
+    run.unity_list_swipe(song_list(["A", "B", "C"]), cells, -1)
+    (_, _, _, _, x0, y0, x1, y1, duration), back = sent[0], sent[1]
+    # Vertical list (300..640 in Unity, x2 in Android): finger moves up for the next items.
+    assert x0 == x1 == "540" and int(y0) > int(y1) and duration == "600"
+    assert back[4:6] == sent[0][6:8] and back[6:8] == sent[0][4:6]
+    assert [entry["observation"]["horizontal"] for entry in run.journal] == [False, False]

@@ -51,6 +51,30 @@ def text(value):
     return " ".join(re.sub(r"<[^>]*>", "", str(value)).split())
 
 
+# Touch reasons whose control the bridge does not type as a button: the game's
+# own checkbox (e.g. the Photography Live "match the stage song" TouchArea)
+# exposes only its label. The label is touched at its observed bounds.
+LABEL_TOUCH_REASONS = frozenset(("qa_mv_original_member",))
+
+
+def label_nodes(snapshot):
+    """Active, non-empty, on-screen text labels that are not forbidden actions."""
+    nodes = snapshot.get("nodes", [])
+    if not isinstance(nodes, list) or len(nodes) > 512:
+        raise ValueError("Invalid Unity UI node count")
+    result = []
+    for node in nodes:
+        if (not isinstance(node, dict) or node.get("kind") not in ("text", "tmp_text")
+                or node.get("active") is not True or not usable_bounds(snapshot, node)):
+            continue
+        label = text(node.get("text", ""))
+        path = node.get("path", "")
+        if not label or not isinstance(path, str) or not path or _FORBIDDEN.search(label + " " + path):
+            continue
+        result.append(dict(node, label=label))
+    return result
+
+
 def usable_bounds(snapshot, node):
     screen = snapshot.get("screen", {})
     width, height = screen.get("width"), screen.get("height")
@@ -70,6 +94,21 @@ def buttons(snapshot):
     if not isinstance(nodes, list) or len(nodes) > 512:
         raise ValueError("Invalid Unity UI node count")
     labels = [node for node in nodes if isinstance(node, dict) and node.get("kind") in ("text", "tmp_text") and node.get("active") is True]
+    # List cells are clones with one shared path; each keeps only the labels
+    # drawn inside its own bounds (the song list's titles, run 9).
+    shared = {}
+    for node in nodes:
+        if isinstance(node, dict) and node.get("kind") == "button":
+            shared[node.get("path")] = shared.get(node.get("path"), 0) + 1
+
+    def inside(row, node):
+        if shared.get(node.get("path"), 0) < 2:
+            return True
+        if not usable_bounds(snapshot, row):
+            return False
+        x, y = (row["bounds"][0] + row["bounds"][2]) / 2, (row["bounds"][1] + row["bounds"][3]) / 2
+        left, top, right, bottom = node["bounds"]
+        return left <= x <= right and top <= y <= bottom
     for node in nodes:
         if (not isinstance(node, dict) or node.get("kind") != "button"
                 or node.get("active") is not True or node.get("interactable") is not True
@@ -81,7 +120,7 @@ def buttons(snapshot):
         parts, seen = [], set()
         for row in [node, *labels]:
             row_path, label_text = str(row.get("path", "")), text(row.get("text", ""))
-            if (row_path == path or row_path.startswith(path + "/")) and label_text:
+            if (row_path == path or row_path.startswith(path + "/")) and label_text and (row is node or inside(row, node)):
                 identity = (row_path, label_text)
                 if identity not in seen:
                     seen.add(identity)
@@ -427,8 +466,10 @@ class UiExplorer:
             self._input_error(code)
             return None
 
-        current = next((item for item in buttons(fresh) if item.get("instance_id") == node.get("instance_id")
-                        and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
+        candidates = label_nodes(fresh) if reason in LABEL_TOUCH_REASONS else buttons(fresh)
+        current = next((item for item in candidates if item.get("instance_id") == node.get("instance_id")
+                        and item.get("path") == node.get("path") and item.get("name") == node.get("name")
+                        and (reason not in LABEL_TOUCH_REASONS or item.get("label") == node.get("label"))), None)
         if fresh.get("ok") is not True or current is None:
             return reject("selected_node_no_longer_present")
         selectors = {"observed_notice_close": notice_close_target,
