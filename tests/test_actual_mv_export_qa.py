@@ -1835,3 +1835,26 @@ def test_mv_wait_answers_the_song_download_sheet_before_observing_the_mv(tmp_pat
     assert run.open_mv() is second
     assert "observed_resource_download_confirmation" in touched
     assert [e["phase"] for e in run.journal][:2] == ["route_idols", "observed_resource_download_confirmation"]
+
+
+def rotation_prompt(tap_label=True):
+    root = "WindowSystem/OverlayRoot/DeviceRotationView(Clone)"
+    nodes = [ui_node("button", root + "/TouchScreen", (0, 0, 540, 1140)),
+             ui_node("tmp_text", root + "/RotationLabel", (150, 580, 390, 640), "감상을 시작합니다.\n가로 모드로 즐겨보세요.")]
+    if tap_label:
+        nodes.append(ui_node("tmp_text", root + "/TapToStart", (200, 900, 340, 930), "TAP TO START"))
+    return ui_snapshot(*nodes)
+
+
+def test_portrait_rotation_prompt_is_started_by_its_own_tap_area(monkeypatch):
+    # Run 12: the MV loaded and waited on "가로 모드로 즐겨보세요 / TAP TO START".
+    assert qa.rotation_start_target(UI, rotation_prompt())["path"].endswith("DeviceRotationView(Clone)/TouchScreen")
+    assert qa.rotation_start_target(UI, rotation_prompt(tap_label=False)) is None
+    assert qa.rotation_start_target(UI, ui_snapshot()) is None
+    run = route_run(lambda: rotation_prompt(), monkeypatch)
+    assert run.tap_to_start(rotation_prompt()) is True
+    # Throttled: no second touch within 10 s.
+    assert run.tap_to_start(rotation_prompt()) is False
+    qa.time.monotonic = (lambda base: (lambda: base + 11))(qa.time.monotonic())
+    assert run.tap_to_start(rotation_prompt()) is True
+    assert [role for role, _ in run.taps] == ["observed_rotation_tap_to_start"] * 2

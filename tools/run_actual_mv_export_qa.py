@@ -709,6 +709,24 @@ STAGE_CELL_PATH = re.compile(r"Stage[A-Za-z]*(List|Cell)")
 SONG_SWIPE_LIMIT = 40
 
 
+ROTATION_VIEW = "DeviceRotationView(Clone)/"
+MV_PLAYBACK_VERIFY_SECONDS = 120
+
+
+def rotation_start_target(ui, snapshot):
+    """The rotation prompt's touch area, only while its TAP TO START label shows."""
+    nodes = snapshot.get("nodes") if isinstance(snapshot, dict) else None
+    if not isinstance(nodes, list):
+        return None
+    shown = any(isinstance(n, dict) and n.get("active") is True and n.get("kind") in ("text", "tmp_text")
+                and str(n.get("path", "")).endswith(ROTATION_VIEW + "TapToStart")
+                and re.search(r"TAP\s*TO\s*START", str(n.get("text", "")), re.I) for n in nodes)
+    if not shown:
+        return None
+    found = [b for b in ui.buttons(snapshot) if b["path"].endswith(ROTATION_VIEW + "TouchScreen")]
+    return found[0] if len(found) == 1 else None
+
+
 def original_member_label(ui, snapshot):
     """The Live page's "match the stage song" checkbox label (its TouchArea is no button)."""
     found = [node for node in ui.label_nodes(snapshot) if str(node.get("path", "")).endswith(ORIGINAL_MEMBER_SUFFIX)]
@@ -1191,6 +1209,17 @@ class ActualRun:
             return None
         self.wait(attempt, 180, "photography_confirm_view_unavailable")
 
+    def tap_to_start(self, snap):
+        """Touch the game's rotation prompt's TAP TO START area, at most every 10 s."""
+        node = rotation_start_target(self.ui, snap)
+        if node is None or time.monotonic() - getattr(self, "rotation_tapped_at", -1e9) < 10:
+            return False
+        if self.explorer._tap(snap, node, "observed_rotation_tap_to_start", len(self.journal)):
+            self.rotation_tapped_at = time.monotonic()
+            self.record("observed_rotation_tap_to_start")
+            return True
+        return False
+
     def unity_list_swipe(self, snap, cells, direction):
         """Swipe inside the observed list cells, along their spread axis."""
         left = min(c["bounds"][0] for c in cells)
@@ -1507,7 +1536,7 @@ class ActualRun:
             # 확인", 89 MB, over the song list); answer the game's own sheet.
             try:
                 snap = self.explorer._snapshot()
-                if snap.get("ok") is True and self.handle_dialog(snap):
+                if snap.get("ok") is True and (self.handle_dialog(snap) or self.tap_to_start(snap)):
                     return None
             except (ValueError, OSError):
                 pass
@@ -1520,13 +1549,22 @@ class ActualRun:
         first = self.wait(scene_ready, 600, "actual_normal_3d_mv_not_observed")
         self.device.screenshot("real-mv-playing")
         def playing_again():
+            # Portrait guest: the game waits on its own "turn to landscape /
+            # TAP TO START" view (run 12); the tap is the supported way on.
+            try:
+                snap = self.explorer._snapshot()
+                if snap.get("ok") is True:
+                    self.tap_to_start(snap)
+            except (ValueError, OSError):
+                pass
             second = self.mp4()
             try:
                 validate_playing_source(first, second)
                 return second
             except Rejected:
                 return None
-        baseline = self.wait(playing_again, 30, "real_mv_playback_not_verified")
+        # The software-GPU guest renders the MV at a few frames per second.
+        baseline = self.wait(playing_again, MV_PLAYBACK_VERIFY_SECONDS, "real_mv_playback_not_verified")
         self.record("real_mv_playing", baseline)
         self.report["actual_mv_verified"] = True
         return baseline
