@@ -684,6 +684,16 @@ def terms_agree_target(snapshot):
     return found[0] if len(found) == 1 else None
 
 
+def home_input_blocked(snapshot):
+    """True while the game's own startup observation says input is held.
+
+    A missing observation is not treated as blocked; the explorer's own
+    per-touch checks still refuse a control that is not current.
+    """
+    startup = snapshot.get("startup_observation") if isinstance(snapshot, dict) else None
+    return isinstance(startup, dict) and (startup.get("content_blocking") is True or startup.get("input_releasing") is True)
+
+
 def labels(name):
     found = set()
     for path in (ROOT / "android-server/app/src/main/res").glob("values*/strings*.xml"):
@@ -998,10 +1008,16 @@ class ActualRun:
                 return None
             if self.handle_dialog(snap):
                 return None
+            if home_input_blocked(snap):
+                return None
             node = self.ui.choose_button(snap, pattern, name)
             if node:
-                self.unity_touch(snap, node, "qa_mv_route")
-                return True
+                # A control that moved or closed between the snapshot and the
+                # touch is re-observed within this route's wait, not a failure.
+                if self.explorer._tap(snap, node, "qa_mv_route", len(self.journal)):
+                    self.record("qa_mv_route")
+                    return True
+                return None
             return None
         if optional:
             return attempt()
@@ -1113,7 +1129,9 @@ class ActualRun:
             if self.handle_dialog(snapshot):
                 return None
             if self.ui._home_role(snapshot, "idols"):
-                return True
+                # Home's controls exist while LoadingManager still blocks input
+                # (run 7); Home counts only once the game releases it.
+                return True if not home_input_blocked(snapshot) else None
             title = [n for n in self.ui.buttons(snapshot) if n.get("path") == "Canvas/TitleButton"]
             if len(title) == 1 and self.ui.title_block_reason(snapshot, title[0]) is None:
                 # A tap during the title fade-in is ignored by the game; while
@@ -1233,10 +1251,18 @@ class ActualRun:
         return granted
 
     def open_mv(self):
-        snap = self.explorer._snapshot()
-        node = self.ui._home_role(snap, "idols")
-        need(node is not None, "home_character_page_control_unavailable")
-        self.unity_touch(snap, node, "route_idols")
+        def idols():
+            snap = self.explorer._snapshot()
+            if snap.get("ok") is not True or self.handle_dialog(snap) or home_input_blocked(snap):
+                return None
+            node = self.ui._home_role(snap, "idols")
+            if node is None:
+                return None
+            if self.explorer._tap(snap, node, "route_idols", len(self.journal)):
+                self.record("route_idols")
+                return True
+            return None
+        self.wait(idols, 600, "home_character_page_control_unavailable")
         self.route(r"撮影\s*[・·･]\s*鑑賞|촬영\s*[・·･]\s*감상|Shooting.*Viewing|Photography", r"^(Photography|PhotoButton)$")
         self.route(r"ライブ|라이브|Live", r"^Live(Tab|Button)?$")
         self.route(re.escape(self.args.song_label))

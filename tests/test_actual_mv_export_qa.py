@@ -416,8 +416,10 @@ def test_open_mv_uses_the_real_view_route_without_searching_for_a_pause_button(t
     run = qa.ActualRun.__new__(qa.ActualRun)
     run.args = SimpleNamespace(song_label="Bittersweet Echo")
     run.proof, run.report, run.journal = tmp_path, {}, []
-    run.explorer = SimpleNamespace(_snapshot=lambda: {"ok": True})
-    run.ui = SimpleNamespace(_home_role=lambda snap, role: {"name": "Idols"})
+    run.explorer = SimpleNamespace(_snapshot=lambda: {"ok": True}, _tap=lambda snap, node, role, index: True)
+    run.ui = SimpleNamespace(_home_role=lambda snap, role: {"name": "Idols"}, notice_close_target=lambda s: None,
+                             manager_level_close_target=lambda s: None, lesson_reward_close_target=lambda s: None,
+                             download_confirmation=lambda s: None)
     routes, shots = [], []
     run.unity_touch = lambda *args: None
     run.route = lambda pattern, *args, **kwargs: routes.append(pattern)
@@ -1520,3 +1522,37 @@ def test_a_dialog_that_closed_before_its_touch_is_re_observed_not_a_failure():
     run.record = lambda phase, observation=None: run.journal.append({"phase": phase})
     assert run.handle_dialog({"nodes": [sheet]}) is True
     assert run.journal[-1]["phase"] == "observed_resource_download_confirmation_input_skipped"
+
+
+def test_home_counts_only_after_loading_releases_input():
+    assert qa.home_input_blocked({"startup_observation": {"content_blocking": True, "input_releasing": False}})
+    assert qa.home_input_blocked({"startup_observation": {"content_blocking": False, "input_releasing": True}})
+    assert not qa.home_input_blocked({"startup_observation": {"content_blocking": False, "input_releasing": False}})
+    assert not qa.home_input_blocked({"ok": True})
+
+
+def test_idols_route_waits_for_released_home_and_retries_a_refused_touch():
+    states = [{"ok": True, "startup_observation": {"content_blocking": True}},
+              {"ok": True, "startup_observation": {"content_blocking": False}},
+              {"ok": True, "startup_observation": {"content_blocking": False}}]
+    taps = []
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.journal = []
+    run.explorer = SimpleNamespace(_snapshot=lambda: states.pop(0),
+                                   _tap=lambda snap, node, role, index: taps.append(role) or len(taps) > 1)
+    run.ui = SimpleNamespace(_home_role=lambda snap, role: {"path": "idols"}, notice_close_target=lambda s: None,
+                             manager_level_close_target=lambda s: None, lesson_reward_close_target=lambda s: None,
+                             download_confirmation=lambda s: None)
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase})
+
+    def wait(action, timeout, code):
+        for _ in range(5):
+            result = action()
+            if result is not None and result is not False:
+                return result
+        raise qa.Rejected(code)
+    run.wait = wait
+    run.route = lambda *a, **k: (_ for _ in ()).throw(StopIteration)
+    with pytest.raises(StopIteration):
+        run.open_mv()
+    assert taps == ["route_idols", "route_idols"] and [e["phase"] for e in run.journal] == ["route_idols"]
