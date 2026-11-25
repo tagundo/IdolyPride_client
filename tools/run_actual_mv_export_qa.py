@@ -1503,6 +1503,14 @@ class ActualRun:
         self.live_song_decide_and_view()
         self.route(r"画面回転|화면\s*회전|Rotate\s*(screen)?", r"^Rotate(Button)?$", optional=True)
         def scene_ready():
+            # Watching a song can first ask for its data (run 11: "다운로드
+            # 확인", 89 MB, over the song list); answer the game's own sheet.
+            try:
+                snap = self.explorer._snapshot()
+                if snap.get("ok") is True and self.handle_dialog(snap):
+                    return None
+            except (ValueError, OSError):
+                pass
             try:
                 payload = self.mp4()
                 state, obs = native_payload(payload)

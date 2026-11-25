@@ -1799,3 +1799,39 @@ def test_list_swipe_runs_along_the_observed_axis_in_android_pixels(tmp_path):
     assert x0 == x1 == "540" and int(y0) > int(y1) and duration == "600"
     assert back[4:6] == sent[0][6:8] and back[6:8] == sent[0][4:6]
     assert [entry["observation"]["horizontal"] for entry in run.journal] == [False, False]
+
+
+def test_mv_wait_answers_the_song_download_sheet_before_observing_the_mv(tmp_path):
+    # Run 11: "감상하기" first asked for the song's data (89 MB); the scene
+    # wait only polled the native status and never answered the sheet.
+    sheet = {"path": "Sheet/Actions/Execute/TextButtonNormal", "label": "다운로드"}
+    pending = []
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.args = SimpleNamespace(song_label="Bittersweet Echo")
+    run.proof, run.report, run.journal = tmp_path, {}, []
+    touched = []
+    run.explorer = SimpleNamespace(_snapshot=lambda: {"ok": True},
+                                   _tap=lambda snap, node, role, index: touched.append(role) or pending.clear() or True)
+    run.ui = SimpleNamespace(_home_role=lambda snap, role: {"name": "Idols"}, notice_close_target=lambda s: None,
+                             manager_level_close_target=lambda s: None, lesson_reward_close_target=lambda s: None,
+                             download_confirmation=lambda s: pending[0] if pending else None)
+    run.route = lambda *args, **kwargs: None
+    run.live_members_decide = run.select_song = lambda: None
+    run.live_song_decide_and_view = lambda: pending.append(sheet)  # the sheet follows "감상하기"
+    run.device = SimpleNamespace(screenshot=lambda name: None)
+    first, second = playing_snapshot(), playing_snapshot(102, 1.5)
+    first["native"]["ready"] = second["native"]["ready"] = False
+    payloads = iter((first, second))
+    polled = []
+    run.mp4 = lambda: polled.append(1) or next(payloads)
+
+    def wait(action, timeout, code):
+        for _ in range(5):
+            result = action()
+            if result is not None and result is not False:
+                return result
+        raise qa.Rejected(code)
+    run.wait = wait
+    assert run.open_mv() is second
+    assert "observed_resource_download_confirmation" in touched
+    assert [e["phase"] for e in run.journal][:2] == ["route_idols", "observed_resource_download_confirmation"]
