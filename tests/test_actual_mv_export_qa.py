@@ -1507,3 +1507,16 @@ def test_driver_reuses_qa_game_boot_fixture_and_keeps_the_session_token_out_of_f
     assert [row["method"] for row in document["rpc_calls"]] == [path for _, path, _, _ in sent]
     assert document["actual_game_tutorial_played"] is False and document["continuation"]["completed_step"] == 150
     assert FIXTURE_TOKEN not in written(tmp_path) + qa.json.dumps(run.report) + qa.json.dumps(run.journal)
+
+
+def test_a_dialog_that_closed_before_its_touch_is_re_observed_not_a_failure():
+    sheet = {"path": "Title/SimpleActionSheet(Clone)/Canvas/Root/UIContentArea/ActionBarContainer/AnchorAdjust/Actions/Execute/TextButtonNormal",
+             "kind": "button", "active": True}
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.journal = []
+    run.explorer = SimpleNamespace(_tap=lambda snap, node, role, index: False)
+    run.ui = SimpleNamespace(notice_close_target=lambda s: None, manager_level_close_target=lambda s: None,
+                             lesson_reward_close_target=lambda s: None, download_confirmation=lambda s: sheet)
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase})
+    assert run.handle_dialog({"nodes": [sheet]}) is True
+    assert run.journal[-1]["phase"] == "observed_resource_download_confirmation_input_skipped"

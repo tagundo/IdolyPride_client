@@ -1012,7 +1012,7 @@ class ActualRun:
         # pre-checked in the observed UI and its Agree action stays interactable.
         terms = terms_agree_target(snap)
         if terms is not None:
-            self.unity_touch(snap, terms, "observed_terms_agree")
+            self.dialog_touch(snap, terms, "observed_terms_agree")
             return True
         for function, role in ((self.ui.notice_close_target, "observed_notice_close"),
                                (self.ui.manager_level_close_target, "observed_manager_level_close"),
@@ -1020,9 +1020,22 @@ class ActualRun:
                                (self.ui.download_confirmation, "observed_resource_download_confirmation")):
             node = function(snap)
             if node:
-                self.unity_touch(snap, node, role)
+                self.dialog_touch(snap, node, role)
                 return True
         return False
+
+    def dialog_touch(self, snap, node, role):
+        """Touch a recognised dialog control; a closed dialog is not a failure.
+
+        The explorer re-reads Unity before touching and refuses a control that
+        is no longer current, e.g. a sheet the previous touch already accepted
+        (run 6: the download sheet closed into the loading screen). The wait
+        loop then re-observes instead of ending the run on a stale snapshot.
+        """
+        if self.explorer._tap(snap, node, role, len(self.journal)):
+            self.record(role)
+        else:
+            self.record(role + "_input_skipped")
 
     def launch(self):
         self.report["target"] = self.device.identity()
