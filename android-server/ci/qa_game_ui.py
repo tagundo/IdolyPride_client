@@ -20,8 +20,9 @@ _DIAGNOSTIC_PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
 _NORMAL_PACKAGE = "game.qualiarts.idolypride.local"
 _QA_PACKAGES = frozenset((_DIAGNOSTIC_PACKAGE, _NORMAL_PACKAGE))
 _MAX_BODY = 72 * 1024
-_FORBIDDEN = re.compile(r"購入|課金|ガチャを引|データ削除|アカウント削除|buy|purchase|deleteaccount", re.I)
-_ERROR = re.compile(r"Unimplemented|Unauthenticated|NullReferenceException|サーバーとの通信に失敗", re.I)
+# Japanese and Korean clients (the unified app ships both); never tap these.
+_FORBIDDEN = re.compile(r"購入|課金|ガチャを引|データ削除|アカウント削除|구매|과금|가챠|뽑기|데이터\s*삭제|계정\s*삭제|buy|purchase|deleteaccount", re.I)
+_ERROR = re.compile(r"Unimplemented|Unauthenticated|NullReferenceException|サーバーとの通信に失敗|서버와의\s*통신에\s*실패", re.I)
 _GOALS = (
     ("lesson", r"レッスン", r"lesson.*button|button.*lesson"),
     ("live", r"ライブ", r"live.*button|button.*live"),
@@ -182,17 +183,18 @@ def download_confirmation(snapshot):
     if len(roots) != 1:
         return None
     titles = [row for row in nodes if row.get("active") is True and row.get("kind") in ("text", "tmp_text")
-              and text(row.get("text", "")) == "ダウンロード確認"
+              and text(row.get("text", "")) in ("ダウンロード確認", "다운로드 확인")
               and "/SimpleActionSheet(Clone)/" in str(row.get("path", ""))]
     if len(titles) != 1:
         return None
     root = roots.pop()
     local = [row for row in nodes if str(row.get("path", "")).startswith(root)]
     descriptions = [text(row.get("text", "")) for row in local if row.get("active") is True]
-    if (not any(re.fullmatch(r"必要なデータをダウンロードします\s*\([^)]*\)", label) for label in descriptions)
+    if (not any(re.fullmatch(r"必要なデータをダウンロードします\s*\([^)]*\)|필요한 데이터를 다운로드\s*합니다\s*\([^)]*\)", label)
+                for label in descriptions)
             or _FORBIDDEN.search(" ".join(descriptions))):
         return None
-    return choose_button(dict(snapshot, nodes=local), r"^ダウンロード$")
+    return choose_button(dict(snapshot, nodes=local), r"^(ダウンロード|다운로드)$")
 
 
 def visible_action_sheet(snapshot):
@@ -233,16 +235,34 @@ def notice_close_target(snapshot):
     if not label_at(base + "Header/Title", "INFORMATION"):
         return None
     candidates = buttons(snapshot)
-    for number, label in ((1, "お知らせ"), (2, "不具合"), (3, "PR")):
+    # Tab labels are localized. Accept the observed Japanese set, or a fully
+    # localized set (all three non-empty, none Japanese, none forbidden, e.g.
+    # the Korean client whose labels are not yet observed); a mixed set is not
+    # this dialog. The INFORMATION title, three wired tabs and CloseButton stay required.
+    japanese = ("お知らせ", "不具合", "PR")
+    labels = []
+    for number in (1, 2, 3):
         path = base + f"Footer/TabButtons/Button{number}"
         tabs = [node for node in candidates if node.get("path") == path
                 and node.get("name") == f"Button{number}"
                 and node.get("callback_registered") is True]
-        if len(tabs) != 1 or not label_at(path + "/Text", label):
+        if len(tabs) != 1:
             return None
+        labels.append(_label_text(nodes, path + "/Text"))
+    localized = (all(labels) and not any(label in japanese[:2] for label in labels)
+                 and not _FORBIDDEN.search(" ".join(labels)))
+    if tuple(labels) != japanese and not localized:
+        return None
     close = [node for node in candidates if node.get("path") == base + "Footer/CloseButton"
              and node.get("name") == "CloseButton" and node.get("callback_registered") is True]
     return close[0] if len(close) == 1 else None
+
+
+def _label_text(nodes, path):
+    matches = [node for node in nodes if isinstance(node, dict)
+               and node.get("path") == path and node.get("kind") in ("text", "tmp_text")
+               and node.get("active") is True]
+    return text(matches[0].get("text", "")).strip() if len(matches) == 1 else ""
 
 
 def visible_manager_level_overlay(snapshot):
@@ -600,7 +620,7 @@ class UiExplorer:
                 self.restart_pending = False
                 self._restart()
             return
-        close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで")
+        close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで|확인|닫기|다음|나중에")
         if close is not None and re.search(r"dialog|modal|popup|sheet", str(close.get("path", "")), re.I):
             if self.pending and self._signature(snapshot) != self.pending[2] and self.pending_dialog_frame is None:
                 self.pending_dialog_frame = frame
