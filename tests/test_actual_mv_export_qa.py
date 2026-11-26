@@ -1929,3 +1929,13 @@ def test_android_control_pages_the_scroll_view_not_a_spinner(tmp_path):
     found = device.android_control({"Wait"}, cls="android.widget.CheckBox", scrolls=40)
     assert found.get("text") == "Wait" and len(swipes) == 3
     assert all(args[:3] == ("shell", "input", "swipe") and args[3] == "270" for args in swipes)
+
+
+def test_title_retap_is_skipped_while_loading_and_a_refused_retap_is_not_fatal():
+    # Run 16: the title canvas stayed behind the post-download loading screen;
+    # a refused retap through unity_touch ended the whole run.
+    source = Path(qa.__file__).read_text()
+    loop = source[source.index("def title_or_home():"):source.index('self.wait(title_or_home')]
+    assert "self.unity_touch(" not in loop
+    assert "not home_input_blocked(snapshot)" in loop
+    assert 'self.record(role + "_input_skipped")' in loop

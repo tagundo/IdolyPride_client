@@ -1371,13 +1371,23 @@ class ActualRun:
                 # (run 7); Home counts only once the game releases it.
                 return True if not home_input_blocked(snapshot) else None
             title = [n for n in self.ui.buttons(snapshot) if n.get("path") == "Canvas/TitleButton"]
-            if len(title) == 1 and self.ui.title_block_reason(snapshot, title[0]) is None:
+            # The title canvas stays behind the download and loading screens
+            # (run 16); never retap it while the game holds input.
+            if len(title) == 1 and self.ui.title_block_reason(snapshot, title[0]) is None and not home_input_blocked(snapshot):
                 # A tap during the title fade-in is ignored by the game; while
                 # the same title stays up, tap it again at a bounded interval.
                 now = time.monotonic()
                 if not title_taps or (now - title_taps[-1] >= TITLE_RETAP_SECONDS and len(title_taps) < TITLE_TAP_LIMIT):
-                    self.unity_touch(snapshot, title[0], "observed_title" if not title_taps else "observed_title_retap")
-                    title_taps.append(now)
+                    role = "observed_title" if not title_taps else "observed_title_retap"
+                    # A title the explorer refuses on its fresh re-read (it moved
+                    # on or is obscured) is re-observed, not a failed run.
+                    if self.explorer._tap(snapshot, title[0], role, len(self.journal)):
+                        self.record(role)
+                        title_taps.append(now)
+                    else:
+                        self.record(role + "_input_skipped")
+                        if title_taps:
+                            title_taps.append(now)
             return None
         self.wait(title_or_home, self.args.startup_timeout, "usable_home_not_observed")
         self.report["game_boot_verified"] = True
