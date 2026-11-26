@@ -710,6 +710,7 @@ SONG_SWIPE_LIMIT = 40
 
 
 ROTATION_VIEW = "DeviceRotationView(Clone)/"
+MAX_NOTICE_BACKS = 6
 MV_PLAYBACK_VERIFY_SECONDS = 120
 
 
@@ -1261,6 +1262,8 @@ class ActualRun:
         if terms is not None:
             self.dialog_touch(snap, terms, "observed_terms_agree")
             return True
+        if self.notice_android_back(snap):
+            return True
         for function, role in ((self.ui.notice_close_target, "observed_notice_close"),
                                (self.ui.manager_level_close_target, "observed_manager_level_close"),
                                (self.ui.lesson_reward_close_target, "observed_lesson_reward_close"),
@@ -1270,6 +1273,31 @@ class ActualRun:
                 self.dialog_touch(snap, node, role)
                 return True
         return False
+
+    def notice_android_back(self, snap):
+        """Close a notice that ignores its X with Android Back (DialogManager.AndroidBack).
+
+        On a guest drawing about one frame per second the X's press spans a
+        frame and counts as a long tap whose click is suppressed (runs 15, 17:
+        ~500 touches each). Only after the X was touched three times over at
+        least 20 s with the notice still shown, and at most every 15 s.
+        """
+        if self.ui.notice_close_target(snap) is None:
+            self.notice_close_seen = []
+            return False
+        seen = getattr(self, "notice_close_seen", [])
+        now = time.monotonic()
+        if (len(seen) < 3 or now - seen[0] < 20
+                or now - getattr(self, "notice_back_at", -1e9) < 15):
+            return False
+        backs = self.report.setdefault("notice_android_back", 0)
+        if backs >= MAX_NOTICE_BACKS:
+            return False
+        self.device.adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        self.notice_back_at = now
+        self.report["notice_android_back"] = backs + 1
+        self.record("observed_notice_android_back", {"x_touches": len(seen)})
+        return True
 
     def dialog_touch(self, snap, node, role):
         """Touch a recognised dialog control; a closed dialog is not a failure.
@@ -1281,6 +1309,8 @@ class ActualRun:
         """
         if self.explorer._tap(snap, node, role, len(self.journal)):
             self.record(role)
+            if role == "observed_notice_close":
+                self.notice_close_seen = getattr(self, "notice_close_seen", []) + [time.monotonic()]
         else:
             self.record(role + "_input_skipped")
 

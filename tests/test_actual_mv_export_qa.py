@@ -1939,3 +1939,34 @@ def test_title_retap_is_skipped_while_loading_and_a_refused_retap_is_not_fatal()
     assert "self.unity_touch(" not in loop
     assert "not home_input_blocked(snapshot)" in loop
     assert 'self.record(role + "_input_skipped")' in loop
+
+
+def test_a_notice_that_ignores_its_x_is_closed_with_android_back(monkeypatch):
+    # Runs 15 and 17: ~500 touches of the notice X on a ~1 frame/s guest were
+    # long taps whose click the game suppresses; DialogManager.AndroidBack closes it.
+    clock = {"now": 100.0}
+    monkeypatch.setattr(qa.time, "monotonic", lambda: clock["now"])
+    close = {"path": "Singleton/GlobalDialog/DialogManager/NoticeDialog(Clone)/TabDialogBase/DialogCanvas/Dialog/Footer/CloseButton"}
+    keys = []
+    run = qa.ActualRun.__new__(qa.ActualRun)
+    run.journal, run.report = [], {}
+    run.explorer = SimpleNamespace(_tap=lambda snap, node, role, index: True)
+    run.ui = SimpleNamespace(notice_close_target=lambda s: close, manager_level_close_target=lambda s: None,
+                             lesson_reward_close_target=lambda s: None, download_confirmation=lambda s: None)
+    run.device = SimpleNamespace(adb=lambda *args, **kwargs: keys.append(args) or "")
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase})
+    for _ in range(3):
+        assert run.handle_dialog({"nodes": []}) is True
+        clock["now"] += 5
+    assert keys == [] and [e["phase"] for e in run.journal] == ["observed_notice_close"] * 3
+    clock["now"] += 10  # 25 s after the first X touch
+    assert run.handle_dialog({"nodes": []}) is True
+    assert keys == [("shell", "input", "keyevent", "KEYCODE_BACK")]
+    assert run.journal[-1]["phase"] == "observed_notice_android_back" and run.report["notice_android_back"] == 1
+    # Throttled: the next attempt within 15 s touches the X again instead.
+    clock["now"] += 5
+    run.handle_dialog({"nodes": []})
+    assert len(keys) == 1 and run.journal[-1]["phase"] == "observed_notice_close"
+    # A closed notice resets the count.
+    run.ui.notice_close_target = lambda s: None
+    assert run.handle_dialog({"nodes": []}) is False and run.notice_close_seen == []

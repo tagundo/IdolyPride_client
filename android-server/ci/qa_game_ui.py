@@ -408,16 +408,15 @@ def mapped_point(snapshot, node, xml, package, image_size):
 
 
 def touch_hold_for_frame(snapshot, reason):
-    """150 ms, or long enough to span about two observed frames on a slow guest.
-
-    The title keeps below its 500 ms long-tap threshold.
-    """
+    """150 ms, or longer on a slow guest, always below the 500 ms long tap."""
     observation = snapshot.get("frame_observation") if isinstance(snapshot, dict) else None
     delta = observation.get("unscaled_delta_time") if isinstance(observation, dict) else None
     if type(delta) not in (int, float) or not math.isfinite(delta) or delta <= 0.1:
         return 150
-    held = min(2500, 150 + round(delta * 1600))
-    return min(held, 450) if reason == "observed_title" else held
+    # Qua buttons treat a press of 0.5 s or more as a long tap and suppress
+    # its click (run 17: suppress_long_tap_click, long_tap_time 0.5), so the
+    # hold never reaches it.
+    return min(450, 150 + round(delta * 1600))
 
 
 class UiExplorer:

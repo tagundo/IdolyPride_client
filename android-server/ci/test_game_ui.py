@@ -1175,7 +1175,7 @@ def test_touch_hold_spans_frames_on_a_slow_guest():
     hold = ui.touch_hold_for_frame
     assert hold({"frame_observation": {"unscaled_delta_time": 0.033}}, "observed_notice_close") == 150
     assert hold({}, "qa_mv_route") == 150
-    assert hold({"frame_observation": {"unscaled_delta_time": 0.9}}, "observed_notice_close") == 1590
-    assert hold({"frame_observation": {"unscaled_delta_time": 5.0}}, "qa_mv_route") == 2500
-    # The title stays below its 500 ms long-tap threshold.
-    assert hold({"frame_observation": {"unscaled_delta_time": 0.9}}, "observed_title") == 450
+    assert hold({"frame_observation": {"unscaled_delta_time": 0.15}}, "observed_notice_close") == 390
+    # Run 17: a hold of 0.5 s or more is a long tap whose click is suppressed.
+    assert hold({"frame_observation": {"unscaled_delta_time": 0.9}}, "observed_notice_close") == 450
+    assert hold({"frame_observation": {"unscaled_delta_time": 5.0}}, "qa_mv_route") == 450
