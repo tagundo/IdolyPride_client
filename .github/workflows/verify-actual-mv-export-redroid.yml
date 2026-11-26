@@ -560,6 +560,8 @@ jobs:
           #   the opening tutorial (profile-fixture.json); run 8 showed Photography locked there.
           # The portrait guest cannot be turned and the game's rotation view has no wired tap
           # (run 13), so the app's own "wait for rotation at MV entry/exit" is unchecked first.
+          # The software GPU sometimes draws Home at ~0.9 s/frame (runs 15, 17, 18), where every
+          # touch is a suppressed long tap, so the app's own custom 3D render scale is set to 0.5x.
           case "$PROFILE_SETUP" in
             viewing-mode) SETUP=(--viewing-mode) ;;
             completed-opening) SETUP=(--prepare-completed-opening
@@ -569,7 +571,7 @@ jobs:
           python -B tools/run_actual_mv_export_qa.py --guest redroid --serial "$REDROID_SERIAL" \
             --apk "$INPUT_DIR/current-unified-observer.apk" \
             --qa-evidence "$INPUT_DIR/current-unified-observer.apk.evidence.json" \
-            "${SETUP[@]}" --no-orientation-wait \
+            "${SETUP[@]}" --no-orientation-wait --render-scale 0.5 \
             --source-commit "$SOURCE_SHA" --output-directory "$EVIDENCE_DIR/runtime" --song-label "$SONG_LABEL" \
             --fps '${{ matrix.fps }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}' \
             --startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}

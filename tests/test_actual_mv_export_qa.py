@@ -1970,3 +1970,52 @@ def test_a_notice_that_ignores_its_x_is_closed_with_android_back(monkeypatch):
     # A closed notice resets the count.
     run.ui.notice_close_target = lambda s: None
     assert run.handle_dialog({"nodes": []}) is False and run.notice_close_seen == []
+
+
+def test_render_scale_is_selected_through_the_graphics_tab_in_any_locale(tmp_path):
+    # Runs 15, 17, 18: Home at ~0.9 s/frame turned every touch into a suppressed
+    # long tap; the app's own custom 3D render scale lowers the software-GPU load.
+    custom = sorted(qa.labels("presentation_custom_graphics"))[0]
+    label = sorted(qa.labels("presentation_render_scale"))[0]
+    state = {"custom": "false", "scale": "1× (default)"}
+
+    def tree():
+        root = ET.Element("hierarchy")
+        ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.Button", "enabled": "true",
+                                     "content-desc": "idoly.nav.graphics", "bounds": "[0,0][100,50]"})
+        ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.CheckBox", "enabled": "true",
+                                     "text": custom, "checked": state["custom"], "bounds": "[0,60][300,100]"})
+        row = ET.SubElement(root, "node", {"package": qa.PACKAGE, "class": "android.widget.LinearLayout"})
+        ET.SubElement(row, "node", {"package": qa.PACKAGE, "class": "android.widget.TextView", "text": label})
+        spinner = ET.SubElement(row, "node", {"package": qa.PACKAGE, "class": "android.widget.Spinner",
+                                              "bounds": "[0,120][300,160]"})
+        ET.SubElement(spinner, "node", {"package": qa.PACKAGE, "class": "android.widget.TextView", "text": state["scale"]})
+        return root
+    touched, chosen = [], []
+
+    class Device:
+        def android(self):
+            return tree()
+
+        def android_control(self, values, cls=None, scroll=True, scrolls=12):
+            return next((n for n in tree().iter("node") if n.get("content-desc") in values or n.get("text") in values), None)
+
+        def touch(self, node):
+            touched.append(node.get("content-desc") or node.get("text"))
+            if node.get("class") == "android.widget.CheckBox":
+                state["custom"] = "true"
+
+        def spinner(self, name, value):
+            chosen.append((name, set(value)))
+            state["scale"] = "0.5×"
+
+        def screenshot(self, name):
+            pass
+    run = bare_run(tmp_path)
+    run.device = Device()
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase, "observation": observation})
+    run.wait = lambda action, timeout, code: action() or (_ for _ in ()).throw(qa.Rejected(code))
+    run.set_render_scale("0.5")
+    assert touched == ["idoly.nav.graphics", custom] and state["custom"] == "true"
+    assert chosen == [("presentation_render_scale", {"0.5×", "0.5배", "0.5倍"})]
+    assert run.journal[-1] == {"phase": "render_scale_selected", "observation": {"value": "0.5", "qa_only": True}}

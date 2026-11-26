@@ -760,6 +760,21 @@ def choose_route_button(ui, snapshot, label, name=None, exclude=(), prefer=None)
     return None
 
 
+RENDER_SCALE_INDEX = {"0.25": 0, "0.5": 1, "0.75": 2}  # PresentationSettings.RENDER_SCALE order
+
+
+def array_items(name, index):
+    """The index-th item of a string-array in every locale of the Main UI."""
+    found = set()
+    for path in (ROOT / "android-server/app/src/main/res").glob("values*/strings*.xml"):
+        for node in ET.parse(path).getroot().findall("string-array"):
+            items = node.findall("item")
+            if node.get("name") == name and index < len(items) and items[index].text:
+                found.add(items[index].text)
+    need(found, "source_ui_resource_missing_" + name)
+    return found
+
+
 def labels(name):
     found = set()
     for path in (ROOT / "android-server/app/src/main/res").glob("values*/strings*.xml"):
@@ -1375,6 +1390,8 @@ class ActualRun:
             self.enable_viewing_mode()
         if getattr(self.args, "no_orientation_wait", False) is True:
             self.disable_orientation_wait()
+        if getattr(self.args, "render_scale", None):
+            self.set_render_scale(self.args.render_scale)
         started = self.start_embedded_server()
         # QA ONLY, explicit option: the fixture needs the running server and must
         # exist before the game's own first login, so it runs before Launch,
@@ -1479,6 +1496,48 @@ class ActualRun:
         self.wait(disabled, 30, "orientation_wait_not_disabled")
         self.device.screenshot("orientation-wait-disabled")
         self.record("orientation_wait_disabled", {"control": "playback_wait_for_orientation", "qa_only": True})
+
+    def set_render_scale(self, value):
+        """Select the app's own custom "3D render scale" (Graphics tab) before Start.
+
+        The software-GPU guest sometimes draws Home at ~0.9 s/frame (runs 15,
+        17, 18); every touch then spans a frame, which the game's buttons
+        treat as a suppressed long tap. A smaller 3D buffer is a user setting.
+        """
+        tab = self.device.android_control({"idoly.nav.graphics"}, scroll=False)
+        need(tab is not None, "render_scale_graphics_tab_unavailable")
+        self.device.touch(tab)
+        names = labels("presentation_custom_graphics")
+
+        def custom():
+            nodes = [node for node in self.device.android().iter("node") if node.get("package") == PACKAGE
+                     and node.get("class") == "android.widget.CheckBox" and node.get("text") in names
+                     and node.get("enabled") == "true"]
+            need(len(nodes) <= 1, "custom_graphics_control_ambiguous")
+            return nodes[0] if nodes else None
+        box = custom()
+        if box is None:
+            box = self.device.android_control(names, cls="android.widget.CheckBox")
+        if box.get("checked") != "true":
+            self.device.touch(box)
+        self.wait(lambda: True if (c := custom()) is not None and c.get("checked") == "true" else None,
+                  30, "custom_graphics_not_enabled")
+        # The Main UI follows the guest locale; accept that scale's item in any locale.
+        choices = array_items("presentation_render_scale_options", RENDER_SCALE_INDEX[value])
+        self.device.spinner("presentation_render_scale", choices)
+        expected = labels("presentation_render_scale")
+
+        def selected():
+            for parent in self.device.android().iter("node"):
+                children = list(parent)
+                for index, node in enumerate(children[:-1]):
+                    following = children[index + 1]
+                    if node.get("text") in expected and following.get("class") == "android.widget.Spinner":
+                        return True if any(n.get("text") in choices for n in following.iter("node")) else None
+            return None
+        self.wait(selected, 30, "render_scale_not_applied")
+        self.device.screenshot("render-scale-selected")
+        self.record("render_scale_selected", {"value": value, "qa_only": True})
 
     def start_embedded_server(self):
         """Start the unified app's resource server with its own Start control.
@@ -2020,6 +2079,8 @@ def main():
     parser.add_argument("--no-orientation-wait", action="store_true",
                         help="QA ONLY: uncheck the app's own 'wait for rotation at MV entry/exit' before Start "
                              "(a portrait guest cannot be turned; the game's rotation view has no wired tap)")
+    parser.add_argument("--render-scale", choices=("0.25", "0.5", "0.75"),
+                        help="QA ONLY: select the app's own custom 3D render scale before Start (slow software GPU)")
     parser.add_argument("--descriptor-set", type=Path, help="server protocol descriptor set for the fixture")
     parser.add_argument("--master-dir", type=Path, help="server master-json directory for the fixture")
     args = parser.parse_args()
