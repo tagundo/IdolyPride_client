@@ -56648,7 +56648,9 @@ bool mp4_fresh_video_add(void*player,void*image,bool loop){
 const char*mp4_fresh_video_last_wait=nullptr;
 Mp4FreshResult mp4_fresh_video_waiting(const char*code){
  if(code&&code!=mp4_fresh_video_last_wait){mp4_fresh_video_last_wait=code;idoly_mp4_runtime::diagnostic_event("fresh_video",code);}
- return Mp4FreshResult::waiting;
+ // The scene start's stage timeout reports the host's last wait code
+ // (runs 26-27 traced only "unnamed_wait"); name the video receipt there.
+ return code?mp4_fresh_fail(Mp4FreshResult::waiting,code):Mp4FreshResult::waiting;
 }
 Mp4FreshResult mp4_fresh_video_prepare_all(){
  const char*wait=nullptr;

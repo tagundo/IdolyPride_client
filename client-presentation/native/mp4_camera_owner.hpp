@@ -5099,8 +5099,13 @@ public:
             }
             if(!api_.pause(api_.context,identity_))return fail(Result::stale,"fresh_video_source_changed");
             State now{};const auto result=pump(now);if(result!=Result::ready)return result;
+            // Name which receipt is missing (redroid runs 26-27 waited 60 s on
+            // one undifferentiated code): the player not prepared yet, prepared
+            // without our PrepareCompleted receipt, or not paused.
             if(!prepared_event_||!now.prepared||!now.paused||now.playing)
-                return fail(Result::waiting,"fresh_video_prepare_wait");
+                return fail(Result::waiting,!now.prepared?(prepared_event_?"fresh_video_prepare_state_wait":"fresh_video_prepare_wait")
+                    :!prepared_event_?"fresh_video_prepare_event_missing"
+                    :now.playing?"fresh_video_prepare_playing":"fresh_video_prepare_pause_wait");
             // Some backends can already expose frame zero before this bank
             // observes a FrameReady. Never synthesize an initial receipt from
             // get_frame/get_texture. Prime another actual index, then the
