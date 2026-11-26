@@ -712,6 +712,8 @@ SONG_SWIPE_LIMIT = 40
 
 
 ROTATION_VIEW = "DeviceRotationView(Clone)/"
+# Native phases before rendering; the fresh pipeline reloads the MV in them.
+PREPARING_PHASES = frozenset(("preparing_audio",))  # mp4_runtime: the only phase before rendering
 MAX_NOTICE_BACKS = 6
 MV_PLAYBACK_VERIFY_SECONDS = 120
 
@@ -1839,7 +1841,26 @@ class ActualRun:
         self.report["native_clock_hold_with_advancing_playerloop_verified"] = False
         while time.monotonic() < deadline:
             payload = self.mp4()
-            state, obs = native_payload(payload)
+            try:
+                state, obs = native_payload(payload)
+            except Rejected as error:
+                # The fresh pipeline reloads the original scene before it renders
+                # (run 21: preparing_audio with the source briefly unavailable).
+                state = payload.get("native") if type(payload) is dict else None
+                if (str(error) not in ("normal_3d_source_unavailable", "source_observation_invalid")
+                        or type(state) is not dict or state.get("phase") not in PREPARING_PHASES):
+                    raise
+                self.report["export_preparing_source_unavailable"] = self.report.get(
+                    "export_preparing_source_unavailable", 0) + 1
+                need(state.get("error_code", "none") == "none", "native_export_failed_" + str(state.get("error_code")))
+                if time.monotonic() - last_record >= 20:
+                    self.record("export_progress", payload)
+                    last_record = time.monotonic()
+                    self.capture_mp4_diagnostics("export_progress", force=True)
+                need(bool(self.device.adb("shell", "pidof", PACKAGE, check=False).strip()), "game_process_exited")
+                self.relieve_system_anr()
+                time.sleep(.25)
+                continue
             phase = state.get("phase")
             if phase == "completed":
                 self.capture_mp4_diagnostics("completed", force=True)

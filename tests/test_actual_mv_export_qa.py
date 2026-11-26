@@ -2068,3 +2068,32 @@ def test_route_with_arrival_check_repeats_a_dropped_touch(monkeypatch):
               arrived=lambda snap: any(qa.PHOTOGRAPHY_TABS in b["path"] for b in UI.buttons(snap)))
     assert [role for role, _ in run.taps] == ["qa_mv_route", "qa_mv_route"]
     assert [e["observation"]["touch"] for e in run.journal] == [1, 2]
+
+
+def test_export_wait_allows_the_fresh_scene_reload_only_while_preparing(tmp_path):
+    # Run 21: the fresh pipeline reported preparing_audio with the source
+    # unavailable while it reloaded the MV; the driver treated that as fatal.
+    def payload(phase, valid, error="none"):
+        data = playing_snapshot()
+        data["native"].update(phase=phase, error_code=error)
+        data["native"]["observation"].update(source_valid=valid, source_kind="photography_3d" if valid else "unavailable")
+        return data
+    def run_with(payloads):
+        run = bare_run(tmp_path / str(len(list(tmp_path.iterdir()))))
+        run.proof.mkdir()
+        run.export_deadline = qa.time.monotonic() + 5
+        stream = iter(payloads)
+        run.mp4 = lambda: next(stream)
+        run.record = lambda phase, observation=None: run.journal.append(phase)
+        run.capture_mp4_diagnostics = lambda *a, **k: None
+        run.device = SimpleNamespace(adb=lambda *a, **k: "123")
+        run.relieve_system_anr = lambda: None
+        return run
+    run = run_with([payload("preparing_audio", False), payload("preparing_audio", False), payload("failed", True, "x")])
+    with pytest.raises(qa.Rejected, match="native_export_failed_x"):
+        run.await_export(playing_snapshot())
+    assert run.report["export_preparing_source_unavailable"] == 2
+    # Outside preparation an unavailable source is still a failure.
+    run = run_with([payload("rendering", False)])
+    with pytest.raises(qa.Rejected, match="normal_3d_source_unavailable"):
+        run.await_export(playing_snapshot())
