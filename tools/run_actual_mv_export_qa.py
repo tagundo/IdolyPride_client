@@ -1087,7 +1087,13 @@ class ActualRun:
         need(self.explorer._tap(snapshot, node, role, len(self.journal)), "observed_unity_input_rejected")
         self.record(role)
 
-    def route(self, pattern, name=None, optional=False, within=None):
+    def route(self, pattern, name=None, optional=False, within=None, arrived=None):
+        """Touch a route control; with ``arrived``, until that screen is observed.
+
+        A slow guest can drop a touch (run 20), so a route with an arrival
+        check repeats the touch every 15 s while the screen has not changed.
+        """
+        touched = []
         def attempt():
             snap = self.explorer._snapshot()
             if snap.get("ok") is not True:
@@ -1096,19 +1102,24 @@ class ActualRun:
                 return None
             if home_input_blocked(snap):
                 return None
+            if arrived is not None and touched and arrived(snap):
+                return True
+            if touched and (arrived is None or time.monotonic() - touched[-1] < 15):
+                return True if arrived is None else None
             node = (self.ui.choose_button(snap, pattern, name) if within is None
                     else choose_route_button(self.ui, snap, pattern, name, within=within))
             if node:
                 # A control that moved or closed between the snapshot and the
                 # touch is re-observed within this route's wait, not a failure.
                 if self.explorer._tap(snap, node, "qa_mv_route", len(self.journal)):
-                    self.record("qa_mv_route")
-                    return True
+                    touched.append(time.monotonic())
+                    self.record("qa_mv_route", {"touch": len(touched)} if arrived is not None else None)
+                    return True if arrived is None else None
                 return None
             return None
         if optional:
             return attempt()
-        return self.wait(attempt, 120, "observed_route_control_unavailable")
+        return self.wait(attempt, 120 if arrived is None else 240, "observed_route_control_unavailable")
 
     def route_snapshot(self):
         """A current Unity tree with no dialog to answer and input released."""
@@ -1667,10 +1678,12 @@ class ActualRun:
                 self.record("route_idols", {"touch": len(touched)})
             return None
         self.wait(idols, 600, "home_character_page_control_unavailable")
-        self.route(r"撮影\s*[・·･]\s*鑑賞|촬영\s*[・·･]\s*감상|Shooting.*Viewing|Photography", r"^(Photography|PhotoButton)$")
+        self.route(r"撮影\s*[・·･]\s*鑑賞|촬영\s*[・·･]\s*감상|Shooting.*Viewing|Photography", r"^(Photography|PhotoButton)$",
+                   arrived=lambda snap: any(PHOTOGRAPHY_TABS in b["path"] for b in self.ui.buttons(snap)))
         # Only the Photography screen's own tab: on a slow guest the previous
         # page is still shown and its "LIVE 360°" (Panorama) also says Live (run 19).
-        self.route(r"ライブ|라이브|Live", r"^PhotographyLiveTabButton$", within=PHOTOGRAPHY_TABS)
+        self.route(r"ライブ|라이브|Live", r"^PhotographyLiveTabButton$", within=PHOTOGRAPHY_TABS,
+                   arrived=lambda snap: original_member_label(self.ui, snap) is not None)
         # Live page -> "match the stage song" -> Decide -> song list -> Decide
         # -> confirmation sheet -> watch (run 9: the Live tab opens idol
         # selection, not a song list).

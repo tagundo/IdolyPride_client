@@ -2042,3 +2042,29 @@ def test_live_tab_route_never_matches_home_live_360():
     opened = ui_snapshot(*pending["nodes"], *labelled_button(tabs + "PhotographyLiveTabButton", (0, 126, 135, 186), "라이브"))
     chosen = qa.choose_route_button(UI, opened, pattern, name, within=qa.PHOTOGRAPHY_TABS)
     assert chosen["path"].endswith("PhotographyLiveTabButton")
+
+
+def test_route_with_arrival_check_repeats_a_dropped_touch(monkeypatch):
+    # Run 20: the slow guest dropped a touch; the next route then waited out 120 s.
+    home = "W/HomeTopScreen(Clone)/ScreenCanvas/ScreenRoot" + qa.IDOLS_PHOTOGRAPHY
+    tabs = "W/PhotographyWindow(Clone)" + qa.PHOTOGRAPHY_TABS + "TabButtons/PhotographyLiveTabButton"
+    state = {"opened": False}
+
+    def snapshot():
+        nodes = labelled_button(home, (206, 794, 344, 896), "촬영")
+        if state["opened"]:
+            nodes += labelled_button(tabs, (0, 126, 135, 186), "라이브")
+        return ui_snapshot(*nodes)
+    run = route_run(snapshot, monkeypatch)
+    original = run.explorer._tap
+
+    def tap(snap, node, role, index):
+        original(snap, node, role, index)
+        state["opened"] = len(run.taps) >= 2  # the first touch is dropped
+        return True
+    run.explorer._tap = tap
+    run.handle_dialog = lambda snap: False
+    run.route(r"촬영\s*[・·･]\s*감상|Photography", r"^Photography$",
+              arrived=lambda snap: any(qa.PHOTOGRAPHY_TABS in b["path"] for b in UI.buttons(snap)))
+    assert [role for role, _ in run.taps] == ["qa_mv_route", "qa_mv_route"]
+    assert [e["observation"]["touch"] for e in run.journal] == [1, 2]
