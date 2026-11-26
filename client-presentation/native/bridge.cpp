@@ -56364,7 +56364,7 @@ struct Mp4FreshVideoEntry {
   bool awake=false,loop=false,skip=false,frames=false,captured=false,restored=false;}saved;
  void*image=nullptr;uintptr_t image_native=0;void*script=nullptr;
  void*textures[4]{};uintptr_t texture_native[4]{};size_t texture_count=0;
- bool active=false;
+ bool active=false,prepare_reissued=false;
 };
 Mp4FreshVideoEntry mp4_fresh_videos[16];size_t mp4_fresh_video_count=0;
 std::atomic<void*>mp4_fresh_video_players[16];
@@ -56642,7 +56642,7 @@ bool mp4_fresh_video_add(void*player,void*image,bool loop){
   ||!mp4_video_native(player,&vp)||!mp4_video_native(clip.get(),&native)||!mp4_video_native(image,&inative)
   ||!mp4_fresh_video_image_bound(image,player,false)
   ||!mp4_fresh_keep(player)||!mp4_fresh_keep(clip.get())||!mp4_fresh_keep(image))return false;
- e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;
+ e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;e.prepare_reissued=false;
  e.clip={mp4_cam_call<Rate>(mp4_cam_profile.video_clip_rate)(clip.get(),nullptr),mp4_cam_call<Rate>(mp4_cam_profile.video_clip_length)(clip.get(),nullptr),mp4_cam_call<Count>(mp4_cam_profile.video_clip_frames)(clip.get(),nullptr),loop};
  const mp4freshvideo::Api api={&e,mp4_fresh_video_current,mp4_fresh_video_read,mp4_fresh_video_configure,mp4_fresh_video_prepare,
   mp4_fresh_video_pause,mp4_fresh_video_reference,mp4_fresh_video_set_frame,mp4_fresh_video_native_pump,mp4_fresh_video_publish,
@@ -56663,15 +56663,31 @@ Mp4FreshResult mp4_fresh_video_waiting(const char*code){
 // (redroid runs 26-29: isPrepared stayed false for 60 s with no other sign).
 // frame = flags (1 prepared, 2 playing, 4 paused, 8 texture, 16 configured),
 // tick = player frame + 1 (0 = none). Read-only: original getters only.
-uint64_t mp4_fresh_video_state_logged_at=0;
+uint64_t mp4_fresh_video_state_logged_at=0,mp4_fresh_video_wait_started=0;
 void mp4_fresh_video_log_state(){
  const uint64_t now=idoly_mp4_runtime::milliseconds();
+ if(!mp4_fresh_video_wait_started)mp4_fresh_video_wait_started=now;
  if(mp4_fresh_video_state_logged_at&&now-mp4_fresh_video_state_logged_at<5000)return;
  mp4_fresh_video_state_logged_at=now;
  for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];mp4freshvideo::State st{};
   if(!e.active||!mp4_fresh_video_read(&e,e.identity,&st)){idoly_mp4_runtime::diagnostic_event("fresh_video_state","unreadable",i);continue;}
   const uint64_t flags=(st.prepared?1:0)|(st.playing?2:0)|(st.paused?4:0)|(st.texture?8:0)|(st.configured?16:0);
   idoly_mp4_runtime::diagnostic_event("fresh_video_state",e.frames.error(),flags,st.frame>=0?uint64_t(st.frame)+1:0);
+  // The engine player's own fields (as read by mp4_video_history_layout):
+  // frame = 1 prepared(0x5a) | 2 preparing(0x64) | 4 backend(0x40) | 8 texture id(0x48),
+  // tick = 1 when the field read itself failed.
+  uint8_t prepared=0,preparing=0;uintptr_t backend=0;int32_t texture=0;auto*np=reinterpret_cast<void*>(e.identity.player_native);
+  const bool read=np&&mp4_actor_field(np,0x5a,prepared)&&mp4_actor_field(np,0x64,preparing)
+   &&mp4_actor_field(np,0x40,backend)&&mp4_actor_field(np,0x48,texture);
+  idoly_mp4_runtime::diagnostic_event("fresh_video_native",read?"fields":"unreadable",
+   (prepared?1:0)|(preparing?2:0)|(backend?4:0)|(texture?8:0),read?0:1);
+  // A player that is neither prepared nor preparing 10 s after Prepare was
+  // issued has dropped that request; issue the original Prepare once more.
+  if(read&&!prepared&&!preparing&&!e.prepare_reissued&&mp4_fresh_video_wait_started
+   &&now-mp4_fresh_video_wait_started>=10000){
+   e.prepare_reissued=true;const bool issued=mp4_fresh_video_prepare(&e,e.identity);
+   idoly_mp4_runtime::diagnostic_event("fresh_video_native",issued?"prepare_reissued":"prepare_reissue_failed",i);
+  }
  }
 }
 Mp4FreshResult mp4_fresh_video_prepare_all(){
@@ -56680,7 +56696,7 @@ Mp4FreshResult mp4_fresh_video_prepare_all(){
   if(r==mp4freshvideo::Result::waiting){if(!wait)wait=e.frames.error();}
   else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
  }
- if(wait)mp4_fresh_video_log_state();else mp4_fresh_video_state_logged_at=0;
+ if(wait)mp4_fresh_video_log_state();else mp4_fresh_video_state_logged_at=mp4_fresh_video_wait_started=0;
  return wait?mp4_fresh_video_waiting(wait):Mp4FreshResult::ok;
 }
 Mp4FreshResult mp4_fresh_video_frame_all(double seconds){
