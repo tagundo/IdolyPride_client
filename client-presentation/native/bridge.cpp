@@ -57356,9 +57356,13 @@ bool mp4_fresh_actors_current(){
  }
  return true;
 }
+// Start gate counters (redroid run 30: the video bank was reached only twice
+// in 60 s; which earlier gate returned "waiting" the rest of the time?).
+struct Mp4FreshStartGates{uint64_t calls=0,qos=0,render_depth=0,callbacks=0,adopt=0,video=0,logged_at=0;}mp4_fresh_start_gates;
 Mp4FreshResult mp4_fresh_hold(void*){
  auto&h=mp4_fresh_host;if(!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_scene_changed");
- if(h.render_depth||!mp4_actor_mono_gate.callbacks_unwound())return Mp4FreshResult::waiting;
+ if(h.render_depth){++mp4_fresh_start_gates.render_depth;return Mp4FreshResult::waiting;}
+ if(!mp4_actor_mono_gate.callbacks_unwound()){++mp4_fresh_start_gates.callbacks;return Mp4FreshResult::waiting;}
  if(h.mono&&!mp4_actor_mono_gate.hold(h.source.generation))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_gate_lost");
  if(!mp4_fresh_actors_current())return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_identity_changed");
  for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
@@ -57511,9 +57515,25 @@ Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job
   h.roster->converted=true;}
  return mp4_fresh_acquired();
 }
-Mp4FreshResult mp4_fresh_start(void*){
+void mp4_fresh_start_gates_log(){
+ auto&g=mp4_fresh_start_gates;const uint64_t now=idoly_mp4_runtime::milliseconds();
+ if(g.logged_at&&now-g.logged_at<5000)return;g.logged_at=now;
+ // frame = calls, tick = gate count; one event per gate with a nonzero count.
+ idoly_mp4_runtime::diagnostic_event("fresh_start_gates","video_reached",g.calls,g.video);
+ if(g.qos)idoly_mp4_runtime::diagnostic_event("fresh_start_gates","qos_waiting",g.calls,g.qos);
+ if(g.render_depth)idoly_mp4_runtime::diagnostic_event("fresh_start_gates","hold_render_depth",g.calls,g.render_depth);
+ if(g.callbacks)idoly_mp4_runtime::diagnostic_event("fresh_start_gates","hold_callbacks_not_unwound",g.calls,g.callbacks);
+ if(g.adopt)idoly_mp4_runtime::diagnostic_event("fresh_start_gates","video_adopt_waiting",g.calls,g.adopt);
+}
+Mp4FreshResult mp4_fresh_start_body(void*);
+Mp4FreshResult mp4_fresh_start(void*context){
+ ++mp4_fresh_start_gates.calls;const auto result=mp4_fresh_start_body(context);
+ if(result==Mp4FreshResult::waiting)mp4_fresh_start_gates_log();else mp4_fresh_start_gates={};
+ return result;
+}
+Mp4FreshResult mp4_fresh_start_body(void*){
  auto&h=mp4_fresh_host;
- const auto qos=mp4_fresh_qos_begin();if(qos!=Mp4FreshResult::ok)return qos;
+ const auto qos=mp4_fresh_qos_begin();if(qos!=Mp4FreshResult::ok){if(qos==Mp4FreshResult::waiting)++mp4_fresh_start_gates.qos;return qos;}
  if(!h.path_reset_started){
 #ifdef IDOLY_DARWIN_BRIDGE
   const mp4game::Binding reset{0x6f93480,{0xff,0x03,0x02,0xd1,0xe9,0x23,0x04,0x6d,0xf6,0x57,0x05,0xa9,0xf4,0x4f,0x06,0xa9}};
@@ -57549,7 +57569,8 @@ Mp4FreshResult mp4_fresh_start(void*){
   h.camera_returned=true;}
  if(!h.camera_returned)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_camera_initialization_incomplete");
  const auto held=mp4_fresh_hold(nullptr);if(held!=Mp4FreshResult::ok)return held;
- const auto adopted=mp4_fresh_video_adopt();if(adopted!=Mp4FreshResult::ok)return adopted;
+ const auto adopted=mp4_fresh_video_adopt();if(adopted!=Mp4FreshResult::ok){if(adopted==Mp4FreshResult::waiting)++mp4_fresh_start_gates.adopt;return adopted;}
+ ++mp4_fresh_start_gates.video;
  return mp4_fresh_video_prepare_all();
 }
 Mp4FreshResult mp4_fresh_prepare_step(void*,uint64_t tick,double seconds){
