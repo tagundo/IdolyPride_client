@@ -1515,10 +1515,17 @@ inline bool native_render_boundary(void* manager,double wall){
 // BEGIN_MP4_FRESH_NATIVE_BOUNDARY
 // Explicit disposable-original-scene protocol. These callbacks owe real
 // current writer gates and render completion, not old history restoration.
+// Starting the reloaded scene waits for the MV's own VideoPlayer to report
+// Prepared, which a slow device decodes at its own pace (redroid run 26:
+// fresh_video_prepare_wait outlived 15 s at a few engine frames per second).
+// It keeps a longer, still bounded budget; every other stage keeps 15 s.
+inline uint64_t fresh_stage_budget_ms(const char*timeout){
+    return timeout&&!strcmp(timeout,"fresh_scene_start_timeout")?60000:15000;
+}
 inline void fresh_stage_wait(const char*timeout,const char*detail=nullptr){
     const uint64_t now=milliseconds();
     if(!job.fresh_wait_error||strcmp(job.fresh_wait_error,timeout)||!job.fresh_stage_wait_started){job.fresh_wait_error=timeout;job.fresh_stage_wait_started=now;}
-    if(now>=job.fresh_stage_wait_started&&now-job.fresh_stage_wait_started>15000){
+    if(now>=job.fresh_stage_wait_started&&now-job.fresh_stage_wait_started>fresh_stage_budget_ms(timeout)){
         // The stage code says where; the scene's (or capture's) last wait says what for.
         diagnostic_event("fresh_wait",detail&&detail[0]&&strcmp(detail,"none")?detail:fresh_scene_error("unnamed_wait"),job.frame,0,true);terminal(timeout);}
 }
