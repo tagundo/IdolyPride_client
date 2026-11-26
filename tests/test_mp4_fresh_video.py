@@ -35,7 +35,8 @@ bool original_pending=false;int original_delay=0;int64_t original_frame=-1;
 double reference=-1;int64_t pending_frame=-1;fv::Clip clip{30,2,60,true};
 bool current(void*,const fv::Identity& x){return current_&&fv::same(id,x);}
 bool read(void*,const fv::Identity& x,fv::State*out){assert(fv::same(id,x));*out=state;return true;}
-bool configure(void*,const fv::Identity& x,const fv::Clip&){assert(fv::same(id,x));++configurations;state.configured=true;state.prepared=false;state.frame=-1;state.texture=nullptr;state.texture_native=0;return configured_ok;}
+bool adopt_prepared=false;
+bool configure(void*,const fv::Identity& x,const fv::Clip&){assert(fv::same(id,x));++configurations;state.configured=true;if(adopt_prepared)return configured_ok;state.prepared=false;state.frame=-1;state.texture=nullptr;state.texture_native=0;return configured_ok;}
 bool prepare(void*,const fv::Identity&){++prepares;pending_prepare=true;return prepare_ok;}
 bool pause(void*,const fv::Identity&){++pauses;state.paused=state.prepared;state.playing=false;return true;}
 bool ref(void*,const fv::Identity&,double t){reference=t;return true;}
@@ -68,6 +69,15 @@ int main(int argc,char**argv){assert(argc==2);std::string s=argv[1];auto calls=a
  assert(scope.bind(calls,id,clip));assert(!scope.bind(calls,id,clip));
  if(s=="configure_failed"){configured_ok=false;assert(scope.prepare()==fv::Result::failed&&configurations==1);return 0;}
  if(s=="prepare_failed"){prepare_ok=false;assert(scope.prepare()==fv::Result::failed&&prepares==1);return 0;}
+ if(s=="adopt_prepared"){
+  // Redroid runs 26-33: a new Prepare under the hold never completed. A player
+  // the original scene already prepared (and is playing) keeps its decoder;
+  // no Prepare is issued and frame 0 is proven by real seek/FrameReady receipts.
+  adopt_prepared=true;state.prepared=true;state.playing=true;state.paused=false;state.frame=5;
+  auto result=scope.prepare();for(int i=0;i<4&&result==fv::Result::waiting;++i)result=scope.prepare();
+  assert(result==fv::Result::ready&&prepares==0&&configurations==1&&seeks>=1&&state.paused&&!state.playing);
+  assert(ready(0)==fv::Result::ready&&scope.accepted_frame()==0&&published==1);return 0;
+ }
  if(s=="native_not_returned"){drained=false;assert(scope.prepare()==fv::Result::failed&&published==0);return 0;}
  if(s=="native_throws"){throw_pump=true;assert(scope.prepare()==fv::Result::failed&&published==0);return 0;}
  if(s=="one_frame_unproven"){assert(scope.prepare()==fv::Result::failed&&published==0&&seeks==0);return 0;}
@@ -150,7 +160,7 @@ def fresh_video_binary(tmp_path_factory):
 
 
 @pytest.mark.parametrize("case", [
-    "normal", "initial_zero", "same_frame", "fractional", "loop", "nonloop", "bad_api",
+    "normal", "adopt_prepared", "initial_zero", "same_frame", "fractional", "loop", "nonloop", "bad_api",
     "bad_identity", "bad_clip", "configure_failed", "prepare_failed", "native_not_returned",
     "native_throws", "wrong_identity_event", "source_lost", "abandon", "negative_time",
     "get_frame_is_not_transfer", "missing_seek_event", "missing_frame_event", "wrong_frame_event",

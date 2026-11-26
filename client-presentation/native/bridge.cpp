@@ -56364,7 +56364,7 @@ struct Mp4FreshVideoEntry {
   bool awake=false,loop=false,skip=false,frames=false,captured=false,restored=false;}saved;
  void*image=nullptr;uintptr_t image_native=0;void*script=nullptr;
  void*textures[4]{};uintptr_t texture_native[4]{};size_t texture_count=0;
- bool active=false,prepare_reissued=false;
+ bool active=false,prepare_reissued=false,adopted_prepared=false;
 };
 Mp4FreshVideoEntry mp4_fresh_videos[16];size_t mp4_fresh_video_count=0;
 std::atomic<void*>mp4_fresh_video_players[16];
@@ -56508,7 +56508,14 @@ bool mp4_fresh_video_capture_knobs(Mp4FreshVideoEntry&e){
 bool mp4_fresh_video_configure(void*context,const mp4freshvideo::Identity&id,const mp4freshvideo::Clip&clip){
  auto*e=static_cast<Mp4FreshVideoEntry*>(context);if(!mp4_fresh_video_current(context,id)||!mp4_fresh_video_capture_knobs(*e)||!mp4_fresh_video_write_image(*e,nullptr,0))return false;
  using Call=void(*)(void*,Method*);using SetInt=void(*)(void*,int32_t,Method*);using SetBool=void(*)(void*,bool,Method*);using SetFloat=void(*)(void*,float,Method*);
- mp4_cam_call<Call>(mp4_cam_profile.video_stop)(id.player,nullptr);
+ // A player the reloaded MV already prepared keeps its decoder: Stop would
+ // release it, and a new Prepare under the export hold never completed
+ // (redroid runs 26-33: preparing=1 with a backend but no texture for 60 s).
+ // Its frames are then sought with the bank's ordinary set_frame receipts.
+ mp4freshvideo::State before{};
+ e->adopted_prepared=mp4_fresh_video_read(context,id,&before)&&before.prepared;
+ idoly_mp4_runtime::diagnostic_event("fresh_video",e->adopted_prepared?"adopted_prepared_player":"stopped_for_prepare");
+ if(!e->adopted_prepared)mp4_cam_call<Call>(mp4_cam_profile.video_stop)(id.player,nullptr);
  if(!mp4_fresh_video_native_pump(context,id))return false;
  mp4_cam_call<SetInt>(mp4_cam_profile.video_set_render_mode)(id.player,mp4camp::ExtraLayout::video_render_api,nullptr);
  mp4_cam_call<SetInt>(mp4_cam_profile.video_set_audio_mode)(id.player,mp4camp::ExtraLayout::video_audio_none,nullptr);
@@ -56519,7 +56526,7 @@ bool mp4_fresh_video_configure(void*context,const mp4freshvideo::Identity&id,con
  mp4_cam_call<SetBool>(mp4_cam_profile.video_set_play_on_awake)(id.player,false,nullptr);
  mp4_cam_call<SetBool>(mp4_cam_profile.video_set_loop)(id.player,clip.loop,nullptr);
  mp4_cam_call<SetFloat>(mp4_cam_profile.video_set_speed)(id.player,1,nullptr);
- mp4freshvideo::State now{};return mp4_fresh_video_read(context,id,&now)&&now.configured&&!now.prepared;
+ mp4freshvideo::State now{};return mp4_fresh_video_read(context,id,&now)&&now.configured&&now.prepared==e->adopted_prepared;
 }
 bool mp4_fresh_video_prepare(void*context,const mp4freshvideo::Identity&id){
  if(!mp4_fresh_video_current(context,id))return false;
@@ -56642,7 +56649,7 @@ bool mp4_fresh_video_add(void*player,void*image,bool loop){
   ||!mp4_video_native(player,&vp)||!mp4_video_native(clip.get(),&native)||!mp4_video_native(image,&inative)
   ||!mp4_fresh_video_image_bound(image,player,false)
   ||!mp4_fresh_keep(player)||!mp4_fresh_keep(clip.get())||!mp4_fresh_keep(image))return false;
- e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;e.prepare_reissued=false;
+ e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;e.prepare_reissued=false;e.adopted_prepared=false;
  e.clip={mp4_cam_call<Rate>(mp4_cam_profile.video_clip_rate)(clip.get(),nullptr),mp4_cam_call<Rate>(mp4_cam_profile.video_clip_length)(clip.get(),nullptr),mp4_cam_call<Count>(mp4_cam_profile.video_clip_frames)(clip.get(),nullptr),loop};
  const mp4freshvideo::Api api={&e,mp4_fresh_video_current,mp4_fresh_video_read,mp4_fresh_video_configure,mp4_fresh_video_prepare,
   mp4_fresh_video_pause,mp4_fresh_video_reference,mp4_fresh_video_set_frame,mp4_fresh_video_native_pump,mp4_fresh_video_publish,

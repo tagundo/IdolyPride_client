@@ -5107,6 +5107,15 @@ public:
                 // Partial original mutations still belong to disposable End.
                 configured_=true;
                 if(!api_.configure(api_.context,identity_,clip_))return fail(Result::failed,"fresh_video_configuration_failed");
+                // A player the original scene already prepared is adopted as
+                // prepared (configure kept its decoder instead of Stop): no new
+                // Prepare is issued, and its frames are proven by the ordinary
+                // prime/seek FrameReady receipts below.
+                State configured{};
+                if(state(configured)&&configured.prepared){
+                    prepare_issued_=true;prepared_event_=true;pause_allowed_=true;
+                    events_=drained_=frame_event_=seek_event_=0;event_frame_=-1;
+                }
             }
             if(!prepare_issued_){
                 prepare_issued_=true;events_=drained_=frame_event_=seek_event_=0;event_frame_=-1;
