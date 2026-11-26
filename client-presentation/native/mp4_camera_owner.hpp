@@ -5028,6 +5028,16 @@ class Scope {
         return api_.current(api_.context,identity_)&&api_.read(api_.context,identity_,&out)
             &&same(out.identity,identity_)&&api_.current(api_.context,identity_);
     }
+    // Pause only a prepared player. Redroid runs 26-31 pumped the native
+    // update ~8 times a second and the player stayed configured+paused,
+    // never prepared: Pause on an unprepared VideoPlayer (re)starts its own
+    // preparation, so pausing every poll can keep restarting it. Until the
+    // player reports prepared, only its identity is checked (playOnAwake is
+    // off and Stop preceded Prepare, so it is not playing).
+    bool pause_allowed_=false;
+    bool hold_paused() {
+        return pause_allowed_?api_.pause(api_.context,identity_):api_.current(api_.context,identity_);
+    }
     bool event() noexcept {
         if(events_==~uint64_t(0)){failed_=true;error_="fresh_video_event_exhausted";return false;}
         ++events_;return true;
@@ -5043,7 +5053,12 @@ class Scope {
         // Only the actual returned original Update plus its empty native
         // invocation queue closes events. An event counter is not a fence.
         drained_=events_;
-        if(!api_.pause(api_.context,identity_)||!state(out))return fail(Result::stale,"fresh_video_source_changed");
+        if(!hold_paused()||!state(out))return fail(Result::stale,"fresh_video_source_changed");
+        if(!pause_allowed_&&(out.prepared||prepared_event_)){
+            // First prepared observation: pause it now, as every poll did before.
+            pause_allowed_=true;
+            if(!api_.pause(api_.context,identity_)||!state(out))return fail(Result::stale,"fresh_video_source_changed");
+        }
         if(!out.configured)return fail(Result::stale,"fresh_video_configuration_changed");
         return Result::ready;
     }
@@ -5097,7 +5112,7 @@ public:
                 prepare_issued_=true;events_=drained_=frame_event_=seek_event_=0;event_frame_=-1;
                 if(!api_.prepare(api_.context,identity_))return fail(Result::failed,"fresh_video_prepare_failed");
             }
-            if(!api_.pause(api_.context,identity_))return fail(Result::stale,"fresh_video_source_changed");
+            if(!hold_paused())return fail(Result::stale,"fresh_video_source_changed");
             State now{};const auto result=pump(now);if(result!=Result::ready)return result;
             // Name which receipt is missing (redroid runs 26-27 waited 60 s on
             // one undifferentiated code): the player not prepared yet, prepared

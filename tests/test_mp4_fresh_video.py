@@ -184,3 +184,14 @@ def test_can_step_pins_match_original_instance_boolean_method():
         expected = method["rva"] + ",{" + ",".join(f"0x{x:02x}" for x in bytes.fromhex(method["prefix"])) + "}," + method["registration_pointer_slot"]
         actual = re.search(r"StepBinding " + platform + r"_can_step=\{(.*?)\};", header).group(1)
         assert actual == expected
+
+
+def test_unprepared_player_is_not_paused_every_poll():
+    # Redroid runs 26-31: ~8 native pumps a second, the player stayed
+    # configured+paused and never prepared while every poll paused it.
+    source = (Path(__file__).resolve().parents[1] / "client-presentation/native/mp4_camera_owner.hpp").read_text()
+    bank = source[source.index("// BEGIN_MP4_FRESH_VIDEO_FRAME"):]
+    assert "return pause_allowed_?api_.pause(api_.context,identity_):api_.current(api_.context,identity_);" in bank
+    prepare = bank[bank.index("    Result prepare()noexcept {"):]
+    prepare = prepare[:prepare.index("fresh_video_prepare_wait")]
+    assert "api_.pause(" not in prepare and "hold_paused()" in prepare
