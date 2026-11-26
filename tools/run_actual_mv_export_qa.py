@@ -712,6 +712,7 @@ SONG_SWIPE_LIMIT = 40
 
 
 ROTATION_VIEW = "DeviceRotationView(Clone)/"
+ANDROID_TREE_ATTEMPTS = 5
 # Native phases before rendering; the fresh pipeline reloads the MV in them.
 PREPARING_PHASES = frozenset(("preparing_audio",))  # mp4_runtime: the only phase before rendering
 MAX_NOTICE_BACKS = 6
@@ -830,11 +831,17 @@ class Device:
         return properties
 
     def android(self):
-        self.capture_number += 1
-        raw = self.adb("exec-out", "uiautomator", "dump", "/dev/tty", check=False)
-        prefix = self.output / ("android-%04d" % self.capture_number)
-        prefix.with_suffix(".raw.txt").write_text(raw)
-        start, end = raw.find("<hierarchy"), raw.rfind("</hierarchy>")
+        # uiautomator can fail once while the window changes (run 22, right
+        # after the server menu opened over the game); retry a few times.
+        for attempt in range(ANDROID_TREE_ATTEMPTS):
+            self.capture_number += 1
+            raw = self.adb("exec-out", "uiautomator", "dump", "/dev/tty", check=False, timeout=60)
+            prefix = self.output / ("android-%04d" % self.capture_number)
+            prefix.with_suffix(".raw.txt").write_text(raw)
+            start, end = raw.find("<hierarchy"), raw.rfind("</hierarchy>")
+            if start >= 0 and end >= start:
+                break
+            time.sleep(2)
         need(start >= 0 and end >= start, "android_ui_tree_unavailable")
         xml = raw[start:end + len("</hierarchy>")]
         prefix.with_suffix(".xml").write_text(xml)

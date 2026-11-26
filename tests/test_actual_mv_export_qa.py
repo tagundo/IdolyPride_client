@@ -2097,3 +2097,16 @@ def test_export_wait_allows_the_fresh_scene_reload_only_while_preparing(tmp_path
     run = run_with([payload("rendering", False)])
     with pytest.raises(qa.Rejected, match="normal_3d_source_unavailable"):
         run.await_export(playing_snapshot())
+
+
+def test_android_tree_read_retries_a_failed_dump(tmp_path, monkeypatch):
+    # Run 22: one uiautomator dump failed right after the server menu opened.
+    monkeypatch.setattr(qa.time, "sleep", lambda seconds: None)
+    replies = iter(["ERROR: could not get idle state", "", '<?xml?><hierarchy rotation="0"></hierarchy>'])
+    device = qa.Device.__new__(qa.Device)
+    device.output, device.capture_number = tmp_path, 0
+    device.adb = lambda *args, **kwargs: next(replies)
+    assert device.android().tag == "hierarchy" and device.capture_number == 3
+    device.adb = lambda *args, **kwargs: "ERROR"
+    with pytest.raises(qa.Rejected, match="android_ui_tree_unavailable"):
+        device.android()
