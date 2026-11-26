@@ -2125,7 +2125,10 @@ def test_export_wait_allows_render_setup_before_the_clock_is_owned(tmp_path):
         return data
     run = bare_run(tmp_path)
     run.export_deadline = qa.time.monotonic() + 5
-    stream = iter([payload(False), payload(False), payload(False, error="fresh_video_prepare_timeout")])
+    # Run 25: the coordinator already owns and holds the clock during setup.
+    held = payload(True)
+    held["native"]["observation"]["world_admission"] = "unverified"
+    stream = iter([payload(False), held, payload(False, error="fresh_video_prepare_timeout")])
     run.mp4 = lambda: next(stream)
     run.record = lambda phase, observation=None: run.journal.append(phase)
     run.capture_mp4_diagnostics = lambda *a, **k: None

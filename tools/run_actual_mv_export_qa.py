@@ -1880,11 +1880,12 @@ class ActualRun:
                 return payload, baseline
             need(phase not in ("failed", "cancelled"), "native_export_failed_" + str(state.get("error_code", "unknown")))
             if phase == "rendering" and obs.get("accepted_frames") == 0 and not observed_running \
-                    and obs.get("coordinator_active") is not True:
+                    and obs.get("world_admission") != "verified":
                 # Run 23: "rendering" is published when render setup begins;
                 # the fresh pipeline then readies the reloaded MV (camera,
-                # video, warm-up) under its own named stage budgets before it
-                # owns the clock. Not yet admitted is not a failure here.
+                # video, warm-up) under its own named stage budgets; run 25: the
+                # coordinator already holds the clock while world admission is
+                # still unverified. Not yet admitted is not a failure here.
                 self.report["export_render_setup_polls"] = self.report.get("export_render_setup_polls", 0) + 1
                 need(state.get("error_code", "none") == "none", "native_export_failed_" + str(state.get("error_code")))
             elif phase in ("rendering", "finishing"):
