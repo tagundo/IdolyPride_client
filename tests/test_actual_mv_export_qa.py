@@ -2110,3 +2110,38 @@ def test_android_tree_read_retries_a_failed_dump(tmp_path, monkeypatch):
     device.adb = lambda *args, **kwargs: "ERROR"
     with pytest.raises(qa.Rejected, match="android_ui_tree_unavailable"):
         device.android()
+
+
+def test_export_wait_allows_render_setup_before_the_clock_is_owned(tmp_path):
+    # Run 23: phase "rendering" with fresh_video_prepare_wait, coordinator not
+    # yet active and no frame accepted; the driver ended it as not admitted.
+    def payload(active, accepted=0, error="none"):
+        data = playing_snapshot()
+        data["native"].update(phase="rendering", error_code=error)
+        data["native"]["observation"].update(coordinator_active=active, native_clock_owned=active,
+                                             world_admission="verified" if active else "unverified",
+                                             accepted_frames=accepted, simulation_tick=None,
+                                             rendered_simulation_ticks=0)
+        return data
+    run = bare_run(tmp_path)
+    run.export_deadline = qa.time.monotonic() + 5
+    stream = iter([payload(False), payload(False), payload(False, error="fresh_video_prepare_timeout")])
+    run.mp4 = lambda: next(stream)
+    run.record = lambda phase, observation=None: run.journal.append(phase)
+    run.capture_mp4_diagnostics = lambda *a, **k: None
+    run.device = SimpleNamespace(adb=lambda *a, **k: "123")
+    run.relieve_system_anr = lambda: None
+    with pytest.raises(qa.Rejected, match="native_export_failed_fresh_video_prepare_timeout"):
+        run.await_export(playing_snapshot())
+    assert run.report["export_render_setup_polls"] == 3
+    # Once frames were accepted, losing admission is still a failure.
+    run = bare_run(tmp_path / "b")
+    run.export_deadline = qa.time.monotonic() + 5
+    stream = iter([payload(False, accepted=3)])
+    run.mp4 = lambda: next(stream)
+    run.record = lambda phase, observation=None: None
+    run.capture_mp4_diagnostics = lambda *a, **k: None
+    run.device = SimpleNamespace(adb=lambda *a, **k: "123")
+    run.relieve_system_anr = lambda: None
+    with pytest.raises(qa.Rejected, match="render_admission_not_verified"):
+        run.await_export(playing_snapshot())
