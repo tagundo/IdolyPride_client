@@ -1168,3 +1168,14 @@ def test_fully_localized_notice_tabs_are_accepted_but_mixed_or_forbidden_are_not
     assert ui.notice_close_target(notice_snapshot) is not None
     sorted(tabs, key=lambda n: n["path"])[1]["text"] = "구매"
     assert ui.notice_close_target(notice_snapshot) is None
+
+
+def test_touch_hold_spans_frames_on_a_slow_guest():
+    # redroid run 15: ~0.9 s frames; 501 notice-close touches of 150 ms all missed.
+    hold = ui.touch_hold_for_frame
+    assert hold({"frame_observation": {"unscaled_delta_time": 0.033}}, "observed_notice_close") == 150
+    assert hold({}, "qa_mv_route") == 150
+    assert hold({"frame_observation": {"unscaled_delta_time": 0.9}}, "observed_notice_close") == 1590
+    assert hold({"frame_observation": {"unscaled_delta_time": 5.0}}, "qa_mv_route") == 2500
+    # The title stays below its 500 ms long-tap threshold.
+    assert hold({"frame_observation": {"unscaled_delta_time": 0.9}}, "observed_title") == 450

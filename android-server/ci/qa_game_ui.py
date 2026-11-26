@@ -407,6 +407,19 @@ def mapped_point(snapshot, node, xml, package, image_size):
             round(y0 + (top + bottom) / 2 * (y1 - y0) / height)]
 
 
+def touch_hold_for_frame(snapshot, reason):
+    """150 ms, or long enough to span about two observed frames on a slow guest.
+
+    The title keeps below its 500 ms long-tap threshold.
+    """
+    observation = snapshot.get("frame_observation") if isinstance(snapshot, dict) else None
+    delta = observation.get("unscaled_delta_time") if isinstance(observation, dict) else None
+    if type(delta) not in (int, float) or not math.isfinite(delta) or delta <= 0.1:
+        return 150
+    held = min(2500, 150 + round(delta * 1600))
+    return min(held, 450) if reason == "observed_title" else held
+
+
 class UiExplorer:
     def __init__(self, qa):
         self.game_package = qa_package(qa.game_package)
@@ -559,8 +572,12 @@ class UiExplorer:
         if hold == 150:
             # Normal Android DOWN/MOVE/UP at the same point. The original
             # title's long-tap threshold is 500ms and its drag threshold is30.
+            # A software-GPU guest can draw ~1 frame/s (redroid run 15: 501
+            # notice-close touches of 150 ms all missed); hold across frames.
+            held = touch_hold_for_frame(fresh, reason)
+            action["touch_hold_milliseconds"] = held
             self.qa.adb("shell", "input", source, "swipe", str(point[0]), str(point[1]),
-                        str(point[0]), str(point[1]), "150")
+                        str(point[0]), str(point[1]), str(held))
         elif hold == 0:
             prefix_args = ("shell", "input") if source == "touchscreen" else ("shell", "input", source)
             self.qa.adb(*prefix_args, "tap", str(point[0]), str(point[1]))
