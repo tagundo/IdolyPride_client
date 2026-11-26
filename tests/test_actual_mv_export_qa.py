@@ -1537,31 +1537,37 @@ def test_home_counts_only_after_loading_releases_input():
     assert not qa.home_input_blocked({"ok": True})
 
 
-def test_idols_route_waits_for_released_home_and_retries_a_refused_touch():
-    states = [{"ok": True, "startup_observation": {"content_blocking": True}},
-              {"ok": True, "startup_observation": {"content_blocking": False}},
-              {"ok": True, "startup_observation": {"content_blocking": False}}]
+def test_idols_route_waits_for_released_home_and_retries_until_the_page_opens(monkeypatch):
+    clock = {"now": 100.0}
+    monkeypatch.setattr(qa.time, "monotonic", lambda: clock["now"])
+    page = {"path": "W/HomeTopScreen(Clone)/ScreenCanvas/ScreenRoot" + qa.IDOLS_PHOTOGRAPHY}
+    states = [{"ok": True, "startup_observation": {"content_blocking": True}}] + [{"ok": True}] * 30
     taps = []
     run = qa.ActualRun.__new__(qa.ActualRun)
     run.journal = []
+    # The first touch is refused, the second is dropped by the slow guest
+    # (run 20), the third opens the Idols page.
     run.explorer = SimpleNamespace(_snapshot=lambda: states.pop(0),
                                    _tap=lambda snap, node, role, index: taps.append(role) or len(taps) > 1)
     run.ui = SimpleNamespace(_home_role=lambda snap, role: {"path": "idols"}, notice_close_target=lambda s: None,
                              manager_level_close_target=lambda s: None, lesson_reward_close_target=lambda s: None,
-                             download_confirmation=lambda s: None)
-    run.record = lambda phase, observation=None: run.journal.append({"phase": phase})
+                             download_confirmation=lambda s: None,
+                             buttons=lambda snap: [page] if len(taps) >= 3 else [])
+    run.record = lambda phase, observation=None: run.journal.append({"phase": phase, "observation": observation})
 
     def wait(action, timeout, code):
-        for _ in range(5):
+        for _ in range(30):
             result = action()
             if result is not None and result is not False:
                 return result
+            clock["now"] += 5
         raise qa.Rejected(code)
     run.wait = wait
     run.route = lambda *a, **k: (_ for _ in ()).throw(StopIteration)
     with pytest.raises(StopIteration):
         run.open_mv()
-    assert taps == ["route_idols", "route_idols"] and [e["phase"] for e in run.journal] == ["route_idols"]
+    assert taps == ["route_idols"] * 3
+    assert [e["observation"]["touch"] for e in run.journal] == [1, 2]
 
 
 def test_viewing_mode_is_checked_through_the_server_tab_before_start(tmp_path):
@@ -1814,7 +1820,8 @@ def test_mv_wait_answers_the_song_download_sheet_before_observing_the_mv(tmp_pat
                                    _tap=lambda snap, node, role, index: touched.append(role) or pending.clear() or True)
     run.ui = SimpleNamespace(_home_role=lambda snap, role: {"name": "Idols"}, notice_close_target=lambda s: None,
                              manager_level_close_target=lambda s: None, lesson_reward_close_target=lambda s: None,
-                             download_confirmation=lambda s: pending[0] if pending else None)
+                             download_confirmation=lambda s: pending[0] if pending else None,
+                             buttons=lambda snap: [{"path": "Home" + qa.IDOLS_PHOTOGRAPHY}])
     run.route = lambda *args, **kwargs: None
     run.live_members_decide = run.select_song = lambda: None
     run.live_song_decide_and_view = lambda: pending.append(sheet)  # the sheet follows "감상하기"

@@ -698,6 +698,7 @@ def home_input_blocked(snapshot):
 # the screens after the Live page are from the game's own type names:
 # PhotographyTopPage decide -> LivePhotographyScreen music/stage lists and
 # decide -> PhotographyConfirmSheet preview).
+IDOLS_PHOTOGRAPHY = "/CharacterPage/SlideRoot/Character/HomeRenewalRoot/Photography"
 PHOTOGRAPHY_TABS = "/PhotographyTopScreen(Clone)/ScreenCanvas/ScreenRoot/PhotographyTab/TabButtonContainer/"
 ORIGINAL_MEMBER_SUFFIX = "/PhotographyLivePage/Lower/Checkbox/TouchArea/Label"
 DECIDE_LABEL = r"^(決定|결정|次へ|다음|Decide|Next|OK)(する|하기)?$"
@@ -1649,16 +1650,21 @@ class ActualRun:
         return granted
 
     def open_mv(self):
+        touched = []
         def idols():
             snap = self.explorer._snapshot()
             if snap.get("ok") is not True or self.handle_dialog(snap) or home_input_blocked(snap):
                 return None
+            # The Idols page counts once its Photography control is on screen;
+            # a touch the slow guest dropped (run 20) is repeated every 15 s.
+            if touched and any(b["path"].endswith(IDOLS_PHOTOGRAPHY) for b in self.ui.buttons(snap)):
+                return True
             node = self.ui._home_role(snap, "idols")
-            if node is None:
+            if node is None or (touched and time.monotonic() - touched[-1] < 15):
                 return None
             if self.explorer._tap(snap, node, "route_idols", len(self.journal)):
-                self.record("route_idols")
-                return True
+                touched.append(time.monotonic())
+                self.record("route_idols", {"touch": len(touched)})
             return None
         self.wait(idols, 600, "home_character_page_control_unavailable")
         self.route(r"撮影\s*[・·･]\s*鑑賞|촬영\s*[・·･]\s*감상|Shooting.*Viewing|Photography", r"^(Photography|PhotoButton)$")
