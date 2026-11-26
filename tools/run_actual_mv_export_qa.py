@@ -698,6 +698,7 @@ def home_input_blocked(snapshot):
 # the screens after the Live page are from the game's own type names:
 # PhotographyTopPage decide -> LivePhotographyScreen music/stage lists and
 # decide -> PhotographyConfirmSheet preview).
+PHOTOGRAPHY_TABS = "/PhotographyTopScreen(Clone)/ScreenCanvas/ScreenRoot/PhotographyTab/TabButtonContainer/"
 ORIGINAL_MEMBER_SUFFIX = "/PhotographyLivePage/Lower/Checkbox/TouchArea/Label"
 DECIDE_LABEL = r"^(決定|결정|次へ|다음|Decide|Next|OK)(する|하기)?$"
 DECIDE_NAME = r"Decide"
@@ -734,13 +735,14 @@ def original_member_label(ui, snapshot):
     return found[0] if len(found) == 1 else None
 
 
-def choose_route_button(ui, snapshot, label, name=None, exclude=(), prefer=None):
+def choose_route_button(ui, snapshot, label, name=None, exclude=(), prefer=None, within=None):
     """A unique button by label (exact, then contained), then by object name.
 
     With several matches, a single one on a sheet or dialog (``prefer``) is
     the control on top.
     """
-    candidates = [b for b in ui.buttons(snapshot) if not any(part in b["path"] for part in exclude)]
+    candidates = [b for b in ui.buttons(snapshot) if not any(part in b["path"] for part in exclude)
+                  and (within is None or within in b["path"])]
     def unique(rows):
         if len(rows) > 1 and prefer is not None:
             top = [row for row in rows if prefer.search(row["path"])]
@@ -1084,7 +1086,7 @@ class ActualRun:
         need(self.explorer._tap(snapshot, node, role, len(self.journal)), "observed_unity_input_rejected")
         self.record(role)
 
-    def route(self, pattern, name=None, optional=False):
+    def route(self, pattern, name=None, optional=False, within=None):
         def attempt():
             snap = self.explorer._snapshot()
             if snap.get("ok") is not True:
@@ -1093,7 +1095,8 @@ class ActualRun:
                 return None
             if home_input_blocked(snap):
                 return None
-            node = self.ui.choose_button(snap, pattern, name)
+            node = (self.ui.choose_button(snap, pattern, name) if within is None
+                    else choose_route_button(self.ui, snap, pattern, name, within=within))
             if node:
                 # A control that moved or closed between the snapshot and the
                 # touch is re-observed within this route's wait, not a failure.
@@ -1659,7 +1662,9 @@ class ActualRun:
             return None
         self.wait(idols, 600, "home_character_page_control_unavailable")
         self.route(r"撮影\s*[・·･]\s*鑑賞|촬영\s*[・·･]\s*감상|Shooting.*Viewing|Photography", r"^(Photography|PhotoButton)$")
-        self.route(r"ライブ|라이브|Live", r"^Live(Tab|Button)?$")
+        # Only the Photography screen's own tab: on a slow guest the previous
+        # page is still shown and its "LIVE 360°" (Panorama) also says Live (run 19).
+        self.route(r"ライブ|라이브|Live", r"^PhotographyLiveTabButton$", within=PHOTOGRAPHY_TABS)
         # Live page -> "match the stage song" -> Decide -> song list -> Decide
         # -> confirmation sheet -> watch (run 9: the Live tab opens idol
         # selection, not a song list).

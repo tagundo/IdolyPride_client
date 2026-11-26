@@ -2019,3 +2019,19 @@ def test_render_scale_is_selected_through_the_graphics_tab_in_any_locale(tmp_pat
     assert touched == ["idoly.nav.graphics", custom] and state["custom"] == "true"
     assert chosen == [("presentation_render_scale", {"0.5×", "0.5배", "0.5倍"})]
     assert run.journal[-1] == {"phase": "render_scale_selected", "observation": {"value": "0.5", "qa_only": True}}
+
+
+def test_live_tab_route_never_matches_home_live_360():
+    # Run 19: the slow guest still showed the Idols page after "촬영", and the
+    # Live route matched its "LIVE 360°" (Panorama) button.
+    home = "WindowSystem/WindowRoot/HomeWindow(Clone)/HomeTopScreen(Clone)/ScreenCanvas/ScreenRoot/CharacterPage/SlideRoot/Character/HomeRenewalRoot/"
+    tabs = ("WindowSystem/WindowRoot/PhotographyWindow(Clone)/PhotographyTopScreen(Clone)/ScreenCanvas/ScreenRoot/"
+            "PhotographyTab/TabButtonContainer/TabButtons/")
+    pending = ui_snapshot(*labelled_button(home + "Panorama", (344, 794, 482, 896), "LIVE 360°"),
+                          *labelled_button(home + "Photography", (206, 794, 344, 896), "촬영"))
+    pattern, name = r"ライブ|라이브|Live", r"^PhotographyLiveTabButton$"
+    assert UI.choose_button(pending, pattern, name)["path"].endswith("Panorama")  # the old, unrestricted choice
+    assert qa.choose_route_button(UI, pending, pattern, name, within=qa.PHOTOGRAPHY_TABS) is None
+    opened = ui_snapshot(*pending["nodes"], *labelled_button(tabs + "PhotographyLiveTabButton", (0, 126, 135, 186), "라이브"))
+    chosen = qa.choose_route_button(UI, opened, pattern, name, within=qa.PHOTOGRAPHY_TABS)
+    assert chosen["path"].endswith("PhotographyLiveTabButton")
