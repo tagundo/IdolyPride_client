@@ -56659,12 +56659,28 @@ Mp4FreshResult mp4_fresh_video_waiting(const char*code){
  // (runs 26-27 traced only "unnamed_wait"); name the video receipt there.
  return code?mp4_fresh_fail(Mp4FreshResult::waiting,code):Mp4FreshResult::waiting;
 }
+// While a player stays unprepared, record its observed state every 5 s
+// (redroid runs 26-29: isPrepared stayed false for 60 s with no other sign).
+// frame = flags (1 prepared, 2 playing, 4 paused, 8 texture, 16 configured),
+// tick = player frame + 1 (0 = none). Read-only: original getters only.
+uint64_t mp4_fresh_video_state_logged_at=0;
+void mp4_fresh_video_log_state(){
+ const uint64_t now=idoly_mp4_runtime::milliseconds();
+ if(mp4_fresh_video_state_logged_at&&now-mp4_fresh_video_state_logged_at<5000)return;
+ mp4_fresh_video_state_logged_at=now;
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];mp4freshvideo::State st{};
+  if(!e.active||!mp4_fresh_video_read(&e,e.identity,&st)){idoly_mp4_runtime::diagnostic_event("fresh_video_state","unreadable",i);continue;}
+  const uint64_t flags=(st.prepared?1:0)|(st.playing?2:0)|(st.paused?4:0)|(st.texture?8:0)|(st.configured?16:0);
+  idoly_mp4_runtime::diagnostic_event("fresh_video_state",e.frames.error(),flags,st.frame>=0?uint64_t(st.frame)+1:0);
+ }
+}
 Mp4FreshResult mp4_fresh_video_prepare_all(){
  const char*wait=nullptr;
  for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];const auto r=e.frames.prepare();
   if(r==mp4freshvideo::Result::waiting){if(!wait)wait=e.frames.error();}
   else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
  }
+ if(wait)mp4_fresh_video_log_state();else mp4_fresh_video_state_logged_at=0;
  return wait?mp4_fresh_video_waiting(wait):Mp4FreshResult::ok;
 }
 Mp4FreshResult mp4_fresh_video_frame_all(double seconds){
