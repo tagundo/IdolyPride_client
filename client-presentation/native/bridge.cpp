@@ -56425,15 +56425,22 @@ bool mp4_fresh_video_native_pump(void*context,const mp4freshvideo::Identity&id){
 bool mp4_fresh_video_knobs(void*context,const mp4freshvideo::Identity&id){
  auto*e=static_cast<Mp4FreshVideoEntry*>(context);if(!mp4_fresh_video_current(context,id))return false;
  using SetInt=void(*)(void*,int32_t,Method*);using SetBool=void(*)(void*,bool,Method*);using SetFloat=void(*)(void*,float,Method*);
- mp4_cam_call<SetInt>(mp4_cam_profile.video_set_render_mode)(id.player,mp4camp::ExtraLayout::video_render_api,nullptr);
- mp4_cam_call<SetInt>(mp4_cam_profile.video_set_audio_mode)(id.player,mp4camp::ExtraLayout::video_audio_none,nullptr);
- mp4_cam_call<SetInt>(mp4_cam_profile.video_set_time_ref)(id.player,2,nullptr);
- mp4_cam_call<SetInt>(mp4_cam_profile.video_set_update_mode)(id.player,1,nullptr);
- mp4_cam_call<SetBool>(mp4_cam_profile.video_set_send_frames)(id.player,true,nullptr);
- mp4_cam_call<SetBool>(mp4_cam_profile.video_set_skip)(id.player,false,nullptr);
- mp4_cam_call<SetBool>(mp4_cam_profile.video_set_play_on_awake)(id.player,false,nullptr);
- mp4_cam_call<SetBool>(mp4_cam_profile.video_set_loop)(id.player,e->clip.loop,nullptr);
- mp4_cam_call<SetFloat>(mp4_cam_profile.video_set_speed)(id.player,1,nullptr);
+ using Int=int32_t(*)(void*,Method*);using Bool=bool(*)(void*,Method*);using Float=float(*)(void*,Method*);
+ // Write only a knob that differs. Re-writing render/audio output on every
+ // pause restarted the player's asynchronous Prepare on a slow device, so it
+ // never completed (redroid runs 26-28: fresh_video_prepare_wait for 60 s).
+ auto*vp=id.player;
+ if(mp4_cam_call<Int>(mp4_cam_profile.video_render_mode)(vp,nullptr)!=mp4camp::ExtraLayout::video_render_api)
+  mp4_cam_call<SetInt>(mp4_cam_profile.video_set_render_mode)(vp,mp4camp::ExtraLayout::video_render_api,nullptr);
+ if(mp4_cam_call<Int>(mp4_cam_profile.video_audio_mode)(vp,nullptr)!=mp4camp::ExtraLayout::video_audio_none)
+  mp4_cam_call<SetInt>(mp4_cam_profile.video_set_audio_mode)(vp,mp4camp::ExtraLayout::video_audio_none,nullptr);
+ if(mp4_cam_call<Int>(mp4_cam_profile.video_time_ref)(vp,nullptr)!=2)mp4_cam_call<SetInt>(mp4_cam_profile.video_set_time_ref)(vp,2,nullptr);
+ if(mp4_cam_call<Int>(mp4_cam_profile.video_update_mode)(vp,nullptr)!=1)mp4_cam_call<SetInt>(mp4_cam_profile.video_set_update_mode)(vp,1,nullptr);
+ if(!mp4_cam_call<Bool>(mp4_cam_profile.video_send_frames)(vp,nullptr))mp4_cam_call<SetBool>(mp4_cam_profile.video_set_send_frames)(vp,true,nullptr);
+ if(mp4_cam_call<Bool>(mp4_cam_profile.video_skip)(vp,nullptr))mp4_cam_call<SetBool>(mp4_cam_profile.video_set_skip)(vp,false,nullptr);
+ if(mp4_cam_call<Bool>(mp4_cam_profile.video_play_on_awake)(vp,nullptr))mp4_cam_call<SetBool>(mp4_cam_profile.video_set_play_on_awake)(vp,false,nullptr);
+ if(mp4_cam_call<Bool>(mp4_cam_profile.video_loop)(vp,nullptr)!=e->clip.loop)mp4_cam_call<SetBool>(mp4_cam_profile.video_set_loop)(vp,e->clip.loop,nullptr);
+ if(mp4_cam_call<Float>(mp4_cam_profile.video_speed)(vp,nullptr)!=1.f)mp4_cam_call<SetFloat>(mp4_cam_profile.video_set_speed)(vp,1,nullptr);
  return mp4_fresh_video_current(context,id);
 }
 bool mp4_fresh_video_pause(void*context,const mp4freshvideo::Identity&id){
