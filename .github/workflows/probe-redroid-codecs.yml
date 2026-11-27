@@ -108,8 +108,10 @@ jobs:
         continue-on-error: true
         run: |
           # The runner's ANDROID_HOME has no linux-arm64 adb; use Ubuntu's adb from PATH.
-          env -u ANDROID_HOME python -B tools/build_android_mp4_qa.py --run-device --serial 127.0.0.1:15555 --timeout 600 \
-            --output-directory "$RUNNER_TEMP/codec-qa"
+          ADB_REAL="$(readlink -f "$(command -v adb)")"
+          mkdir -p "$RUNNER_TEMP/sdk/platform-tools" && cp "$ADB_REAL" "$RUNNER_TEMP/sdk/platform-tools/adb"
+          python -B tools/build_android_mp4_qa.py --run-device --serial 127.0.0.1:15555 --timeout 600 \
+            --android-sdk "$RUNNER_TEMP/sdk" --output-directory "$RUNNER_TEMP/codec-qa" 2>&1 | tee "$RUNNER_TEMP/codec-qa/tool-output.txt"
       - name: Summarize
         if: always()
         run: |
