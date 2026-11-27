@@ -1179,3 +1179,15 @@ def test_touch_hold_spans_frames_on_a_slow_guest():
     # Run 17: a hold of 0.5 s or more is a long tap whose click is suppressed.
     assert hold({"frame_observation": {"unscaled_delta_time": 0.9}}, "observed_notice_close") == 450
     assert hold({"frame_observation": {"unscaled_delta_time": 5.0}}, "qa_mv_route") == 450
+
+
+def test_asset_retry_is_only_the_e209_dialogs_own_retry_button():
+    root = "Singleton/GlobalDialog/ErrorDialogManager/SystemDialog(Clone)/SystemDialogCommonRoot/DialogCanvas/Dialog/"
+    button = {"instance_id": 1, "kind": "button", "name": "OkButton", "path": root + "Buttons/Root/OkButton",
+              "active": True, "interactable": True, "bounds": [431.0, 652.0, 514.0, 712.0], "text": ""}
+    def snapshot(description):
+        return {"ok": True, "nodes": [button, {"instance_id": 2, "kind": "tmp_text", "name": "Description",
+                "path": root + "Description", "active": True, "text": description, "bounds": [0, 0, 1, 1]}]}
+    found = ui.asset_retry_target(snapshot("에셋 획득 실패\n네트워크 환경을 확인한 후 재시도해 주세요\n(E209)"))
+    assert found is not None and found["instance_id"] == 1
+    assert ui.asset_retry_target(snapshot("다른 오류 (E100)")) is None

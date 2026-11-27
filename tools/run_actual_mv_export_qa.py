@@ -716,6 +716,7 @@ ANDROID_TREE_ATTEMPTS = 5
 # Native phases before rendering; the fresh pipeline reloads the MV in them.
 PREPARING_PHASES = frozenset(("preparing_audio",))  # mp4_runtime: the only phase before rendering
 MAX_NOTICE_BACKS = 6
+ASSET_RETRY_LIMIT = 20
 MV_PLAYBACK_VERIFY_SECONDS = 120
 
 
@@ -1300,6 +1301,15 @@ class ActualRun:
         terms = terms_agree_target(snap)
         if terms is not None:
             self.dialog_touch(snap, terms, "observed_terms_agree")
+            return True
+        # A cold asset cache can miss the client's 10 s download limit (run 40 stayed on the
+        # game's E209 sheet for an hour); its own Retry is touched at most every 15 s, 20 times.
+        retry = getattr(self.ui, "asset_retry_target", lambda _snap: None)(snap)
+        if retry is not None:
+            seen = getattr(self, "asset_retries", [])
+            if len(seen) < ASSET_RETRY_LIMIT and (not seen or time.monotonic() - seen[-1] >= 15):
+                self.asset_retries = seen + [time.monotonic()]
+                self.dialog_touch(snap, retry, "observed_asset_retry")
             return True
         if self.notice_android_back(snap):
             return True

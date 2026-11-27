@@ -236,6 +236,22 @@ def download_confirmation(snapshot):
     return choose_button(dict(snapshot, nodes=local), r"^(ダウンロード|다운로드)$")
 
 
+ASSET_RETRY_BUTTON = ("Singleton/GlobalDialog/ErrorDialogManager/SystemDialog(Clone)/SystemDialogCommonRoot/"
+                      "DialogCanvas/Dialog/Buttons/Root/OkButton")
+
+
+def asset_retry_target(snapshot):
+    """The game's own "asset download failed (E209)" dialog's Retry button, and nothing else."""
+    nodes = snapshot.get("nodes", [])
+    root = ASSET_RETRY_BUTTON.rsplit("/Buttons/", 1)[0] + "/"
+    labels = [text(row.get("text", "")) for row in nodes if row.get("active") is True
+              and row.get("kind") in ("text", "tmp_text") and str(row.get("path", "")).startswith(root)]
+    if not any("(E209)" in label for label in labels):
+        return None
+    found = [row for row in buttons(snapshot) if row.get("path") == ASSET_RETRY_BUTTON]
+    return found[0] if len(found) == 1 else None
+
+
 def visible_action_sheet(snapshot):
     return any(row.get("active") is True and "/SimpleActionSheet(Clone)/" in str(row.get("path", ""))
                for row in snapshot.get("nodes", []))
@@ -486,7 +502,8 @@ class UiExplorer:
             return reject("selected_node_no_longer_present")
         selectors = {"observed_notice_close": notice_close_target,
                      "observed_manager_level_close": manager_level_close_target,
-                     "observed_lesson_reward_close": lesson_reward_close_target}
+                     "observed_lesson_reward_close": lesson_reward_close_target,
+                     "observed_asset_retry": asset_retry_target}
         if reason in selectors:
             close = selectors[reason](fresh)
             if (close is None or close.get("instance_id") != current.get("instance_id")
