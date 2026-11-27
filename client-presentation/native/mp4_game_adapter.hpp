@@ -225,6 +225,8 @@ public:
     Result start_automatic();
     Result prepare_automatic_frame(double timeline_seconds);
     Result validate_automatic_frame(double timeline_seconds);
+    int drift_mode()const{return drift_mode_;}double drift_actual()const{return drift_actual_;}double drift_expected()const{return drift_expected_;}
+    int drift_mode_=0;double drift_actual_=0,drift_expected_=0;
     Result original_camera_updated(void* brain);
     // Main-thread pure completion/validation boundary before the coordinator
     // rebases source clock state. It does not rebuild/evaluate or resize.
@@ -1020,8 +1022,11 @@ inline Result GameAdapter::validate_automatic_frame(double seconds){
         if(!fresh_playing_||!std::isfinite(seconds)||seconds<0||seconds>snapshot_.duration_seconds)
             return fail(Result::invalid,"fresh_frame_time_invalid");
         const double actual=api_.director_get_time(get(director_),nullptr);
-        if(api_.director_get_mode(get(director_),nullptr)!=1||!std::isfinite(actual)||std::fabs(actual-seconds)>.001)
-            return fail(Result::stale,"fresh_original_time_drift");
+        const int mode=api_.director_get_mode(get(director_),nullptr);
+        if(mode!=1||!std::isfinite(actual)||std::fabs(actual-seconds)>.001){
+            // Kept for the trace: which of the two it was, and by how much.
+            drift_mode_=mode;drift_actual_=actual;drift_expected_=seconds;
+            return fail(Result::stale,"fresh_original_time_drift");}
         error_="none";return Result::ok;
     }
     return automatic_result(automatic_scope_.validate_frame(seconds));

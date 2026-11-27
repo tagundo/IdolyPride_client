@@ -1689,6 +1689,11 @@ inline bool native_fresh_render_boundary_impl(void*manager,double wall){
     if(job.schedule.next_tick()){
         const uint64_t previous_tick=job.schedule.next_tick()-1;
         if(game.validate_automatic_frame(job.schedule.tick_seconds(previous_tick))!=Result::ok){
+            // frame = the director's time in microseconds (2^62 = not finite or negative), tick = its update mode.
+            const double actual=game.drift_actual();
+            diagnostic_event("fresh_time","director_time_us_mode",std::isfinite(actual)&&actual>=0&&actual<1e9?static_cast<uint64_t>(actual*1e6+.5):(uint64_t(1)<<62),
+                static_cast<uint64_t>(game.drift_mode()<0?255:game.drift_mode()));
+            diagnostic_event("fresh_time","expected_us_clock_tick",static_cast<uint64_t>(game.drift_expected()*1e6+.5),previous_tick);
             terminal(game.last_error());return native_boundary_clock_tick(manager,wall);}
         if(!job.have_rendered_tick||job.last_rendered_tick!=previous_tick){
             if(job.schedule.awaiting_frame()&&!job.capture_requested)native_capture_request();
