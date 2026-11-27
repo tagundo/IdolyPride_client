@@ -218,3 +218,12 @@ def test_unprepared_video_is_dropped_after_a_bounded_wait():
     assert "constexpr uint64_t mp4_fresh_video_drop_after_ms=20000;" in bridge
     frames = bridge[bridge.index("Mp4FreshResult mp4_fresh_video_frame_all(double seconds){"):]
     assert "if(e.dropped)continue;" in frames[:frames.index("\n}\n")]
+
+
+def test_prepared_video_whose_first_frame_stalls_is_dropped_only_at_time_zero():
+    bridge = (ROOT / "client-presentation/native/bridge.cpp").read_text()
+    frames = bridge[bridge.index("Mp4FreshResult mp4_fresh_video_frame_all(double seconds){"):]
+    frames = frames[:frames.index("\n}\n")]
+    assert "mp4_fresh_video_seek_drop_after_ms=8000;" in bridge
+    assert 'if(r==mp4freshvideo::Result::waiting&&seconds<=0){' in frames and '"dropped_seek_stalled"' in frames
+    assert "now-e.prewarm_wait_started>=mp4_fresh_video_seek_drop_after_ms" in frames

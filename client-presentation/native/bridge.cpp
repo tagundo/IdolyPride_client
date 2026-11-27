@@ -56365,6 +56365,7 @@ struct Mp4FreshVideoEntry {
  void*image=nullptr;uintptr_t image_native=0;void*script=nullptr;
  void*textures[4]{};uintptr_t texture_native[4]{};size_t texture_count=0;
  bool active=false,prepare_reissued=false,adopted_prepared=false,dropped=false;
+ uint64_t prewarm_wait_started=0;
 };
 Mp4FreshVideoEntry mp4_fresh_videos[16];size_t mp4_fresh_video_count=0;
 std::atomic<void*>mp4_fresh_video_players[16];
@@ -56649,7 +56650,7 @@ bool mp4_fresh_video_add(void*player,void*image,bool loop){
   ||!mp4_video_native(player,&vp)||!mp4_video_native(clip.get(),&native)||!mp4_video_native(image,&inative)
   ||!mp4_fresh_video_image_bound(image,player,false)
   ||!mp4_fresh_keep(player)||!mp4_fresh_keep(clip.get())||!mp4_fresh_keep(image))return false;
- e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;e.prepare_reissued=false;e.adopted_prepared=false;e.dropped=false;
+ e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;e.prepare_reissued=false;e.adopted_prepared=false;e.dropped=false;e.prewarm_wait_started=0;
  e.clip={mp4_cam_call<Rate>(mp4_cam_profile.video_clip_rate)(clip.get(),nullptr),mp4_cam_call<Rate>(mp4_cam_profile.video_clip_length)(clip.get(),nullptr),mp4_cam_call<Count>(mp4_cam_profile.video_clip_frames)(clip.get(),nullptr),loop};
  const mp4freshvideo::Api api={&e,mp4_fresh_video_current,mp4_fresh_video_read,mp4_fresh_video_configure,mp4_fresh_video_prepare,
   mp4_fresh_video_pause,mp4_fresh_video_reference,mp4_fresh_video_set_frame,mp4_fresh_video_native_pump,mp4_fresh_video_publish,
@@ -56729,9 +56730,21 @@ Mp4FreshResult mp4_fresh_video_prepare_all(){
  if(!wait)mp4_fresh_video_state_logged_at=mp4_fresh_video_wait_started=0;
  return wait?mp4_fresh_video_waiting(wait):Mp4FreshResult::ok;
 }
+// The same holds for a prepared player whose first frame never arrives
+// (redroid run 43: fresh_video_seek_wait outlived the prewarm stage on a
+// software decoder). Only at time zero, before any frame was accepted: after
+// this long the export continues without that video screen
+// (fresh_video / dropped_seek_stalled, frame = bank index).
+constexpr uint64_t mp4_fresh_video_seek_drop_after_ms=8000;
 Mp4FreshResult mp4_fresh_video_frame_all(double seconds){
  const char*wait=nullptr;
  for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];if(e.dropped)continue;const auto r=e.frames.request(seconds);
+  if(r==mp4freshvideo::Result::waiting&&seconds<=0){
+   const uint64_t now=idoly_mp4_runtime::milliseconds();
+   if(!e.prewarm_wait_started)e.prewarm_wait_started=now;
+   else if(now-e.prewarm_wait_started>=mp4_fresh_video_seek_drop_after_ms){
+    e.dropped=true;idoly_mp4_runtime::diagnostic_event("fresh_video","dropped_seek_stalled",i);continue;}
+  }else if(seconds<=0)e.prewarm_wait_started=0;
   if(r==mp4freshvideo::Result::waiting){if(!wait)wait=e.frames.error();}
   else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
  }
