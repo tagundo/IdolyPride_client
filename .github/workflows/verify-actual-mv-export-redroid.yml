@@ -600,6 +600,8 @@ jobs:
             --startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}
       - name: Collect bounded container, kernel and redacted Android logs
         if: always()
+        # Runs 36 and 51: after a failed boot an adb/docker call here never returned (2.5 h).
+        timeout-minutes: 10
         run: |
           set +e
           R="$EVIDENCE_DIR/redroid"
