@@ -57644,6 +57644,19 @@ Mp4FreshResult mp4_fresh_grant(void*,uint64_t tick){
  if(!mp4_fresh_current(nullptr)||!h.prepared||h.prepared_tick!=tick||!clock.have_tick()||clock.tick()!=tick)
   return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_step_receipt_missing");
  h.prepared=false;h.tick=tick;h.grant_boundary=idoly_mp4_runtime::native_entries;
+ // Redroid run 45: the master director stayed at 0 after the first 1/60 s tick
+ // in GameTime mode. Trace its play state, time and graph for the first grants.
+ if(tick<=2){
+  const double t=mp4_api.director_get_time(h.source.director,nullptr);
+  const int state=mp4_api.automatic_playback.director_state?mp4_api.automatic_playback.director_state(h.source.director,nullptr):-1;
+  idoly_mp4_runtime::diagnostic_event("fresh_grant","director_time_us_state",std::isfinite(t)&&t>=0&&t<1e9?uint64_t(t*1e6+.5):(uint64_t(1)<<62),uint64_t(state<0?255:state));
+  for(size_t i=0;i<h.director_count;++i){if(h.directors[i]!=h.source.director)continue;auto graph=h.director_graphs[i];
+   int32_t mode=-1;const bool read_mode=graph.handle&&mp4_actor_graph_mode(&graph,&mode);
+   using Playing=bool(*)(mp4actor::Handle*,mp4actor::Method*);
+   const int playing=graph.handle&&mp4_actor_source_verified?int(reinterpret_cast<Playing>(image_base+mp4_actor_profile.graph_playing.rva)(&graph,nullptr)):2;
+   // frame = graph mode held (255 unreadable, 254 no owned graph) * 1000 + mode to restore; tick = graph playing (2 unknown).
+   idoly_mp4_runtime::diagnostic_event("fresh_grant","graph_mode_restore_playing",uint64_t(!graph.handle?254:read_mode?mode:255)*1000+uint64_t(h.director_modes[i]&0xff),uint64_t(playing));}
+ }
  for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
   mp4_actor_graph_set(&graph,h.actor_modes[i],nullptr);
   if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.actor_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_grant_failed");}
