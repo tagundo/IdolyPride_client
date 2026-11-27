@@ -57608,7 +57608,20 @@ Mp4FreshResult mp4_fresh_start_body(void*){
  }
  if(!h.path_reset_returned)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_path_initial_reset_incomplete");
  if(!h.started){const auto held=mp4_fresh_hold(nullptr);if(held!=Mp4FreshResult::ok)return held;
+  const auto master_state=[&]()->int{return mp4_api.automatic_playback.director_state?mp4_api.automatic_playback.director_state(h.source.director,nullptr):-1;};
+  const int state_before=master_state();
   h.started=true;{ScopedValue<unsigned> injecting(mp4_fresh_injected_reset_depth,mp4_fresh_injected_reset_depth+1);mp4_api.player_set_time(h.source.player,0,nullptr);}h.start_returned=true;h.held=false;idoly_mp4_runtime::diagnostic_event("fresh_prepare","initial_zero_returned");
+  // Redroid runs 44-46: the master director was Paused with its graph not
+  // playing at every grant, so the granted 1/60 s never moved the timeline
+  // (fresh_original_time_drift at the second frame). Its graph is held in
+  // Manual mode at time 0 here, so resuming it cannot advance anything; the
+  // trace keeps its state before and after the initial seek (255 = unknown).
+  const int state_after=master_state();
+  idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_state_around_zero",uint64_t(state_before<0?255:state_before),uint64_t(state_after<0?255:state_after));
+  if(state_after==0&&mp4_api.automatic_playback.director_resume){
+   mp4_api.automatic_playback.director_resume(h.source.director,nullptr);
+   if(master_state()!=1)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_master_resume_failed");
+   idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_resumed");}
   // Roots that ran on the DSP clock before conversion (now GameTime, held)
   // advanced in real time during the warm-up; start them at 0 with the MV,
   // as they were when Play and conversion shared one acquire call.
