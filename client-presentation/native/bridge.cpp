@@ -56102,7 +56102,21 @@ bool mp4_fresh_path_current(const Mp4FreshControlRoster&r){
    if(!mp4_actor_graph_mode(&current,&observed))return mp4_fresh_stale_line(__LINE__);
    const bool captured=!r.converted&&observed==n.graph_mode;
    const bool owned=observed==n.desired_mode||observed==3;
-   if(!captured&&!owned)return mp4_fresh_stale_line(__LINE__);
+   if(!captured&&!owned){
+    // Redroid run 54: once the timeline really plays, a director's live graph
+    // shows an update mode that is neither the roster's nor the hold's. A
+    // Control track gives a controlled director a new graph with the
+    // director's own clock; that birth is the original lifecycle, so the new
+    // graph joins the owned clock here instead of ending the export. Trace:
+    // frame = node index, tick = controlled*10000 + observed*1000 +
+    // desired*100 + captured graph mode (9 = none)*10 + director mode.
+    static uint64_t traced=0;
+    if(traced<8){++traced;idoly_mp4_runtime::diagnostic_event("fresh_roster",n.controlled?"controlled_graph_adopted":"graph_mode_unowned",uint64_t(i),
+     uint64_t(n.controlled)*10000+uint64_t(observed&7)*1000+uint64_t(n.desired_mode&7)*100+uint64_t(n.graph_mode<0||n.graph_mode>8?9:n.graph_mode)*10+uint64_t(mode&7));}
+    if(!n.controlled||n.desired_mode<0||n.desired_mode>3)return mp4_fresh_stale_line(__LINE__);
+    mp4_actor_graph_set(&current,n.desired_mode,nullptr);
+    if(!mp4_actor_graph_mode(&current,&observed)||observed!=n.desired_mode)return mp4_fresh_stale_line(__LINE__);
+   }
   }else if(!n.controlled&&n.asset)return mp4_fresh_stale_line(__LINE__);
  }
  Mp4ActorTempRoot type(mp4_type_get_object(reinterpret_cast<void*>(image_base+mp4_stage_other_pins.director_component.binding.rva)));
