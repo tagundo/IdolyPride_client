@@ -56326,6 +56326,8 @@ struct Mp4FreshSceneHost {
  mp4actor::Owner actors[32]{};int32_t actor_modes[32]{};size_t actor_count=0;
  mp4actor::PresentationInventory callbacks{};
  void*directors[129]{};int32_t director_modes[129]{};mp4actor::Handle director_graphs[129]{};double director_times[129]{};size_t director_count=0;
+ // Whether each graph was playing when the hold last switched it to Manual (see mp4_fresh_graph_replay).
+ bool director_playing[129]{},actor_playing[32]{},path_playing[128]{},playing_traced=false;
  uint64_t director_identity=0,job=0,factory=0,tick=0,prepared_tick=0,brain_serial=0,listener_token=0,grant_boundary=0;
  double prepared_seconds=0;
  uint32_t roots[1024]{};size_t root_count=0;
@@ -57418,6 +57420,22 @@ bool mp4_fresh_actors_current(){
 // Start gate counters (redroid run 30: the video bank was reached only twice
 // in 60 s; which earlier gate returned "waiting" the rest of the time?).
 struct Mp4FreshStartGates{uint64_t calls=0,qos=0,render_depth=0,callbacks=0,adopt=0,video=0,logged_at=0;}mp4_fresh_start_gates;
+// Unity stops a playing graph when its update mode becomes Manual, and neither
+// PlayableGraph.Play nor PlayableDirector.Resume starts it again while Manual
+// (redroid runs 46-47: master director Paused, graph not playing at every
+// grant, Resume without effect), so restoring the mode alone left the timeline
+// at 0 for ever. The hold records which graphs were playing; the grant plays
+// those again once their own update mode is back.
+bool mp4_fresh_graph_playing(mp4actor::Handle graph){
+ using Playing=bool(*)(mp4actor::Handle*,mp4actor::Method*);
+ return graph.handle&&mp4_actor_source_verified&&reinterpret_cast<Playing>(image_base+mp4_actor_profile.graph_playing.rva)(&graph,nullptr);
+}
+bool mp4_fresh_graph_replay(mp4actor::Handle graph,bool was_playing){
+ if(!was_playing||!graph.handle||mp4_fresh_graph_playing(graph))return true;
+ using Play=void(*)(mp4actor::Handle*,mp4actor::Method*);
+ reinterpret_cast<Play>(image_base+mp4_actor_profile.graph_play.rva)(&graph,nullptr);
+ return mp4_fresh_graph_playing(graph);
+}
 Mp4FreshResult mp4_fresh_hold(void*){
  auto&h=mp4_fresh_host;if(!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_scene_changed");
  if(h.render_depth){++mp4_fresh_start_gates.render_depth;return Mp4FreshResult::waiting;}
@@ -57426,7 +57444,7 @@ Mp4FreshResult mp4_fresh_hold(void*){
  if(!mp4_fresh_actors_current())return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_identity_changed");
  for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
   if(!mp4_actor_graph_mode(&graph,&mode))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_mode_invalid");
-  if(mode!=3)mp4_actor_graph_set(&graph,3,nullptr);
+  if(mode!=3){h.actor_playing[i]=mp4_fresh_graph_playing(graph);mp4_actor_graph_set(&graph,3,nullptr);}
   if(!mp4_actor_graph_mode(&graph,&mode)||mode!=3)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_hold_failed");}
  h.brain_serial=0;
  // Hold scheduling without generating OnBehaviourPause/Resume every frame.
@@ -57438,14 +57456,17 @@ Mp4FreshResult mp4_fresh_hold(void*){
   mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
   mp4actor::Handle graph{};std::memcpy(&graph,&raw,16);if(graph.handle&&!mp4_api.graph_valid(&raw,nullptr))graph={};h.director_graphs[i]=graph;
   if(graph.handle&&mp4_api.graph_valid(&raw,nullptr)){int32_t mode=-1;if(!mp4_actor_graph_mode(&graph,&mode)||(mode!=h.director_modes[i]&&mode!=3))return mp4_fresh_fail(Mp4FreshResult::unsupported,"fresh_owned_graph_clock_unsupported");
-   if(mode!=3)mp4_actor_graph_set(&graph,3,nullptr);
+   if(mode!=3){h.director_playing[i]=mp4_fresh_graph_playing(graph);mp4_actor_graph_set(&graph,3,nullptr);
+    if(h.directors[i]==h.source.director&&!h.playing_traced){h.playing_traced=true;
+     // frame = playing before the switch to Manual, tick = playing after it.
+     idoly_mp4_runtime::diagnostic_event("fresh_hold","master_graph_playing_around_manual",uint64_t(h.director_playing[i]),uint64_t(mp4_fresh_graph_playing(graph)));}}
    mp4game::PlayableGraph after{};mp4_api.director_graph_injected(h.directors[i],&after,nullptr);
    if(!mp4_fresh_current(nullptr)||std::memcmp(&raw,&after,16)||!mp4_actor_graph_mode(&graph,&mode)||mode!=3)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_graph_hold_failed");}
   h.director_times[i]=time;
  }
  for(size_t i=0;i<h.roster->path_graph_count;++i){auto graph=h.roster->path_graphs[i].graph;int32_t mode=-1;
   if(!mp4_actor_graph_mode(&graph,&mode)||(mode!=1&&mode!=3))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_graph_mode_changed");
-  if(mode!=3)mp4_actor_graph_set(&graph,3,nullptr);
+  if(mode!=3){h.path_playing[i]=mp4_fresh_graph_playing(graph);mp4_actor_graph_set(&graph,3,nullptr);}
   if(!mp4_actor_graph_mode(&graph,&mode)||mode!=3||!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_graph_hold_failed");}
  h.held=true;
  for(size_t i=0;i<h.actor_count;++i){uintptr_t native=0;
@@ -57611,17 +57632,10 @@ Mp4FreshResult mp4_fresh_start_body(void*){
   const auto master_state=[&]()->int{return mp4_api.automatic_playback.director_state?mp4_api.automatic_playback.director_state(h.source.director,nullptr):-1;};
   const int state_before=master_state();
   h.started=true;{ScopedValue<unsigned> injecting(mp4_fresh_injected_reset_depth,mp4_fresh_injected_reset_depth+1);mp4_api.player_set_time(h.source.player,0,nullptr);}h.start_returned=true;h.held=false;idoly_mp4_runtime::diagnostic_event("fresh_prepare","initial_zero_returned");
-  // Redroid runs 44-46: the master director was Paused with its graph not
-  // playing at every grant, so the granted 1/60 s never moved the timeline
-  // (fresh_original_time_drift at the second frame). Its graph is held in
-  // Manual mode at time 0 here, so resuming it cannot advance anything; the
-  // trace keeps its state before and after the initial seek (255 = unknown).
+  // The trace keeps the master's play state before and after the initial seek
+  // (255 = unknown); see mp4_fresh_graph_replay for why it reads Paused.
   const int state_after=master_state();
   idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_state_around_zero",uint64_t(state_before<0?255:state_before),uint64_t(state_after<0?255:state_after));
-  if(state_after==0&&mp4_api.automatic_playback.director_resume){
-   mp4_api.automatic_playback.director_resume(h.source.director,nullptr);
-   if(master_state()!=1)return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_master_resume_failed");
-   idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_resumed");}
   // Roots that ran on the DSP clock before conversion (now GameTime, held)
   // advanced in real time during the warm-up; start them at 0 with the MV,
   // as they were when Play and conversion shared one acquire call.
@@ -57672,16 +57686,19 @@ Mp4FreshResult mp4_fresh_grant(void*,uint64_t tick){
  }
  for(size_t i=0;i<h.actor_count;++i){auto graph=h.actors[i].graph;int32_t mode=-1;
   mp4_actor_graph_set(&graph,h.actor_modes[i],nullptr);
-  if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.actor_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_grant_failed");}
+  if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.actor_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_grant_failed");
+  if(h.actor_modes[i]!=3&&!mp4_fresh_graph_replay(graph,h.actor_playing[i]))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_graph_replay_failed");}
  for(size_t i=0;i<h.director_count;++i){auto graph=h.director_graphs[i];if(!graph.handle)continue;
   mp4game::PlayableGraph raw{};mp4_api.director_graph_injected(h.directors[i],&raw,nullptr);
   if(std::memcmp(&graph,&raw,16))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_graph_changed_before_grant");
   int32_t mode=-1;mp4_actor_graph_set(&graph,h.director_modes[i],nullptr);
   mp4game::PlayableGraph after{};mp4_api.director_graph_injected(h.directors[i],&after,nullptr);
-  if(!mp4_fresh_current(nullptr)||std::memcmp(&raw,&after,16)||!mp4_actor_graph_mode(&graph,&mode)||mode!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_graph_grant_failed");}
+  if(!mp4_fresh_current(nullptr)||std::memcmp(&raw,&after,16)||!mp4_actor_graph_mode(&graph,&mode)||mode!=h.director_modes[i])return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_graph_grant_failed");
+  if(h.director_modes[i]!=3&&!mp4_fresh_graph_replay(graph,h.director_playing[i]))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_owned_graph_replay_failed");}
  for(size_t i=0;i<h.roster->path_graph_count;++i){auto graph=h.roster->path_graphs[i].graph;int32_t mode=-1;
   mp4_actor_graph_set(&graph,h.roster->path_graphs[i].desired_mode,nullptr);
-  if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode||!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_graph_grant_failed");}
+  if(!mp4_actor_graph_mode(&graph,&mode)||mode!=h.roster->path_graphs[i].desired_mode||!mp4_fresh_current(nullptr))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_graph_grant_failed");
+  if(h.roster->path_graphs[i].desired_mode!=3&&!mp4_fresh_graph_replay(graph,h.path_playing[i]))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_path_graph_replay_failed");}
  if(!mp4_actor_mono_gate.grant(h.source.generation,tick+1))return mp4_fresh_fail(Mp4FreshResult::stale,"fresh_actor_grant_failed");
  h.held=false;h.brain_serial=tick+1;return Mp4FreshResult::ok;
 }
