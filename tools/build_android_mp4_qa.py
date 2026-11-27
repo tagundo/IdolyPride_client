@@ -339,7 +339,9 @@ def independent_audio(mp4, directory):
 
 
 def run_device(directory, sdk, serial, timeout, root=ROOT):
-    need(re.fullmatch(r"emulator-[0-9]+", serial) and 1 <= timeout <= 900, "Bounded emulator probe required")
+    # An emulator, or a disposable redroid container on the runner's loopback.
+    need(re.fullmatch(r"emulator-[0-9]+|127\.0\.0\.1:[0-9]{2,5}", serial) and 1 <= timeout <= 900,
+         "Bounded emulator probe required")
     regular(directory / "build-report.json", MIB)
     build_report = json.loads((directory / "build-report.json").read_bytes())
     apk = regular(directory / APK_NAME, 8 * MIB)
