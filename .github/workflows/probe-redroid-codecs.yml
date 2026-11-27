@@ -58,6 +58,8 @@ jobs:
           - {name: a14-guest, image: '14.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
           - {name: a13-guest, image: '13.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
           - {name: a12-guest, image: '12.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
+          - {name: a15-host-vgem, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=host androidboot.use_memfd=true', vgem: true}
+          - {name: a11-guest, image: '11.0.0-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,7 +79,8 @@ jobs:
           if [ '${{ matrix.vgem }}' = true ]; then
             sudo modprobe vgem || { sudo apt-get update -qq; sudo apt-get install -y -q "linux-modules-extra-$(uname -r)"; sudo modprobe vgem; } || echo VGEM_UNAVAILABLE
           fi
-          ls -l /dev/dri /dev/dma_heap 2>&1 || true
+          mkdir -p "$RUNNER_TEMP/codec-qa"
+          { ls -l /dev/dri /dev/dma_heap 2>&1; lsmod | grep -E 'vgem|vkms|drm' ; uname -r; } | tee "$RUNNER_TEMP/codec-qa/host-drm.txt" || true
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends adb ffmpeg
       - name: Boot redroid (${{ matrix.name }})
@@ -100,6 +103,11 @@ jobs:
             sleep 3
           done
           echo "booted=${booted:-0} seconds=$SECONDS" | tee -a "$E/boot.txt"
+          # What allocators does the image carry, and what selects one?
+          {
+            docker exec redroid sh -c 'ls -l /vendor/lib64/hw /system/lib64/hw /vendor/lib/hw 2>&1; echo ---; grep -rnE "hardware\.(gralloc|egl|vulkan)|gpu_mode" /vendor/etc/init /system/etc/init /vendor/bin/*.sh /vendor/*.rc /*.rc /vendor/build.prop /vendor/default.prop 2>/dev/null | head -n 80; echo ---; ls -l /dev/dri /dev/dma_heap /dev/ion /dev/ashmem* 2>&1; echo ---; ls /vendor/lib64 | grep -iE "gbm|drm|gralloc|mesa|dri|minigbm|swiftshader|angle"; ls /vendor/lib64/dri 2>&1 | head -n 30'
+          } > "$E/image-inspect.txt" 2>&1 || true
+          timeout 20 docker exec redroid logcat -d 2>/dev/null | tail -n 400 > "$E/boot-logcat.txt" || true
           test -n "$booted"
           for attempt in $(seq 1 60); do adb -s 127.0.0.1:15555 shell cmd package list packages >/dev/null 2>&1 && break; sleep 2; done
           adb -s 127.0.0.1:15555 shell 'getprop | grep -iE "gralloc|egl|vulkan|redroid|build.version.sdk"' > "$E/props.txt" 2>&1 || true
