@@ -180,8 +180,11 @@ def test_gapps_zip_is_downloaded_from_the_pinned_url_and_rejected_unless_its_sha
     build = boot.index('docker build --pull=false --platform linux/arm64 -t "$RUN_IMAGE" "$G/context"')
     assert download < check < helper < build < boot.index("docker run -d --name redroid")
     assert '--base-image "$IMAGE" --context "$G/context" > "$R/gapps-context.json"' in boot
-    # The package's GmsCore needs API 35: the Android 14 image fails closed instead of booting without it.
-    assert 'if [ "$REDROID_TAG" != 15.0.0_64only-250627 ]; then' in boot
+    # Each package is pinned for one image: Android 15's and the Android 11 one; any other tag fails closed.
+    assert "15.0.0_64only-250627) GAPPS_ANDROID=15; GMS_DIR=GmsCore ;;" in boot
+    assert "GAPPS_SHA256=a34e054b952b8d5117e5c011b807ef25be1f02d71f0d1ce11db42e89da2962ce ;;" in boot
+    assert '*) echo "::error::No verified Google Play services package for redroid $REDROID_TAG; dispatch with gapps=none"; exit 1 ;;' in boot
+    assert set(gapps.PROFILES) == {"11", "15"} and len(gapps.PACKAGE_APKS_11) == 3
     assert "none) printf '%s\\n' gapps=none" in boot and '*) echo "::error::unsupported gapps choice"; exit 1 ;;' in boot
 
 

@@ -35,7 +35,7 @@ on:
         required: true
         default: 15.0.0_64only-250627
         type: choice
-        options: [15.0.0_64only-250627, 14.0.0_64only-240527]
+        options: [15.0.0_64only-250627, 14.0.0_64only-240527, 11.0.0-latest]
       display:
         description: Portrait guest display (pixel_4 aspect; density 220 or 440)
         required: true
@@ -300,6 +300,9 @@ jobs:
           case "$REDROID_TAG" in
             15.0.0_64only-250627) DIGEST=sha256:b51bde9cef80f7bd7581148192f2b2f4d41f23c6344cfe88eceeb8ddd67490ee ;;
             14.0.0_64only-240527) DIGEST=sha256:0a611199ba2e0b5d60af39b3327a517f6407231f4352114ed3bd3cbfe2be69aa ;;
+            # Codec probe runs 4-7: only this image encodes (OMX.google.h264.encoder needs no
+            # YUV graphic buffers, which redroid's allocator cannot provide on any release).
+            11.0.0-latest) DIGEST=sha256:60b0810684be4578733a847be3314c50b70f73bc92405b5a627ebe9b633ebb5e ;;
             *) echo "::error::unpinned redroid tag"; exit 1 ;;
           esac
           IMAGE="redroid/redroid:$REDROID_TAG@$DIGEST"
@@ -316,9 +319,15 @@ jobs:
             none) printf '%s\n' gapps=none "run_image=$RUN_IMAGE" > "$R/gapps.txt" ;;
             mindthegapps)
               # The pinned package's GmsCore needs API 35: fail closed on any other image.
-              if [ "$REDROID_TAG" != 15.0.0_64only-250627 ]; then
-                echo "::error::No verified Google Play services package for redroid $REDROID_TAG; dispatch with gapps=none"; exit 1
-              fi
+              case "$REDROID_TAG" in
+                15.0.0_64only-250627) GAPPS_ANDROID=15; GMS_DIR=GmsCore ;;
+                11.0.0-latest)
+                  GAPPS_ANDROID=11; GMS_DIR=PrebuiltGmsCore
+                  GAPPS_RELEASE=MindTheGapps-11.0.0-arm64-20230922_081122
+                  GAPPS_URL=https://github.com/MindTheGapps/11.0.0-arm64/releases/download/$GAPPS_RELEASE/$GAPPS_RELEASE.zip
+                  GAPPS_SHA256=a34e054b952b8d5117e5c011b807ef25be1f02d71f0d1ce11db42e89da2962ce ;;
+                *) echo "::error::No verified Google Play services package for redroid $REDROID_TAG; dispatch with gapps=none"; exit 1 ;;
+              esac
               G="$RUNNER_TEMP/redroid-gapps"
               rm -rf "$G"
               mkdir -p "$G"
@@ -333,7 +342,7 @@ jobs:
               fi
               # Allowlisted regular files only (GmsCore, GSF, Play Store and their configuration),
               # 0644 files / 0755 directories; nothing from the zip is executed.
-              python -B tools/redroid_gapps_context.py --zip "$G/gapps.zip" --sha256 "$GAPPS_SHA256" \
+              python -B tools/redroid_gapps_context.py --zip "$G/gapps.zip" --sha256 "$GAPPS_SHA256" --android "$GAPPS_ANDROID" \
                 --base-image "$IMAGE" --context "$G/context" > "$R/gapps-context.json"
               rm -f "$G/gapps.zip"
               cp "$G/context/Dockerfile" "$R/gapps-Dockerfile"
@@ -356,7 +365,7 @@ jobs:
                 "$(docker image inspect -f '{{json .Config.Entrypoint}}' "$IMAGE")"
               docker image inspect "$RUN_IMAGE" > "$R/gapps-image-inspect.json"
               docker create --name gapps-check "$RUN_IMAGE" > /dev/null
-              for path in product/priv-app/GmsCore product/priv-app/Phonesky system_ext/priv-app/GoogleServicesFramework \
+              for path in "product/priv-app/$GMS_DIR" product/priv-app/Phonesky system_ext/priv-app/GoogleServicesFramework \
                   etc/sysconfig/qa-google-initial-package-state.xml; do
                 docker cp "gapps-check:/system/$path" - | tar --numeric-owner -tvf -
               done > "$R/gapps-image-files.txt"
@@ -365,7 +374,7 @@ jobs:
               if grep -vE '^(drwxr-xr-x|-rw-r--r--) 0/0 ' "$R/gapps-image-files.txt"; then
                 echo '::error::GApps files in the derived image are not root-owned 0644/0755'; exit 1
               fi
-              for name in GmsCore.apk Phonesky.apk GoogleServicesFramework.apk; do
+              for name in "$GMS_DIR.apk" Phonesky.apk GoogleServicesFramework.apk; do
                 if ! grep -qE "^-rw-r--r-- 0/0 .*/$name\$" "$R/gapps-image-files.txt"; then
                   echo "::error::$name is missing from the derived image"; exit 1
                 fi

@@ -61,6 +61,27 @@ SUPPORT_FILES = (
     "system/system_ext/etc/permissions/privapp-permissions-google-system-ext.xml",
 )
 
+# Android 11 image (the only redroid image whose software AVC encoder needs no YUV graphic
+# buffers): the last official MindTheGapps 11 arm64 release, same three packages.
+PACKAGE_APKS_11 = {
+    "system/product/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk":
+        ("com.google.android.gms", "0b4e47b1e53d8d035fda2f5d8369f67de6f9985ed49001c207aac329d563b56f", 96849165),
+    "system/product/priv-app/Phonesky/Phonesky.apk":
+        ("com.android.vending", "2d4f714099b1e74b26246aec794e51a3c09181e6a9a315261774cf13c4e7ccdd", 22290178),
+    "system/system_ext/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk":
+        ("com.google.android.gsf", "482798ab45ae314ae8084ee15295d0acb7da4ea9cdc3c2701a75ab2dbc10f252", 6555284),
+}
+SUPPORT_FILES_11 = (
+    "system/product/etc/permissions/privapp-permissions-google-p.xml",
+    "system/product/etc/permissions/com.google.android.dialer.support.xml",
+    "system/product/framework/com.google.android.dialer.support.jar",
+    "system/product/etc/sysconfig/google.xml",
+    "system/product/etc/sysconfig/google_build.xml",
+    "system/product/etc/sysconfig/google-hiddenapi-package-whitelist.xml",
+    "system/system_ext/etc/permissions/privapp-permissions-google-se.xml",
+)
+PROFILES = {"15": None, "11": (PACKAGE_APKS_11, SUPPORT_FILES_11)}
+
 # Android 15 redroid scans new system packages as stopped on first boot
 # (config_stopSystemPackagesByDefault); let the Google packages receive BOOT_COMPLETED.
 INITIAL_STATE_FILE = "system/etc/sysconfig/qa-google-initial-package-state.xml"
@@ -176,8 +197,14 @@ def main(argv=None):
     parser.add_argument("--sha256", required=True, help="pinned SHA-256 of that zip")
     parser.add_argument("--base-image", required=True, help="digest-pinned redroid image reference")
     parser.add_argument("--context", required=True, help="new or empty Docker build context directory")
+    parser.add_argument("--android", choices=sorted(PROFILES), default="15", help="guest Android release")
     args = parser.parse_args(argv)
-    receipt = prepare(args.zip, args.sha256, args.base_image, args.context)
+    profile = PROFILES[args.android]
+    if profile is None:
+        receipt = prepare(args.zip, args.sha256, args.base_image, args.context)
+    else:
+        receipt = prepare(args.zip, args.sha256, args.base_image, args.context,
+                          apk_pins=profile[0], support_files=profile[1])
     json.dump(receipt, sys.stdout, indent=1, sort_keys=True)
     sys.stdout.write("\n")
 
