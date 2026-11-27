@@ -83,6 +83,7 @@ jobs:
       - name: Boot redroid (${{ matrix.name }})
         id: boot
         continue-on-error: true
+        timeout-minutes: 10
         run: |
           set -uo pipefail
           E="$RUNNER_TEMP/codec-qa"
@@ -105,21 +106,22 @@ jobs:
             androidboot.redroid_width=540 androidboot.redroid_height=1140 androidboot.redroid_dpi=220 \
             ${{ matrix.args }}
           booted=
-          for attempt in $(seq 1 100); do
+          for attempt in $(seq 1 60); do
             [ "$(docker inspect -f '{{.State.Running}}' redroid)" = true ] || { echo CONTAINER_EXITED | tee "$E/boot.txt"; break; }
-            adb connect 127.0.0.1:15555 >/dev/null 2>&1 || true
-            if [ "$(adb -s 127.0.0.1:15555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then booted=1; break; fi
+            timeout 10 adb connect 127.0.0.1:15555 >/dev/null 2>&1 || true
+            if [ "$(timeout 10 adb -s 127.0.0.1:15555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then booted=1; break; fi
             sleep 3
           done
           echo "booted=${booted:-0} seconds=$SECONDS" | tee -a "$E/boot.txt"
           # What allocators does the image carry, and what selects one?
           {
-            docker exec redroid sh -c 'ls -l /vendor/lib64/hw /system/lib64/hw /vendor/lib/hw 2>&1; echo ---; grep -rnE "hardware\.(gralloc|egl|vulkan)|gpu_mode" /vendor/etc/init /system/etc/init /vendor/bin/*.sh /vendor/*.rc /*.rc /vendor/build.prop /vendor/default.prop 2>/dev/null | head -n 80; echo ---; ls -l /dev/dri /dev/dma_heap /dev/ion /dev/ashmem* 2>&1; echo ---; ls /vendor/lib64 | grep -iE "gbm|drm|gralloc|mesa|dri|minigbm|swiftshader|angle"; ls /vendor/lib64/dri 2>&1 | head -n 30'
+            timeout 30 docker exec redroid sh -c 'ls -l /vendor/lib64/hw /system/lib64/hw /vendor/lib/hw 2>&1; echo ---; grep -rnE "hardware\.(gralloc|egl|vulkan)|gpu_mode" /vendor/etc/init /system/etc/init /vendor/bin/*.sh /vendor/*.rc /*.rc /vendor/build.prop /vendor/default.prop 2>/dev/null | head -n 80; echo ---; ls -l /dev/dri /dev/dma_heap /dev/ion /dev/ashmem* 2>&1; echo ---; ls /vendor/lib64 | grep -iE "gbm|drm|gralloc|mesa|dri|minigbm|swiftshader|angle"; ls /vendor/lib64/dri 2>&1 | head -n 30'
           } > "$E/image-inspect.txt" 2>&1 || true
-          timeout 20 docker exec redroid logcat -d 2>/dev/null | tail -n 400 > "$E/boot-logcat.txt" || true
+          timeout 20 docker exec redroid logcat -d 2>/dev/null | grep -iE 'gralloc|minigbm|cros|gbm|drm|allocator|surfaceflinger|hwcomposer|FATAL|Abort|vulkan|SwiftShader|ANGLE|EGL' | tail -n 400 > "$E/boot-logcat.txt" || true
+          timeout 20 docker exec redroid sh -c 'getprop | grep -E "hardware\.|boot_completed|init.svc"' > "$E/boot-props.txt" 2>&1 || true
           test -n "$booted"
-          for attempt in $(seq 1 60); do adb -s 127.0.0.1:15555 shell cmd package list packages >/dev/null 2>&1 && break; sleep 2; done
-          adb -s 127.0.0.1:15555 shell 'getprop | grep -iE "gralloc|egl|vulkan|redroid|build.version.sdk"' > "$E/props.txt" 2>&1 || true
+          for attempt in $(seq 1 60); do timeout 10 adb -s 127.0.0.1:15555 shell cmd package list packages >/dev/null 2>&1 && break; sleep 2; done
+          timeout 20 adb -s 127.0.0.1:15555 shell 'getprop | grep -iE "gralloc|egl|vulkan|redroid|build.version.sdk"' > "$E/props.txt" 2>&1 || true
       - name: Run the production encoder on synthetic frames
         if: steps.boot.outcome == 'success'
         continue-on-error: true
