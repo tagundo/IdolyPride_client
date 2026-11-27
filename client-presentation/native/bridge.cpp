@@ -56364,7 +56364,7 @@ struct Mp4FreshVideoEntry {
   bool awake=false,loop=false,skip=false,frames=false,captured=false,restored=false;}saved;
  void*image=nullptr;uintptr_t image_native=0;void*script=nullptr;
  void*textures[4]{};uintptr_t texture_native[4]{};size_t texture_count=0;
- bool active=false,prepare_reissued=false,adopted_prepared=false;
+ bool active=false,prepare_reissued=false,adopted_prepared=false,dropped=false;
 };
 Mp4FreshVideoEntry mp4_fresh_videos[16];size_t mp4_fresh_video_count=0;
 std::atomic<void*>mp4_fresh_video_players[16];
@@ -56649,7 +56649,7 @@ bool mp4_fresh_video_add(void*player,void*image,bool loop){
   ||!mp4_video_native(player,&vp)||!mp4_video_native(clip.get(),&native)||!mp4_video_native(image,&inative)
   ||!mp4_fresh_video_image_bound(image,player,false)
   ||!mp4_fresh_keep(player)||!mp4_fresh_keep(clip.get())||!mp4_fresh_keep(image))return false;
- e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;e.prepare_reissued=false;e.adopted_prepared=false;
+ e.identity={player,clip.get(),vp,native,mp4_fresh_host.source.generation,mp4_fresh_host.job};e.image=image;e.image_native=inative;e.prepare_reissued=false;e.adopted_prepared=false;e.dropped=false;
  e.clip={mp4_cam_call<Rate>(mp4_cam_profile.video_clip_rate)(clip.get(),nullptr),mp4_cam_call<Rate>(mp4_cam_profile.video_clip_length)(clip.get(),nullptr),mp4_cam_call<Count>(mp4_cam_profile.video_clip_frames)(clip.get(),nullptr),loop};
  const mp4freshvideo::Api api={&e,mp4_fresh_video_current,mp4_fresh_video_read,mp4_fresh_video_configure,mp4_fresh_video_prepare,
   mp4_fresh_video_pause,mp4_fresh_video_reference,mp4_fresh_video_set_frame,mp4_fresh_video_native_pump,mp4_fresh_video_publish,
@@ -56697,18 +56697,41 @@ void mp4_fresh_video_log_state(){
   }
  }
 }
+// A MV video player that never prepares under the export hold (redroid runs
+// 26-34: preparing with a decoder but no texture for 60 s, whether the bank
+// or the original scene issued Prepare) must not cost the whole export. After
+// this long unprepared, the export continues without that video screen: its
+// frames are no longer requested, its image keeps no texture, and the trace
+// names it (fresh_video / dropped_unprepared, frame = bank index). The
+// player's knobs are still restored by the ordinary cleanup.
+constexpr uint64_t mp4_fresh_video_drop_after_ms=20000;
 Mp4FreshResult mp4_fresh_video_prepare_all(){
  const char*wait=nullptr;
- for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];const auto r=e.frames.prepare();
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];if(e.dropped)continue;const auto r=e.frames.prepare();
   if(r==mp4freshvideo::Result::waiting){if(!wait)wait=e.frames.error();}
   else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
  }
- if(wait)mp4_fresh_video_log_state();else mp4_fresh_video_state_logged_at=mp4_fresh_video_wait_started=0;
+ if(wait){
+  mp4_fresh_video_log_state();
+  if(mp4_fresh_video_wait_started&&idoly_mp4_runtime::milliseconds()-mp4_fresh_video_wait_started>=mp4_fresh_video_drop_after_ms){
+   for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];
+    if(e.dropped)continue;mp4freshvideo::State st{};
+    if(mp4_fresh_video_read(&e,e.identity,&st)&&st.prepared)continue;
+    e.dropped=true;idoly_mp4_runtime::diagnostic_event("fresh_video","dropped_unprepared",i);
+   }
+   wait=nullptr;
+   for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];if(e.dropped)continue;
+    const auto r=e.frames.prepare();
+    if(r==mp4freshvideo::Result::waiting){if(!wait)wait=e.frames.error();}
+    else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());}
+  }
+ }
+ if(!wait)mp4_fresh_video_state_logged_at=mp4_fresh_video_wait_started=0;
  return wait?mp4_fresh_video_waiting(wait):Mp4FreshResult::ok;
 }
 Mp4FreshResult mp4_fresh_video_frame_all(double seconds){
  const char*wait=nullptr;
- for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];const auto r=e.frames.request(seconds);
+ for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];if(e.dropped)continue;const auto r=e.frames.request(seconds);
   if(r==mp4freshvideo::Result::waiting){if(!wait)wait=e.frames.error();}
   else if(r!=mp4freshvideo::Result::ready)return mp4_fresh_fail(Mp4FreshResult::unsupported,e.frames.error());
  }

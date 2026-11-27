@@ -205,3 +205,16 @@ def test_unprepared_player_is_not_paused_every_poll():
     prepare = bank[bank.index("    Result prepare()noexcept {"):]
     prepare = prepare[:prepare.index("fresh_video_prepare_wait")]
     assert "api_.pause(" not in prepare and "hold_paused()" in prepare
+
+
+def test_unprepared_video_is_dropped_after_a_bounded_wait():
+    # Redroid runs 26-34: the MV's video player never prepared under the hold;
+    # the export continues without that screen after 20 s instead of failing.
+    bridge = (Path(__file__).resolve().parents[1] / "client-presentation/native/bridge.cpp").read_text()
+    prepare = bridge[bridge.index("Mp4FreshResult mp4_fresh_video_prepare_all(){"):]
+    prepare = prepare[:prepare.index("\n}\n")]
+    assert "mp4_fresh_video_drop_after_ms" in prepare and '"dropped_unprepared"' in prepare
+    assert "st.prepared)continue;" in prepare  # a prepared player is never dropped
+    assert "constexpr uint64_t mp4_fresh_video_drop_after_ms=20000;" in bridge
+    frames = bridge[bridge.index("Mp4FreshResult mp4_fresh_video_frame_all(double seconds){"):]
+    assert "if(e.dropped)continue;" in frames[:frames.index("\n}\n")]
