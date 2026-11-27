@@ -52,14 +52,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {name: a15-guest-redroidc2, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: false}
-          - {name: a15-guest-plain, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest', vgem: false}
-          - {name: a15-auto, image: '15.0.0_64only-250627', args: 'androidboot.use_memfd=true', vgem: false}
-          - {name: a14-guest, image: '14.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
-          - {name: a13-guest, image: '13.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
-          - {name: a12-guest, image: '12.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
-          - {name: a15-host-vgem, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=host androidboot.use_memfd=true', vgem: true}
-          - {name: a11-guest, image: '11.0.0-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
+          - {name: a15-guest-plain, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: false, gralloc: ''}
+          - {name: a15-guest-cros-vgem, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: true, gralloc: cros}
+          - {name: a15-guest-cros, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: false, gralloc: cros}
+          - {name: a15-guest-gbm-vgem, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: true, gralloc: gbm}
+          - {name: a11-guest, image: '11.0.0-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false, gralloc: ''}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,7 +88,19 @@ jobs:
           E="$RUNNER_TEMP/codec-qa"
           docker pull -q "redroid/redroid:${{ matrix.image }}" || { echo IMAGE_PULL_FAILED | tee "$E/boot.txt"; exit 1; }
           docker image inspect -f '{{index .RepoDigests 0}}' "redroid/redroid:${{ matrix.image }}" | tee "$E/image.txt"
-          docker run -d --name redroid --privileged -p 127.0.0.1:15555:5555 \
+          # Run 4: gralloc.redroid has no YUV formats; the image also carries minigbm (gralloc.cros)
+          # and gbm_gralloc. The guest GPU stack is kept and only the allocator module is swapped.
+          MOUNT=()
+          docker create --name redroid-src "redroid/redroid:${{ matrix.image }}" >/dev/null
+          docker cp redroid-src:/vendor/bin/gpu_config.sh "$E/gpu_config.orig.sh.txt" || true
+          docker rm redroid-src >/dev/null
+          if [ -n '${{ matrix.gralloc }}' ]; then
+            sed 's/setprop ro.hardware.gralloc redroid/setprop ro.hardware.gralloc ${{ matrix.gralloc }}/' "$E/gpu_config.orig.sh.txt" > "$RUNNER_TEMP/gpu_config.sh"
+            grep -q 'ro.hardware.gralloc ${{ matrix.gralloc }}' "$RUNNER_TEMP/gpu_config.sh" || { echo GRALLOC_PATCH_FAILED | tee "$E/boot.txt"; exit 1; }
+            chmod 755 "$RUNNER_TEMP/gpu_config.sh"; sudo chown 0:2000 "$RUNNER_TEMP/gpu_config.sh"
+            MOUNT=(-v "$RUNNER_TEMP/gpu_config.sh:/vendor/bin/gpu_config.sh:ro")
+          fi
+          docker run -d --name redroid --privileged -p 127.0.0.1:15555:5555 "${MOUNT[@]}" \
             "redroid/redroid:${{ matrix.image }}" \
             androidboot.redroid_width=540 androidboot.redroid_height=1140 androidboot.redroid_dpi=220 \
             ${{ matrix.args }}
