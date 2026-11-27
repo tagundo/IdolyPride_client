@@ -54,12 +54,10 @@ jobs:
         include:
           - {name: a15-guest-redroidc2, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: false}
           - {name: a15-guest-plain, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest', vgem: false}
-          - {name: a15-host-vgem, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=host androidboot.use_memfd=true', vgem: true}
           - {name: a15-auto, image: '15.0.0_64only-250627', args: 'androidboot.use_memfd=true', vgem: false}
           - {name: a14-guest, image: '14.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
           - {name: a13-guest, image: '13.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
           - {name: a12-guest, image: '12.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
-          - {name: a16-guest, image: '16.0.0_64only-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,7 +107,8 @@ jobs:
         if: steps.boot.outcome == 'success'
         continue-on-error: true
         run: |
-          python -B tools/build_android_mp4_qa.py --run-device --serial 127.0.0.1:15555 --timeout 600 \
+          # The runner's ANDROID_HOME has no linux-arm64 adb; use Ubuntu's adb from PATH.
+          env -u ANDROID_HOME python -B tools/build_android_mp4_qa.py --run-device --serial 127.0.0.1:15555 --timeout 600 \
             --output-directory "$RUNNER_TEMP/codec-qa"
       - name: Summarize
         if: always()
