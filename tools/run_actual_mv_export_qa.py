@@ -1878,22 +1878,70 @@ class ActualRun:
     def await_export(self, baseline, replay=False):
         deadline, previous_tick, observed_running, last_record = self.export_deadline, None, False, 0
         acquired = False
+        stalls = 0
         self.report["native_overlay_pause_resume_verified"] = False
         self.report["native_clock_hold_with_advancing_playerloop_verified"] = False
         while time.monotonic() < deadline:
-            payload = self.mp4()
             try:
-                state, obs = native_payload(payload)
-            except Rejected as error:
-                # The fresh pipeline reloads the original scene before it renders
-                # (run 21: preparing_audio with the source briefly unavailable).
-                state = payload.get("native") if type(payload) is dict else None
-                if (str(error) not in ("normal_3d_source_unavailable", "source_observation_invalid")
-                        or type(state) is not dict or state.get("phase") not in PREPARING_PHASES):
-                    raise
-                self.report["export_preparing_source_unavailable"] = self.report.get(
-                    "export_preparing_source_unavailable", 0) + 1
-                need(state.get("error_code", "none") == "none", "native_export_failed_" + str(state.get("error_code")))
+                payload = self.mp4()
+                try:
+                    state, obs = native_payload(payload)
+                except Rejected as error:
+                    # The fresh pipeline reloads the original scene before it renders
+                    # (run 21: preparing_audio with the source briefly unavailable).
+                    state = payload.get("native") if type(payload) is dict else None
+                    if (str(error) not in ("normal_3d_source_unavailable", "source_observation_invalid")
+                            or type(state) is not dict or state.get("phase") not in PREPARING_PHASES):
+                        raise
+                    self.report["export_preparing_source_unavailable"] = self.report.get(
+                        "export_preparing_source_unavailable", 0) + 1
+                    need(state.get("error_code", "none") == "none", "native_export_failed_" + str(state.get("error_code")))
+                    if time.monotonic() - last_record >= 20:
+                        self.record("export_progress", payload)
+                        last_record = time.monotonic()
+                        self.capture_mp4_diagnostics("export_progress", force=True)
+                    need(bool(self.device.adb("shell", "pidof", PACKAGE, check=False).strip()), "game_process_exited")
+                    self.relieve_system_anr()
+                    time.sleep(.25)
+                    continue
+                phase = state.get("phase")
+                if phase == "completed":
+                    # Keep the produced file before any verdict check can end the run.
+                    self.salvage_movie(state)
+                    self.capture_mp4_diagnostics("completed", force=True)
+                    need(observed_running, "no_actual_native_render_progress_observed")
+                    need(acquired, "native_export_acquisition_baseline_unavailable")
+                    need(self.report.get("native_clock_hold_with_advancing_playerloop_verified") is True,
+                         "independent_clock_hold_not_verified")
+                    validate_completed(baseline, payload, self.args.width, self.args.height, self.args.fps)
+                    self.record("native_export_completed_and_restored", payload)
+                    return payload, baseline
+                need(phase not in ("failed", "cancelled"), "native_export_failed_" + str(state.get("error_code", "unknown")))
+                if phase == "rendering" and obs.get("accepted_frames") == 0 and not observed_running \
+                        and obs.get("world_admission") != "verified":
+                    # Run 23: "rendering" is published when render setup begins;
+                    # the fresh pipeline then readies the reloaded MV (camera,
+                    # video, warm-up) under its own named stage budgets; run 25: the
+                    # coordinator already holds the clock while world admission is
+                    # still unverified. Not yet admitted is not a failure here.
+                    self.report["export_render_setup_polls"] = self.report.get("export_render_setup_polls", 0) + 1
+                    need(state.get("error_code", "none") == "none", "native_export_failed_" + str(state.get("error_code")))
+                elif phase in ("rendering", "finishing"):
+                    previous_tick = validate_running(payload, previous_tick)
+                    observed_running = True
+                    if fresh_pipeline(state):
+                        # No acquired-source baseline and no pause exercise exist for the fresh
+                        # pipeline yet; the completion checks then fail closed, after the movie
+                        # itself was kept.
+                        self.report["fresh_pipeline_running_checks_skipped"] = True
+                    elif not acquired and phase == "rendering":
+                        baseline = export_acquisition_baseline(baseline, payload, replay=replay)
+                        self.record("native_queue_replay_acquisition_baseline" if replay
+                                    else "native_direct_acquisition_baseline", payload)
+                        acquired = True
+                    if (phase == "rendering" and obs["accepted_frames"] >= 2 and not fresh_pipeline(state)
+                            and not self.report.get("native_overlay_pause_resume_verified")):
+                        self.exercise_export_pause()
                 if time.monotonic() - last_record >= 20:
                     self.record("export_progress", payload)
                     last_record = time.monotonic()
@@ -1901,52 +1949,16 @@ class ActualRun:
                 need(bool(self.device.adb("shell", "pidof", PACKAGE, check=False).strip()), "game_process_exited")
                 self.relieve_system_anr()
                 time.sleep(.25)
+            except (TimeoutError, subprocess.TimeoutExpired, OSError) as error:
+                # Run 56: one observer/adb call timed out while the guest reloaded the scene.
+                # A stalled observation is retried; only a long unbroken run of them ends the run.
+                stalls += 1
+                self.report["export_observation_stalls"] = self.report.get("export_observation_stalls", 0) + 1
+                self.report["export_observation_last_stall"] = type(error).__name__
+                need(stalls <= 40, "export_observation_stalled")
+                time.sleep(2)
                 continue
-            phase = state.get("phase")
-            if phase == "completed":
-                # Keep the produced file before any verdict check can end the run.
-                self.salvage_movie(state)
-                self.capture_mp4_diagnostics("completed", force=True)
-                need(observed_running, "no_actual_native_render_progress_observed")
-                need(acquired, "native_export_acquisition_baseline_unavailable")
-                need(self.report.get("native_clock_hold_with_advancing_playerloop_verified") is True,
-                     "independent_clock_hold_not_verified")
-                validate_completed(baseline, payload, self.args.width, self.args.height, self.args.fps)
-                self.record("native_export_completed_and_restored", payload)
-                return payload, baseline
-            need(phase not in ("failed", "cancelled"), "native_export_failed_" + str(state.get("error_code", "unknown")))
-            if phase == "rendering" and obs.get("accepted_frames") == 0 and not observed_running \
-                    and obs.get("world_admission") != "verified":
-                # Run 23: "rendering" is published when render setup begins;
-                # the fresh pipeline then readies the reloaded MV (camera,
-                # video, warm-up) under its own named stage budgets; run 25: the
-                # coordinator already holds the clock while world admission is
-                # still unverified. Not yet admitted is not a failure here.
-                self.report["export_render_setup_polls"] = self.report.get("export_render_setup_polls", 0) + 1
-                need(state.get("error_code", "none") == "none", "native_export_failed_" + str(state.get("error_code")))
-            elif phase in ("rendering", "finishing"):
-                previous_tick = validate_running(payload, previous_tick)
-                observed_running = True
-                if fresh_pipeline(state):
-                    # No acquired-source baseline and no pause exercise exist for the fresh
-                    # pipeline yet; the completion checks then fail closed, after the movie
-                    # itself was kept.
-                    self.report["fresh_pipeline_running_checks_skipped"] = True
-                elif not acquired and phase == "rendering":
-                    baseline = export_acquisition_baseline(baseline, payload, replay=replay)
-                    self.record("native_queue_replay_acquisition_baseline" if replay
-                                else "native_direct_acquisition_baseline", payload)
-                    acquired = True
-                if (phase == "rendering" and obs["accepted_frames"] >= 2 and not fresh_pipeline(state)
-                        and not self.report.get("native_overlay_pause_resume_verified")):
-                    self.exercise_export_pause()
-            if time.monotonic() - last_record >= 20:
-                self.record("export_progress", payload)
-                last_record = time.monotonic()
-                self.capture_mp4_diagnostics("export_progress", force=True)
-            need(bool(self.device.adb("shell", "pidof", PACKAGE, check=False).strip()), "game_process_exited")
-            self.relieve_system_anr()
-            time.sleep(.25)
+            stalls = 0
         raise Rejected("actual_full_export_timeout")
 
     def salvage_movie(self, state):
