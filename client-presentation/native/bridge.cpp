@@ -56032,7 +56032,8 @@ bool mp4_fresh_path_search(Mp4FreshControlRoster&r,void*component){
 }
 // Which currentness check last failed (source line of this file at the built commit); read by the hold trace.
 int mp4_fresh_stale_at=0;
-inline bool mp4_fresh_stale_line(int line){mp4_fresh_stale_at=line;return false;}
+// The innermost failed branch wins (run 53: the outer line hid the roster's own); mp4_fresh_current clears it first.
+inline bool mp4_fresh_stale_line(int line){if(!mp4_fresh_stale_at)mp4_fresh_stale_at=line;return false;}
 bool mp4_fresh_path_current(const Mp4FreshControlRoster&r){
  if((r.path_owner_count||r.path_search_count)&&!mp4_fresh_path_pins())return mp4_fresh_stale_line(__LINE__);
  if(r.player){void*value=nullptr;if(!mp4_actor_field(r.player,0x40,value)||value!=r.environment
@@ -56356,7 +56357,7 @@ bool mp4_fresh_keep(void*object){
  h.roots[h.root_count++]=root;return true;
 }
 bool mp4_fresh_current(void*){
- auto&h=mp4_fresh_host;if(!game_call()||!h.active||h.detached||mp4_fresh_withdrawn.load(std::memory_order_acquire))return mp4_fresh_stale_line(__LINE__);
+ mp4_fresh_stale_at=0;auto&h=mp4_fresh_host;if(!game_call()||!h.active||h.detached||mp4_fresh_withdrawn.load(std::memory_order_acquire))return mp4_fresh_stale_line(__LINE__);
  Mp4SceneWitness now{};if(!idoly_mp4_runtime::game.selected_scene_witness(now)||!mp4_scene_same_source(now,h.source))return mp4_fresh_stale_line(__LINE__);
  for(size_t i=0;i<h.root_count;++i)if(!h.roots[i]||!weak_get(h.roots[i]))return mp4_fresh_stale_line(__LINE__);
  void*timeline=nullptr;if(!mp4_actor_field(h.source.player,mp4game::Layout{}.player_director_controller,timeline)
