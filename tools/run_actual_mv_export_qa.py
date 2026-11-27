@@ -906,7 +906,20 @@ class Device:
             if candidates:
                 found = candidates[0]
                 break
-            self.android_control(expected)
+            # A label on the viewport's last pixels has its spinner below the fold (run 41,
+            # landscape: "Output resolution" showed, its spinner did not): nudge the list up.
+            shown = [n for n in tree.iter("node") if n.get("package") == PACKAGE and n.get("text") in expected]
+            scroll = [n for n in tree.iter("node") if n.get("package") == PACKAGE and n.get("scrollable") == "true"
+                      and n.get("class") in ("android.widget.ScrollView", "androidx.core.widget.NestedScrollView")]
+            if shown and len(scroll) == 1:
+                x, _y = self.point(scroll[0])
+                box = list(map(int, re.findall(r"\d+", scroll[0].get("bounds"))))
+                middle = (box[1] + box[3]) // 2
+                self.adb("shell", "input", "swipe", str(x), str(middle + (box[3] - box[1]) // 4),
+                         str(x), str(middle - (box[3] - box[1]) // 4), "400")
+                time.sleep(1)
+            else:
+                self.android_control(expected)
         need(found is not None, "spinner_label_unavailable")
         self.touch(found)
         choice = self.android_control({value} if isinstance(value, str) else value,
@@ -919,7 +932,11 @@ class Device:
         self.touch(node)
         # Ordinary keyboard select-all also covers a field that the IME already
         # focused while the previous setting was edited.
-        self.adb("shell", "input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+        selected = self.adb("shell", "input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A",
+                            check=False, merge_error=True)
+        if re.search(r"unknown command|error|usage", selected, re.I):
+            # Android 11's input tool has no keycombination: clear the field from its end.
+            self.adb("shell", "input", "keyevent", "KEYCODE_MOVE_END", *(["KEYCODE_DEL"] * 16))
         self.adb("shell", "input", "text", str(value))
         self.adb("shell", "input", "keyevent", "KEYCODE_BACK")
         fresh = self.android_control(labels(name), cls="android.widget.EditText")
