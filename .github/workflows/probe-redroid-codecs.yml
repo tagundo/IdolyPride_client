@@ -91,25 +91,27 @@ jobs:
           docker image inspect -f '{{index .RepoDigests 0}}' "redroid/redroid:${{ matrix.image }}" | tee "$E/image.txt"
           # Run 4: gralloc.redroid has no YUV formats; the image also carries minigbm (gralloc.cros)
           # and gbm_gralloc. The guest GPU stack is kept and only the allocator module is swapped.
-          MOUNT=()
-          docker create --name redroid-src "redroid/redroid:${{ matrix.image }}" >/dev/null
+          RUN_IMAGE="redroid/redroid:${{ matrix.image }}"
+          docker create --name redroid-src "$RUN_IMAGE" >/dev/null
           docker cp redroid-src:/vendor/bin/gpu_config.sh "$E/gpu_config.orig.sh.txt" || true
           docker rm redroid-src >/dev/null
           if [ -n '${{ matrix.gralloc }}' ]; then
-            sed 's/setprop ro.hardware.gralloc redroid/setprop ro.hardware.gralloc ${{ matrix.gralloc }}/' "$E/gpu_config.orig.sh.txt" > "$RUNNER_TEMP/gpu_config.sh"
-            grep -q 'ro.hardware.gralloc ${{ matrix.gralloc }}' "$RUNNER_TEMP/gpu_config.sh" || { echo GRALLOC_PATCH_FAILED | tee "$E/boot.txt"; exit 1; }
-            chmod 755 "$RUNNER_TEMP/gpu_config.sh"; sudo chown 0:2000 "$RUNNER_TEMP/gpu_config.sh"
-            MOUNT=(-v "$RUNNER_TEMP/gpu_config.sh:/vendor/bin/gpu_config.sh:ro")
+            C="$RUNNER_TEMP/swap"; mkdir -p "$C"
+            sed 's/setprop ro.hardware.gralloc redroid/setprop ro.hardware.gralloc ${{ matrix.gralloc }}/' "$E/gpu_config.orig.sh.txt" > "$C/gpu_config.sh"
+            grep -q 'ro.hardware.gralloc ${{ matrix.gralloc }}' "$C/gpu_config.sh" || { echo GRALLOC_PATCH_FAILED | tee "$E/boot.txt"; exit 1; }
+            printf 'FROM %s\nCOPY --chown=0:2000 --chmod=755 gpu_config.sh /vendor/bin/gpu_config.sh\n' "$RUN_IMAGE" > "$C/Dockerfile"
+            docker build -q -t redroid-swap "$C" || { echo SWAP_IMAGE_BUILD_FAILED | tee "$E/boot.txt"; exit 1; }
+            RUN_IMAGE=redroid-swap
           fi
-          docker run -d --name redroid --privileged -p 127.0.0.1:15555:5555 "${MOUNT[@]}" \
-            "redroid/redroid:${{ matrix.image }}" \
+          docker run -d --name redroid --privileged -p 127.0.0.1:15555:5555 \
+            "$RUN_IMAGE" \
             androidboot.redroid_width=540 androidboot.redroid_height=1140 androidboot.redroid_dpi=220 \
             ${{ matrix.args }}
           booted=
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Running}}' redroid)" = true ] || { echo CONTAINER_EXITED | tee "$E/boot.txt"; break; }
-            timeout 10 adb connect 127.0.0.1:15555 >/dev/null 2>&1 || true
-            if [ "$(timeout 10 adb -s 127.0.0.1:15555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then booted=1; break; fi
+            timeout 4 adb connect 127.0.0.1:15555 >/dev/null 2>&1 || true
+            if [ "$(timeout 4 adb -s 127.0.0.1:15555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then booted=1; break; fi
             sleep 3
           done
           echo "booted=${booted:-0} seconds=$SECONDS" | tee -a "$E/boot.txt"
@@ -122,6 +124,26 @@ jobs:
           test -n "$booted"
           for attempt in $(seq 1 60); do timeout 10 adb -s 127.0.0.1:15555 shell cmd package list packages >/dev/null 2>&1 && break; sleep 2; done
           timeout 20 adb -s 127.0.0.1:15555 shell 'getprop | grep -iE "gralloc|egl|vulkan|redroid|build.version.sdk"' > "$E/props.txt" 2>&1 || true
+      - name: Find the Android 11 Google Play services package (pin discovery only)
+        if: matrix.name == 'a11-guest'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          set -uo pipefail
+          E="$RUNNER_TEMP/codec-qa"; G="$RUNNER_TEMP/gapps11"; mkdir -p "$G"
+          curl -fsSL https://api.github.com/repos/MindTheGapps/11.0.0-arm64/releases?per_page=3 > "$G/releases.json" || { echo RELEASES_UNAVAILABLE > "$E/gapps11.txt"; exit 0; }
+          URL=$(python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(next(a['browser_download_url'] for a in r[0]['assets'] if a['name'].endswith('.zip')))" "$G/releases.json")
+          curl -fsSL --max-time 500 -o "$G/gapps.zip" "$URL" || { echo "DOWNLOAD_FAILED $URL" > "$E/gapps11.txt"; exit 0; }
+          { echo "url=$URL"; echo "zip_sha256=$(sha256sum "$G/gapps.zip" | cut -d' ' -f1)"
+            python3 - "$G/gapps.zip" <<'PY'
+          import hashlib, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              for i in z.infolist():
+                  if i.is_dir(): continue
+                  h = hashlib.sha256(z.read(i)).hexdigest() if i.filename.endswith('.apk') else '-'
+                  print(i.file_size, h, i.filename)
+          PY
+          } > "$E/gapps11.txt" 2>&1
       - name: Run the production encoder on synthetic frames
         if: steps.boot.outcome == 'success'
         continue-on-error: true
