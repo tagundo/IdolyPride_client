@@ -57956,7 +57956,13 @@ bool mp4_install_fresh_runtime(){
  if(idoly_mp4_runtime::fresh_scene_installed.load(std::memory_order_acquire))return true;
  idoly_mp4_runtime::FreshSceneApi api{};api.context=&mp4_fresh_host;
  api.available=mp4_fresh_available;api.save_origin=mp4_fresh_save_origin;api.admit=mp4_fresh_admit;
- api.acquire=mp4_fresh_acquire;api.start=mp4_fresh_start;api.current=mp4_fresh_current;api.hold=mp4_fresh_hold;
+ api.acquire=mp4_fresh_acquire;api.start=mp4_fresh_start;api.hold=mp4_fresh_hold;
+ // The runtime's own boundary check: name the failed branch once per export (run 49 saw no hold event).
+ api.current=[](void*context){
+  const bool current=mp4_fresh_current(context);static decltype(mp4_fresh_host.job) reported{};
+  if(!current&&mp4_fresh_host.active&&!mp4_fresh_host.detached&&!(reported==mp4_fresh_host.job)){reported=mp4_fresh_host.job;
+   idoly_mp4_runtime::diagnostic_event("fresh_current","boundary_stale_line",uint64_t(mp4_fresh_stale_at));}
+  return current;};
  api.prepare_step=mp4_fresh_prepare_step;api.grant=mp4_fresh_grant;api.prepare_render=mp4_fresh_prepare_render;
  api.prepare_finish=mp4_fresh_prepare_finish;api.finish=mp4_fresh_finish;api.error=mp4_fresh_error;api.withdraw=mp4_fresh_withdraw;api.audio_source_error=mp4_fresh_audio_source_error;
  return idoly_mp4_runtime::install_fresh_scene_api(api);

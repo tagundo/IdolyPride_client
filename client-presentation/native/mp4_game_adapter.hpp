@@ -227,6 +227,8 @@ public:
     Result validate_automatic_frame(double timeline_seconds);
     int drift_mode()const{return drift_mode_;}double drift_actual()const{return drift_actual_;}double drift_expected()const{return drift_expected_;}
     int drift_mode_=0;double drift_actual_=0,drift_expected_=0;
+    int primary_stale()const{return primary_stale_;}
+    mutable int primary_stale_=0;
     Result original_camera_updated(void* brain);
     // Main-thread pure completion/validation boundary before the coordinator
     // rebases source clock state. It does not rebuild/evaluate or resize.
@@ -827,16 +829,19 @@ inline Result GameAdapter::snapshot_selected(Snapshot& output) {
 }
 inline bool GameAdapter::primary_scene_current() const {
     void* presenter=get(presenter_),*player=get(player_),*director=get(director_),*controller=get(camera_controller_);
-    if(owner_replaced_||!presenter||!live(player)||!live(director)||!live(controller))return false;
+    // primary_stale_: which sub-check failed last (trace only).
+    if(owner_replaced_||!presenter||!live(player)||!live(director)||!live(controller)){primary_stale_=1;return false;}
     void* mode=nullptr,*data=nullptr;
-    if(resolve_selected_player(false,&mode,&data)!=player)return false;
-    if(scene_kind_==SceneKind::photography&&(mode!=get(photo_mode_)||data!=get(photo_data_)))return false;
+    if(resolve_selected_player(false,&mode,&data)!=player){primary_stale_=2;return false;}
+    if(scene_kind_==SceneKind::photography&&(mode!=get(photo_mode_)||data!=get(photo_data_))){primary_stale_=3;return false;}
     void* timeline=field<void*>(player,layout_.player_director_controller);
-    return timeline&&field<void*>(timeline,layout_.controller_master)==director
-        &&api_.director_get_asset(director,nullptr)==get(timeline_asset_)
-        &&field<void*>(controller,layout_.camera_main)==get(camera_)
-        &&live(get(brain_))&&api_.brain_output_camera(get(brain_),nullptr)==get(camera_)
-        &&camera_scope_current(timeline)&&audio_scope_current(timeline);
+    if(!timeline||field<void*>(timeline,layout_.controller_master)!=director){primary_stale_=4;return false;}
+    if(api_.director_get_asset(director,nullptr)!=get(timeline_asset_)){primary_stale_=5;return false;}
+    if(field<void*>(controller,layout_.camera_main)!=get(camera_)){primary_stale_=6;return false;}
+    if(!live(get(brain_))||api_.brain_output_camera(get(brain_),nullptr)!=get(camera_)){primary_stale_=7;return false;}
+    if(!camera_scope_current(timeline)){primary_stale_=8;return false;}
+    if(!audio_scope_current(timeline)){primary_stale_=9;return false;}
+    return true;
 }
 inline bool GameAdapter::camera_scope_current(void* timeline) const {
     if(!camera_scope_identity_||!live(get(camera_timeline_director_))

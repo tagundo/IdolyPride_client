@@ -1548,8 +1548,12 @@ inline bool native_fresh_render_boundary_impl(void*manager,double wall){
         job.clock_lost=true;terminal(clock.error());
     }
     if(job.scene_acquired&&!job.clock_lost&&job.stage!=Stage::retiring){
-        if(!api.current(api.context)||job.source_generation!=game.owned_scene_generation()
-            ||!game.owned_primary_scene_current())terminal("fresh_scene_changed");
+        const bool scene_current=api.current(api.context),same_generation=job.source_generation==game.owned_scene_generation();
+        const bool primary_current=scene_current&&same_generation&&game.owned_primary_scene_current();
+        if(!primary_current){
+            // frame: 1 host scene check, 2 generation, 3 adapter primary scene; tick: the adapter's failed sub-check.
+            diagnostic_event("fresh_current","boundary_failed_check",!scene_current?1:!same_generation?2:3,uint64_t(game.primary_stale()));
+            terminal("fresh_scene_changed");}
         else{
             const Result held=api.hold(api.context);
             if(held==Result::waiting){fresh_stage_wait("fresh_source_hold_timeout");return native_boundary_clock_tick(manager,wall);}
