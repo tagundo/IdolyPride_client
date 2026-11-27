@@ -523,6 +523,17 @@ def test_running_scope_needs_fresh_admission_and_monotonic_simulation_clock():
         qa.validate_running(current, 10)
 
 
+def test_fresh_pipeline_runs_without_the_in_place_world_admission_provider():
+    current = snapshot()
+    obs = current["native"]["observation"]
+    obs.update(coordinator_active=True, native_clock_owned=True, world_admission="unverified", simulation_tick=83)
+    current["native"]["pipeline_mode"] = "fresh_original_scene"
+    assert qa.validate_running(current, 81) == 83
+    obs["native_clock_owned"] = False
+    with pytest.raises(qa.Rejected, match="render_admission"):
+        qa.validate_running(current, 81)
+
+
 def test_native_clock_hold_requires_advancing_loop_without_timeline_progress():
     first, second = snapshot(100), snapshot(102)
     for payload in (first, second):

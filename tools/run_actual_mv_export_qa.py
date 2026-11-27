@@ -453,10 +453,17 @@ def validate_playing_source(first, second):
     return y
 
 
+def fresh_pipeline(state):
+    """The disposable reloaded-scene pipeline: it has no world-admission provider and no acquired source."""
+    return type(state) is dict and state.get("pipeline_mode") == "fresh_original_scene"
+
+
 def validate_running(payload, previous_tick=None):
     state, observed = native_payload(payload)
+    # Run 55: the fresh pipeline rendered 42 frames on its owned, held clock while
+    # world admission (a provider of the older in-place pipeline) stayed unverified.
     need(observed.get("coordinator_active") is True and observed.get("native_clock_owned") is True
-         and observed.get("world_admission") == "verified", "render_admission_not_verified")
+         and (observed.get("world_admission") == "verified" or fresh_pipeline(state)), "render_admission_not_verified")
     tick = observed.get("simulation_tick")
     need(tick is None or integer(tick), "simulation_tick_invalid")
     if previous_tick is not None and tick is not None:
@@ -1897,6 +1904,8 @@ class ActualRun:
                 continue
             phase = state.get("phase")
             if phase == "completed":
+                # Keep the produced file before any verdict check can end the run.
+                self.salvage_movie(state)
                 self.capture_mp4_diagnostics("completed", force=True)
                 need(observed_running, "no_actual_native_render_progress_observed")
                 need(acquired, "native_export_acquisition_baseline_unavailable")
@@ -1918,12 +1927,18 @@ class ActualRun:
             elif phase in ("rendering", "finishing"):
                 previous_tick = validate_running(payload, previous_tick)
                 observed_running = True
-                if not acquired and phase == "rendering":
+                if fresh_pipeline(state):
+                    # No acquired-source baseline and no pause exercise exist for the fresh
+                    # pipeline yet; the completion checks then fail closed, after the movie
+                    # itself was kept.
+                    self.report["fresh_pipeline_running_checks_skipped"] = True
+                elif not acquired and phase == "rendering":
                     baseline = export_acquisition_baseline(baseline, payload, replay=replay)
                     self.record("native_queue_replay_acquisition_baseline" if replay
                                 else "native_direct_acquisition_baseline", payload)
                     acquired = True
-                if phase == "rendering" and obs["accepted_frames"] >= 2 and not self.report.get("native_overlay_pause_resume_verified"):
+                if (phase == "rendering" and obs["accepted_frames"] >= 2 and not fresh_pipeline(state)
+                        and not self.report.get("native_overlay_pause_resume_verified")):
                     self.exercise_export_pause()
             if time.monotonic() - last_record >= 20:
                 self.record("export_progress", payload)
@@ -1933,6 +1948,31 @@ class ActualRun:
             self.relieve_system_anr()
             time.sleep(.25)
         raise Rejected("actual_full_export_timeout")
+
+    def salvage_movie(self, state):
+        """Best-effort copy of the just completed export into the movie evidence folder."""
+        try:
+            identifier = state.get("export_id")
+            if type(identifier) is not str or not HEX32.fullmatch(identifier):
+                raise Rejected("salvage_export_identity_invalid")
+            raw = self.device.adb("exec-out", "run-as", PACKAGE, "find", "files", "-type", "f", "-name", identifier + ".mp4")
+            paths = [line for line in raw.splitlines() if line.strip()]
+            need(len(paths) == 1, "salvage_source_not_unique")
+            path = PurePosixPath(paths[0])
+            need(path.parts[0] == "files" and all(p not in (".", "..") for p in path.parts)
+                 and path.name == identifier + ".mp4", "salvage_source_path_invalid")
+            size = self.device.adb("exec-out", "run-as", PACKAGE, "stat", "-c", "%s", str(path)).strip()
+            need(size.isdigit() and 1 <= int(size) <= MAX_MOVIE, "salvage_size_out_of_bounds")
+            folder = self.proof.parent / "video"
+            folder.mkdir(exist_ok=True)
+            movie = folder / "salvaged-before-verdict-actual-game.mp4"
+            with movie.open("wb") as output:
+                result = subprocess.run(self.device.base + ["exec-out", "run-as", PACKAGE, "cat", str(path)],
+                                        stdout=output, stderr=subprocess.PIPE, timeout=300)
+            need(result.returncode == 0 and movie.stat().st_size == int(size), "salvage_transfer_failed")
+            self.report["movie_salvaged_before_verdict"] = {"bytes": int(size), "sha256": sha(movie)}
+        except Exception as error:  # never let the salvage itself end the run
+            self.report["movie_salvage_error"] = str(error)[:200]
 
     def retrieve_and_decode(self, payload, label):
         state, _ = native_payload(payload)
