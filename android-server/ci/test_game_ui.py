@@ -1186,7 +1186,7 @@ def test_asset_retry_is_only_the_e209_dialogs_own_retry_button():
     button = {"instance_id": 1, "kind": "button", "name": "OkButton", "path": root + "Buttons/Root/OkButton",
               "active": True, "interactable": True, "bounds": [431.0, 652.0, 514.0, 712.0], "text": ""}
     def snapshot(description):
-        return {"ok": True, "nodes": [button, {"instance_id": 2, "kind": "tmp_text", "name": "Description",
+        return {"ok": True, "screen": {"width": 540, "height": 1140, "origin": "top-left", "units": "unity-screen-pixels"}, "nodes": [button, {"instance_id": 2, "kind": "tmp_text", "name": "Description",
                 "path": root + "Description", "active": True, "text": description, "bounds": [0, 0, 1, 1]}]}
     found = ui.asset_retry_target(snapshot("에셋 획득 실패\n네트워크 환경을 확인한 후 재시도해 주세요\n(E209)"))
     assert found is not None and found["instance_id"] == 1
