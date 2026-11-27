@@ -390,7 +390,7 @@ struct Job {
     uint64_t fresh_render_tick=0;
     bool fresh_render_ready=false;
     bool have_rendered_tick=false,prewarm_requested=false,prewarm_inflight=false,prewarm_completed=false;
-    const char*fresh_wait_error=nullptr;uint64_t fresh_stage_wait_started=0;
+    const char*fresh_wait_error=nullptr;uint64_t fresh_stage_wait_started=0,fresh_stage_wait_bias=0; // bias: time already counted (tests)
     bool automatic=false,fresh=false,fresh_started=false,fresh_pre_finish_settled=false,fresh_finish_settled=false,scene_acquired=false,auto_started=false,capture_requested=false,
         scene_restored=false,clock_lost=false,restoration_verified=false,
         clock_settings_restored=false,camera_audio_restored=false,dependent_state_restored=false;
@@ -1518,19 +1518,22 @@ inline bool native_render_boundary(void* manager,double wall){
 // Starting the reloaded scene waits for the MV's own VideoPlayer to report
 // Prepared, which a slow device decodes at its own pace (redroid run 26:
 // fresh_video_prepare_wait outlived 15 s at a few engine frames per second).
-// It keeps a longer, still bounded budget; every other stage keeps 15 s.
+// Acquiring it warms the reloaded scene for a number of engine frames, which
+// the same slow device draws at its own pace (redroid run 42:
+// fresh_warm_frame_wait outlived 15 s at five engine frames in 20 s). Both
+// keep a longer, still bounded budget; every other stage keeps 15 s.
 inline uint64_t fresh_stage_budget_ms(const char*timeout){
-    return timeout&&!strcmp(timeout,"fresh_scene_start_timeout")?60000:15000;
+    return timeout&&(!strcmp(timeout,"fresh_scene_start_timeout")||!strcmp(timeout,"fresh_scene_acquire_timeout"))?180000:15000;
 }
 inline void fresh_stage_wait(const char*timeout,const char*detail=nullptr){
     const uint64_t now=milliseconds();
-    if(!job.fresh_wait_error||strcmp(job.fresh_wait_error,timeout)||!job.fresh_stage_wait_started){job.fresh_wait_error=timeout;job.fresh_stage_wait_started=now;}
-    if(now>=job.fresh_stage_wait_started&&now-job.fresh_stage_wait_started>fresh_stage_budget_ms(timeout)){
+    if(!job.fresh_wait_error||strcmp(job.fresh_wait_error,timeout)||!job.fresh_stage_wait_started){job.fresh_wait_error=timeout;job.fresh_stage_wait_started=now;job.fresh_stage_wait_bias=0;}
+    if(now>=job.fresh_stage_wait_started&&now-job.fresh_stage_wait_started+job.fresh_stage_wait_bias>fresh_stage_budget_ms(timeout)){
         // The stage code says where; the scene's (or capture's) last wait says what for.
         diagnostic_event("fresh_wait",detail&&detail[0]&&strcmp(detail,"none")?detail:fresh_scene_error("unnamed_wait"),job.frame,0,true);terminal(timeout);}
 }
 inline void fresh_stage_ready(const char*timeout){
-    if(job.fresh_wait_error&&!strcmp(job.fresh_wait_error,timeout)){job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;}
+    if(job.fresh_wait_error&&!strcmp(job.fresh_wait_error,timeout)){job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;job.fresh_stage_wait_bias=0;}
 }
 inline bool native_fresh_render_boundary_impl(void*manager,double wall){
     auto&clock=native_engine_clock;auto&api=fresh_scene_api;
@@ -1597,7 +1600,7 @@ inline bool native_fresh_render_boundary_impl(void*manager,double wall){
         return native_boundary_clock_tick(manager,wall);
     }
     if(paused){
-        job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;
+        job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;job.fresh_stage_wait_bias=0;
         pthread_mutex_lock(&control_mutex);pause_acknowledged=true;reset_watchdog_pending=true;pthread_mutex_unlock(&control_mutex);
         return native_boundary_clock_tick(manager,wall);
     }

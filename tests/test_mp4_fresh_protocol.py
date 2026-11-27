@@ -421,7 +421,7 @@ int main(int argc,char**argv){
     const auto now=rtcore::milliseconds();assert(now>15001);rtcore::queue_prepare_wait_started=now-15001;deadline_advanced=true;
    }
    if(!deadline_advanced&&scenario=="direct_save_origin_timeout"&&rtcore::fresh_immediate_wait_started){const auto now=rtcore::milliseconds();assert(now>15001);rtcore::fresh_immediate_wait_started=now-15001;deadline_advanced=true;}
-   if(!deadline_advanced&&stage_timeout&&rtcore::job.fresh_stage_wait_started){const auto now=rtcore::milliseconds();const auto over=rtcore::fresh_stage_budget_ms(rtcore::job.fresh_wait_error)+1;assert(now>over);rtcore::job.fresh_stage_wait_started=now-over;deadline_advanced=true;}
+   if(!deadline_advanced&&stage_timeout&&rtcore::job.fresh_stage_wait_started){rtcore::job.fresh_stage_wait_bias=rtcore::fresh_stage_budget_ms(rtcore::job.fresh_wait_error)+1;deadline_advanced=true;}
    pump_fresh();
    timespec pause{0,1000000};nanosleep(&pause,nullptr);
    if(queue_failure&&save_cleanup_wait_count&&!restored){
@@ -731,6 +731,7 @@ def test_scene_start_alone_has_the_longer_bounded_budget():
     runtime = (ROOT / "client-presentation/native/mp4_runtime.hpp").read_text()
     budget = runtime[runtime.index("inline uint64_t fresh_stage_budget_ms("):]
     budget = budget[:budget.index("\n}\n") + 3]
-    assert '"fresh_scene_start_timeout")?60000:15000' in budget
+    assert ('(!strcmp(timeout,"fresh_scene_start_timeout")||!strcmp(timeout,"fresh_scene_acquire_timeout"))?180000:15000'
+            in budget)
     wait = runtime[runtime.index("inline void fresh_stage_wait("):]
-    assert "now-job.fresh_stage_wait_started>fresh_stage_budget_ms(timeout)" in wait[:wait.index("\n}\n")]
+    assert "now-job.fresh_stage_wait_started+job.fresh_stage_wait_bias>fresh_stage_budget_ms(timeout)" in wait[:wait.index("\n}\n")]

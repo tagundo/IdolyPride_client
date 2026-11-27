@@ -633,7 +633,7 @@ inline void queue_tick(){
     if(request.kind!=QueueCommandKind::none)queue_process(request);
     pthread_mutex_lock(&control_mutex);const bool reset_clock=reset_watchdog_pending;pthread_mutex_unlock(&control_mutex);
     if(reset_clock){queue_replay().resume_clock(milliseconds());fresh_immediate_wait_started=queue_prepare_wait_started=0;
-        job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;}
+        job.fresh_wait_error=nullptr;job.fresh_stage_wait_started=0;job.fresh_stage_wait_bias=0;}
     bool can_run=false;
     if(queue_replay_available&&!queue_blocked&&installed&&configured_valid){
         // Only original Unity callbacks inspect the router. Cold server menus
