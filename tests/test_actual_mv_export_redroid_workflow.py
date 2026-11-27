@@ -195,7 +195,8 @@ def test_derived_image_is_local_from_the_pinned_digest_and_boots_with_the_same_p
     assert "test \"$(docker image inspect -f '{{json .Config.Entrypoint}}' \"$RUN_IMAGE\")\" = \\" in boot
     assert 'docker cp "gapps-check:/system/$path" - | tar --numeric-owner -tvf -' in boot
     assert "if grep -vE '^(drwxr-xr-x|-rw-r--r--) 0/0 ' \"$R/gapps-image-files.txt\"; then" in boot
-    run = boot[boot.index("docker run -d --name redroid"):boot.index("androidboot.use_redroid_c2=1") + 30]
+    run = boot[boot.index("docker run -d --name redroid"):boot.index("androidboot.use_memfd=true $REDROID_C2_ARG") + 45]
+    assert "redroid) REDROID_C2_ARG=androidboot.use_redroid_c2=1 ;;" in boot and "aosp) REDROID_C2_ARG= ;;" in boot
     assert '\n            "$RUN_IMAGE" \\\n' in run and '"$IMAGE"' not in run
     for argument in ("androidboot.redroid_gpu_mode=guest", "androidboot.use_memfd=true", "androidboot.redroid_fps=30",
                      'androidboot.redroid_dpi="$DPI"', '-v "$REDROID_DATA:/data"'):

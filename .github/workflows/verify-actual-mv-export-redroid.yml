@@ -48,6 +48,14 @@ on:
         default: mindthegapps
         type: choice
         options: [mindthegapps, none]
+      redroid_c2:
+        description: >-
+          Codec2 service the guest boots with: redroid's own (androidboot.use_redroid_c2=1) or
+          AOSP's default. Run 35: the redroid one could not allocate YUV encoder input blocks.
+        required: true
+        default: redroid
+        type: choice
+        options: [redroid, aosp]
       profile_setup:
         description: >-
           QA-only profile setup before Launch: the server's own Viewing mode (unlocked viewing
@@ -377,13 +385,19 @@ jobs:
           mkdir -p "$REDROID_DATA"
           # Fresh /data on every job; adb published on the runner's loopback only.
           BOOT_START=$SECONDS
+          case "${{ inputs.redroid_c2 || 'redroid' }}" in
+            redroid) REDROID_C2_ARG=androidboot.use_redroid_c2=1 ;;
+            aosp) REDROID_C2_ARG= ;;
+            *) echo "::error::unsupported redroid_c2 choice"; exit 1 ;;
+          esac
+          echo "redroid_c2=${{ inputs.redroid_c2 || 'redroid' }}" > "$R/redroid-c2.txt"
           docker run -d --name redroid --privileged \
             -v "$REDROID_DATA:/data" \
             -p "127.0.0.1:${REDROID_SERIAL##*:}:5555" \
             "$RUN_IMAGE" \
             androidboot.redroid_width="$WIDTH" androidboot.redroid_height="$HEIGHT" androidboot.redroid_dpi="$DPI" \
             androidboot.redroid_fps=30 androidboot.redroid_gpu_mode=guest \
-            androidboot.use_memfd=true androidboot.use_redroid_c2=1
+            androidboot.use_memfd=true $REDROID_C2_ARG
           S="$REDROID_SERIAL"
           booted=
           for attempt in $(seq 1 300); do
