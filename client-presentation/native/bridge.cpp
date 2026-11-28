@@ -56359,9 +56359,6 @@ struct Mp4FreshSceneHost {
  idoly_mp4_fresh_qos::State qos{};bool qos_failed=false;
 }mp4_fresh_host;
 std::atomic<bool>mp4_fresh_withdrawn{false};
-// Source line of the first withdrawal of this export (trace only).
-std::atomic<int>mp4_fresh_withdrawn_at{0};
-inline void mp4_fresh_withdraw_mark(int line){int none=0;mp4_fresh_withdrawn_at.compare_exchange_strong(none,line,std::memory_order_acq_rel);mp4_fresh_withdrawn.store(true,std::memory_order_release);}
 uint64_t mp4_fresh_listener_sequence=0;
 Mp4FreshResult mp4_fresh_fail(Mp4FreshResult r,const char*error){mp4_fresh_host.error=error;return r;}
 bool mp4_fresh_keep(void*object){
@@ -56597,7 +56594,7 @@ bool mp4_fresh_video_publish(void*context,const mp4freshvideo::Identity&id,void*
 }
 void mp4_fresh_video_event(unsigned kind,void*script,void*player,int64_t frame){
  if(!game_call()){
-  for(auto&p:mp4_fresh_video_players)if(p.load(std::memory_order_acquire)==player){mp4_fresh_withdraw_mark(__LINE__);break;}
+  for(auto&p:mp4_fresh_video_players)if(p.load(std::memory_order_acquire)==player){mp4_fresh_withdrawn.store(true,std::memory_order_release);break;}
   return;
  }
  for(size_t i=0;i<mp4_fresh_video_count;++i){auto&e=mp4_fresh_videos[i];if(!e.active||e.identity.player!=player)continue;
@@ -56628,7 +56625,7 @@ bool mp4_fresh_video_suppress(void*script,bool,double){
  if(!script)return false;
  if(!game_call()){
   for(auto&p:mp4_fresh_video_scripts)if(p.load(std::memory_order_acquire)==script){
-   mp4_fresh_withdraw_mark(__LINE__);return true;
+   mp4_fresh_withdrawn.store(true,std::memory_order_release);return true;
   }
   return false;
  }
@@ -56638,7 +56635,7 @@ bool mp4_fresh_video_suppress(void*script,bool,double){
   // detachment, even if its scene/root receipt was just withdrawn.
   if(e.script==script){
    if(e.dropped)return true;
-   if(!mp4_fresh_video_current(&e,e.identity)){e.frames.abandon();mp4_fresh_withdraw_mark(__LINE__);}
+   if(!mp4_fresh_video_current(&e,e.identity)){e.frames.abandon();mp4_fresh_withdrawn.store(true,std::memory_order_release);}
    return true;
   }
  }
@@ -56655,7 +56652,7 @@ bool mp4_fresh_video_suppress(void*script,bool,double){
    ||!mp4_root_track_field(script,"IsRecording",mp4camp::RenderLayout::video_mixer_isrecording)
    ||!mp4_actor_field(script,mp4camp::RenderLayout::video_mixer_isrecording,recording)||recording
    ||!mp4_fresh_keep(script)){
-   e.frames.abandon();mp4_fresh_withdraw_mark(__LINE__);return true;
+   e.frames.abandon();mp4_fresh_withdrawn.store(true,std::memory_order_release);return true;
   }
   e.script=script;mp4_fresh_video_scripts[i].store(script,std::memory_order_release);return true;
  }
@@ -57133,8 +57130,8 @@ bool mp4_fresh_defer_master_play(void*self,Method*method,uintptr_t caller)noexce
    return false;}
   const bool schedules=mp4_fresh_reset_scheduler_timeline==timeline||mp4_fresh_base_scheduler(caller);
   if(!schedules&&!g.caller_reported){g.caller_reported=true;mp4_fresh_report_caller("unrecognized_play_caller",caller,true);}
-  if(g.deferred){if(schedules){if(g.reset_requests!=~uint64_t(0))++g.reset_requests;g.reset_required=true;g.reset_returned=false;g.await_scheduler=false;}g.failed=true;mp4_fresh_withdraw_mark(__LINE__);mp4_fresh_host.error="fresh_duplicate_play_request";idoly_mp4_runtime::diagnostic_event("fresh_prepare",g.bind_pending?"duplicate_master_play_unbound":"duplicate_master_play");return true;}
-  g.player=player;g.reset_required=schedules;g.reset_requests=schedules?1:0;g.await_scheduler=!schedules;if(!schedules){g.failed=true;mp4_fresh_host.error="fresh_unrecognized_master_play";mp4_fresh_withdraw_mark(__LINE__);}g.timeline=timeline;g.master=self;g.method=method;g.serial=request.serial;g.identity=request.identity;
+  if(g.deferred){if(schedules){if(g.reset_requests!=~uint64_t(0))++g.reset_requests;g.reset_required=true;g.reset_returned=false;g.await_scheduler=false;}g.failed=true;mp4_fresh_withdrawn.store(true,std::memory_order_release);mp4_fresh_host.error="fresh_duplicate_play_request";idoly_mp4_runtime::diagnostic_event("fresh_prepare",g.bind_pending?"duplicate_master_play_unbound":"duplicate_master_play");return true;}
+  g.player=player;g.reset_required=schedules;g.reset_requests=schedules?1:0;g.await_scheduler=!schedules;if(!schedules){g.failed=true;mp4_fresh_host.error="fresh_unrecognized_master_play";mp4_fresh_withdrawn.store(true,std::memory_order_release);}g.timeline=timeline;g.master=self;g.method=method;g.serial=request.serial;g.identity=request.identity;
   for(auto*object:{g.player,g.timeline,g.master}){
    const auto root=mp4_retain(object);if(!root||weak_get(root)!=object){if(root)weak_free(root);g.failed=true;g.deferred=true;idoly_mp4_runtime::diagnostic_event("fresh_prepare","master_play_root_failed",0,0,true);return true;}g.roots[g.root_count++]=root;}
   g.deferred=true;g.bind_pending=true;(void)mp4_fresh_play_gate_bind(true);return true;
@@ -57569,7 +57566,7 @@ Mp4FreshResult mp4_fresh_acquire(void*,const Mp4SceneWitness&source,uint64_t job
  if(!job||!source.generation||!idoly_mp4_runtime::native_clock_scope().held())return mp4_fresh_fail(Mp4FreshResult::invalid,"fresh_acquire_clock_missing");
  // A queued entry can reuse the host without the full reset in save_origin.
  if(!h.active){h.warming=h.warmed=h.warm_ready=false;h.warm_draws=h.warm_draws_at_size=0;}
- h.source=source;h.job=job;h.active=true;h.detached=false;mp4_fresh_withdrawn.store(false,std::memory_order_release);mp4_fresh_withdrawn_at.store(0,std::memory_order_release);
+ h.source=source;h.job=job;h.active=true;h.detached=false;mp4_fresh_withdrawn.store(false,std::memory_order_release);
  const auto played=mp4_fresh_release_deferred_play();if(played!=Mp4FreshResult::ok)return played;
  if(!h.warmed){const auto warm=mp4_fresh_warm();if(warm!=Mp4FreshResult::ok)return warm;}
  if(!h.roster){void*storage=::malloc(sizeof(Mp4FreshControlRoster));if(!storage)return mp4_fresh_fail(Mp4FreshResult::failed,"fresh_control_roster_allocation_failed");h.roster=new(idoly_mp4_actor_placement::Address{storage})Mp4FreshControlRoster{};}
@@ -57785,7 +57782,7 @@ Mp4FreshResult mp4_fresh_save_origin(void*){
  if(h.active)return mp4_fresh_fail(Mp4FreshResult::invalid,"fresh_previous_cleanup_pending");
  if(!mp4_fresh_origin_state().saved&&!h.listener.active()){
   h.~Mp4FreshSceneHost();new(idoly_mp4_actor_placement::Address{&h})Mp4FreshSceneHost{};
-  mp4_fresh_withdrawn.store(false,std::memory_order_release);mp4_fresh_withdrawn_at.store(0,std::memory_order_release);mp4_fresh_qos_foreign_changed.store(false,std::memory_order_release);mp4_fresh_video_program=Mp4FreshVideoProgram{};}
+  mp4_fresh_withdrawn.store(false,std::memory_order_release);mp4_fresh_qos_foreign_changed.store(false,std::memory_order_release);mp4_fresh_video_program=Mp4FreshVideoProgram{};}
  const auto saved=mp4_fresh_origin_save(nullptr);
  if(saved!=Mp4FreshResult::ok){h.error=mp4_fresh_origin_error(nullptr);return saved;}
  idoly_mp4_timeline_audio::ListenerResult muted;
@@ -57984,7 +57981,7 @@ bool mp4_install_fresh_runtime(){
  api.current=[](void*context){
   const bool current=mp4_fresh_current(context);static decltype(mp4_fresh_host.job) reported{};
   if(!current&&mp4_fresh_host.active&&!mp4_fresh_host.detached&&!(reported==mp4_fresh_host.job)){reported=mp4_fresh_host.job;
-   idoly_mp4_runtime::diagnostic_event("fresh_current","boundary_stale_line",uint64_t(mp4_fresh_stale_at),uint64_t(mp4_fresh_withdrawn_at.load(std::memory_order_acquire)));}
+   idoly_mp4_runtime::diagnostic_event("fresh_current","boundary_stale_line",uint64_t(mp4_fresh_stale_at));}
   return current;};
  api.prepare_step=mp4_fresh_prepare_step;api.grant=mp4_fresh_grant;api.prepare_render=mp4_fresh_prepare_render;
  api.prepare_finish=mp4_fresh_prepare_finish;api.finish=mp4_fresh_finish;api.error=mp4_fresh_error;api.withdraw=mp4_fresh_withdraw;api.audio_source_error=mp4_fresh_audio_source_error;

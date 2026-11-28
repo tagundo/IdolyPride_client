@@ -24,7 +24,7 @@ struct Mp4ChildDrivingFrameData {uint8_t bytes[64]{};};
 struct Script {void*player=nullptr;uint8_t recording=0;bool typed=true,player_field=true,recording_field=true;};
 struct Frames {int abandoned=0;void abandon(){++abandoned;}};
 struct Identity {void*player=nullptr;};
-struct Entry {Frames frames;Identity identity;void*script=nullptr;bool active=false,current=true;};
+struct Entry {Frames frames;Identity identity;void*script=nullptr;bool active=false,current=true,dropped=false;};
 Entry mp4_fresh_videos[16];size_t mp4_fresh_video_count=1;
 std::atomic<void*>mp4_fresh_video_scripts[16];std::atomic<bool>mp4_fresh_withdrawn{false};
 bool owner=true,selected=true,callbacks=true,retain_ok=true;

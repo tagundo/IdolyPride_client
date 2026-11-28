@@ -55,6 +55,8 @@ void*components(void*go,void*type,bool,bool hierarchy,bool,bool,void*,Method*){a
  for(void*v:all)if(type==component_token||mp4_type_is(v,"UnityEngine.Playables.PlayableDirector"))array->values.push_back(v);
  return array;}
 bool mp4_actor_graph_mode(mp4actor::Handle*graph,int32_t*mode){if(!graph||!graph->handle||!mp4_alive(reinterpret_cast<void*>(graph->handle)))return false;*mode=static_cast<Object*>(reinterpret_cast<void*>(graph->handle))->mode;return *mode>=0&&*mode<=3;}
+void mp4_actor_graph_set(mp4actor::Handle*graph,int32_t mode,void*){if(graph&&graph->handle&&mp4_alive(reinterpret_cast<void*>(graph->handle)))static_cast<Object*>(reinterpret_cast<void*>(graph->handle))->mode=mode;}
+namespace idoly_mp4_runtime {inline void diagnostic_event(const char*,const char*,uint64_t=0,uint64_t=0,bool=false){}}
 struct Profile{mp4game::Binding director_get_asset,director_get_reference,director_graph_injected,director_get_mode,track_muted_hierarchy,graph_valid;}mp4_profile;
 struct{mp4game::Binding get_game_object,get_components_internal,playable_valid,script_instance,playable_graph_get,graph_root_count,graph_root;}mp4_actor_profile;
 struct{mp4game::Binding component;}mp4_cam_types;
