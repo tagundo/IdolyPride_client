@@ -369,7 +369,7 @@ def source_snapshot(root, commit, allow_working):
 
 
 def build_config(asset_info):
-    gradle_version = '2026.11.23.9'
+    gradle_version = '2026.11.23.10'
     fields = ['package ' + SERVER_PACKAGE + ';', 'public final class BuildConfig {',
         'public static final boolean DEBUG = false;',
         'public static final String APPLICATION_ID = "' + PACKAGE + '";',
