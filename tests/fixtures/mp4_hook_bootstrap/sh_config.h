@@ -1,0 +1,3 @@
+#pragma once
+
+#define SHADOWHOOK_ERRNO_HOOK_ISLAND_REWRITE 42

@@ -1,0 +1,60 @@
+# Read-only host capability probe for running the ARM64 game natively.
+# No game, APK, account or release is touched.
+name: Probe ARM64 Android host capabilities
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-135ccacf-oukoym]
+    paths: [.github/workflows/probe-arm64-android-host.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04-arm, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        # Probe every capability; a missing one must not hide the others.
+        shell: bash --noprofile --norc -x {0}
+    steps:
+      - name: Host, CPU, memory, virtualization and GPU
+        run: |
+          uname -a; nproc; free -g; df -h / | tail -1
+          grep -m3 -i -E 'model name|Features|flags' /proc/cpuinfo | cut -c1-300
+          ls -l /dev/kvm || echo NO_DEV_KVM
+          ls -l /dev/dri || echo NO_DEV_DRI
+          grep -E 'CONFIG_KVM=|CONFIG_ANDROID_BINDER|CONFIG_ANDROID_BINDERFS|CONFIG_ASHMEM|CONFIG_PSI=' /boot/config-$(uname -r) || echo NO_BOOT_CONFIG
+          ls /lib/modules/$(uname -r)/kernel/drivers/android || echo NO_ANDROID_MODULE_DIR
+          modinfo binder_linux | head -3 || echo NO_BINDER_MODINFO
+      - name: Try binder (redroid prerequisite)
+        run: |
+          if ! sudo modprobe binder_linux devices=binder,hwbinder,vndbinder; then
+            sudo apt-get update -q >/dev/null 2>&1
+            sudo apt-get install -y -q "linux-modules-extra-$(uname -r)" >/dev/null 2>&1 || echo NO_EXTRA_MODULES_PACKAGE
+            sudo modprobe binder_linux devices=binder,hwbinder,vndbinder || echo BINDER_MODULE_UNAVAILABLE
+          fi
+          lsmod | grep -i binder || echo NO_BINDER_LOADED
+          grep binder /proc/filesystems || echo NO_BINDERFS
+          docker version --format '{{.Server.Version}}' || echo NO_DOCKER
+      - name: Try KVM access and the Android emulator package for this host
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            python3 -c "import fcntl,os;fd=os.open('/dev/kvm',os.O_RDWR);print('KVM_GET_API_VERSION',fcntl.ioctl(fd,0xAE00))"
+          fi
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o tools.zip https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+          unzip -q tools.zip && mkdir -p sdk/cmdline-tools && mv cmdline-tools sdk/cmdline-tools/latest
+          M="sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$RUNNER_TEMP/sdk"
+          yes | $M --licenses >/dev/null 2>&1
+          $M --list 2>/dev/null | grep -E '^ *(emulator|system-images;android-3[4-6];(google_apis|default|google_apis_playstore);(arm64-v8a|x86_64)) ' | head -20
+          $M --install emulator >/dev/null 2>&1 || echo EMULATOR_INSTALL_FAILED
+          file sdk/emulator/emulator sdk/emulator/qemu/*/qemu-system-* | head -4
+          sdk/emulator/emulator -accel-check 2>&1 | tail -6

@@ -1,0 +1,192 @@
+# Which disposable redroid configuration can run the app's own MP4 encoder?
+# Runs only the isolated synthetic codec QA app (the production Java encoder
+# with generated frames); no game, account or release is touched. Redroid MV
+# run 35 failed in c2.android.avc.encoder: "fetch graphic block failed: 14".
+name: Probe redroid codec configurations
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-135ccacf-oukoym]
+    paths: [.github/workflows/probe-redroid-codecs.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Build the isolated codec QA APK from the current production Java encoder
+        run: |
+          python -B tools/build_android_mp4_qa.py \
+            --output-directory "$RUNNER_TEMP/codec-qa" --android-sdk "$ANDROID_HOME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: redroid-codec-qa-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codec-qa
+          retention-days: 3
+
+  probe:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: a15-guest-plain, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: false, gralloc: ''}
+          - {name: a15-guest-cros-vgem, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: true, gralloc: cros}
+          - {name: a15-guest-cros, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: false, gralloc: cros}
+          - {name: a15-guest-gbm-vgem, image: '15.0.0_64only-250627', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true androidboot.use_redroid_c2=1', vgem: true, gralloc: gbm}
+          - {name: a11-guest, image: '11.0.0-latest', args: 'androidboot.redroid_gpu_mode=guest androidboot.use_memfd=true', vgem: false, gralloc: ''}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: redroid-codec-qa-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codec-qa
+      - name: Host setup
+        run: |
+          set -euo pipefail
+          sudo modprobe binder_linux devices=binder,hwbinder,vndbinder
+          if [ '${{ matrix.vgem }}' = true ]; then
+            sudo modprobe vgem || { sudo apt-get update -qq; sudo apt-get install -y -q "linux-modules-extra-$(uname -r)"; sudo modprobe vgem; } || echo VGEM_UNAVAILABLE
+          fi
+          mkdir -p "$RUNNER_TEMP/codec-qa"
+          { ls -l /dev/dri /dev/dma_heap 2>&1; lsmod | grep -E 'vgem|vkms|drm' ; uname -r; } | tee "$RUNNER_TEMP/codec-qa/host-drm.txt" || true
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends adb ffmpeg
+      - name: Boot redroid (${{ matrix.name }})
+        id: boot
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          set -uo pipefail
+          E="$RUNNER_TEMP/codec-qa"
+          docker pull -q "redroid/redroid:${{ matrix.image }}" || { echo IMAGE_PULL_FAILED | tee "$E/boot.txt"; exit 1; }
+          docker image inspect -f '{{index .RepoDigests 0}}' "redroid/redroid:${{ matrix.image }}" | tee "$E/image.txt"
+          # Run 4: gralloc.redroid has no YUV formats; the image also carries minigbm (gralloc.cros)
+          # and gbm_gralloc. The guest GPU stack is kept and only the allocator module is swapped.
+          RUN_IMAGE="redroid/redroid:${{ matrix.image }}"
+          docker create --name redroid-src "$RUN_IMAGE" >/dev/null
+          docker cp redroid-src:/vendor/bin/gpu_config.sh "$E/gpu_config.orig.sh.txt" || true
+          docker rm redroid-src >/dev/null
+          if [ -n '${{ matrix.gralloc }}' ]; then
+            C="$RUNNER_TEMP/swap"; mkdir -p "$C"
+            sed 's/setprop ro.hardware.gralloc redroid/setprop ro.hardware.gralloc ${{ matrix.gralloc }}/' "$E/gpu_config.orig.sh.txt" > "$C/gpu_config.sh"
+            grep -q 'ro.hardware.gralloc ${{ matrix.gralloc }}' "$C/gpu_config.sh" || { echo GRALLOC_PATCH_FAILED | tee "$E/boot.txt"; exit 1; }
+            printf 'FROM %s\nCOPY --chown=0:2000 --chmod=755 gpu_config.sh /vendor/bin/gpu_config.sh\n' "$RUN_IMAGE" > "$C/Dockerfile"
+            docker build -q -t redroid-swap "$C" || { echo SWAP_IMAGE_BUILD_FAILED | tee "$E/boot.txt"; exit 1; }
+            RUN_IMAGE=redroid-swap
+          fi
+          docker run -d --name redroid --privileged -p 127.0.0.1:15555:5555 \
+            "$RUN_IMAGE" \
+            androidboot.redroid_width=540 androidboot.redroid_height=1140 androidboot.redroid_dpi=220 \
+            ${{ matrix.args }}
+          booted=
+          for attempt in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Running}}' redroid)" = true ] || { echo CONTAINER_EXITED | tee "$E/boot.txt"; break; }
+            timeout 4 adb connect 127.0.0.1:15555 >/dev/null 2>&1 || true
+            if [ "$(timeout 4 adb -s 127.0.0.1:15555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then booted=1; break; fi
+            sleep 3
+          done
+          echo "booted=${booted:-0} seconds=$SECONDS" | tee -a "$E/boot.txt"
+          # What allocators does the image carry, and what selects one?
+          {
+            timeout 30 docker exec redroid sh -c 'ls -l /vendor/lib64/hw /system/lib64/hw /vendor/lib/hw 2>&1; echo ---; grep -rnE "hardware\.(gralloc|egl|vulkan)|gpu_mode" /vendor/etc/init /system/etc/init /vendor/bin/*.sh /vendor/*.rc /*.rc /vendor/build.prop /vendor/default.prop 2>/dev/null | head -n 80; echo ---; ls -l /dev/dri /dev/dma_heap /dev/ion /dev/ashmem* 2>&1; echo ---; ls /vendor/lib64 | grep -iE "gbm|drm|gralloc|mesa|dri|minigbm|swiftshader|angle"; ls /vendor/lib64/dri 2>&1 | head -n 30'
+          } > "$E/image-inspect.txt" 2>&1 || true
+          timeout 20 docker exec redroid logcat -d 2>/dev/null | grep -iE 'gralloc|minigbm|cros|gbm|drm|allocator|surfaceflinger|hwcomposer|FATAL|Abort|vulkan|SwiftShader|ANGLE|EGL' | tail -n 400 > "$E/boot-logcat.txt" || true
+          timeout 20 docker exec redroid sh -c 'getprop | grep -E "hardware\.|boot_completed|init.svc"' > "$E/boot-props.txt" 2>&1 || true
+          test -n "$booted"
+          for attempt in $(seq 1 60); do timeout 10 adb -s 127.0.0.1:15555 shell cmd package list packages >/dev/null 2>&1 && break; sleep 2; done
+          timeout 20 adb -s 127.0.0.1:15555 shell 'getprop | grep -iE "gralloc|egl|vulkan|redroid|build.version.sdk"' > "$E/props.txt" 2>&1 || true
+      - name: Find the Android 11 Google Play services package (pin discovery only)
+        if: matrix.name == 'a11-guest'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          set -uo pipefail
+          E="$RUNNER_TEMP/codec-qa"; G="$RUNNER_TEMP/gapps11"; mkdir -p "$G"
+          curl -fsSL https://api.github.com/repos/MindTheGapps/11.0.0-arm64/releases?per_page=3 > "$G/releases.json" || { echo RELEASES_UNAVAILABLE > "$E/gapps11.txt"; exit 0; }
+          URL=$(python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(next(a['browser_download_url'] for a in r[0]['assets'] if a['name'].endswith('.zip')))" "$G/releases.json")
+          curl -fsSL --max-time 500 -o "$G/gapps.zip" "$URL" || { echo "DOWNLOAD_FAILED $URL" > "$E/gapps11.txt"; exit 0; }
+          { echo "url=$URL"; echo "zip_sha256=$(sha256sum "$G/gapps.zip" | cut -d' ' -f1)"
+            python3 - "$G/gapps.zip" <<'PY'
+          import hashlib, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              for i in z.infolist():
+                  if i.is_dir(): continue
+                  h = hashlib.sha256(z.read(i)).hexdigest() if i.filename.endswith('.apk') else '-'
+                  print(i.file_size, h, i.filename)
+          PY
+          } > "$E/gapps11.txt" 2>&1
+      - name: Run the production encoder on synthetic frames
+        if: steps.boot.outcome == 'success'
+        continue-on-error: true
+        run: |
+          # The runner's ANDROID_HOME has no linux-arm64 adb; use Ubuntu's adb from PATH.
+          ADB_REAL="$(readlink -f "$(command -v adb)")"
+          mkdir -p "$RUNNER_TEMP/sdk/platform-tools" && cp "$ADB_REAL" "$RUNNER_TEMP/sdk/platform-tools/adb"
+          python -B tools/build_android_mp4_qa.py --run-device --serial 127.0.0.1:15555 --timeout 600 \
+            --android-sdk "$RUNNER_TEMP/sdk" --output-directory "$RUNNER_TEMP/codec-qa" 2>&1 | tee "$RUNNER_TEMP/codec-qa/tool-output.txt"
+      - name: Summarize
+        if: always()
+        run: |
+          E="$RUNNER_TEMP/codec-qa"
+          timeout 20 adb -s 127.0.0.1:15555 logcat -d 2>/dev/null | grep -E 'fetch graphic block|NO_MEMORY|CCodec.*(Created component|failed)|gralloc|Gralloc' | tail -n 60 > "$E/codec-logcat.txt" || true
+          timeout 20 docker logs redroid 2>&1 | tail -n 80 > "$E/docker-logs.txt" || true
+          {
+            echo "### ${{ matrix.name }}"
+            cat "$E/boot.txt" 2>/dev/null
+            python3 - "$E" <<'PY'
+          import json, sys, pathlib
+          d = pathlib.Path(sys.argv[1])
+          try:
+              r = json.loads((d / "runtime-report.json").read_text())
+              print("status:", r.get("status"), "|", str(r.get("error", ""))[:200])
+              for case in (r.get("result") or {}).get("cases", []):
+                  print(" -", case.get("name"), case.get("status"), str(case.get("error", ""))[:160])
+          except Exception as error:
+              print("no runtime report:", type(error).__name__)
+          try:
+              t = json.loads((d / "terminal-report.json").read_text())
+              for case in t.get("cases", []):
+                  print(" *", case.get("name"), case.get("status"), str(case.get("error", ""))[:160])
+          except Exception:
+              pass
+          PY
+            tail -n 6 "$E/codec-logcat.txt" 2>/dev/null
+          } | tee -a "$GITHUB_STEP_SUMMARY" "$E/summary.txt"
+          docker rm -f redroid >/dev/null 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: redroid-codec-probe-${{ matrix.name }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/codec-qa/*.txt
+            ${{ runner.temp }}/codec-qa/*.json
+          retention-days: 7

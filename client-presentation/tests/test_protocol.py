@@ -7,13 +7,13 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "client-presentation"
-JDK = Path("/workspace/.setup/jdk-system/usr/lib/jvm/java-21-openjdk-amd64/bin")
 SPEC = importlib.util.spec_from_file_location("presentation_addon_protocol", HERE / "build_addon.py")
 ADDON = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ADDON)
 
 
-def test_java_protocol_and_transport_boundaries(tmp_path):
+def test_java_protocol_and_transport_boundaries(tmp_path, presentation_jdk):
+    JDK = presentation_jdk
     sources = [HERE / "java/game/qualiarts/idolypride/presentation/PresentationClient.java",
                HERE / "tests/PresentationHarness.java"]
     flags = ["-Xmx128m", "-XX:MaxMetaspaceSize=128m", "-XX:ReservedCodeCacheSize=32m",
@@ -27,7 +27,8 @@ def test_java_protocol_and_transport_boundaries(tmp_path):
     assert result.stdout.startswith("PASS ") and int(result.stdout.split()[1]) >= 45
 
 
-def test_java_playback_protocol_transport_and_native_default_retention(tmp_path):
+def test_java_playback_protocol_transport_and_native_default_retention(tmp_path, presentation_jdk):
+    JDK = presentation_jdk
     sources = [HERE / "java/game/qualiarts/idolypride/presentation/PresentationClient.java",
                HERE / "tests/PlaybackHarness.java"]
     flags = ["-Xmx128m", "-XX:MaxMetaspaceSize=128m", "-XX:ReservedCodeCacheSize=32m",
@@ -41,7 +42,8 @@ def test_java_playback_protocol_transport_and_native_default_retention(tmp_path)
     assert result.stdout.startswith("PASS ") and int(result.stdout.split()[1]) >= 90
 
 
-def test_java_render_probe_nullable_contract_optional_endpoint_and_transport(tmp_path):
+def test_java_render_probe_nullable_contract_optional_endpoint_and_transport(tmp_path, presentation_jdk):
+    JDK = presentation_jdk
     sources = [HERE / "java/game/qualiarts/idolypride/presentation/PresentationClient.java",
                HERE / "tests/RenderProbeHarness.java"]
     env = dict(os.environ, MALLOC_ARENA_MAX="2")
@@ -53,10 +55,10 @@ def test_java_render_probe_nullable_contract_optional_endpoint_and_transport(tmp
     assert result.stdout.startswith("PASS ") and int(result.stdout.split()[1]) >= 250
 
 
-def test_jdk21_captured_parameter_metadata_compiles_through_cached_d8(tmp_path):
+def test_jdk21_captured_parameter_metadata_compiles_through_cached_d8(tmp_path, presentation_jdk, presentation_android34_tools):
     """Exercise real production classes at the former D8 null-name boundary."""
-    android = Path("/workspace/.setup/android-sdk/platforms/android-34/android.jar")
-    d8 = Path("/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar")
+    JDK = presentation_jdk
+    android, d8 = presentation_android34_tools
     classes, dex = tmp_path / "classes", tmp_path / "dex"
     classes.mkdir(); dex.mkdir()
     env = dict(os.environ, MALLOC_ARENA_MAX="2")

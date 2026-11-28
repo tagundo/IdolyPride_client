@@ -24,9 +24,10 @@ NAME = re.compile(r"adv_[a-z0-9_-]{1,160}\.txt\Z")
 class ZipScriptSource:
     """Pinned compressed source reader; never expands unrelated master files."""
 
-    def __init__(self, path, prefix, *, expected_sha256):
+    def __init__(self, path, prefix, *, expected_sha256, max_archive_bytes=64 * 1024 * 1024):
         path = Path(path)
-        if (path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 64 * 1024 * 1024
+        if (type(max_archive_bytes) is not int or not 1 <= max_archive_bytes <= 192 * 1024 * 1024
+                or path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= max_archive_bytes
                 or not isinstance(prefix, str) or not prefix.endswith("/") or prefix.startswith("/")
                 or "\\" in prefix or any(part in ("", ".", "..") for part in prefix[:-1].split("/"))
                 or not isinstance(expected_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)):

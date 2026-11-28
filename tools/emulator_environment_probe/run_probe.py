@@ -12,6 +12,13 @@ import time
 
 PACKAGE = "org.idolypride.environmentprobe"
 ACTIVITY = PACKAGE + "/.ProbeActivity"
+TRANSLATED_GUEST, REDROID_GUEST = "translated-emulator", "redroid"
+COMMON_PROPERTIES = ("ro.build.version.sdk", "ro.product.cpu.abilist", "ro.dalvik.vm.native.bridge",
+                     "ro.hardware.egl", "ro.boot.qemu.avd_name", "ro.build.version.incremental")
+# A native ARM64 container has no translator to hash; record its GPU/codec stack instead.
+REDROID_PROPERTIES = ("ro.hardware", "ro.boot.hardware", "ro.product.device", "ro.product.cpu.abi",
+                      "ro.hardware.vulkan", "ro.hardware.gralloc", "ro.boot.redroid_gpu_mode",
+                      "ro.opengles.version", "debug.stagefright.ccodec", "sys.use_memfd", "ro.build.fingerprint")
 
 
 def scoped_crash_log(text, pid):
@@ -56,7 +63,16 @@ def validate_report(report):
                for key in ("vertex_vec4_300", "fragment_vec4_300"))
 
 
-def run(adb, serial, apk, output, timeout=60, record_root=False):
+def guest_properties(guest):
+    if guest == TRANSLATED_GUEST:
+        return COMMON_PROPERTIES
+    if guest == REDROID_GUEST:
+        return COMMON_PROPERTIES + REDROID_PROPERTIES
+    raise ValueError("unsupported guest kind")
+
+
+def run(adb, serial, apk, output, timeout=60, record_root=False, guest=TRANSLATED_GUEST):
+    names = guest_properties(guest)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     base = [str(adb)] + (["-s", serial] if serial else [])
@@ -84,12 +100,14 @@ def run(adb, serial, apk, output, timeout=60, record_root=False):
     # A failed removal must abort: a previous successful report cannot qualify this run.
     call("shell", "run-as", PACKAGE, "rm", "-f", "files/report.json")
     properties = {}
-    for key in ("ro.build.version.sdk", "ro.product.cpu.abilist", "ro.dalvik.vm.native.bridge",
-                "ro.hardware.egl", "ro.boot.qemu.avd_name", "ro.build.version.incremental"):
+    for key in names:
         properties[key] = call("shell", "getprop", key).strip()
-    bridge_hash = call("shell", "sha256sum", "/system/lib64/libndk_translation.so", check=False).split()
-    if bridge_hash and len(bridge_hash[0]) == 64 and all(c in "0123456789abcdef" for c in bridge_hash[0]):
-        properties["libndk_translation_sha256"] = bridge_hash[0]
+    if guest == TRANSLATED_GUEST:
+        bridge_hash = call("shell", "sha256sum", "/system/lib64/libndk_translation.so", check=False).split()
+        if bridge_hash and len(bridge_hash[0]) == 64 and all(c in "0123456789abcdef" for c in bridge_hash[0]):
+            properties["libndk_translation_sha256"] = bridge_hash[0]
+    else:
+        properties["uname_machine"] = call("shell", "uname", "-m", check=False).strip()[:32]
     call("shell", "am", "start", "-W", "-n", ACTIVITY)
     report = None
     first_pid = None
@@ -129,7 +147,7 @@ def run(adb, serial, apk, output, timeout=60, record_root=False):
                                 capture_output=True, timeout=20, check=False)
     if screenshot.returncode == 0:
         (output / "probe.png").write_bytes(screenshot.stdout)
-    summary = {"schema": 1, "synthetic_only": True, "runtime_attempted": True,
+    summary = {"schema": 1, "synthetic_only": True, "runtime_attempted": True, "guest": guest,
                "environment_compatible": validate_report(report), "failure": failure,
                "first_pid": first_pid, "last_pid": last_pid, "properties": properties,
                "game_installed_or_launched": False,
@@ -148,8 +166,11 @@ def main():
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--record-root", action="store_true",
                         help="Record adb root/whoami support on the dedicated test emulator; not a pass requirement")
+    parser.add_argument("--guest", choices=(TRANSLATED_GUEST, REDROID_GUEST), default=TRANSLATED_GUEST,
+                        help="Recorded identity properties; the graphics/CPU pass gate is the same for every guest")
     args = parser.parse_args()
-    raise SystemExit(0 if run(args.adb, args.serial, args.apk, args.output, args.timeout, args.record_root) else 1)
+    raise SystemExit(0 if run(args.adb, args.serial, args.apk, args.output, args.timeout, args.record_root,
+                              args.guest) else 1)
 
 
 if __name__ == "__main__":

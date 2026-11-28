@@ -37,6 +37,8 @@ final class LoopbackUiServer implements Runnable {
     interface Actions {
         String health();
         String snapshot();
+        default String mp4Status() { return error("mp4_observer_unavailable"); }
+        default String mp4Diagnostics() { return error("mp4_observer_unavailable"); }
         String click(int instanceId, long generation);
     }
 
@@ -133,6 +135,8 @@ final class LoopbackUiServer implements Runnable {
             if (length != 0) { reply(socket, 400, error("unexpected_body")); return; }
             if (request[1].equals("/health")) reply(socket, 200, actions.health());
             else if (request[1].equals("/snapshot")) reply(socket, 200, actions.snapshot());
+            else if (request[1].equals("/mp4-status")) reply(socket, 200, actions.mp4Status());
+            else if (request[1].equals("/mp4-diagnostics")) reply(socket, 200, actions.mp4Diagnostics());
             else reply(socket, 404, error("unknown_endpoint"));
             return;
         }

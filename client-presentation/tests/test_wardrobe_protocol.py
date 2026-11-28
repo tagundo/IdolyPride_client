@@ -12,11 +12,11 @@ import threading
 import pytest
 
 HERE=Path(__file__).resolve().parents[1]
-JDK=Path("/workspace/.setup/jdk-system/usr/lib/jvm/java-21-openjdk-amd64/bin")
 SPEC=importlib.util.spec_from_file_location("wardrobe_addon_protocol",HERE/"build_addon.py")
 ADDON=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(ADDON)
 
-def test_java_wardrobe_schema_transport_and_other_channel_retention(tmp_path):
+def test_java_wardrobe_schema_transport_and_other_channel_retention(tmp_path, presentation_jdk):
+    JDK = presentation_jdk
     sources=[HERE/"java/game/qualiarts/idolypride/presentation/PresentationClient.java",HERE/"tests/WardrobeHarness.java"]
     env=dict(os.environ,MALLOC_ARENA_MAX="2")
     subprocess.run([str(JDK/"javac"),*["-J"+f for f in ADDON.JAVA_FLAGS],*ADDON.JAVAC_ARGUMENTS,
@@ -26,7 +26,8 @@ def test_java_wardrobe_schema_transport_and_other_channel_retention(tmp_path):
     assert result.stdout.startswith("PASS ") and int(result.stdout.split()[1])>=190
 
 
-def test_native_schema2_snapshots_reach_java_and_actual_loopback_post(tmp_path):
+def test_native_schema2_snapshots_reach_java_and_actual_loopback_post(tmp_path, presentation_jdk):
+    JDK = presentation_jdk
     compiler = shutil.which("c++")
     if compiler is None:
         pytest.skip("Host C++ compiler unavailable")

@@ -3,6 +3,14 @@ name: Build native server candidates or draft assets
 on:
   workflow_dispatch:
     inputs:
+      ios_unified:
+        description: Build an Actions-only integrated iPhone/iPad IPA and run a disposable iOS Simulator core probe
+        type: boolean
+        default: false
+      ios_publish:
+        description: After unified iOS verification, publish an immutable source download branch with full IPA readback
+        type: boolean
+        default: false
       artifact_only:
         description: Build Actions-only candidates for separate Android native runtime QA; leave the release draft untouched
         type: boolean
@@ -16,8 +24,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-server-apps-${{ inputs.fixed_payload_patch && 'v0.3.2' || 'v0.3.0' }}
-  cancel-in-progress: true
+  group: native-server-apps-${{ inputs.ios_unified && (inputs.ios_publish && 'ios-unified-publication' || 'ios-unified') || (inputs.fixed_payload_patch && 'v0.3.2' || 'v0.3.0') }}
+  cancel-in-progress: ${{ !inputs.ios_publish }}
 
 env:
   GH_REPO: ${{ github.repository }}
@@ -29,6 +37,7 @@ env:
 
 jobs:
   prepare:
+    if: ${{ !inputs.ios_unified }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -267,7 +276,7 @@ jobs:
     # Release uploads stay paused until native ARM runtime QA replaces the
     # translated gate. artifact_only builds bytes for that separate QA and
     # never uploads Android APKs to the release or claims runtime success.
-    if: ${{ inputs.artifact_only || vars.IDOLY_ANDROID_NATIVE_RUNTIME_QA_READY == 'true' }}
+    if: ${{ !inputs.ios_unified && (inputs.artifact_only || vars.IDOLY_ANDROID_NATIVE_RUNTIME_QA_READY == 'true') }}
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -748,6 +757,7 @@ jobs:
           compression-level: 0
 
   macos:
+    if: ${{ !inputs.ios_unified }}
     needs: prepare
     runs-on: macos-15
     timeout-minutes: 35
@@ -801,13 +811,40 @@ jobs:
             --report data/macos-evidence/native-live-engine/abi-report.json
           cp data/native-live/macos/build-report.json data/macos-evidence/native-live-engine/
           git diff --exit-code -- native-live-engine/go.mod native-live-engine/go.sum
+      - name: Prepare the frozen latest Mac public cohort
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PYCODE'
+          import importlib.util,os,sys
+          from pathlib import Path
+          root=Path.cwd()
+          def module(name,path):
+              spec=importlib.util.spec_from_file_location(name,root/path)
+              result=importlib.util.module_from_spec(spec);sys.modules[name]=result
+              spec.loader.exec_module(result);return result
+          work=Path(os.environ['RUNNER_TEMP'])/'latest-macos-payload'
+          work.mkdir(mode=0o700)
+          verifier=module('legacy_workflow_latest_pin','tools/latest_server_data_pin.py')
+          verifier.verify_source_pointer()
+          blob=work/'latest-server-overlay.zip'
+          verifier.fetch_overlay(blob);verifier.verify_overlay(blob)
+          prepare=module('legacy_workflow_latest_prepare','tools/prepare_latest_server_data.py')
+          payload=work/'ServerData.zip';proof=work/'server-data-preparation.json'
+          report=prepare.upgrade_server_data(None,payload,overlay_zip=blob,report_path=proof)
+          verifier.verify_upgrade_proof(report);verifier.verify_payload(payload)
+          print('Pinned latest Mac payload prepared')
+          PYCODE
       - name: Build the frozen engine and exercise the actual relocated SwiftUI app
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p data/macos-evidence data/dist
           .venv/bin/python macos-server/build_app.py \
-            --server-data "data/dist/$IDOLY_PAYLOAD_NAME" \
+            --server-data "$RUNNER_TEMP/latest-macos-payload/ServerData.zip" \
+            --server-data-upgrade-proof "$RUNNER_TEMP/latest-macos-payload/server-data-preparation.json" \
             --output data/macos/IdolyPrideLocalServer.app \
             --archive data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip \
             --evidence data/macos-evidence --version "$IDOLY_APP_VERSION" --build-number "$IDOLY_APP_VERSION_CODE" \
@@ -970,7 +1007,7 @@ jobs:
           if-no-files-found: warn
 
   verify:
-    if: ${{ !inputs.artifact_only }}
+    if: ${{ !inputs.ios_unified && !inputs.artifact_only }}
     needs: [prepare, android, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1115,3 +1152,114 @@ jobs:
           name: native-server-release-verification-v${{ env.IDOLY_APP_VERSION }}
           path: data/release-verification
           if-no-files-found: error
+
+  ios-unified:
+    if: ${{ inputs.ios_unified }}
+    runs-on: macos-15
+    timeout-minutes: 40
+    outputs:
+      source_sha: ${{ github.sha }}
+      artifact_id: ${{ steps.ios-artifact.outputs.artifact-id }}
+      artifact_sha256: ${{ steps.ios-artifact.outputs.artifact-digest }}
+    # GitHub requires contents:write to read the pinned original IPA from its
+    # unpublished input release. Only the fetch step receives GH_TOKEN; no
+    # release or source mutation is performed by this job.
+    permissions:
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Fetch SHA-pinned runtime, original game and server-data inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B ios-unified/fetch_inputs.py --output "$RUNNER_TEMP/idoly-unified-inputs"
+      - name: Install build verification dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check pytest==8.4.2 pycryptodome==3.23.0 UnityPy==1.25.4 astc-encoder-py==0.1.12 Pillow==13.0.0
+          python3 -m pip install --no-index "$RUNNER_TEMP"/idoly-unified-inputs/wheels/*.whl
+      - name: Verify host lifecycle, packaging, load gate and settings bridge
+        run: |
+          python3 -B -m pytest -q -p no:cacheprovider tests/test_ios_host.py tests/test_public_payload.py tests/test_ios_unified_*.py ios-unified/native/tests/test_build_native.py
+          python3 -B ios-unified/native/build_native.py --portable-tests
+      - name: Compile real iOS frameworks, compose IPA and run fresh Simulator core probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -B ios-unified/ci_build.py
+          --inputs "$RUNNER_TEMP/idoly-unified-inputs"
+          --work "$RUNNER_TEMP/idoly-unified-build"
+          --output "$RUNNER_TEMP/idoly-unified-output"
+          --source-commit "$GITHUB_SHA"
+      - name: Keep diagnostics when the build or probe fails
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: ios-unified-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-unified-output/*.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload the IPA after the Simulator core probe passes
+        id: ios-artifact
+        uses: actions/upload-artifact@v4
+        if: ${{ success() }}
+        with:
+          name: ios-unified-prototype-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-unified-output
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  ios-publication:
+    needs: ios-unified
+    if: ${{ inputs.ios_unified && inputs.ios_publish && needs.ios-unified.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      actions: read
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ios-unified.outputs.source_sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+      - name: Install locked report-verification dependencies
+        run: uv sync --locked --python 3.13
+      - name: Verify exact build artifact and publish after full remote SHA readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IDOLY_SOURCE: ${{ needs.ios-unified.outputs.source_sha }}
+          IDOLY_ARTIFACT: ${{ needs.ios-unified.outputs.artifact_id }}
+          IDOLY_ARTIFACT_SHA: ${{ needs.ios-unified.outputs.artifact_sha256 }}
+        run: >-
+          uv run --locked python -B ios-unified/delivery.py
+          --source-commit "$IDOLY_SOURCE"
+          --run-id "$GITHUB_RUN_ID"
+          --artifact-id "$IDOLY_ARTIFACT"
+          --artifact-sha256 "$IDOLY_ARTIFACT_SHA"
+          --work "$RUNNER_TEMP/idoly-verified-ios-delivery"
+          --publish
+      - name: Upload small publication proof without the IPA
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ios-unified-publication-proof-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-verified-ios-delivery/proof
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14

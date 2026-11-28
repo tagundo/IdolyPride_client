@@ -20,8 +20,9 @@ _DIAGNOSTIC_PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
 _NORMAL_PACKAGE = "game.qualiarts.idolypride.local"
 _QA_PACKAGES = frozenset((_DIAGNOSTIC_PACKAGE, _NORMAL_PACKAGE))
 _MAX_BODY = 72 * 1024
-_FORBIDDEN = re.compile(r"購入|課金|ガチャを引|データ削除|アカウント削除|buy|purchase|deleteaccount", re.I)
-_ERROR = re.compile(r"Unimplemented|Unauthenticated|NullReferenceException|サーバーとの通信に失敗", re.I)
+# Japanese and Korean clients (the unified app ships both); never tap these.
+_FORBIDDEN = re.compile(r"購入|課金|ガチャを引|データ削除|アカウント削除|구매|과금|가챠|뽑기|데이터\s*삭제|계정\s*삭제|buy|purchase|deleteaccount", re.I)
+_ERROR = re.compile(r"Unimplemented|Unauthenticated|NullReferenceException|サーバーとの通信に失敗|서버와의\s*통신에\s*실패", re.I)
 _GOALS = (
     ("lesson", r"レッスン", r"lesson.*button|button.*lesson"),
     ("live", r"ライブ", r"live.*button|button.*live"),
@@ -50,6 +51,30 @@ def text(value):
     return " ".join(re.sub(r"<[^>]*>", "", str(value)).split())
 
 
+# Touch reasons whose control the bridge does not type as a button: the game's
+# own checkbox (e.g. the Photography Live "match the stage song" TouchArea)
+# exposes only its label. The label is touched at its observed bounds.
+LABEL_TOUCH_REASONS = frozenset(("qa_mv_original_member",))
+
+
+def label_nodes(snapshot):
+    """Active, non-empty, on-screen text labels that are not forbidden actions."""
+    nodes = snapshot.get("nodes", [])
+    if not isinstance(nodes, list) or len(nodes) > 512:
+        raise ValueError("Invalid Unity UI node count")
+    result = []
+    for node in nodes:
+        if (not isinstance(node, dict) or node.get("kind") not in ("text", "tmp_text")
+                or node.get("active") is not True or not usable_bounds(snapshot, node)):
+            continue
+        label = text(node.get("text", ""))
+        path = node.get("path", "")
+        if not label or not isinstance(path, str) or not path or _FORBIDDEN.search(label + " " + path):
+            continue
+        result.append(dict(node, label=label))
+    return result
+
+
 def usable_bounds(snapshot, node):
     screen = snapshot.get("screen", {})
     width, height = screen.get("width"), screen.get("height")
@@ -69,6 +94,21 @@ def buttons(snapshot):
     if not isinstance(nodes, list) or len(nodes) > 512:
         raise ValueError("Invalid Unity UI node count")
     labels = [node for node in nodes if isinstance(node, dict) and node.get("kind") in ("text", "tmp_text") and node.get("active") is True]
+    # List cells are clones with one shared path; each keeps only the labels
+    # drawn inside its own bounds (the song list's titles, run 9).
+    shared = {}
+    for node in nodes:
+        if isinstance(node, dict) and node.get("kind") == "button":
+            shared[node.get("path")] = shared.get(node.get("path"), 0) + 1
+
+    def inside(row, node):
+        if shared.get(node.get("path"), 0) < 2:
+            return True
+        if not usable_bounds(snapshot, row):
+            return False
+        x, y = (row["bounds"][0] + row["bounds"][2]) / 2, (row["bounds"][1] + row["bounds"][3]) / 2
+        left, top, right, bottom = node["bounds"]
+        return left <= x <= right and top <= y <= bottom
     for node in nodes:
         if (not isinstance(node, dict) or node.get("kind") != "button"
                 or node.get("active") is not True or node.get("interactable") is not True
@@ -80,7 +120,7 @@ def buttons(snapshot):
         parts, seen = [], set()
         for row in [node, *labels]:
             row_path, label_text = str(row.get("path", "")), text(row.get("text", ""))
-            if (row_path == path or row_path.startswith(path + "/")) and label_text:
+            if (row_path == path or row_path.startswith(path + "/")) and label_text and (row is node or inside(row, node)):
                 identity = (row_path, label_text)
                 if identity not in seen:
                     seen.add(identity)
@@ -182,17 +222,34 @@ def download_confirmation(snapshot):
     if len(roots) != 1:
         return None
     titles = [row for row in nodes if row.get("active") is True and row.get("kind") in ("text", "tmp_text")
-              and text(row.get("text", "")) == "ダウンロード確認"
+              and text(row.get("text", "")) in ("ダウンロード確認", "다운로드 확인")
               and "/SimpleActionSheet(Clone)/" in str(row.get("path", ""))]
     if len(titles) != 1:
         return None
     root = roots.pop()
     local = [row for row in nodes if str(row.get("path", "")).startswith(root)]
     descriptions = [text(row.get("text", "")) for row in local if row.get("active") is True]
-    if (not any(re.fullmatch(r"必要なデータをダウンロードします\s*\([^)]*\)", label) for label in descriptions)
+    if (not any(re.fullmatch(r"必要なデータをダウンロードします\s*\([^)]*\)|필요한 데이터를 다운로드\s*합니다\s*\([^)]*\)", label)
+                for label in descriptions)
             or _FORBIDDEN.search(" ".join(descriptions))):
         return None
-    return choose_button(dict(snapshot, nodes=local), r"^ダウンロード$")
+    return choose_button(dict(snapshot, nodes=local), r"^(ダウンロード|다운로드)$")
+
+
+ASSET_RETRY_BUTTON = ("Singleton/GlobalDialog/ErrorDialogManager/SystemDialog(Clone)/SystemDialogCommonRoot/"
+                      "DialogCanvas/Dialog/Buttons/Root/OkButton")
+
+
+def asset_retry_target(snapshot):
+    """The game's own "asset download failed (E209)" dialog's Retry button, and nothing else."""
+    nodes = snapshot.get("nodes", [])
+    root = ASSET_RETRY_BUTTON.rsplit("/Buttons/", 1)[0] + "/"
+    labels = [text(row.get("text", "")) for row in nodes if row.get("active") is True
+              and row.get("kind") in ("text", "tmp_text") and str(row.get("path", "")).startswith(root)]
+    if not any("(E209)" in label for label in labels):
+        return None
+    found = [row for row in buttons(snapshot) if row.get("path") == ASSET_RETRY_BUTTON]
+    return found[0] if len(found) == 1 else None
 
 
 def visible_action_sheet(snapshot):
@@ -233,16 +290,34 @@ def notice_close_target(snapshot):
     if not label_at(base + "Header/Title", "INFORMATION"):
         return None
     candidates = buttons(snapshot)
-    for number, label in ((1, "お知らせ"), (2, "不具合"), (3, "PR")):
+    # Tab labels are localized. Accept the observed Japanese set, or a fully
+    # localized set (all three non-empty, none Japanese, none forbidden, e.g.
+    # the Korean client whose labels are not yet observed); a mixed set is not
+    # this dialog. The INFORMATION title, three wired tabs and CloseButton stay required.
+    japanese = ("お知らせ", "不具合", "PR")
+    labels = []
+    for number in (1, 2, 3):
         path = base + f"Footer/TabButtons/Button{number}"
         tabs = [node for node in candidates if node.get("path") == path
                 and node.get("name") == f"Button{number}"
                 and node.get("callback_registered") is True]
-        if len(tabs) != 1 or not label_at(path + "/Text", label):
+        if len(tabs) != 1:
             return None
+        labels.append(_label_text(nodes, path + "/Text"))
+    localized = (all(labels) and not any(label in japanese[:2] for label in labels)
+                 and not _FORBIDDEN.search(" ".join(labels)))
+    if tuple(labels) != japanese and not localized:
+        return None
     close = [node for node in candidates if node.get("path") == base + "Footer/CloseButton"
              and node.get("name") == "CloseButton" and node.get("callback_registered") is True]
     return close[0] if len(close) == 1 else None
+
+
+def _label_text(nodes, path):
+    matches = [node for node in nodes if isinstance(node, dict)
+               and node.get("path") == path and node.get("kind") in ("text", "tmp_text")
+               and node.get("active") is True]
+    return text(matches[0].get("text", "")).strip() if len(matches) == 1 else ""
 
 
 def visible_manager_level_overlay(snapshot):
@@ -348,6 +423,18 @@ def mapped_point(snapshot, node, xml, package, image_size):
             round(y0 + (top + bottom) / 2 * (y1 - y0) / height)]
 
 
+def touch_hold_for_frame(snapshot, reason):
+    """150 ms, or longer on a slow guest, always below the 500 ms long tap."""
+    observation = snapshot.get("frame_observation") if isinstance(snapshot, dict) else None
+    delta = observation.get("unscaled_delta_time") if isinstance(observation, dict) else None
+    if type(delta) not in (int, float) or not math.isfinite(delta) or delta <= 0.1:
+        return 150
+    # Qua buttons treat a press of 0.5 s or more as a long tap and suppress
+    # its click (run 17: suppress_long_tap_click, long_tap_time 0.5), so the
+    # hold never reaches it.
+    return min(450, 150 + round(delta * 1600))
+
+
 class UiExplorer:
     def __init__(self, qa):
         self.game_package = qa_package(qa.game_package)
@@ -407,13 +494,16 @@ class UiExplorer:
             self._input_error(code)
             return None
 
-        current = next((item for item in buttons(fresh) if item.get("instance_id") == node.get("instance_id")
-                        and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
+        candidates = label_nodes(fresh) if reason in LABEL_TOUCH_REASONS else buttons(fresh)
+        current = next((item for item in candidates if item.get("instance_id") == node.get("instance_id")
+                        and item.get("path") == node.get("path") and item.get("name") == node.get("name")
+                        and (reason not in LABEL_TOUCH_REASONS or item.get("label") == node.get("label"))), None)
         if fresh.get("ok") is not True or current is None:
             return reject("selected_node_no_longer_present")
         selectors = {"observed_notice_close": notice_close_target,
                      "observed_manager_level_close": manager_level_close_target,
-                     "observed_lesson_reward_close": lesson_reward_close_target}
+                     "observed_lesson_reward_close": lesson_reward_close_target,
+                     "observed_asset_retry": asset_retry_target}
         if reason in selectors:
             close = selectors[reason](fresh)
             if (close is None or close.get("instance_id") != current.get("instance_id")
@@ -498,8 +588,12 @@ class UiExplorer:
         if hold == 150:
             # Normal Android DOWN/MOVE/UP at the same point. The original
             # title's long-tap threshold is 500ms and its drag threshold is30.
+            # A software-GPU guest can draw ~1 frame/s (redroid run 15: 501
+            # notice-close touches of 150 ms all missed); hold across frames.
+            held = touch_hold_for_frame(fresh, reason)
+            action["touch_hold_milliseconds"] = held
             self.qa.adb("shell", "input", source, "swipe", str(point[0]), str(point[1]),
-                        str(point[0]), str(point[1]), "150")
+                        str(point[0]), str(point[1]), str(held))
         elif hold == 0:
             prefix_args = ("shell", "input") if source == "touchscreen" else ("shell", "input", source)
             self.qa.adb(*prefix_args, "tap", str(point[0]), str(point[1]))
@@ -600,7 +694,7 @@ class UiExplorer:
                 self.restart_pending = False
                 self._restart()
             return
-        close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで")
+        close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで|확인|닫기|다음|나중에")
         if close is not None and re.search(r"dialog|modal|popup|sheet", str(close.get("path", "")), re.I):
             if self.pending and self._signature(snapshot) != self.pending[2] and self.pending_dialog_frame is None:
                 self.pending_dialog_frame = frame

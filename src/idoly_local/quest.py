@@ -19,6 +19,11 @@ from .rpc import RpcCode, RpcFailure
 _TOP = "/api.Quest/Top"
 _LIST_MAIN = "/api.Quest/ListMain"
 _LIST_ASSET = "/api.Quest/ListAsset"
+_LIST_DAILY = "/api.Quest/ListDaily"
+_LIST_CONTEST = "/api.Quest/ListContest"
+_LIST_TOWER = "/api.Quest/ListTower"
+_TOWER_TOP = "/api.Quest/TowerTop"
+_READ_CATALOGS = (_LIST_DAILY, _LIST_CONTEST, _LIST_TOWER, _TOWER_TOP)
 _USER_GET = "/api.User/Get"
 
 
@@ -39,7 +44,7 @@ def _integer(value, description: str, *, maximum: int = (1 << 63) - 1) -> int:
 
 
 class Quest:
-    """Serve the main-live catalog, progress and ListAsset resource references."""
+    """Serve live catalogs/history and saved-unit resource references without battles."""
 
     def __init__(self, schema, state, profile: str, master_dir: Path | None = None, *, tutorial_replays=None,
                  pvp=None):
@@ -132,51 +137,194 @@ class Quest:
         return areas, quests, ordered
 
     @staticmethod
-    def _copy_result(info, row, rank_values):
+    def _validate_result(row, rank_values):
         if row is None:
             return
         if min(row.lastClearedTime, row.highestScore, row.highestRank) < 0:
             _invalid("Local quest progress contains negative values")
         if row.highestScoreRank not in rank_values:
             _invalid("Local quest progress has an unknown result rank")
+        _integer(row.highestRank, "quest ranking", maximum=(1 << 31) - 1)
+        if hasattr(row, "dailyClearCount"):
+            _integer(row.dailyClearCount, "daily quest clear count")
+
+    @classmethod
+    def _copy_result(cls, info, row, rank_values):
+        if row is None:
+            return
+        cls._validate_result(row, rank_values)
         info.cleared = bool(row.lastClearedTime)
         info.highestScore = row.highestScore
-        info.highestRank = _integer(row.highestRank, "quest ranking", maximum=(1 << 31) - 1)
+        info.highestRank = row.highestRank
         info.rankType = row.highestScoreRank
 
-    def _contest_catalog(self, result, areas, quests, progress, rank_values):
-        # LiveTop.RequestLiveProgressAsync dereferences model.ContestArea
-        # unconditionally at 0x5759ce8..0x5759cf4. Its quests are inspected for
-        # campaign labels even when contest entry is locked. An absent optional
-        # protobuf message therefore is not a valid inactive-state response.
-        candidates = [row for row in areas.values() if row["type"] == 2]
-        if len(candidates) != 1:
-            _invalid("Quest.Top needs one local contest area")
-        area = candidates[0]
+    def _progress_maps(self, snapshot, areas, quests):
+        area_progress = self._progress(snapshot.areas, "areaId", "area progress")
+        quest_progress = self._progress(snapshot.quests, "questId", "quest progress")
+        if any(key not in areas for key in area_progress) or any(key not in quests for key in quest_progress):
+            _invalid("Local quest progress has unknown master references")
+        return area_progress, quest_progress
+
+    @staticmethod
+    def _ordered_areas(areas, area_type):
+        return sorted((row for row in areas.values() if row["type"] == area_type),
+                      key=lambda row: (_integer(row.get("order", 0), "area ordering"), row["id"]))
+
+    @staticmethod
+    def _area_references(area, quests, area_progress):
         identities = area.get("questIds")
         if (not isinstance(identities, list) or not identities
                 or any(not isinstance(key, str) or key not in quests for key in identities)
                 or len(identities) != len(set(identities))):
-            _invalid("Invalid local contest quest references")
-        result.contestArea.areaId = area["id"]
-        # This exposes the real catalog/history required by the menu, without
-        # claiming that competitive battle entry or quotas are implemented.
-        result.contestArea.unlocked = False
+            _invalid("Invalid local archived area quest references")
+        if any(quests[key].get("areaId") != area["id"] for key in identities):
+            _invalid("Local archived quest does not belong to its area")
+        for name in ("viewConditionId", "unlockConditionId"):
+            if not isinstance(area.get(name, ""), str):
+                _invalid("Invalid local archived area condition")
+        saved = area_progress.get(area["id"])
+        if saved is not None:
+            _integer(saved.clearQuestCount, "area clear count", maximum=len(identities))
+            _integer(saved.lastClearedTime, "area clear timestamp")
+            # Real UserArea has this counter; the older independent fixture
+            # omits it. Reads never roll it over or allocate challenge passes.
+            if hasattr(saved, "dailyClearCount"):
+                _integer(saved.dailyClearCount, "daily area clear count")
+        return identities
+
+    def _visible_archive_area(self, area, quests, area_progress, quest_progress, rank_values):
+        # Validate hidden rows too: an unsupported schedule must not conceal
+        # corrupt master references or invalid persisted counters.
+        identities = self._area_references(area, quests, area_progress)
         for key in identities:
-            if quests[key].get("areaId") != area["id"]:
-                _invalid("Local contest quest does not belong to its area")
-            info = result.contestArea.quests.add(questId=key)
-            self._copy_result(info, progress.get(key), rank_values)
-            info.isPlayable = False
+            self._validate_result(quest_progress.get(key), rank_values)
+        # Do not turn past/future event schedules into active daily/EX towers.
+        # Conditional areas are archived only when this account has a result.
+        if not area.get("viewConditionId", ""):
+            return True
+        saved = area_progress.get(area["id"])
+        if saved is not None and (saved.clearQuestCount > 0 or saved.lastClearedTime > 0):
+            return True
+        return any(row is not None and (row.lastClearedTime > 0 or row.highestScore > 0)
+                   for row in (quest_progress.get(key) for key in identities))
+
+    def _inactive_area(self, info, area, quests, area_progress, quest_progress, rank_values):
+        identities = self._area_references(area, quests, area_progress)
+        info.areaId = area["id"]
+        info.unlocked = False
+        for key in identities:
+            row = info.quests.add(questId=key)
+            self._copy_result(row, quest_progress.get(key), rank_values)
+            row.isPlayable = False
+        return identities
+
+    @staticmethod
+    def _rank_values(area_info):
+        descriptor = area_info if hasattr(area_info, "fields_by_name") else area_info.DESCRIPTOR
+        return descriptor.fields_by_name["quests"].message_type.fields_by_name[
+            "rankType"].enum_type.values_by_number
+
+    @staticmethod
+    def _tower_position(identities, area, area_progress, quest_progress):
+        # A catalog identity is not permission to enter a tower. Only derive
+        # its saved frontier when real progress exists, without persisting it.
+        saved = area_progress.get(area["id"])
+        count = saved.clearQuestCount if saved is not None else 0
+        has_result = any(row is not None and row.lastClearedTime > 0
+                         for row in (quest_progress.get(key) for key in identities))
+        if not count and not has_result:
+            return ""
+        for index, key in enumerate(identities):
+            row = quest_progress.get(key)
+            if index >= count and not (row is not None and row.lastClearedTime > 0):
+                return key
+        return identities[-1]
+
+    def _contest_catalog(self, result, areas, quests, progress, rank_values, area_progress=None):
+        # The original LiveTop post-await reader requires contestArea even
+        # when battle entry is inactive (0x5759ce8..0x5759cf4).
+        candidates = self._ordered_areas(areas, 2)
+        if len(candidates) != 1:
+            _invalid("Quest catalog needs one local contest area")
+        self._inactive_area(result.contestArea, candidates[0], quests,
+                            area_progress or {}, progress, rank_values)
+
+    def _other_top_catalogs(self, result, areas, quests, area_progress, quest_progress):
+        fields = result.DESCRIPTOR.fields_by_name
+        if "dailyAreas" in fields:
+            rank_values = self._rank_values(fields["dailyAreas"].message_type)
+            for area in self._ordered_areas(areas, 3):
+                if self._visible_archive_area(area, quests, area_progress, quest_progress, rank_values):
+                    info = result.dailyAreas.add()
+                    self._inactive_area(info, area, quests, area_progress, quest_progress,
+                                        self._rank_values(info))
+        towers = self._ordered_areas(areas, 4)
+        if len(towers) > 1:
+            _invalid("Quest catalog has ambiguous main tower areas")
+        if towers and "towerArea" in fields:
+            area = towers[0]
+            identities = self._inactive_area(result.towerArea, area, quests, area_progress,
+                                             quest_progress, self._rank_values(result.towerArea))
+            if "currentTowerQuestId" in fields:
+                result.currentTowerQuestId = self._tower_position(
+                    identities, area, area_progress, quest_progress)
+        # isDailyPlayable and isTowerTopUnlocked stay false: the new read
+        # surfaces do not implement paid/free attempts or tower battle entry.
+
+    def _read_catalog(self, path, snapshot):
+        areas = self.catalog.ids("Area", required=True)
+        quests = self.catalog.ids("Quest", required=True)
+        if any(type(row.get("type")) is not int for row in areas.values()):
+            _invalid("Invalid local area type")
+        area_progress, quest_progress = self._progress_maps(snapshot, areas, quests)
+        result = self.schema.response_type(path)()
+        if "commonResponse" in result.DESCRIPTOR.fields_by_name:
+            result.commonResponse.SetInParent()
+        if path == _LIST_DAILY:
+            rank_values = self._rank_values(result.DESCRIPTOR.fields_by_name["areas"].message_type)
+            for area in self._ordered_areas(areas, 3):
+                if self._visible_archive_area(area, quests, area_progress, quest_progress, rank_values):
+                    info = result.areas.add()
+                    self._inactive_area(info, area, quests, area_progress, quest_progress,
+                                        self._rank_values(info))
+            # No guessed bulk formations, challenge allowances or rewards.
+            return result.SerializeToString()
+        area_type = 2 if path == _LIST_CONTEST else 4
+        candidates = self._ordered_areas(areas, area_type)
+        if len(candidates) != 1:
+            _invalid("Quest catalog needs one local " + ("contest" if area_type == 2 else "tower") + " area")
+        area = candidates[0]
+        target = result.towerArea.area if path == _TOWER_TOP else result.area
+        identities = self._inactive_area(target, area, quests, area_progress,
+                                         quest_progress, self._rank_values(target))
+        if path == _TOWER_TOP:
+            result.towerArea.currentTowerQuestId = self._tower_position(
+                identities, area, area_progress, quest_progress)
+            rank_values = self._rank_values(result.DESCRIPTOR.fields_by_name[
+                "subTowerAreas"].message_type.fields_by_name["area"].message_type)
+            for subarea in self._ordered_areas(areas, 5):
+                if not self._visible_archive_area(subarea, quests, area_progress, quest_progress, rank_values):
+                    continue
+                info = result.subTowerAreas.add()
+                subidentities = self._inactive_area(info.area, subarea, quests, area_progress,
+                                                    quest_progress, self._rank_values(info.area))
+                info.currentTowerQuestId = self._tower_position(
+                    subidentities, subarea, area_progress, quest_progress)
+            result.hierarchyNotiInfo.currentDetailGradeId = self.catalog.hierarchy_grade(
+                snapshot.hierarchy.currentFixedPoint + snapshot.hierarchy.currentVariablePoint,
+                snapshot.hierarchy.bestDetailGradeId)
+        return result.SerializeToString()
 
     def handle(self, path: str, request_bytes: bytes) -> bytes | None:
-        if path not in (_TOP, _LIST_MAIN, _LIST_ASSET):
+        if path not in (_TOP, _LIST_MAIN, _LIST_ASSET) + _READ_CATALOGS:
             return None
         try:
             request = self.schema.request_type(path).FromString(request_bytes)
         except DecodeError:
             raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Malformed quest catalog protobuf request") from None
         snapshot = self._snapshot()
+        if path in _READ_CATALOGS:
+            return self._read_catalog(path, snapshot)
         if path == _LIST_ASSET:
             from .live_assets import project_live_assets
             result = project_live_assets(self.schema, snapshot, request, self.catalog)
@@ -184,10 +332,7 @@ class Quest:
                 self.tutorial_replays.append_assets(result, snapshot, request.questId)
             return result.SerializeToString()
         areas, quests, groups = self._main_catalog(tutorial_pending=self._tutorial_pending(snapshot))
-        area_progress = self._progress(snapshot.areas, "areaId", "area progress")
-        quest_progress = self._progress(snapshot.quests, "questId", "quest progress")
-        if any(key not in areas for key in area_progress) or any(key not in quests for key in quest_progress):
-            _invalid("Local quest progress has unknown master references")
+        area_progress, quest_progress = self._progress_maps(snapshot, areas, quests)
         result = self.schema.response_type(path)()
         result.commonResponse.SetInParent()
         if path == _TOP:
@@ -207,7 +352,8 @@ class Quest:
             group_field].message_type.fields_by_name["areas"].message_type.fields_by_name[
             "quests"].message_type.fields_by_name["rankType"].enum_type.values_by_number
         if path == _TOP:
-            self._contest_catalog(result, areas, quests, quest_progress, rank_values)
+            self._contest_catalog(result, areas, quests, quest_progress, rank_values, area_progress)
+            self._other_top_catalogs(result, areas, quests, area_progress, quest_progress)
         preceding_complete = True
         for group, group_areas in groups:
             output_group = output_groups.add(areaGroupId=group["id"])

@@ -14,10 +14,26 @@ struct pthread_mutex_t { long signature; char opaque[56]; };
 #define PTHREAD_MUTEX_INITIALIZER {0x32AAABA7, {0}}
 struct timespec { long tv_sec; long tv_nsec; };
 struct timeval { long tv_sec; int tv_usec; };
+// Public arm64 Darwin stat layout (144 bytes); no platform SDK is required.
+struct stat {
+    int32_t st_dev; uint16_t st_mode,st_nlink; uint64_t st_ino;
+    uint32_t st_uid,st_gid; int32_t st_rdev;
+    timespec st_atimespec,st_mtimespec,st_ctimespec,st_birthtimespec;
+    int64_t st_size,st_blocks; int32_t st_blksize; uint32_t st_flags,st_gen;
+    int32_t st_lspare; int64_t st_qspare[2];
+};
+static_assert(sizeof(stat)==144 && __builtin_offsetof(stat,st_mode)==4
+    && __builtin_offsetof(stat,st_nlink)==6 && __builtin_offsetof(stat,st_ino)==8
+    && __builtin_offsetof(stat,st_mtimespec)==48 && __builtin_offsetof(stat,st_ctimespec)==64
+    && __builtin_offsetof(stat,st_size)==96,"Public Darwin arm64 stat ABI differs");
 struct sockaddr { uint8_t length, family; char data[14]; };
 struct sockaddr_in { uint8_t length, family; uint16_t port; uint32_t address; char zero[8]; };
 extern "C" {
 void *memcpy(void *, const void *, size_t);
+void *malloc(size_t); void free(void *);
+long pread(int,void *,size_t,int64_t); long pwrite(int,const void *,size_t,int64_t);
+int ftruncate(int,int64_t); void *dlsym(void *,const char *);
+void *memset(void *, int, size_t);
 int memcmp(const void *, const void *, size_t);
 int strcmp(const char *, const char *);
 int strncmp(const char *, const char *, size_t);
@@ -40,6 +56,17 @@ int connect(int, const sockaddr *, unsigned int);
 long send(int, const void *, size_t, int);
 long recv(int, void *, size_t, int);
 int close(int);
+int open(const char *,int,...);
+int openat(int,const char *,int,...);
+long read(int,void *,size_t);
+long write(int,const void *,size_t);
+int renameat(int,const char *,int,const char *);
+int unlinkat(int,const char *,int);
+int fsync(int);
+void arc4random_buf(void *,size_t);
+int fstat(int,struct stat *);
+int dup(int);
+uint32_t geteuid();
 uint32_t _dyld_image_count();
 const char *_dyld_get_image_name(uint32_t);
 const void *_dyld_get_image_header(uint32_t);
@@ -55,7 +82,7 @@ public:
     constexpr const T *end() const { return first+count; }
     constexpr size_t size() const { return count; }
 };
-using ::int64_t; using ::memcpy; using ::memcmp; using ::strcmp; using ::strlen;
+using ::int64_t; using ::memcpy; using ::memset; using ::memcmp; using ::strcmp; using ::strlen;
 using ::snprintf; using ::strncmp; using ::atan; using ::tan; using ::round; using ::lround; using ::llround;
 inline bool isfinite(double value) { return __builtin_isfinite(value); }
 inline double fabs(double value) { return __builtin_fabs(value); }

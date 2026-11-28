@@ -1,0 +1,1475 @@
+{
+  "schema": 1,
+  "platforms": {
+    "android": {
+      "schema": 1,
+      "platform": "android",
+      "director_registry": {
+        "manager_slot": "0x14e64c0",
+        "tagged_queue": true,
+        "native": {
+          "registry_getter": {
+            "rva": "0x731404",
+            "prefix": "a86d00b0006142f9c0035fd6fe0f1ff8",
+            "body": "a86d00b0006142f9c0035fd6",
+            "bounded_bytes": 12
+          },
+          "sample_category": {
+            "rva": "0x72f8c0",
+            "prefix": "fe0f1ef8f44f01a9f403012af30300aa",
+            "body": "fe0f1ef8f44f01a9f403012af30300aa27000094e803142a6916088bea0309aa4b0d4af8cb0100b4eb031faa2c4102910d0980528e0140f96b050091ce696df8ad410191cf1140f9ef050091cf1100f94e0140f9df010bebe8feff542ac140f90a0200b46816088bea031faa2901069108c105910b0980520c0140f94a0500918c696bf86b4101918d1140f9ad0500918d1100f92c0140f99f010aebe8feff54f44f41a9fe0742f8c0035fd6",
+            "bounded_bytes": 172
+          },
+          "rebuild": {
+            "rva": "0x72f96c",
+            "prefix": "fe57bea9f44f01a908745039a8020034",
+            "body": "fe57bea9f44f01a908745039a8020034f30300aa151280527402158be00314aadb03009480820391d9030094b5820091bfc205f121ffff5474ba41f975a20d919f0215ebc0000054e00313aae10314aae0030094940640f9faffff177f761039f44f41a9fe57c2a8c0035fd6",
+            "bounded_bytes": 108
+          },
+          "append": {
+            "rva": "0x73093c",
+            "prefix": "fe5fbda9f65701a9f44f02a929b04239",
+            "body": "fe5fbda9f65701a9f44f02a929b04239283040b9f30301aa490110370814088b152558a914c1059117010691b6060091df0649eb08030054f60200f9090000141614088bd50e4af8c80640f9b7060091d44200d1ff0648eb48020054d70200f9880240f9e9d2fff0206dc13d090a8052a822099b1f4d04a9f44f42a9f65741a901e4006f000500ad010501adfe5fc3a8c0035fd6e00314aa000b0094e7ffff17e00314aafd0a0094edffff17",
+            "bounded_bytes": 172
+          },
+          "category": {
+            "rva": "0x73061c",
+            "prefix": "fe0f1ef8f44f01a928008052f303012a",
+            "body": "fe0f1ef8f44f01a928008052f303012af40300aa086c103951fdff97e00314aae103132a54feff97e00314aae103132a29ffff97e00314aa49fdff979f6e1039f44f41a9fe0742f8c0035fd6",
+            "bounded_bytes": 76
+          },
+          "callbacks_rebuild": {
+            "rva": "0x730364",
+            "prefix": "fe57bea9f44f01a90878503948020034",
+            "body": "fe57bea9f44f01a90878503948020034f30300aa144a80526002148b9a010094948200919fc20cf181ffff5474ba41f975a20d919f0215ebc0000054e00313aae10314aaa8010094940640f9faffff177f7a1039f44f41a9fe57c2a8c0035fd6280040f9",
+            "bounded_bytes": 100
+          },
+          "callbacks_dispatch": {
+            "rva": "0x7302f0",
+            "prefix": "fe0f1df8f65701a9f44f02a9f303012a",
+            "body": "fe0f1df8f65701a9f44f02a9f303012af40300aa18000094e803132a8916088b283141f9080200b4f3031faaf4031faa3581099136410991ca0240f9496973f8a90000b44801138b0021009120013fd6a80240f9940600911f0114eb73a20091c8feff54f44f42a9f65741a9fe0743f8c0035fd6",
+            "bounded_bytes": 116
+          },
+          "output_callbacks": {
+            "rva": "0x730a48",
+            "prefix": "ff0303d1fd7b06a9fc6f07a9fa6708a9",
+            "body": "ff0303d1fd7b06a9fc6f07a9fa6708a9f85f09a9f6570aa9f44f0ba9f30300aae00301aaf40301aaeff1ff97600a0037964240f997e20191df0217ebe0090054c9d2ffb02099c23de863009114210091790980521a058052e003803de003c03d28008052ff2300f9e84b00b9e017803df50316aaa88e5ff8e1030191081140f9e00315aa00013fd6e82b40f9c80600b4fb031faae82340f908111b8bfd0308aaa98f40b86a16098b493141f9690100b45c2941f90a0140f9eb031faa8c0340f99f010aeb200300546b0500913f010beb9ca3009148ffff54e003c03dff1300f9f92b00b978420991e003833c080140f9e1630091e80f00f9a80340b90017088ba60a0094a80340b9e00314aa0817088b090140f9080940f91f2003d508251a9b1ca100d1c5f1ff979da341a9b80700911f0748eb28010054880740f9980f00f97b07009115793df8e82b40f91f011beb28faff540400001480230091a1f8ff97f6ffff17e0030191a6f1ff97d60640f9df0217eb41f7ff54f44f4ba9f6574aa9f85f49a9fa6748a9fc6f47a9fd7b46a9ff030391c0035fd6fe0f1ef8f44f01a9019c41f9f30300aa00c00c9174e20c91610a009460220d91749a01f97fa201f97f9e01f9080000946862503908050011",
+            "bounded_bytes": 464
+          },
+          "drain": {
+            "rva": "0x72fb78",
+            "prefix": "ff0302d1fd7b02a9fc6f03a9fa6704a9",
+            "body": "ff0302d1fd7b02a9fc6f03a9fa6704a9f85f05a9f65706a9f44f07a908685039e8160035c9d2ffd02099c23d2800805208681039ff0300f9e80b00b9e007803d013c42f9f30300aae0030091b40000945ad3ffb0f4d1ff90fc031f2af6031f2a77e20d9178a20d91190380525a231791940a3e91e80b40f9481300b40805007144120054eb0340f9fb03082a092db99b2a0140f96a1100b4682f199b080940b94b2140b908791f127f01086ba1100054551540f9751000b4aa1240f9281140b9490500911f190071a91200f9a80f0054e803082a890000104a6b683829090a8b20011fd6a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9e003679e01102e1e21008052e00315aae2031faae3031f2ae4031f2a3c00805221f4ff97a81240f9bf0218eb08050091a81200f9600c0054a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9080340f9b80600f91d000014a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9e003679e01102e1e41008052e00315aae2031faae3031f2ae4031f2a03f4ff97e00315aa76f5ff97bf0217eba0060054a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9e80240f9b70600f9a80200f9150500f9a80640f9150100f927000014a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9e003679e01102e1e81008052e00315aae2031faae3031f2ae4031f2ae2f3ff97e00315aa55f5ff97e00315aaf1f2ff97e00315aa60f2ff97c10b8052e32e8052e00315aae20314aa9f39f8970c000014bd5a4179e00315aa3bf7ff97a8b24239a803084a08011e129c0b482a15000014a85a417908791d12a85a01793c00805210000014e00315aa11f3ff970d000014df3a007168010054a81a40b9694200916aa20091623a40b91f01007128018a9a010140f9e003679ee00315aa20f4ff976807007105eeff54613e42f9e003009113000094d6060011df420071c1ecff549c000036687610912920805209010079e00300917f6a10393a000094f44f47a9f65746a9f85f45a9fa6744a9fc6f43a9fd7b42a9ff030291c0035fd6",
+            "bounded_bytes": 796
+          },
+          "collect": {
+            "rva": "0x72fe94",
+            "prefix": "fe0f1af8fc6f01a9fa6702a9f85f03a9",
+            "body": "fe0f1af8fc6f01a9fa6702a9f85f03a9f65704a9f44f05a9f30301aaf40300aa3d0d0094e00313aa7e04ff9700010034f44f45a9f65744a9f85f43a9fa6742a9fc6f41a9fe0746f8c0035fd6f5d1ff9017038052b50a3e91e00313aa9b04ff979a2241a9180440f91b1040b9191840b95c070091f60300aa9f0748ebe8010054880240f94100805243268052e00316aa4823179be20315aa9c0a00f9186d00a9191100b94139f897e00313aa5d04ff9740fdff34dfffff17e00314aa270d0094f0ffff17",
+            "bounded_bytes": 196
+          },
+          "enqueue": {
+            "rva": "0x730464",
+            "prefix": "fe57bea9f44f01a9c3d1fff0f30302aa",
+            "body": "fe57bea9f44f01a9c3d1fff0f30302aaf403012af50300aa63083e91000480524100805202018052445080528337f897680240f9690a40b9ea03142a0a0c00f9e10300aa08a400a9a03e42f9f44f41a9fe57c2a80503ff17",
+            "bounded_bytes": 88
+          },
+          "deferred_a": {
+            "rva": "0x7305ac",
+            "prefix": "fe0f1ef8f44f01a908cc41f9f30300aa",
+            "body": "fe0f1ef8f44f01a908cc41f9f30300aa680200b469c641f9f40309aa8a0240f96a0100b48b0a40b94c2140b96b791f129f010b6bc1000054401540f9800000b441f3ff9769c641f968ce41f9944200912a11088b9f020aeb21feff547fce01f9e00313aaf44f41a9fe0742f858fdff17",
+            "bounded_bytes": 112
+          },
+          "deferred_b": {
+            "rva": "0x73052c",
+            "prefix": "fe0f1ef8f44f01a908dc41f9f30300aa",
+            "body": "fe0f1ef8f44f01a908dc41f9f30300aae80200b469d641f9f40309aa8a0240f9ea0100b48b0a40b94c2140b96b791f129f010b6b410100544a1540f94ab14239ea000836c1008052e00313aae20314aabaffff9769d641f968de41f9944200912a11088b9f020aeba1fdff547fde01f9e00313aaf44f41a9fe0742f874fdff17",
+            "bounded_bytes": 128
+          },
+          "deferred_append_a": {
+            "rva": "0x7306c0",
+            "prefix": "fe0f1df8f65701a9f44f02a9280040f9",
+            "body": "fe0f1df8f65701a9f44f02a9280040f9280200b4290840b9082140b9f30301aa29791f121f01096b6101005415cc41f908d041f9f40300aab6060091df0648eb2801005496ce01f988c641f96002c03d0079b53cf44f42a9f65741a9fe0743f8c0035fd680220e91a80b0094f6ffff17",
+            "bounded_bytes": 112
+          },
+          "deferred_append_b": {
+            "rva": "0x7304bc",
+            "prefix": "fe0f1df8f65701a9f44f02a9280040f9",
+            "body": "fe0f1df8f65701a9f44f02a9280040f9280200b4290840b9082140b9f30301aa29791f121f01096b6101005415dc41f908e041f9f40300aab6060091df0648eb2801005496de01f988d641f96002c03d0079b53cf44f42a9f65741a9fe0743f8c0035fd680a20e91290c0094f6ffff17",
+            "bounded_bytes": 112
+          },
+          "graph_create": {
+            "rva": "0x730834",
+            "prefix": "fe57bea9f44f01a9c3d1fff0f40301aa",
+            "body": "fe57bea9f44f01a9c3d1fff0f40301aaf50300aa63083e91001f8052c10b805202018052a45780529036f897e10314aaf30300aa76efff97a8e20d911f0113eba0010054690240f9c90000b46a0640f92a0500f9692a40a9490100f97f7e00a9090140f9692200a9330500f9680640f9130100f9e00313aaf44f41a9fe57c2a8c0035fd6",
+            "bounded_bytes": 132
+          },
+          "graph_destroy": {
+            "rva": "0x73075c",
+            "prefix": "ffc300d1fe5701a9f44f02a9280040f9",
+            "body": "ffc300d1fe5701a9f44f02a9280040f9080300b4290840b90a2140b9f40301aa29791f125f01096b41020054151540f9f30300aae1031faae00315aafcefff97880240f9e00315aa092140b91f1500f929090011092100b922e8ff97e00700a9e203009141008052e00313aa27ffff97f44f42a9fe5741a9ffc30091c0035fd6",
+            "bounded_bytes": 128
+          },
+          "atomic_push": {
+            "rva": "0x6f10cc",
+            "prefix": "08247fc808242ac8caffff35280000f9",
+            "body": "08247fc808242ac8caffff35280000f92b0080522a0500910c347fc8bf0109eba10000549f0108eb6100005401a82bc84bffff355f3f03d5e8030caae9030daa6bfeffb5c0035fd6",
+            "bounded_bytes": 72
+          },
+          "atomic_pop": {
+            "rva": "0x6f115c",
+            "prefix": "0a247fc80a2428c8c8ffff35e8030aaa",
+            "body": "0a247fc80a2428c8c8ffff35e8030aaaca0100b42d0080520b0140f92c0500910ab87fc8df0109eba10000545f0108eb610000540b302dc84dffff355f3f03d5e9030eaa4dfeffb5e00308aac0035fd6",
+            "bounded_bytes": 80
+          }
+        },
+        "outputs": [
+          {
+            "vtable": "0x1423b70",
+            "producer": {
+              "rva": "0x8e39b0",
+              "prefix": "fe5fbda9f65701a9f44f02a9086840f9",
+              "body": "fe5fbda9f65701a9f44f02a9086840f9f30301aa7500805294008052a80000b4089141b91f05007194169f1af503951a762241a9d7060091ff0648ebe8020054680240f9770a00f9a95b00f0295941f90811168b150900b9090100f9752241a9b6060091df0648ebe8010054680240f9760a00f9a95b00f0295d41f90811158b140900b9f44f42a9f65741a9090100f9fe5fc3a8c0035fd6e00313aa582df997e8ffff17e00313aa552df997f0ffff17e10300aa006840f9600000b4224440b90b5fff17c0035fd6af3bf917fe4fbfa9f30300aac52d00942ac5ffd04099c23d085a009008612f91c90380522a0080527f8a00f9680200f9691a01b9604a803d6ac20439fe4fc1a8c0035fd6ff8302d1fe3b00f9f65708a9f44f09a908c04439f50303aaf40302aaf30300aaf60301aac8000034e00313aae10316aae20314aae30315aa36000094c80240b9f65304a9ffff05a9f52b00f9e83b00b9c84e40f9e83700f9a80240f9080940f9880000b4890a40f9200140bd000100bde95900f0",
+              "bounded_bytes": 384
+            },
+            "callbacks": [
+              {
+                "rva": "0x8b34d8",
+                "prefix": "21008052e2031f2ae3031f2a01000014",
+                "body": "21008052e2031f2ae3031f2a01000014",
+                "bounded_bytes": 16
+              },
+              {
+                "rva": "0x8b3e70",
+                "prefix": "22008052e1031f2ae3031f2a9bfdff17",
+                "body": "22008052e1031f2ae3031f2a9bfdff17",
+                "bounded_bytes": 16
+              }
+            ],
+            "categories": [
+              3,
+              4
+            ],
+            "animation": true
+          },
+          {
+            "vtable": "0x1426600",
+            "producer": {
+              "rva": "0x94e438",
+              "prefix": "fe57bea9f44f01a9342041a9f30301aa",
+              "body": "fe57bea9f44f01a9342041a9f30301aa95060091bf0648eb88010054680240f9750a00f9e9fffff029013f910811148bf44f41a9aa008052090100f90a0900b9fe57c2a8c0035fd6e00313aaca82f797f3ffff17fe4fbfa9f30300aa9379ff97800000b4e10313aafe4fc1a8",
+              "bounded_bytes": 108
+            },
+            "callbacks": [
+              {
+                "rva": "0x94dfc0",
+                "prefix": "ff8305d1e87b00fdfd7b10a9fc6f11a9",
+                "body": "ff8305d1e87b00fdfd7b10a9fc6f11a9",
+                "bounded_bytes": 16
+              }
+            ],
+            "categories": [
+              5
+            ],
+            "animation": false
+          },
+          {
+            "vtable": "0x1419648",
+            "producer": {
+              "rva": "0x72df8c",
+              "prefix": "fe57bea9f44f01a9342041a9f30301aa",
+              "body": "fe57bea9f44f01a9342041a9f30301aa95060091bf0648eb88010054680240f9750a00f90900009029813f910811148bf44f41a94a008052090100f90a0900b9fe57c2a8c0035fd6e00313aaf5030094f3ffff17",
+              "bounded_bytes": 84
+            },
+            "callbacks": [
+              {
+                "rva": "0x72dfe0",
+                "prefix": "ff8304d1e85b00fdfd7b0ca9fc6f0da9",
+                "body": "ff8304d1e85b00fdfd7b0ca9fc6f0da9",
+                "bounded_bytes": 16
+              }
+            ],
+            "categories": [
+              2
+            ],
+            "animation": false
+          }
+        ],
+        "layout": {
+          "active": 872,
+          "stopped": 888,
+          "slot": 16,
+          "slot_version": 32,
+          "slot_native": 40,
+          "queue": 1144,
+          "queue_record_bytes": 32,
+          "deferred": [
+            904,
+            936
+          ],
+          "graph_dispatch": [
+            144,
+            368
+          ],
+          "callback_dispatch": 592
+        },
+        "ownership_requires": [
+          "exact current source graphs or authorized BEFORE retirement basis plus actual valid pending Destroy/version+2",
+          "typed animation target / audio state / script userData+managed node callback closure for every native output",
+          "maintenance captured/closed witness and operation-kind authorization receipts; no manual flush"
+        ],
+        "native_source_scope": "Original AArch64 producer and manager body source pins; not whole-scene or GPU execution proof"
+      },
+      "sources": {
+        "engine_sha256": "c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85",
+        "native_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+        "metadata_sha256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e"
+      },
+      "methods": {
+        "find_objects": {
+          "type": "UnityEngine.Object",
+          "name": "FindObjectsOfType",
+          "parameter_count": 2,
+          "static": true,
+          "rva": "0x8f84ae0",
+          "prefix": "fe57bea9f44f01a9b58700b0a26a41f9",
+          "return": "UnityEngine.Object[]",
+          "parameters": [
+            {
+              "name": "type",
+              "type": "System.Type",
+              "metadata_type_index": 76354
+            },
+            {
+              "name": "includeInactive",
+              "type": "System.Boolean",
+              "metadata_type_index": 50428
+            }
+          ],
+          "metadata_method_index": 164963,
+          "token_row": 3471,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa01f7f8"
+        },
+        "current_loop": {
+          "type": "UnityEngine.LowLevel.PlayerLoop",
+          "name": "GetCurrentPlayerLoopInternal",
+          "parameter_count": 0,
+          "static": true,
+          "rva": "0x8f97444",
+          "prefix": "fe4fbfa9138700d060fe46f9a00000b5",
+          "return": "UnityEngine.LowLevel.PlayerLoopSystemInternal[]",
+          "parameters": [],
+          "metadata_method_index": 165872,
+          "token_row": 4380,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa021460"
+        },
+        "cloth_enabled": {
+          "type": "UnityEngine.Cloth",
+          "name": "get_enabled",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8f3437c",
+          "prefix": "fe0f1ef8f44f01a9148a00d0816e43f9",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 221605,
+          "token_row": 23,
+          "module": "UnityEngine.ClothModule.dll",
+          "registration_pointer_slot": "0xa018a20"
+        },
+        "actor_registry": {
+          "type": "VL.Core.VLActorController",
+          "name": "get_actorControllers",
+          "parameter_count": 0,
+          "static": true,
+          "rva": "0x924507c",
+          "prefix": "fe0f1ef8f44f01a9d37100b0143e00f0",
+          "return": "System.Collections.Generic.IReadOnlyList`1<VL.IVLActorController>",
+          "parameters": [],
+          "metadata_method_index": 195783,
+          "token_row": 1105,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa04ae20",
+          "body": "fe0f1ef8f44f01a9d37100b0143e00f06822563994fa44f9c8000037003e00f000f844f9ab53bd962800805268221639880240f9f44f41a9085d40f9000140f9fe0742f8c0035fd6"
+        },
+        "game_object": {
+          "type": "UnityEngine.Component",
+          "name": "get_gameObject",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8f7c5c8",
+          "prefix": "fe0f1ef8f44f01a9f487009081e647f9",
+          "return": "UnityEngine.GameObject",
+          "parameters": [],
+          "metadata_method_index": 164655,
+          "token_row": 3163,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa01ee58"
+        },
+        "active_hierarchy": {
+          "type": "UnityEngine.GameObject",
+          "name": "get_activeInHierarchy",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8f7fdd8",
+          "prefix": "fe0f1ef8f44f01a9d48700d0817240f9",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 164786,
+          "token_row": 3294,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa01f270"
+        },
+        "active_enabled": {
+          "type": "UnityEngine.Behaviour",
+          "name": "get_isActiveAndEnabled",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8f7bb50",
+          "prefix": "fe0f1ef8f44f01a9f48700b081d647f9",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 164639,
+          "token_row": 3147,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa01edd8"
+        },
+        "animator_graph": {
+          "type": "UnityEngine.Animator",
+          "name": "GetCurrentGraph",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x8f21850",
+          "prefix": "fe57bea9f44f01a9b58a0090a22e44f9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph&",
+              "metadata_type_index": 44721
+            }
+          ],
+          "metadata_method_index": 206079,
+          "token_row": 265,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa015d48"
+        },
+        "animator_controller": {
+          "type": "UnityEngine.Animator",
+          "name": "get_runtimeAnimatorController",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8f21630",
+          "prefix": "fe0f1ef8f44f01a9b48a0090810a44f9",
+          "return": "UnityEngine.RuntimeAnimatorController",
+          "parameters": [],
+          "metadata_method_index": 206069,
+          "token_row": 255,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa015cf8"
+        },
+        "animator_bound": {
+          "type": "UnityEngine.Animator",
+          "name": "get_hasBoundPlayables",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8f216b0",
+          "prefix": "fe0f1ef8f44f01a9b48a0090811244f9",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 206071,
+          "token_row": 257,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa015d08"
+        },
+        "animator_mode": {
+          "type": "UnityEngine.Animator",
+          "name": "get_updateMode",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8f1df64",
+          "prefix": "fe0f1ef8f44f01a9d48a0090811243f9",
+          "return": "UnityEngine.AnimatorUpdateMode",
+          "parameters": [],
+          "metadata_method_index": 205923,
+          "token_row": 109,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa015868"
+        },
+        "legacy_state_count": {
+          "type": "UnityEngine.Animation",
+          "name": "GetStateCount",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8f1bfd8",
+          "prefix": "fe0f1ef8f44f01a9d48a00d0817242f9",
+          "return": "System.Int32",
+          "parameters": [],
+          "metadata_method_index": 205836,
+          "token_row": 22,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa0155b0"
+        },
+        "graph_valid": {
+          "type": "UnityEngine.Playables.PlayableGraph",
+          "name": "IsValid_Injected",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x8fabb44",
+          "prefix": "fe0f1ef8f44f01a9748600f0815a41f9",
+          "return": "System.Boolean",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableGraph&",
+              "metadata_type_index": 44721
+            }
+          ],
+          "metadata_method_index": 166700,
+          "token_row": 5208,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa022e40"
+        },
+        "graph_output_count": {
+          "type": "UnityEngine.Playables.PlayableGraph",
+          "name": "GetOutputCount_Injected",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x8fabff4",
+          "prefix": "fe0f1ef8f44f01a9748600f0818241f9",
+          "return": "System.Int32",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableGraph&",
+              "metadata_type_index": 44721
+            }
+          ],
+          "metadata_method_index": 166710,
+          "token_row": 5218,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa022e90"
+        },
+        "graph_output": {
+          "type": "UnityEngine.Playables.PlayableGraph",
+          "name": "GetOutputInternal_Injected",
+          "parameter_count": 3,
+          "static": true,
+          "rva": "0x8fac30c",
+          "prefix": "fe0f1df8f65701a9f44f02a9768600d0",
+          "return": "System.Boolean",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableGraph&",
+              "metadata_type_index": 44721
+            },
+            {
+              "name": "index",
+              "type": "System.Int32",
+              "metadata_type_index": 61313
+            },
+            {
+              "name": "handle",
+              "type": "UnityEngine.Playables.PlayableOutputHandle&",
+              "metadata_type_index": 44726
+            }
+          ],
+          "metadata_method_index": 166717,
+          "token_row": 5225,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa022ec8"
+        },
+        "output_valid": {
+          "type": "UnityEngine.Playables.PlayableOutputHandle",
+          "name": "IsValid_Injected",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x8fae8bc",
+          "prefix": "fe0f1ef8f44f01a974860090815242f9",
+          "return": "System.Boolean",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableOutputHandle&",
+              "metadata_type_index": 44725
+            }
+          ],
+          "metadata_method_index": 166836,
+          "token_row": 5344,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa023280"
+        },
+        "output_type": {
+          "type": "UnityEngine.Playables.PlayableOutputHandle",
+          "name": "GetPlayableOutputType_Injected",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x8fae8f8",
+          "prefix": "fe0f1ef8f44f01a974860090815642f9",
+          "return": "System.Type",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableOutputHandle&",
+              "metadata_type_index": 44725
+            }
+          ],
+          "metadata_method_index": 166837,
+          "token_row": 5345,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa023288"
+        },
+        "output_target": {
+          "type": "UnityEngine.Animations.AnimationPlayableOutput",
+          "name": "InternalGetTarget",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x8f2679c",
+          "prefix": "fe0f1ef8f44f01a9748a00f0815246f9",
+          "return": "UnityEngine.Animator",
+          "parameters": [
+            {
+              "name": "handle",
+              "type": "UnityEngine.Playables.PlayableOutputHandle&",
+              "metadata_type_index": 44725
+            }
+          ],
+          "metadata_method_index": 206365,
+          "token_row": 551,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa016638"
+        }
+      },
+      "types": {
+        "rigidbody_type": {
+          "type": "UnityEngine.Rigidbody",
+          "rva": "0x9de8480",
+          "prefix": "857e0000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 32389,
+          "metadata_type_index": 70935
+        },
+        "rigidbody2d_type": {
+          "type": "UnityEngine.Rigidbody2D",
+          "rva": "0x9de84b0",
+          "prefix": "8f810000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 33167,
+          "metadata_type_index": 70938
+        },
+        "cloth_type": {
+          "type": "UnityEngine.Cloth",
+          "rva": "0x9da10d0",
+          "prefix": "82820000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 33410,
+          "metadata_type_index": 51958
+        },
+        "character_controller_type": {
+          "type": "UnityEngine.CharacterController",
+          "rva": "0x9d9f4b0",
+          "prefix": "877e0000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 32391,
+          "metadata_type_index": 51505
+        },
+        "fixed_update_type": {
+          "type": "UnityEngine.PlayerLoop.FixedUpdate",
+          "rva": "0x9db51f0",
+          "prefix": "855e0000000000000000118000000000",
+          "kind": 17,
+          "type_definition": 24197,
+          "metadata_type_index": 57310
+        },
+        "animator_type": {
+          "type": "UnityEngine.Animator",
+          "rva": "0x9d85f00",
+          "prefix": "16780000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 30742,
+          "metadata_type_index": 48747
+        },
+        "animation_type": {
+          "type": "UnityEngine.Animation",
+          "rva": "0x9d94d60",
+          "prefix": "06780000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 30726,
+          "metadata_type_index": 48647
+        },
+        "animation_output_type": {
+          "type": "UnityEngine.Animations.AnimationPlayableOutput",
+          "rva": "0x9d95100",
+          "prefix": "3f780000000000000000118000000000",
+          "kind": 17,
+          "type_definition": 30783,
+          "metadata_type_index": 48712
+        }
+      },
+      "registry_slot": "0x1497250",
+      "native": {
+        "lookup": {
+          "rva": "0x54a674",
+          "prefix": "687a00b0082941f9e103002ae00308aa",
+          "body": "687a00b0082941f9e103002ae00308aa01000014ffc300d1fe4f02a9f30300aae11f00b900000191e8230091e1730091aa010094694a40b96a2240f9e80740f92905098b4901098b296100911f0109eb60000054000940f902000014e0031faafe4f42a9ffc30091c0035fd6"
+        },
+        "lookup_impl": {
+          "rva": "0x54a688",
+          "prefix": "ffc300d1fe4f02a9f30300aae11f00b9",
+          "body": "ffc300d1fe4f02a9f30300aae11f00b900000191e8230091e1730091aa010094694a40b96a2240f9e80740f92905098b4901098b296100911f0109eb60000054000940f902000014e0031faafe4f42a9ffc30091c0035fd6"
+        },
+        "lookup_iterator": {
+          "rva": "0x54ad4c",
+          "prefix": "fe0f1ef8f44f01a902500091f40300aa",
+          "body": "fe0f1ef8f44f01a902500091f40300aaf30308aaca030094880a40b9890240f90805088b2801088b086100911f0008eb680600f9e2000054090040b93f09003183000054006000911f0008eb63ffff54600200f9f44f41a9fe0742f8c0035fd6"
+        },
+        "lookup_hash": {
+          "rva": "0x54bc88",
+          "prefix": "280040b9c9a28b52a9daaf728a479852",
+          "body": "280040b9c9a28b52a9daaf728a4798520d31080ba901090b2aecb872294d494aab8399520c408c5229010a4a0b3fbd72ec99b5722915090b2a010b0b8b25090badd888524a010b4a0daebf72090840b94a0d0a0b2ee189524a010d0b4eabb6724b414a4a0a0040f96b010eca6d01098aac050d8b40010c8b0c0040b96b751e129f010b6b810000540e0840b91f010e6b800200549f050031e00100540c018052ad010c0bad01098aae050d8b40010e8b0e0040b9df010b6b810000540f0840b91f010f6be0000054df0500318c21001181feff542805098b4801088b00610091c0035fd6"
+        },
+        "registrar": {
+          "rva": "0x54b388",
+          "prefix": "ff0301d1fe0b00f9f65702a9f44f03a9",
+          "body": "ff0301d1fe0b00f9f65702a9f44f03a9f50301aa212840b9a20a40f9f40300aa83ffff97b32a40f9020a8052e10315aae00313aa7dfd3a9476a2009180020191e10316aaae020094130000f9a82e40f9a80000b5a83240f9680000b5a83640f9e80100b442e2ff908022009142081791e3630091e4230091e10316aaf60f00f985030094a82e40f9081400f9a83240f9081800f9a83640f9081c00f968ee4039a80000358082009161420091c4030094130000f9f44f43a9f65742a9fe0b40f9ff030191c0035fd6"
+        },
+        "fixed_condition": {
+          "rva": "0x6420e4",
+          "prefix": "fe0f1ff84081ff97fe0741f84380ff17",
+          "body": "fe0f1ff84081ff97fe0741f84380ff17"
+        },
+        "fixed_executor": {
+          "rva": "0x63ffd8",
+          "prefix": "683240f9680000b400013fd660070036",
+          "body": "683240f9680000b400013fd660070036e023059121008052"
+        },
+        "animator_register": {
+          "rva": "0x8bbb80",
+          "prefix": "ff4303d1fe5f0aa9f6570ba9f44f0ca9",
+          "body": "ff4303d1fe5f0aa9f6570ba9f44f0ca957d03bd5e81640f9e84f00f908504639e8042037f40301aaa10b00b408bc40f9f30300aa880200b469b640f90809088b08f17dd3292100912a815ff82a0100b42b0140b94c2140b96b791f129f010b6b610000544a1540f902000014ea031faa9f020aeb4009005408a100f129a1009141feff54e00314aa75a205911cdaf997c00500b4680643f91f0008eb40060054e0030091e10314aae4d0ff97e1030091e00315aa1a0d009433000014a0c1ffd000641e91e8c30191f3c30191c877f89729008052ea434239e923013989c6ffb020a1c03de93b40f988c5ff905f05007108093e916902899ae0030091ff2b00f9ff5b00b9ff3b00b9e82301a9e82306a9e81300f9e083823ce92300a9ff2300f90cad1694e8434239a8030035e03b40f9e19740b982c5ff9042083e91c3408052df09f29716000014e0030091e10314aabad0ff97e1030091e00315aaf00c00940f000014b60240f9e0030091e10314aab2d0ff97e2030091e00315aae10316aa11000094e00313aaf1ebff97e00313aa31d4ff97e00313aac2f0ff97e81640f9e94f40f91f0109ebc1000054f44f4ca9f6574ba9fe5f4aa9ff430391c0035fd6"
+        },
+        "animator_unregister": {
+          "rva": "0x8bb9e8",
+          "prefix": "ff4303d1fe5300f9f6570ba9f44f0ca9",
+          "body": "ff4303d1fe5300f9f6570ba9f44f0ca955d03bd5a81640f9e84f00f9169441b9b605203708bc40f9f40301aa01b440f9f30300aa0809088b02f17dd3a20900b4280040f9280100b4290840b90a2140b929791f125f01096b61000054081540f902000014e8031faa21a000919f0208eb42a000d141feff5420a000d1ef3b2d9468be40f9e00314aa080500d168be00f9a4dbf997e00600b4680643f91f0008eba1000054600215917fda05b97f0603f922f0f59768be40f9480500b43605383668224639e8040034e00313aaf0feff972600001440c5ff90007c1f91e8c30191f3c301912878f89729008052ea434239e9230139a9c6ffb020c1c03de93b40f988c5ff905f05007108093e916902899ae0030091ff2b00f9ff5b00b9ff3b00b9e82301a9e82306a9e81300f9e083823ce92300a9ff2300f96cad1694e843423988010035e03b40f9e19740b982c5ff9042083e91c34080523f0af29705000014e00313aa60ecff97e00313aa33f1ff97a81640f9e94f40f91f0109ebc1000054f44f4ca9f6574ba9fe5340f9ff430391c0035fd6"
+        },
+        "animator_record_ctor": {
+          "rva": "0x8affb8",
+          "prefix": "ffc300d1fe5701a9f44f02a9f30300aa",
+          "body": "ffc300d1fe5701a9f44f02a9f30300aa1f0000f91f0800b91f0800f91f1800b9e00301aaf40301aa9e08fa97600200f9e00314aa610a00b92309fa97e00000b4e8030091f5030091c3eaf997e80340f9a922009104000014495d00b029fd44f9288540f8290140b9680a00f9fe5741a9691a00b9884640b9087da80a682200b9f44f42a9ffc30091c0035fd6"
+        },
+        "animator_append": {
+          "rva": "0x8bf09c",
+          "prefix": "fe0f1df8f65701a9f44f02a9152041a9",
+          "body": "fe0f1df8f65701a9f44f02a9152041a9f40300aaf30301aab6060091df0648eb28020054960a00f9880240f96002c03d09058052a022099b0000803d680a40f9f65741a9080800f9681a40b9081800b9682240b9f44f42a9082000b9fe0743f8c0035fd6"
+        }
+      },
+      "actors": {
+        "registry_field": {
+          "offset": 0,
+          "type": "System.Collections.Generic.List`1<VL.IVLActorController>",
+          "metadata_field_index": 129673
+        },
+        "extensions_field": {
+          "offset": 64,
+          "type": "System.Collections.Generic.List`1<VL.VLActorExtension>",
+          "metadata_field_index": 129679
+        },
+        "animator_field": {
+          "offset": 48,
+          "type": "UnityEngine.Animator",
+          "metadata_field_index": 129677
+        },
+        "active_requires_original_game_object_hierarchy": true,
+        "active_swing_must_be_in_selected_binder": true,
+        "registry_getter_linkage": {
+          "initialized_flag": "0xa07e588",
+          "class_link_slot": "0x9a089f0",
+          "indirect_class_cell": true
+        }
+      },
+      "animator_bindings": {
+        "cached_ptr": 16,
+        "data": 360,
+        "count": 376,
+        "count_bytes": 8,
+        "capacity": 384,
+        "capacity_bytes": 8,
+        "capacity_shift": 1,
+        "registration_flags": 404,
+        "registration_suspended_bit": 4,
+        "record_bytes": 40,
+        "output_handle": 0,
+        "output_version": 8,
+        "graph_handle": 16,
+        "graph_version": 24
+      },
+      "loop": {
+        "value_bytes": 40,
+        "fields": {
+          "type": 0,
+          "updateDelegate": 8,
+          "updateFunction": 16,
+          "loopConditionFunction": 24,
+          "numSubSystems": 32
+        },
+        "condition_abi": "bool(void)",
+        "condition_false_skips_all_children": true,
+        "exit_rva": "0x6400d0"
+      },
+      "registry": {
+        "map": 64,
+        "data": 0,
+        "mask": 8,
+        "occupied": 12,
+        "free": 16,
+        "bucket_bytes": 24,
+        "status": 0,
+        "key": 8,
+        "rtti": 16,
+        "rtti_name": 16,
+        "rtti_class_id": 40,
+        "articulation_class_id": 171741748,
+        "absence_requires_complete_registered_map_and_native_lookup": true
+      }
+    },
+    "ios": {
+      "schema": 1,
+      "platform": "ios",
+      "director_registry": {
+        "manager_slot": "0xa8a8e00",
+        "tagged_queue": false,
+        "native": {
+          "registry_getter": {
+            "rva": "0xdc73a0",
+            "prefix": "08d704b0000147f9c0035fd6fd7bbfa9",
+            "body": "08d704b0000147f9c0035fd6",
+            "bounded_bytes": 12
+          },
+          "sample_category": {
+            "rva": "0xdc5838",
+            "prefix": "f44fbea9fd7b01a9fd430091f40301aa",
+            "body": "f44fbea9fd7b01a9fd430091f40301aaf30300aa27000094e803142a6916088bea0309aa4b0d4af8cb0100b40b0080d22c4102910d0980528e0140f9ce696df8cf1140f9ef050091cf1100f96b0500914e0140f9ad410191df010bebe8feff542ac140f90a0200b40a0080d2290106916816088b08c105910b0980520c0140f98c696bf88d1140f9ad0500918d1100f94a0500912c0140f96b4101919f010aebe8feff54fd7b41a9f44fc2a8c0035fd6",
+            "bounded_bytes": 176
+          },
+          "rebuild": {
+            "rva": "0xdc58e8",
+            "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+            "body": "f657bda9f44f01a9fd7b02a9fd83009108745039a8020034f30300aa151280527402158be00314aa8ff2f597808203918df2f597b5820091bfc205f121ffff5475a20d9174ba41f99f0215ebc0000054e00313aae10314aa0b040094940640f9faffff177f761039fd7b42a9f44f41a9f657c3a8c0035fd6",
+            "bounded_bytes": 120
+          },
+          "append": {
+            "rva": "0xdc696c",
+            "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+            "body": "f85fbca9f65701a9f44f02a9fd7b03a9fdc30091f30301aa283040b929b04239e90010370814088b14c1059116010691152158a9b7060091060000141614088bd50e4af8d44200d1b7060091c80640f9ff0648eb08020054d70200f9880240f9090a80524ac403f04079c13da822099b01e4004f000500ad010501ad1f4d04a9fd7b43a9f44f42a9f65741a9f85fc4a8c0035fd6e00314aa33d1fc97efffff17",
+            "bounded_bytes": 160
+          },
+          "category": {
+            "rva": "0xdc6618",
+            "prefix": "f44fbea9fd7b01a9fd430091f30301aa",
+            "body": "f44fbea9fd7b01a9fd430091f30301aaf40300aa28008052086c103939fdff97e00314aae10313aa37feff97e00314aae10313aa1affff97e00314aa31fdff979f6e1039fd7b41a9f44fc2a8c0035fd6",
+            "bounded_bytes": 80
+          },
+          "callbacks_rebuild": {
+            "rva": "0xdc632c",
+            "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+            "body": "f657bda9f44f01a9fd7b02a9fd8300910878503948020034f30300aa144a80526002148baf010094948200919fc20cf181ffff5475a20d9174ba41f99f0215ebc0000054e00313aae10314aabd010094940640f9faffff177f7a1039fd7b42a9f44f41a9f657c3a8c0035fd6",
+            "bounded_bytes": 108
+          },
+          "callbacks_dispatch": {
+            "rva": "0xdc62b4",
+            "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+            "body": "f657bda9f44f01a9fd7b02a9fd830091f30301aaf40300aa18000094e803132a8916088b283141f9080200b4130080d2140080d23581099136410991ca0240f9496973f8a90000b44801138b0021009120013fd6a80240f99406009173a200911f0114ebc8feff54fd7b42a9f44f41a9f657c3a8c0035fd6",
+            "bounded_bytes": 120
+          },
+          "output_callbacks": {
+            "rva": "0xdc6a6c",
+            "prefix": "ff4303d1fc6f07a9fa6708a9f85f09a9",
+            "body": "ff4303d1fc6f07a9fa6708a9f85f09a9f6570aa9f44f0ba9fd7b0ca9fd030391f40301aaf30300aae00301aafbf2ff97e00a003788e20191974240f9e80700f9ff0208eb400a0054e8a300911421009168c203f00029c03de007803d790980521a058052ff2b00f928008052e85b00b9e007c03de01b803df50317aaa88e5ff8081140f9e1430191e00315aa00013fd6e83340f9080700b41b0080d2e82b40f908111b8bfc0308aa898f40b86a16098b493141f9c90100b40b0080d24a2941f90c0140f9f8030aaa0d0340f9bf010cebc00000546b05009118a300913f010beb48ffff54020000148a0200b5ff1b00f9f93b00b9e007c03de003843c080140f9e81700f9880340b96816088b00410991e1a30091a70a0094880340b96816088b092941f9083141f908251a9b18a100d1e00314aac5f2ff971ca341a996070091df0648eb28010054160f00f9080740f915793cf87b070091e83340f91f011bebe8f9ff54040000140023009165ebf597f6ffff17e0430191b3f2ff97f70640f9e80740f9ff0208ebe1f6ff54fd7b4ca9f44f4ba9f6574aa9f85f49a9fa6748a9fc6f47a9ff430391c0035fd601000014f30300aa04000014f30300aae00314aaa2f2ff97e04301919ff2ff97e00313aa2de6d295",
+            "bounded_bytes": 468
+          },
+          "drain": {
+            "rva": "0xdc5b18",
+            "prefix": "ff0302d1fc6f02a9fa6703a9f85f04a9",
+            "body": "ff0302d1fc6f02a9fa6703a9f85f04a9f65705a9f44f06a9fd7b07a9fdc301910868503968160035f30300aa2800805208681039ff0300f9e80b00b988c203900029c03de007803d013c42f9e0030091b90000941c0080521600805277e20d9178a20d91190380529ac403f05ac30d91e80b40f9081300b40805007104120054fb03082aea0340f90829b99b090140f9291100b46a2b199b4a0940b92b2140b94a791f127f010a6b61100054351540f9351000b4081140b9a91240f929050091a91200f91f190071680f0054e803082a890000104a6b683829090a8b20011fd6a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9e003679e01102e1ee00315aa21008052020080d2030080520400805213f5ff97a81240f908050091a81200f9bf0218eb200a0054a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9080340f9a86200a91d000014a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9e003679e01102e1ee00315aa41008052020080d20300805204008052f5f4ff97e00315aa82f6ff97bf0217eb80060054a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9e80240f9a85e00a9150500f9a80640f9150100f927000014a80240f9c80000b4a90640f9090500f9a82640a9280100f9bf7e00a9e003679e01102e1ee00315aa81008052020080d20300805204008052d5f4ff97e00315aa62f6ff97e00315aad5f3ff97e00315aa5cf3ff97c10b8052422904b042c03291e32e80521814f8970c000014b45a4179e00315aa91f8ff97a8b242398802084a08011e129c0b482a15000014a85a417908791d12a85a01793c00805210000014e00315aaf9f3ff970d000014df3a007168010054a81a40b9694200916aa200911f01007128018a9a010140f9623a40b9e003679ee00315aa1bf5ff976807007145eeff54613e42f9e00300911c000094d6060011df42007101edff549c0000366876109129208052090100797f6a1039e003009145000094fd7b47a9f44f46a9f65745a9f85f44a9fa6743a9fc6f42a9ff030291c0035fd604000014030000140200001401000014f30300aae003009136000094e00313aaaae9d295",
+            "bounded_bytes": 820
+          },
+          "collect": {
+            "rva": "0xdc5e4c",
+            "prefix": "fc6fbaa9fa6701a9f85f02a9f65703a9",
+            "body": "fc6fbaa9fa6701a9f85f02a9f65703a9f44f04a9fd7b05a9fd430191f30301aaf40300aa37f1f597e00313aa9b61fa9700010034fd7b45a9f44f44a9f65743a9f85f42a9fa6741a9fc6fc6a8c0035fd617038052552904b0b5c23291e00313aae606ff97f60300aa190440f9181040b91a1840b99b2241a97c0700919f0748eb080200549c0a00f9880240f96823179b196100a91a1100b9d60000b4e00316aa41008052e20315aa43268052af13f897e00313aa7961fa9720fdff34deffff17e00314aa96b6f897efffff17",
+            "bounded_bytes": 204
+          },
+          "enqueue": {
+            "rva": "0xdc6448",
+            "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+            "body": "f657bda9f44f01a9fd7b02a9fd830091f30302aaf40301aaf50300aa4329049063c0329100048052410080520201805244508052cd11f897e10300aa680240f9690a40b908a400a9e803142a080c00f9a03e42f9fd7b42a9f44f41a9f657c3a85d05ff17",
+            "bounded_bytes": 100
+          },
+          "deferred_a": {
+            "rva": "0xdc65a4",
+            "prefix": "f44fbea9fd7b01a9fd430091f30300aa",
+            "body": "f44fbea9fd7b01a9fd430091f30300aa08cc41f9680200b469c641f9f40309aa8a0240f96a0100b44b2140b98c0a40b98c791f127f010c6bc1000054401540f9800000b434f4ff9769c641f968ce41f9944200912a11088b9f020aeb21feff547fce01f9e00313aafd7b41a9f44fc2a841fdff17",
+            "bounded_bytes": 116
+          },
+          "deferred_b": {
+            "rva": "0xdc6520",
+            "prefix": "f44fbea9fd7b01a9fd430091f30300aa",
+            "body": "f44fbea9fd7b01a9fd430091f30300aa08dc41f9e80200b469d641f9f40309aa8a0240f9ea0100b44b2140b98c0a40b98c791f127f010c6b410100544a1540f94ab14239ea000836e00313aac1008052e20314aab5ffff9769d641f968de41f9944200912a11088b9f020aeba1fdff547fde01f9e00313aafd7b41a9f44fc2a85efdff17",
+            "bounded_bytes": 132
+          },
+          "deferred_append_a": {
+            "rva": "0xdc66c0",
+            "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+            "body": "f657bda9f44f01a9fd7b02a9fd830091280040f9280200b4f30301aa082140b9290840b929791f121f01096b61010054f40300aa15cc41f9b606009108d041f9df0648eb2801005496ce01f988c641f96002c03d0079b53cfd7b42a9f44f41a9f657c3a8c0035fd680220e912fd2f797f6ffff17",
+            "bounded_bytes": 116
+          },
+          "deferred_append_b": {
+            "rva": "0xdc64ac",
+            "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+            "body": "f657bda9f44f01a9fd7b02a9fd830091280040f9280200b4f30301aa082140b9290840b929791f121f01096b61010054f40300aa15dc41f9b606009108e041f9df0648eb2801005496de01f988d641f96002c03d0079b53cfd7b42a9f44f41a9f657c3a8c0035fd680a20e91b4d2f797f6ffff17",
+            "bounded_bytes": 116
+          },
+          "graph_create": {
+            "rva": "0xdc6870",
+            "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+            "body": "f657bda9f44f01a9fd7b02a9fd830091f50301aaf40300aa4329049063c03291001f8052c10b805202018052a4578052c410f897f30300aae10315aa51f0ff9788e20d911f0113eba0010054690240f9c90000b46a0640f92a0500f9692a40a9490100f97f7e00a9090140f9692200a9330500f9680640f9130100f9e00313aafd7b42a9f44f41a9f657c3a8c0035fd6f40300aa4329049063c03291e00313aac10b805202018052a4578052ac10f897e00314aaf3e6d295",
+            "bounded_bytes": 184
+          },
+          "graph_destroy": {
+            "rva": "0xdc6760",
+            "prefix": "ff4301d1f65702a9f44f03a9fd7b04a9",
+            "body": "ff4301d1f65702a9f44f03a9fd7b04a9fd030191484e0490080942f9080140f9e80f00f9280040f9080300b4f40301aa092140b92a0840b94a791f123f010a6b41020054f30300aa151540f9e00315aa010080d2aff0ff97880240f9092140b929090011092100b91f1500f9e00315aa3de8ff97e08700a9e2230091e00313aa4100805219ffff97e80f40f9494e0490290942f9290140f93f0108ebc1000054fd7b44a9f44f43a9f65742a9ff430191c0035fd6f801d395",
+            "bounded_bytes": 184
+          },
+          "atomic_push": {
+            "rva": "0xd87a1c",
+            "prefix": "08fc5fc8280000f901fc08c8a8ffff35",
+            "body": "08fc5fc8280000f901fc08c8a8ffff35c0035fd6",
+            "bounded_bytes": 20
+          },
+          "atomic_pop": {
+            "rva": "0xd87a44",
+            "prefix": "e80300aa00fd5fc8a00000b4090040f9",
+            "body": "e80300aa00fd5fc8a00000b4090040f909fd0ac88affff35c0035fd65f3f03d5c0035fd6",
+            "bounded_bytes": 36
+          }
+        },
+        "outputs": [
+          {
+            "vtable": "0x97f7688",
+            "producer": {
+              "rva": "0xf3fa68",
+              "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+              "body": "f85fbca9f65701a9f44f02a9fd7b03a9fdc30091f30301aa086840f97500805294008052a80000b4089141b91f05007194169f1af503951a762241a9d7060091ff0648eb08030054770a00f9680240f90811168b49fefff029212891090100f9150900b9752241a9b6060091df0648eb08020054760a00f9680240f90811158b69feff9029411291090100f9140900b9fd7b43a9f44f42a9f65741a9f85fc4a8c0035fd6e00313aa36edf197e7ffff17e00313aa33edf197efffff17e10300aa006840f9600000b4224440b9f74cff17c0035fd67c23fa17fd7bbfa9fd030091381e0094c845049008c11b91080000f91f8800f9c8038052081801b9a8b603d00029c03d0048803d2800805208c00439fd7bc1a8c0035fd6ff8302d1f65707a9f44f08a9fd7b09a9fd430291f50303aaf40302aaf60301aaf30300aa08c04439c8000034e00313aae10316aae20314aae30315aa36000094c80240b9e83b00b9f65304a9ffff05a9f52b00f9c84e40f9e83700f9a80240f9080940f9880000b4890a40f9200140bd000100bdf31700f9ff3300b9e8a30091e83300f9a84504f0",
+              "bounded_bytes": 416
+            },
+            "callbacks": [
+              {
+                "rva": "0xf0aa08",
+                "prefix": "21008052020080520300805201000014",
+                "body": "21008052020080520300805201000014",
+                "bounded_bytes": 16
+              },
+              {
+                "rva": "0xf0b490",
+                "prefix": "0100805222008052030080525ffdff17",
+                "body": "0100805222008052030080525ffdff17",
+                "bounded_bytes": 16
+              }
+            ],
+            "categories": [
+              3,
+              4
+            ],
+            "animation": true
+          },
+          {
+            "vtable": "0x97fa218",
+            "producer": {
+              "rva": "0xfa37f8",
+              "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+              "body": "f657bda9f44f01a9fd7b02a9fd830091f30301aa342041a995060091bf0648eba8010054750a00f9680240f90811148b0900009029510e91090100f9a9008052090900b9fd7b42a9f44f41a9f657c3a8c0035fd6e00313aae65df097f2ffff17f44fbea9fd7b01a9fd430091f30300aab080ff97a00000b4e10313aafd7b41a9f44fc2a80c92ff17fd7b41a9f44fc2a8",
+              "bounded_bytes": 144
+            },
+            "callbacks": [
+              {
+                "rva": "0xfa3394",
+                "prefix": "ff8305d1e9230f6dfc6f10a9fa6711a9",
+                "body": "ff8305d1e9230f6dfc6f10a9fa6711a9",
+                "bounded_bytes": 16
+              }
+            ],
+            "categories": [
+              5
+            ],
+            "animation": false
+          },
+          {
+            "vtable": "0x97f2140",
+            "producer": {
+              "rva": "0xdc443c",
+              "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+              "body": "f657bda9f44f01a9fd7b02a9fd830091f30301aa342041a995060091bf0648eba8010054750a00f9680240f90811148b0900009029711291090100f949008052090900b9fd7b42a9f44f41a9f657c3a8c0035fd6e00313aad5daf797f2ffff17",
+              "bounded_bytes": 96
+            },
+            "callbacks": [
+              {
+                "rva": "0xdc449c",
+                "prefix": "ff8304d1e9230b6dfc6f0ca9fa670da9",
+                "body": "ff8304d1e9230b6dfc6f0ca9fa670da9",
+                "bounded_bytes": 16
+              }
+            ],
+            "categories": [
+              2
+            ],
+            "animation": false
+          }
+        ],
+        "layout": {
+          "active": 872,
+          "stopped": 888,
+          "slot": 16,
+          "slot_version": 32,
+          "slot_native": 40,
+          "queue": 1144,
+          "queue_record_bytes": 32,
+          "deferred": [
+            904,
+            936
+          ],
+          "graph_dispatch": [
+            144,
+            368
+          ],
+          "callback_dispatch": 592
+        },
+        "ownership_requires": [
+          "exact current source graphs or authorized BEFORE retirement basis plus actual valid pending Destroy/version+2",
+          "typed animation target / audio state / script userData+managed node callback closure for every native output",
+          "maintenance captured/closed witness and operation-kind authorization receipts; no manual flush"
+        ],
+        "native_source_scope": "Original AArch64 producer and manager body source pins; not whole-scene or GPU execution proof"
+      },
+      "sources": {
+        "engine_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+        "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+        "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda"
+      },
+      "methods": {
+        "find_objects": {
+          "type": "UnityEngine.Object",
+          "name": "FindObjectsOfType",
+          "parameter_count": 2,
+          "static": true,
+          "rva": "0x7854ed8",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "UnityEngine.Object[]",
+          "parameters": [
+            {
+              "name": "type",
+              "type": "System.Type",
+              "metadata_type_index": 76225
+            },
+            {
+              "name": "includeInactive",
+              "type": "System.Boolean",
+              "metadata_type_index": 50275
+            }
+          ],
+          "metadata_method_index": 165388,
+          "token_row": 3476,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa789720"
+        },
+        "current_loop": {
+          "type": "UnityEngine.LowLevel.PlayerLoop",
+          "name": "GetCurrentPlayerLoopInternal",
+          "parameter_count": 0,
+          "static": true,
+          "rva": "0x787002c",
+          "prefix": "f44fbea9fd7b01a9fd430091738501b0",
+          "return": "UnityEngine.LowLevel.PlayerLoopSystemInternal[]",
+          "parameters": [],
+          "metadata_method_index": 166301,
+          "token_row": 4389,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa78b3a8"
+        },
+        "cloth_enabled": {
+          "type": "UnityEngine.Cloth",
+          "name": "get_enabled",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x77e6374",
+          "prefix": "f44fbea9fd7b01a9fd430091938901f0",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 222308,
+          "token_row": 23,
+          "module": "UnityEngine.ClothModule.dll",
+          "registration_pointer_slot": "0xa782920"
+        },
+        "actor_registry": {
+          "type": "VL.Core.VLActorController",
+          "name": "get_actorControllers",
+          "parameter_count": 0,
+          "static": true,
+          "rva": "0x7bd4f70",
+          "prefix": "f44fbea9fd7b01a9fd430091736a01b0",
+          "return": "System.Collections.Generic.IReadOnlyList`1<VL.IVLActorController>",
+          "parameters": [],
+          "metadata_method_index": 196215,
+          "token_row": 1105,
+          "module": "vl-unity.Runtime.dll",
+          "registration_pointer_slot": "0xa7b5480",
+          "body": "f44fbea9fd7b01a9fd430091736a01b0682e7339b44001d094c23891c8000037a04001d000c038919b5c189428008052682e3339880240f9085d40f9000140f9fd7b41a9f44fc2a8c0035fd6"
+        },
+        "game_object": {
+          "type": "UnityEngine.Component",
+          "name": "get_gameObject",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7849a74",
+          "prefix": "f44fbea9fd7b01a9fd430091938601f0",
+          "return": "UnityEngine.GameObject",
+          "parameters": [],
+          "metadata_method_index": 165080,
+          "token_row": 3168,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa788d80"
+        },
+        "active_hierarchy": {
+          "type": "UnityEngine.GameObject",
+          "name": "get_activeInHierarchy",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x784e5ec",
+          "prefix": "f44fbea9fd7b01a9fd430091738601d0",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 165211,
+          "token_row": 3299,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa789198"
+        },
+        "active_enabled": {
+          "type": "UnityEngine.Behaviour",
+          "name": "get_isActiveAndEnabled",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x7848b70",
+          "prefix": "f44fbea9fd7b01a9fd430091b3860190",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 165064,
+          "token_row": 3152,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa788d00"
+        },
+        "animator_graph": {
+          "type": "UnityEngine.Animator",
+          "name": "GetCurrentGraph",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x77c7ef8",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "graph",
+              "type": "UnityEngine.Playables.PlayableGraph&",
+              "metadata_type_index": 44603
+            }
+          ],
+          "metadata_method_index": 206490,
+          "token_row": 265,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa77fc50"
+        },
+        "animator_controller": {
+          "type": "UnityEngine.Animator",
+          "name": "get_runtimeAnimatorController",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x77c7c28",
+          "prefix": "f44fbea9fd7b01a9fd430091938a01d0",
+          "return": "UnityEngine.RuntimeAnimatorController",
+          "parameters": [],
+          "metadata_method_index": 206480,
+          "token_row": 255,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa77fc00"
+        },
+        "animator_bound": {
+          "type": "UnityEngine.Animator",
+          "name": "get_hasBoundPlayables",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x77c7cdc",
+          "prefix": "f44fbea9fd7b01a9fd430091938a01d0",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 206482,
+          "token_row": 257,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa77fc10"
+        },
+        "animator_mode": {
+          "type": "UnityEngine.Animator",
+          "name": "get_updateMode",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x77c2f00",
+          "prefix": "f44fbea9fd7b01a9fd430091b38a01d0",
+          "return": "UnityEngine.AnimatorUpdateMode",
+          "parameters": [],
+          "metadata_method_index": 206334,
+          "token_row": 109,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa77f770"
+        },
+        "legacy_state_count": {
+          "type": "UnityEngine.Animation",
+          "name": "GetStateCount",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x77c0208",
+          "prefix": "f44fbea9fd7b01a9fd430091d38a0190",
+          "return": "System.Int32",
+          "parameters": [],
+          "metadata_method_index": 206247,
+          "token_row": 22,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa77f4b8"
+        },
+        "graph_valid": {
+          "type": "UnityEngine.Playables.PlayableGraph",
+          "name": "IsValid_Injected",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x78900f8",
+          "prefix": "f44fbea9fd7b01a9fd430091738401b0",
+          "return": "System.Boolean",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableGraph&",
+              "metadata_type_index": 44603
+            }
+          ],
+          "metadata_method_index": 167134,
+          "token_row": 5222,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa78cdb0"
+        },
+        "graph_output_count": {
+          "type": "UnityEngine.Playables.PlayableGraph",
+          "name": "GetOutputCount_Injected",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x7890aa4",
+          "prefix": "f44fbea9fd7b01a9fd430091738401b0",
+          "return": "System.Int32",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableGraph&",
+              "metadata_type_index": 44603
+            }
+          ],
+          "metadata_method_index": 167144,
+          "token_row": 5232,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa78ce00"
+        },
+        "graph_output": {
+          "type": "UnityEngine.Playables.PlayableGraph",
+          "name": "GetOutputInternal_Injected",
+          "parameter_count": 3,
+          "static": true,
+          "rva": "0x7891148",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Boolean",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableGraph&",
+              "metadata_type_index": 44603
+            },
+            {
+              "name": "index",
+              "type": "System.Int32",
+              "metadata_type_index": 61162
+            },
+            {
+              "name": "handle",
+              "type": "UnityEngine.Playables.PlayableOutputHandle&",
+              "metadata_type_index": 44608
+            }
+          ],
+          "metadata_method_index": 167151,
+          "token_row": 5239,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa78ce38"
+        },
+        "output_valid": {
+          "type": "UnityEngine.Playables.PlayableOutputHandle",
+          "name": "IsValid_Injected",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x78961fc",
+          "prefix": "f44fbea9fd7b01a9fd430091338401f0",
+          "return": "System.Boolean",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableOutputHandle&",
+              "metadata_type_index": 44607
+            }
+          ],
+          "metadata_method_index": 167270,
+          "token_row": 5358,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa78d1f0"
+        },
+        "output_type": {
+          "type": "UnityEngine.Playables.PlayableOutputHandle",
+          "name": "GetPlayableOutputType_Injected",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x78962f8",
+          "prefix": "f44fbea9fd7b01a9fd430091338401f0",
+          "return": "System.Type",
+          "parameters": [
+            {
+              "name": "_unity_self",
+              "type": "UnityEngine.Playables.PlayableOutputHandle&",
+              "metadata_type_index": 44607
+            }
+          ],
+          "metadata_method_index": 167271,
+          "token_row": 5359,
+          "module": "UnityEngine.CoreModule.dll",
+          "registration_pointer_slot": "0xa78d1f8"
+        },
+        "output_target": {
+          "type": "UnityEngine.Animations.AnimationPlayableOutput",
+          "name": "InternalGetTarget",
+          "parameter_count": 1,
+          "static": true,
+          "rva": "0x77d07b4",
+          "prefix": "f44fbea9fd7b01a9fd430091538a01b0",
+          "return": "UnityEngine.Animator",
+          "parameters": [
+            {
+              "name": "handle",
+              "type": "UnityEngine.Playables.PlayableOutputHandle&",
+              "metadata_type_index": 44607
+            }
+          ],
+          "metadata_method_index": 206776,
+          "token_row": 551,
+          "module": "UnityEngine.AnimationModule.dll",
+          "registration_pointer_slot": "0xa780540"
+        }
+      },
+      "types": {
+        "rigidbody_type": {
+          "type": "UnityEngine.Rigidbody",
+          "rva": "0xa551fd0",
+          "prefix": "3c7f0000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 32572,
+          "metadata_type_index": 70802
+        },
+        "rigidbody2d_type": {
+          "type": "UnityEngine.Rigidbody2D",
+          "rva": "0xa552000",
+          "prefix": "fe810000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 33278,
+          "metadata_type_index": 70805
+        },
+        "cloth_type": {
+          "type": "UnityEngine.Cloth",
+          "rva": "0xa50aae0",
+          "prefix": "f2820000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 33522,
+          "metadata_type_index": 51805
+        },
+        "character_controller_type": {
+          "type": "UnityEngine.CharacterController",
+          "rva": "0xa508ec0",
+          "prefix": "3e7f0000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 32574,
+          "metadata_type_index": 51352
+        },
+        "fixed_update_type": {
+          "type": "UnityEngine.PlayerLoop.FixedUpdate",
+          "rva": "0xa51ebf0",
+          "prefix": "b45e0000000000000000118000000000",
+          "kind": 17,
+          "type_definition": 24244,
+          "metadata_type_index": 57156
+        },
+        "animator_type": {
+          "type": "UnityEngine.Animator",
+          "rva": "0xa4efae0",
+          "prefix": "4e780000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 30798,
+          "metadata_type_index": 48589
+        },
+        "animation_type": {
+          "type": "UnityEngine.Animation",
+          "rva": "0xa4fe720",
+          "prefix": "3e780000000000000000120000000000",
+          "kind": 18,
+          "type_definition": 30782,
+          "metadata_type_index": 48489
+        },
+        "animation_output_type": {
+          "type": "UnityEngine.Animations.AnimationPlayableOutput",
+          "rva": "0xa4feac0",
+          "prefix": "77780000000000000000118000000000",
+          "kind": 17,
+          "type_definition": 30839,
+          "metadata_type_index": 48554
+        }
+      },
+      "registry_slot": "0xa938f90",
+      "native": {
+        "lookup": {
+          "rva": "0xbd69b4",
+          "prefix": "e10300aa08eb04d000c947f901000014",
+          "body": "e10300aa08eb04d000c947f901000014ff0301d1f44f02a9fd7b03a9fdc30091f30300aaa1c31eb800000191e8230091a15300d1bea9fd97682240f9694a40b92905098b0801098b09610091e80740f91f0109eb60000054000940f902000014000080d2fd7b43a9f44f42a9ff030191c0035fd6"
+        },
+        "lookup_impl": {
+          "rva": "0xbd69c4",
+          "prefix": "ff0301d1f44f02a9fd7b03a9fdc30091",
+          "body": "ff0301d1f44f02a9fd7b03a9fdc30091f30300aaa1c31eb800000191e8230091a15300d1bea9fd97682240f9694a40b92905098b0801098b09610091e80740f91f0109eb60000054000940f902000014000080d2fd7b43a9f44f42a9ff030191c0035fd6"
+        },
+        "lookup_iterator": {
+          "rva": "0xb410e0",
+          "prefix": "f44fbea9fd7b01a9fd430091f40300aa",
+          "body": "f44fbea9fd7b01a9fd430091f40300aaf30308aa0250009112000094880240f9890a40b92905098b0801098b08610091602200a91f0008ebc2000054090040b93f0900316300005400600091faffff17600200f9fd7b41a9f44fc2a8c0035fd6"
+        },
+        "lookup_hash": {
+          "rva": "0xb41140",
+          "prefix": "280040b90931080bcaa28b52aadaaf72",
+          "body": "280040b90931080bcaa28b52aadaaf7229010a0b294d494a8a4798522aecb87229010a4a2915090baa8399520a3fbd722a010a0b0b408c52eb99b5726925090b4901094a290d090baad888520aaebf7229010a0b2941494a2ae189524aabb6722b010aca6a751e12090840b96d01098a0b0040f9ac050d8b60010c8b0c0040b99f010a6b810000540e0840b91f010e6b800200549f050031e00100540c018052ad010c0bad01098aae050d8b60010e8b0e0040b9df010a6b810000540f0840b91f010f6be00000548c210011df05003181feff542805098b6801088b00610091c0035fd6"
+        },
+        "registrar": {
+          "rva": "0xbd781c",
+          "prefix": "ff0301d1f65701a9f44f02a9fd7b03a9",
+          "body": "ff0301d1f65701a9f44f02a9fd7b03a9fdc30091f40301aaf30300aa212840b9820a40f982ffff97962a40f98002c03dc002803d808640ad828e41adc28e01adc08600ad60020191d5a20091e10315aaec020094160000f9882e40f9a80000b5883240f9680000b5883640f9e80100b460220091f50700f9c2d303d042603b91e3230091e4030091e10315aac8030094882e40f9081400f9883240f9081800f9883640f9081c00f9c8ee4039a800003560820091c1420091f8030094160000f9fd7b43a9f44f42a9f65741a9ff030191c0035fd6"
+        },
+        "fixed_condition": {
+          "rva": "0xccc210",
+          "prefix": "fd7bbfa9fd0300911e85ff97fd7bc1a8",
+          "body": "fd7bbfa9fd0300911e85ff97fd7bc1a8fc83ff17"
+        },
+        "fixed_executor": {
+          "rva": "0xccac30",
+          "prefix": "683240f9680000b400013fd660070034",
+          "body": "683240f9680000b400013fd660070034a0a301d121008052"
+        },
+        "animator_register": {
+          "rva": "0xf13468",
+          "prefix": "ff4303d1f6570aa9f44f0ba9fd7b0ca9",
+          "body": "ff4303d1f6570aa9f44f0ba9fd7b0ca9fd030391c84304f0080942f9080140f9a8831df808504639e8042037f40301aae10a00b4f30300aa08bc40f9880200b469b640f90809088b08f17dd3292100912a815ff82a0100b44b2140b92c0140b98c791f127f010c6b610000544a1540f9020000140a0080d29f020aeb8008005429a1009108a100f141feff5475a20591e00314aad6d3fa97000500b4680643f91f0008eb80050054e0030091e10314aa75cfff97e1030091e00315aabe0c00942d000014e02504d0001c0891b34301d1a84301d18b6df997c81e04f008c13291e82301a929008052e9230139ff2b00f9ff5b00b9e82306a9a9035d38aa035bf83f05007169028a9ae92300a9e81300f928ba03f000edc23de083823cff3b00b9ff2300f9e003009163cc1194a04301d1aeb4f09716000014e0030091e10314aa51cfff97e1030091e00315aa9a0c00940f000014b60240f9e0030091e10314aa49cfff97e2030091e00315aae10316aa18000094e00313aa78ebff97e00313aa14d3ff97e00313aa62f0ff97a8835df8c94304f0290942f9290140f93f0108ebc1000054fd7b4ca9f44f4ba9f6574aa9ff430391c0035fd6"
+        },
+        "animator_unregister": {
+          "rva": "0xf13290",
+          "prefix": "ff4303d1f6570aa9f44f0ba9fd7b0ca9",
+          "body": "ff4303d1f6570aa9f44f0ba9fd7b0ca9fd030391c84304f0080942f9080140f9a8831df8159441b975032037f30300aa08bc40f9880600b4f40301aa60b640f909058052087d099b02a100d1080040f9280100b4092140b90a0840b94a791f123f010a6b61000054081540f902000014080080d201a000919f0208eba005005442a000d1e00301aa5fa000b101feff541d000014e02504d000240791b34301d1a84301d10d6ef997c81e04f008c13291e82301a929008052e9230139ff2b00f9ff5b00b9e82306a9a9035d38aa035bf83f05007169028a9ae92300a9e81300f928ba03f000e9c23de083823cff3b00b9ff2300f9e0030091e5cc1194a04301d130b5f097a8835df8c94304f0290942f9290140f93f0108eb41050054fd7b4ca9f44f4ba9f6574aa9ff430391c0035fd6"
+        },
+        "animator_record_ctor": {
+          "rva": "0xf072ec",
+          "prefix": "ffc300d1f44f01a9fd7b02a9fd830091",
+          "body": "ffc300d1f44f01a9fd7b02a9fd830091f40301aaf30300aa1f0000f91f0800b91f0800f91f1800b9e00301aaba03fb97600200f9610a00b9e00314aa4b04fb97c00000b4e803009125e6fa97e80340f9e90b40b907000014a9d104d029012f91280140f9e80300f9290940b9e90b00b9680a00f9691a00b9884640b9087da80a682200b9e00313aafd7b42a9f44f41a9ffc30091c0035fd6"
+        },
+        "animator_append": {
+          "rva": "0xf1681c",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "body": "f657bda9f44f01a9fd7b02a9fd830091f30301aaf40300aa152041a9b6060091df0648eb28020054960a00f9880240f909058052a022099b6002c03d0000803d680a40f9080800f9681a40b9081800b9682240b9082000b9fd7b42a9f44f41a9f657c3a8c0035fd6"
+        }
+      },
+      "actors": {
+        "registry_field": {
+          "offset": 0,
+          "type": "System.Collections.Generic.List`1<VL.IVLActorController>",
+          "metadata_field_index": 129885
+        },
+        "extensions_field": {
+          "offset": 64,
+          "type": "System.Collections.Generic.List`1<VL.VLActorExtension>",
+          "metadata_field_index": 129891
+        },
+        "animator_field": {
+          "offset": 48,
+          "type": "UnityEngine.Animator",
+          "metadata_field_index": 129889
+        },
+        "active_requires_original_game_object_hierarchy": true,
+        "active_swing_must_be_in_selected_binder": true,
+        "registry_getter_linkage": {
+          "initialized_flag": "0xa921ccb",
+          "class_link_slot": "0xa3eae30",
+          "indirect_class_cell": false
+        }
+      },
+      "animator_bindings": {
+        "cached_ptr": 16,
+        "data": 360,
+        "count": 376,
+        "count_bytes": 8,
+        "capacity": 384,
+        "capacity_bytes": 8,
+        "capacity_shift": 1,
+        "registration_flags": 404,
+        "registration_suspended_bit": 4,
+        "record_bytes": 40,
+        "output_handle": 0,
+        "output_version": 8,
+        "graph_handle": 16,
+        "graph_version": 24
+      },
+      "loop": {
+        "value_bytes": 40,
+        "fields": {
+          "type": 0,
+          "updateDelegate": 8,
+          "updateFunction": 16,
+          "loopConditionFunction": 24,
+          "numSubSystems": 32
+        },
+        "condition_abi": "bool(void)",
+        "condition_false_skips_all_children": true,
+        "exit_rva": "0xccad28"
+      },
+      "registry": {
+        "map": 64,
+        "data": 0,
+        "mask": 8,
+        "occupied": 12,
+        "free": 16,
+        "bucket_bytes": 24,
+        "status": 0,
+        "key": 8,
+        "rtti": 16,
+        "rtti_name": 16,
+        "rtti_class_id": 40,
+        "articulation_class_id": 171741748,
+        "absence_requires_complete_registered_map_and_native_lookup": true
+      }
+    }
+  }
+}

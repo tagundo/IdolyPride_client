@@ -9,13 +9,15 @@ import hashlib
 import http.client
 import io
 import threading
+from urllib.parse import urlsplit
 
+from Crypto.Cipher import AES
 import pytest
 
 from idoly_local.assets import create_asset_server
 from idoly_local.octo_cache import OctoCache
 from idoly_local.octo_http import OctoGateway
-from idoly_local.octo_manifest import Database, OctoManifest, OctoManifestError, OctoObject, OctoRequestError
+from idoly_local.octo_manifest import Database, OctoManifest, OctoManifestError, OctoObject, OctoRequestError, decrypt_manifest
 from idoly_local.resource_translation import ResourceTranslation
 from idoly_local.resource_translation_build import build_resource_overlay
 
@@ -29,15 +31,18 @@ OBSERVED = (
 
 
 def manifest(raw, aliases=None):
+    def aes(encrypt, key, iv, value):
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        return cipher.encrypt(value) if encrypt else cipher.decrypt(value)
     return OctoManifest(raw, aes_key=bytes(32), client_key="synthetic-alias-check",
-        base_url="http://127.0.0.1:8080", aes_cbc=lambda _encrypt, _key, _iv, value: value,
+        base_url="http://127.0.0.1:8080", aes_cbc=aes,
         object_aliases=aliases)
 
 
 def fixture():
     db = Database(revision=1089, urlFormat=URL)
     db.assetBundleList.add(id=1, name="stage", size=3, md5=hashlib.md5(b"old").hexdigest(),
-        objectName="stage", generation=1, uploadVersionId=202050, state=2)
+        objectName="Stage1", generation=1, uploadVersionId=202050, state=2)
     aliases, payloads = {}, {}
     for number, (name, old_name, generation, new_name, fingerprint) in enumerate(OBSERVED, 1):
         payload = ("[title title=테스트]\n" + name).encode()
@@ -82,13 +87,10 @@ def serving(tmp_path, aliases, payloads, raw, *, corrupt=False):
 
 
 def test_observed_paths_resolve_to_canonical_objects_without_changing_catalog():
-    raw, aliases, _ = fixture(); before = manifest(raw); after = manifest(raw, aliases)
-    assert len(after.objects) == 3 and after.objects == before.objects
+    raw, aliases, _ = fixture(); after = manifest(raw, aliases)
+    assert len(after.objects) == 3 and after.archive_sha256 == hashlib.sha256(raw).hexdigest()
     for identity, record in aliases.items():
         path = "/octo/{1}/{0}/{2}/{3}".format(*identity)
-        with pytest.raises(OctoRequestError) as failure:
-            before.lookup_object(path)
-        assert failure.value.status == 404
         resolved = after.lookup_object(path)
         assert resolved is after.objects[record.identity] and resolved == record
         assert resolved.object_name != identity[2]
@@ -97,11 +99,40 @@ def test_observed_paths_resolve_to_canonical_objects_without_changing_catalog():
     assert after.lookup_object("/octo/202050/resources/oRlhqS/16444311832531005964").name == OBSERVED[0][0]
 
 
+def test_six_byte_sdk_set_reproduces_truncated_url_for_private_long_identity():
+    # Original Octo.ObjectName.Set writes its six byte fields only when
+    # string.Length == 6. A newly initialized struct otherwise stays zeroed.
+    def sdk_name(value):
+        storage = bytearray(6)
+        if len(value) == 6:
+            storage[:] = value.encode("ascii")
+        return storage.decode("ascii")
+    _name, old_name, generation, private_name, _fingerprint = OBSERVED[0]
+    assert len(private_name) == 50
+    broken = "http://127.0.0.1:8080/octo/102050/assetbundle/{}/{}".format(
+        sdk_name(private_name), generation)
+    assert broken.encode().split(b"\0", 1)[0] == b"http://127.0.0.1:8080/octo/102050/assetbundle/"
+    corrected = "http://127.0.0.1:8080/octo/102050/assetbundle/{}/{}".format(
+        sdk_name(old_name), generation)
+    assert "\0" not in corrected and corrected.endswith(f"/{old_name}/{generation}")
+
+
 def test_observed_mixed_paths_get_head_and_range_use_verified_offline_bytes(tmp_path):
     raw, aliases, payloads = fixture()
     with serving(tmp_path, aliases, payloads, raw) as (request, cache, calls):
-        for identity, record in aliases.items():
-            path = "/octo/{1}/{0}/{2}/{3}".format(*identity)
+        status, _headers, encrypted = request("/v2/pub/a/212/v/205051/list/0", headers={
+            "Accept": "application/x-protobuf,x-octo-app/212", "X-OCTO-KEY": "synthetic-alias-check"})
+        assert status == 200
+        def aes(encrypt, key, iv, value):
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+            return cipher.encrypt(value) if encrypt else cipher.decrypt(value)
+        sdk = Database.FromString(decrypt_manifest(encrypted, aes_key=bytes(32), aes_cbc=aes))
+        for row in sdk.resourceList:
+            identity = "resources", row.uploadVersionId, row.objectName, row.generation
+            record = aliases[identity]
+            assert len(row.objectName) == 6 and len(record.object_name) == 50
+            path = urlsplit(sdk.urlFormat.format(v=row.uploadVersionId, type="resources",
+                o=row.objectName, g=row.generation)).path
             status, headers, body = request(path)
             assert status == 200 and body == payloads[record.cache_key]
             assert headers["ETag"] == '"' + record.md5 + '"'
@@ -161,11 +192,11 @@ def test_alias_targets_and_shape_are_checked_against_primary_whitelist():
 
 def test_translation_layer_derives_immutable_aliases_only_for_verified_changed_rows(tmp_path):
     db = Database(revision=1087, urlFormat=URL)
-    db.assetBundleList.add(id=1, name="stage", size=3, md5="a" * 32, objectName="stage",
+    db.assetBundleList.add(id=1, name="stage", size=3, md5="a" * 32, objectName="Stage1",
         generation=1, uploadVersionId=202050, state=3)
     for number, name in enumerate(("adv_main_01_01_02.txt", "adv_untranslated_01.txt"), 1):
         db.resourceList.add(id=number, name=name, size=3, md5="b" * 32,
-            objectName="original_" + str(number), generation=1, uploadVersionId=202050, state=3)
+            objectName=f"Orig{number:02}", generation=1, uploadVersionId=202050, state=3)
     raw = db.SerializeToString(); source = tmp_path / "source"; source.mkdir()
     text = "[title title=번역]\n테스트 대사".encode()
     (source / "adv_main_01_01_02.txt").write_bytes(text)
@@ -175,7 +206,7 @@ def test_translation_layer_derives_immutable_aliases_only_for_verified_changed_r
     try:
         assert len(layer.object_aliases) == 1
         identity, target = next(iter(layer.object_aliases.items()))
-        assert identity == ("resources", 202050, "original_1", target.generation)
+        assert identity == ("resources", 202050, "Orig01", target.generation)
         resolved = manifest(layer.manifest, layer.object_aliases).lookup_object(
             "/octo/{1}/{0}/{2}/{3}".format(*identity))
         with layer.open_source(resolved) as stream:

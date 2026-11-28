@@ -1,0 +1,407 @@
+"""Original GameTime protocol, with explicit held-clock/dependent-state proofs.
+
+The protocol is production code; original native graph/job/GPU execution is not
+claimed by the synthetic state callbacks. The optional original audit rebuilds
+every committed binding from the pinned clients rather than a copied table.
+"""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+ROOT=Path(__file__).resolve().parents[1]
+NATIVE=ROOT/"client-presentation/native"
+HARNESS=r'''
+#include "mp4_playback_state.hpp"
+#include <cassert>
+#include <cstring>
+#include <string>
+#include <vector>
+namespace p=idoly_mp4_playback;
+struct Graph {void* handle=nullptr;int version=0,padding=0;};
+p::Scope<Graph>* verifying_scope=nullptr;
+struct Scene {
+    int player=0,director=0;bool owner=true,playing=true,paused=false;
+    int state=1,mode=0,version=1;double time=13.25;
+    int history=37,saved_history=0;float volume=.6f,saved_volume=0;
+    unsigned primary_reads=0,owner_queries=0;
+    unsigned sets=0,evaluates=0,rebuilds=0,captures=0,prepares=0,resets=0,restores=0,releases=0,quiesces=0;
+    unsigned pending_jobs=1;bool quiesce_ready=true;
+    bool fence=true,reset_ready=true,restore_ready=true,release_ready=true,rebuild_ready=true,exclusive=true;
+    bool source_ready=true;unsigned verifications=0;bool fail_reset=false,old_valid=false;bool released_owned=true;
+    std::string switch_on;std::vector<std::string> calls;
+} s;
+void primary(){++s.primary_reads;assert(s.owner&&"no original scene read/write after identity loss");}
+void event(const char* name){
+    primary();s.calls.emplace_back(name);
+    if(s.switch_on==name){s.owner=false;s.state=0;s.mode=2;s.time=77;s.history=88;s.volume=.8f;s.playing=false;s.paused=true;}
+}
+int32_t state(void*,void*){primary();return s.state;}
+int32_t mode(void*,void*){primary();return s.mode;}
+void setmode(void*,int32_t value,void*){primary();s.mode=value;event("mode");}
+double time(void*,void*){primary();return s.time;}
+void settime(void*,double value,void*){primary();++s.sets;s.time=value;event("time");}
+void evaluate(void*,void*){primary();++s.evaluates;s.history=-200;event("evaluate");}
+void graph(void*,Graph* value,void*){primary();*value={&s.director,s.version,0};}
+bool valid(Graph* value,void*){return value->handle==&s.director&&(value->version==s.version||s.old_valid);}
+void play(void*,void*){primary();s.state=1;event("play");}
+void pause(void*,void*){primary();s.state=0;event("pause");}
+void resume(void*,void*){primary();s.state=1;event("resume");}
+void rebuild(void*,void*){primary();assert(!s.pending_jobs);++s.rebuilds;if(s.rebuild_ready){++s.version;s.history=0;}event("rebuild");}
+bool playing(void*,void*){primary();return s.playing;}
+bool paused(void*,void*){primary();return s.paused;}
+void setplaying(void*,bool value,void*){primary();s.playing=value;event("playing_flag");}
+void setpaused(void*,bool value,void*){primary();s.paused=value;event("paused_flag");}
+bool current(void* context){assert(context==&s);++s.owner_queries;return s.owner;}
+p::Result quiesce(void*){primary();++s.quiesces;if(!s.quiesce_ready)return p::Result::waiting;s.pending_jobs=0;event("quiesce");return p::Result::ok;}
+p::Result capture(void*){primary();assert(!s.pending_jobs);++s.captures;if(!s.fence)return p::Result::waiting;s.saved_history=s.history;s.saved_volume=s.volume;event("capture");return p::Result::ok;}
+p::Result prepare(void*){primary();++s.prepares;s.volume=0;event("prepare");return p::Result::ok;}
+p::Result reset(void*){primary();++s.resets;if(!s.reset_ready)return p::Result::waiting;if(s.fail_reset)return p::Result::unsupported;s.history=0;event("reset");return p::Result::ok;}
+p::Result restore(void*){primary();++s.restores;if(!s.restore_ready)return p::Result::waiting;s.history=s.saved_history;s.volume=s.saved_volume;event("restore");return p::Result::ok;}
+p::Result release(void*,bool owned){++s.releases;s.released_owned=owned;if(!s.release_ready)return p::Result::waiting;s.calls.emplace_back("release");return p::Result::ok;}
+p::Result verify_source(void*){assert(verifying_scope&&verifying_scope->source_playback_state_restored()&&!verifying_scope->logical_restored());primary();++s.verifications;assert(s.time==13.25&&s.history==s.saved_history&&s.volume==s.saved_volume);assert(!s.calls.empty()&&(s.verifications>1||s.calls.back()=="paused_flag"));return s.source_ready?p::Result::ok:p::Result::waiting;}
+const char* dependent_error(void*){return s.fail_reset?"actor_history_unverified":"actor_fence_pending";}
+p::OriginalApi<Graph> api(){
+    p::OriginalApi<Graph> a{};a.director_state=state;a.director_mode=mode;a.director_set_mode=setmode;
+    a.director_time=time;a.director_set_time=settime;a.director_evaluate=evaluate;a.director_graph=graph;a.graph_valid=valid;
+    a.director_play=play;a.director_pause=pause;a.director_resume=resume;a.director_rebuild=rebuild;
+    a.player_playing=playing;a.player_paused=paused;a.player_set_playing=setplaying;a.player_set_paused=setpaused;return a;
+}
+p::Dependents dependents(){return {current,quiesce,capture,prepare,reset,restore,release,dependent_error,verify_source};}
+int main(int argc,char** argv){
+    assert(argc==2);std::string scenario=argv[1];p::Scope<Graph> scope;verifying_scope=&scope;assert(!scope.source_playback_state_restored());
+    if(scenario=="paused"){s.state=0;s.paused=true;}
+    if(scenario=="checkpoint_pause_pending")s.paused=true;
+    if(scenario=="not_started"){s.state=0;s.playing=false;}
+    const int source_state=s.state,source_mode=s.mode;const bool source_playing=s.playing,source_paused=s.paused;
+    auto a=api();auto d=dependents();if(scenario=="missing_dependency")d.capture=nullptr;
+    if(scenario=="missing_quiesce")d.quiesce=nullptr;
+    if(scenario=="missing_source_verify")d.verify_source_restored=nullptr;
+    if(scenario=="missing_api")a.director_rebuild=nullptr;
+    assert(scope.install(a,d));
+    if(scenario=="clock_unowned"||scenario=="clock_not_held"){
+        assert(scope.acquire(&s.player,&s.director,&s,{scenario!="clock_unowned",false})==p::Result::waiting);
+        assert(!scope.active()&&s.calls.empty()&&s.captures==0);return 0;
+    }
+    if(scenario=="missing_dependency"||scenario=="missing_api"||scenario=="missing_quiesce"||scenario=="missing_source_verify"){
+        assert(scope.acquire(&s.player,&s.director,&s,{true,true})==p::Result::unsupported);
+        assert(!scope.active()&&s.calls.empty()&&s.captures==0);return 0;
+    }
+    if(scenario=="capture_wait"||scenario=="cancel_capture"||scenario=="checkpoint_capture_unknown")s.fence=false;
+    if(scenario=="quiesce_wait")s.quiesce_ready=false;
+    if(scenario=="owner_capture")s.switch_on="capture";
+    auto result=scope.acquire(&s.player,&s.director,&s,{true,true});
+    if(scenario=="checkpoint_capture_unknown"||scenario=="checkpoint_pause_pending"){
+        // Capture/pause preparation can be incomplete before a historical
+        // source state has been acquired. An OK partial cleanup is not proof
+        // that source playback/camera/audio was restored.
+        assert(result==p::Result::waiting&&scope.active()&&!scope.logical_restored());
+        const auto sets_before=s.sets,rebuilds_before=s.rebuilds,verifications_before=s.verifications;
+        assert(scope.restore({true,true},false)==p::Result::ok&&scope.active()&&!scope.logical_restored());
+        assert(s.sets==sets_before&&s.rebuilds==rebuilds_before&&s.verifications==verifications_before);
+        const auto reads=s.primary_reads,queries=s.owner_queries;
+        assert(scope.release_restored()==p::Result::invalid&&scope.active());
+        assert(s.primary_reads==reads&&s.owner_queries==queries&&s.releases==0);
+        s.owner=false;
+        assert(scope.abandon()==p::Result::stale&&!scope.active()&&!s.released_owned);
+        assert(s.primary_reads==reads&&s.owner_queries==queries);return 0;
+    }
+    if(scenario=="quiesce_wait"){
+        assert(result==p::Result::waiting&&scope.active()&&s.captures==0&&s.pending_jobs==1&&s.prepares==0);
+        s.quiesce_ready=true;result=scope.acquire(&s.player,&s.director,&s,{true,true});
+    }
+    if(scenario=="owner_capture"){
+        assert(result==p::Result::stale&&scope.active());assert(scope.restore({false,false})==p::Result::stale&&!scope.active());
+        assert(!s.released_owned&&s.time==77&&s.history==88&&s.volume==.8f);return 0;
+    }
+    if(scenario=="capture_wait"||scenario=="cancel_capture"){
+        assert(result==p::Result::waiting&&scope.active()&&s.time==13.25&&s.state==source_state&&s.volume==.6f&&s.prepares==0);
+        if(scenario=="cancel_capture"){assert(scope.restore({true,true})==p::Result::ok&&!scope.active()&&s.sets==0&&s.rebuilds==0);return 0;}
+        s.fence=true;result=scope.acquire(&s.player,&s.director,&s,{true,true});assert(s.captures==2);
+    }
+    assert(result==p::Result::ok&&scope.phase()==p::Phase::held&&s.state==0&&s.paused&&s.volume==0);
+    assert(scope.snapshot().state==source_state&&scope.snapshot().time==13.25);
+    if(scenario=="cancel_held"){assert(scope.restore({true,true})==p::Result::ok&&!scope.active());assert(s.time==13.25&&s.state==source_state&&s.history==37&&s.volume==.6f);return 0;}
+    if(scenario=="rebuild_wait")s.rebuild_ready=false;
+    if(scenario=="reset_wait"||scenario=="reset_graph_changed")s.reset_ready=false;
+    if(scenario=="reset_unsupported")s.fail_reset=true;
+    if(scenario=="owner_rebuild")s.switch_on="rebuild";
+    result=scope.start({true,true});
+    if(scenario=="owner_rebuild"){
+        assert(result==p::Result::stale&&scope.restore({false,false})==p::Result::stale&&!scope.active());
+        assert(!s.released_owned&&s.time==77&&s.history==88);return 0;
+    }
+    if(scenario=="rebuild_wait"){
+        assert(result==p::Result::waiting&&s.rebuilds==1&&s.resets==0);
+        // The original has returned. Later publication completes that exact
+        // issued rebuild; retry must not execute another destructive original.
+        ++s.version;s.history=0;s.rebuild_ready=true;result=scope.start({true,true});assert(s.rebuilds==1);
+    }
+    if(scenario=="reset_wait"){
+        assert(result==p::Result::waiting&&s.rebuilds==1&&s.sets==0);s.reset_ready=true;result=scope.start({true,true});assert(s.rebuilds==1);
+    }
+    if(scenario=="reset_graph_changed"){
+        // A native fence/reset can wait while another original callback
+        // replaces this same director's graph. Do not call reset again.
+        assert(result==p::Result::waiting&&s.resets==1);++s.version;s.reset_ready=true;
+        assert(scope.start({true,true})==p::Result::stale&&s.resets==1);
+        assert(scope.restore({true,true})==p::Result::stale&&!scope.active()&&!s.released_owned);return 0;
+    }
+    if(scenario=="reset_unsupported"){
+        assert(result==p::Result::unsupported&&!std::strcmp(scope.error(),"actor_history_unverified"));
+        assert(scope.restore({true,true})==p::Result::ok&&!scope.active()&&s.history==37&&s.time==13.25);return 0;
+    }
+    assert(result==p::Result::ok&&scope.playing()&&s.mode==1&&s.state==1&&s.playing&&!s.paused&&s.time==0);
+    const auto sets=s.sets,evaluates=s.evaluates;
+    for(int frame=0;frame<120;++frame){s.time=frame/60.;assert(scope.validate_frame(s.time)==p::Result::ok);s.history=frame;}
+    assert(s.sets==sets&&s.evaluates==evaluates&&sets==1&&evaluates==0);
+    if(scenario=="abandon"||scenario=="abandon_wait"){
+        const auto calls=s.calls.size();const auto quiesces=s.quiesces,rebuilds=s.rebuilds;
+        s.owner=false;s.time=88;s.history=99;
+        if(scenario=="abandon_wait"){
+            s.release_ready=false;assert(scope.abandon()==p::Result::waiting&&scope.active());s.release_ready=true;
+        }
+        assert(scope.abandon()==p::Result::stale&&!scope.active()&&!s.released_owned);
+        assert(s.quiesces==quiesces&&s.rebuilds==rebuilds&&s.calls.size()==calls+1&&s.time==88&&s.history==99);
+        assert(scope.abandon()==p::Result::ok);return 0;
+    }
+    if(scenario=="wrong_time"){assert(scope.validate_frame(9)==p::Result::failed&&!std::strcmp(scope.error(),"original_playback_frame_time_mismatch"));}
+    if(scenario=="changed_graph"){
+        ++s.version;s.time=66;s.history=77;s.volume=.9f;
+        assert(scope.validate_frame(0)==p::Result::stale);
+        const auto before=s.calls.size();assert(scope.restore({true,true})==p::Result::stale&&!scope.active());
+        assert(s.calls.size()==before+1&&!s.released_owned&&s.time==66&&s.history==77&&s.volume==.9f);return 0;
+    }
+    if(scenario=="changed_owner"){
+        s.owner=false;s.time=66;s.history=77;s.volume=.9f;assert(scope.restore({false,false})==p::Result::stale&&!scope.active());
+        assert(!s.released_owned&&s.time==66&&s.history==77&&s.volume==.9f);return 0;
+    }
+    if(scenario=="checkpoint_progress"||scenario=="checkpoint_owner_lost"||scenario=="checkpoint_release_wait"){
+        // Source restoration is a historical checkpoint. Ordinary playback can
+        // advance or replace the graph before private GPU resources retire.
+        assert(scope.restore({true,true},false)==p::Result::ok&&scope.active()&&scope.logical_restored());
+        assert(s.releases==0&&s.verifications==1&&s.time==13.25&&s.history==37&&s.volume==.6f);
+        const auto reads=s.primary_reads,queries=s.owner_queries,sets_before=s.sets,evaluates_before=s.evaluates;
+        const auto rebuilds_before=s.rebuilds,restores_before=s.restores,verifies_before=s.verifications;
+        s.time=19.75;s.history=903;s.volume=.4f;++s.version;s.state=0;s.paused=true;
+        if(scenario=="checkpoint_owner_lost")s.owner=false;
+        // Explicitly retrying the checkpoint after detach must not compare
+        // its old time/history or require a newly acquired native clock.
+        assert(scope.restore({false,false},false)==p::Result::ok&&scope.logical_restored());
+        assert(s.primary_reads==reads&&s.owner_queries==queries);
+        if(scenario=="checkpoint_release_wait"){
+            s.release_ready=false;
+            assert(scope.release_restored()==p::Result::waiting&&scope.active()&&scope.logical_restored());
+            assert(!s.released_owned&&s.primary_reads==reads&&s.owner_queries==queries);
+            s.time=25;s.history=1001;s.owner=false;s.release_ready=true;
+        }
+        assert(scope.release_restored()==p::Result::ok&&!scope.active()&&!scope.logical_restored()&&!scope.source_playback_state_restored()&&!s.released_owned);
+        assert(s.primary_reads==reads&&s.owner_queries==queries&&s.sets==sets_before&&s.evaluates==evaluates_before);
+        assert(s.rebuilds==rebuilds_before&&s.restores==restores_before&&s.verifications==verifies_before);
+        assert(s.history==(scenario=="checkpoint_release_wait"?1001:903)&&s.volume==.4f&&s.state==0&&s.paused);
+        assert(scope.release_restored()==p::Result::ok&&s.primary_reads==reads&&s.owner_queries==queries);return 0;
+    }
+    if(scenario=="checkpoint_verify_wait"){
+        s.source_ready=false;
+        assert(scope.restore({true,true},false)==p::Result::waiting&&scope.active()&&!scope.logical_restored()&&scope.source_playback_state_restored());
+        const auto reads=s.primary_reads,queries=s.owner_queries,sets_before=s.sets;
+        assert(scope.release_restored()==p::Result::invalid&&scope.active()&&s.releases==0);
+        assert(s.primary_reads==reads&&s.owner_queries==queries&&s.sets==sets_before);
+        s.owner=false;assert(scope.abandon()==p::Result::stale&&!scope.active()&&!s.released_owned);
+        assert(s.primary_reads==reads&&s.owner_queries==queries);return 0;
+    }
+    if(scenario=="restore_wait")s.restore_ready=false;
+    if(scenario=="source_verify_wait")s.source_ready=false;
+    if(scenario=="restore_quiesce_wait"){s.quiesce_ready=false;s.pending_jobs=3;}
+    if(scenario=="release_wait")s.release_ready=false;
+    if(scenario=="owner_restore_evaluate")s.switch_on="evaluate";
+    result=scope.restore({true,true});
+    if(scenario=="restore_quiesce_wait"){
+        assert(result==p::Result::waiting&&scope.active()&&s.pending_jobs==3&&s.rebuilds==1&&s.restores==0);
+        s.quiesce_ready=true;result=scope.restore({true,true});assert(!s.pending_jobs);
+    }
+    if(scenario=="owner_restore_evaluate"){
+        assert(result==p::Result::stale&&!scope.active()&&!s.released_owned&&s.history==88&&s.time==77);return 0;
+    }
+    if(scenario=="restore_wait"){
+        assert(result==p::Result::waiting&&scope.active()&&s.rebuilds==2&&s.restores==1);
+        s.restore_ready=true;result=scope.restore({true,true});assert(s.rebuilds==2&&s.restores==2);
+    }
+    if(scenario=="source_verify_wait"){
+        assert(result==p::Result::waiting&&scope.active()&&s.rebuilds==2&&s.restores==1&&s.verifications==1);
+        const auto prior=s.calls.size();s.source_ready=true;result=scope.restore({true,true});
+        assert(s.calls.size()==prior+2&&s.rebuilds==2&&s.restores==1&&s.verifications==2);
+    }
+    if(scenario=="release_wait"){
+        assert(result==p::Result::waiting&&scope.active()&&s.rebuilds==2&&s.restores==1);
+        const auto prior=s.calls.size();s.release_ready=true;result=scope.restore({true,true});
+        assert(s.calls.size()==prior+1&&s.rebuilds==2&&s.restores==1&&s.releases==2);
+    }
+    assert(result==p::Result::ok&&!scope.active()&&s.time==13.25&&s.state==source_state&&s.mode==source_mode);
+    assert(s.playing==source_playing&&s.paused==source_paused&&s.history==37&&s.volume==.6f&&s.released_owned);
+    assert(scope.restore({false,false})==p::Result::ok);
+}
+'''
+
+CONTROL_HARNESS = HARNESS.split("int main(int argc,char** argv){", 1)[0] + r'''
+struct ControlledHost {
+    p::OriginalApi<Graph> original{};p::OperationReceipt calls[8]{};
+    unsigned entries[8]{},actual[8]{};uint64_t serial=0;
+    p::OperationStep target=p::OperationStep::start_rebuild;
+    bool before=false,after=false,waited=false,bad_empty=false,bad_returned=false,bad_serial=false,throwing=false;
+} host;
+void throwing_rebuild(void*,void*){primary();++s.rebuilds;++s.version;event("rebuild");throw 42;}
+p::Result controlled(void*context,p::OperationStep step,p::OperationKind kind,void*director,const p::Snapshot<Graph>&saved,p::OperationReceipt*out){
+    assert(context==&host&&director==&s.director&&saved.time==13.25);
+    const auto i=static_cast<unsigned>(step);assert(i<8);++host.entries[i];
+    if(host.bad_empty)return p::Result::ok;
+    if(host.bad_returned){*out={0,false,true};return p::Result::waiting;}
+    auto&receipt=host.calls[i];
+    if(step==host.target&&host.before&&!host.waited){host.waited=true;return p::Result::waiting;}
+    if(!receipt.issued){
+        receipt={++host.serial,true,false};*out=receipt;++host.actual[i];
+        if(kind==p::OperationKind::pause)host.original.director_pause(director,nullptr);
+        else if(kind==p::OperationKind::resume)host.original.director_resume(director,nullptr);
+        else if(kind==p::OperationKind::play)host.original.director_play(director,nullptr);
+        else if(kind==p::OperationKind::rebuild)host.original.director_rebuild(director,nullptr);
+        else host.original.director_evaluate(director,nullptr);
+        receipt.returned=true;
+    }
+    *out=receipt;
+    if(host.bad_serial&&step==host.target&&host.waited){++out->serial;return p::Result::ok;}
+    if(step==host.target&&host.after&&!host.waited){host.waited=true;return p::Result::waiting;}
+    return p::Result::ok;
+}
+int main(int argc,char**argv){
+    assert(argc==2);const std::string scenario=argv[1];p::Scope<Graph> scope;verifying_scope=&scope;
+    if(scenario=="after_restore_state_paused"){s.state=0;s.paused=true;}
+    const int source_state=s.state;
+    if(scenario.find("acquire")!=std::string::npos)host.target=p::OperationStep::acquire_pause;
+    if(scenario.find("start_rebuild")!=std::string::npos)host.target=p::OperationStep::start_rebuild;
+    if(scenario.find("start_play")!=std::string::npos)host.target=p::OperationStep::start_play;
+    if(scenario.find("restore_pause")!=std::string::npos)host.target=p::OperationStep::restore_pause;
+    if(scenario.find("restore_rebuild")!=std::string::npos)host.target=p::OperationStep::restore_rebuild;
+    if(scenario.find("restore_evaluate")!=std::string::npos)host.target=p::OperationStep::restore_evaluate;
+    if(scenario.find("restore_state")!=std::string::npos)host.target=p::OperationStep::restore_state;
+    host.before=scenario.rfind("before_",0)==0;host.after=scenario.rfind("after_",0)==0;
+    if(scenario=="bad_empty_ok")host.bad_empty=true;
+    if(scenario=="bad_returned")host.bad_returned=true;
+    if(scenario=="bad_serial_change"){host.after=true;host.bad_serial=true;}
+    if(scenario=="abort_wait_start")host.after=true;
+    auto a=api();if(scenario=="throw_once")a.director_rebuild=throwing_rebuild;
+    host.original=a;a.operation=controlled;a.operation_context=&host;
+    assert(scope.install(a,dependents()));
+    auto result=scope.acquire(&s.player,&s.director,&s,{true,true});
+    if(host.bad_empty||host.bad_returned){assert(result==p::Result::failed&&s.state==1&&host.actual[0]==0);s.owner=false;assert(scope.abandon()==p::Result::stale);return 0;}
+    if(result==p::Result::waiting){assert(host.target==p::OperationStep::acquire_pause);const auto captures=s.captures;result=scope.acquire(&s.player,&s.director,&s,{true,true});assert(captures==s.captures&&host.actual[0]==1);}
+    assert(result==p::Result::ok);
+    if(scenario=="throw_once"){
+        bool caught=false;try{scope.start({true,true});}catch(int value){caught=value==42;}
+        assert(caught&&host.actual[1]==1&&s.rebuilds==1&&scope.restorable_owner_current());
+        assert(scope.start({true,true})==p::Result::failed&&host.actual[1]==1&&s.rebuilds==1);
+        s.owner=false;assert(scope.abandon()==p::Result::stale);return 0;
+    }
+    result=scope.start({true,true});
+    if(scenario=="bad_serial_change"){assert(result==p::Result::waiting&&host.actual[1]==1);assert(scope.start({true,true})==p::Result::failed&&host.actual[1]==1);s.owner=false;scope.abandon();return 0;}
+    if(scenario=="abort_wait_start"){assert(result==p::Result::waiting&&host.actual[1]==1);host.after=false;assert(scope.restore({true,true})==p::Result::ok&&!scope.active()&&s.rebuilds==2);return 0;}
+    if(result==p::Result::waiting){
+        assert(scope.restorable_owner_current());const auto rebuilds=s.rebuilds,sets=s.sets,resets=s.resets;
+        result=scope.start({true,true});assert(result==p::Result::ok);
+        if(host.after){assert(s.rebuilds==rebuilds);if(host.target==p::OperationStep::start_play)assert(s.sets==sets&&s.resets==resets);}
+    }
+    assert(result==p::Result::ok&&scope.playing());s.time=5;
+    if(scenario=="owner_after_call"){s.switch_on="evaluate";assert(scope.restore({true,true})==p::Result::stale&&!scope.active()&&!s.released_owned);return 0;}
+    if(scenario=="verify_wait_after_state")s.source_ready=false;
+    result=scope.restore({true,true});
+    if(result==p::Result::waiting){
+        const auto rebuilds=s.rebuilds,evaluates=s.evaluates,sets=s.sets,restores=s.restores;
+        if(scenario=="verify_wait_after_state"){assert(scope.source_playback_state_restored());s.source_ready=true;}
+        result=scope.restore({true,true});assert(result==p::Result::ok);
+        if(host.after){if(host.target!=p::OperationStep::restore_pause)assert(s.rebuilds==rebuilds);if(host.target==p::OperationStep::restore_evaluate||host.target==p::OperationStep::restore_state)assert(s.evaluates==evaluates&&s.sets==sets);if(host.target==p::OperationStep::restore_state)assert(s.restores==restores);}
+    }
+    assert(result==p::Result::ok&&!scope.active()&&s.state==source_state&&s.time==13.25);
+    for(unsigned i=0;i<8;++i)assert(host.actual[i]<=1);
+    if(scenario=="reuse"){
+        host.calls[0]=host.calls[1]=host.calls[2]=host.calls[3]=host.calls[4]=host.calls[5]=host.calls[6]=p::OperationReceipt{};
+        assert(scope.install(a,dependents())&&scope.acquire(&s.player,&s.director,&s,{true,true})==p::Result::ok&&scope.start({true,true})==p::Result::ok&&scope.restore({true,true})==p::Result::ok);
+        assert(s.rebuilds==4&&host.actual[1]==2&&host.actual[4]==2);
+    }
+}
+'''
+
+
+@pytest.fixture(scope="module")
+def controlled_binary(tmp_path_factory):
+    compiler=shutil.which("c++")
+    if not compiler:
+        pytest.skip("A host C++ compiler is required")
+    folder=tmp_path_factory.mktemp("mp4-playback-controlled")
+    source,binary=folder/"controlled.cpp",folder/"controlled"
+    source.write_text(CONTROL_HARNESS)
+    built=subprocess.run([compiler,"-std=c++17","-O1","-g","-Wall","-Wextra","-Werror","-fsanitize=address,undefined","-fno-omit-frame-pointer","-I",str(NATIVE),str(source),"-o",str(binary)],capture_output=True,text=True,timeout=30)
+    assert built.returncode==0,built.stderr
+    return binary
+
+
+@pytest.mark.parametrize("scenario", "before_acquire after_acquire before_start_rebuild after_start_rebuild before_start_play after_start_play before_restore_pause after_restore_pause before_restore_rebuild after_restore_rebuild before_restore_evaluate after_restore_evaluate before_restore_state after_restore_state after_restore_state_paused bad_empty_ok bad_returned bad_serial_change throw_once owner_after_call abort_wait_start reuse verify_wait_after_state".split())
+def test_resultful_original_operations_are_once_across_wait_and_restore(controlled_binary,scenario):
+    result=subprocess.run([str(controlled_binary),scenario],capture_output=True,text=True,timeout=5)
+    assert result.returncode==0,result.stdout+result.stderr
+
+
+@pytest.fixture(scope="module")
+def playback_binary(tmp_path_factory):
+    compiler=shutil.which("c++")or shutil.which("g++")or shutil.which("clang++")
+    if not compiler:pytest.skip("C++ compiler required")
+    directory=tmp_path_factory.mktemp("mp4-playback-state");source=directory/"state.cpp";binary=directory/"state"
+    source.write_text(HARNESS)
+    built=subprocess.run([compiler,"-std=c++17","-O2","-Wall","-Wextra","-Werror","-I",str(NATIVE),str(source),"-o",str(binary)],capture_output=True,text=True,timeout=30)
+    assert built.returncode==0,built.stdout+built.stderr
+    return binary
+
+
+@pytest.mark.parametrize("scenario",["playing","paused","not_started","abandon","abandon_wait","clock_unowned","clock_not_held",
+    "missing_dependency","missing_api","missing_quiesce","missing_source_verify","source_verify_wait","quiesce_wait","capture_wait","cancel_capture","cancel_held","owner_capture",
+    "rebuild_wait","reset_wait","reset_graph_changed","reset_unsupported","owner_rebuild","wrong_time","changed_graph",
+    "changed_owner","restore_quiesce_wait","restore_wait","release_wait","owner_restore_evaluate",
+    "checkpoint_progress","checkpoint_owner_lost","checkpoint_release_wait","checkpoint_capture_unknown","checkpoint_pause_pending","checkpoint_verify_wait"])
+def test_original_game_time_held_clock_dependent_closure_and_restoration(playback_binary,scenario):
+    ran=subprocess.run([str(playback_binary),scenario],capture_output=True,text=True,timeout=5)
+    assert ran.returncode==0,ran.stdout+ran.stderr
+
+
+def generator():
+    sys.path.insert(0,str(ROOT/"tools"))
+    spec=importlib.util.spec_from_file_location("mp4_playback_profile_audit",ROOT/"tools/audit_mp4_playback_state.py")
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
+
+def test_profile_is_deterministically_embedded_and_uses_original_byte_flags():
+    audit=generator();profile=json.loads((NATIVE/"mp4_playback_state_profile.json").read_text())
+    source=(NATIVE/"mp4_playback_state.hpp").read_text()
+    assert audit.render(profile["platforms"])in source
+    assert len(audit.SELECT)==9
+    for platform in ("android","ios"):
+        p=profile["platforms"][platform]
+        assert set(p["methods"])==set(audit.SELECT)
+        assert [row["offset"]for row in p["fields"].values()]==[0x70,0x71,0x72]
+        assert {key:row["value"]for key,row in p["enums"].items()}=={"game_time":1,"paused":0,"playing":1}
+        assert p["scope"]["automatic_export_permitted_without_verified_dependent_state"]is False
+        assert "Stop"not in [row["name"]for row in p["methods"].values()]
+
+
+@pytest.mark.parametrize("platform",["android","ios"])
+def test_playback_bindings_match_complete_originals_when_supplied(platform):
+    directory=os.environ.get("IDOLY_MP4_ORIGINALS_DIR")
+    if not directory:pytest.skip("Set IDOLY_MP4_ORIGINALS_DIR for actual original audit")
+    audit=generator();base=Path(directory)
+    constructor=audit.OriginalAndroid if platform=="android"else audit.Original
+    metadata,native=("android-metadata.dat","android-native.so")if platform=="android"else("ios-metadata.dat","ios-native.bin")
+    actual=audit.profile(constructor((base/metadata).read_bytes(),(base/native).read_bytes()),platform)
+    expected=json.loads((NATIVE/"mp4_playback_state_profile.json").read_text())["platforms"][platform]
+    assert actual==expected

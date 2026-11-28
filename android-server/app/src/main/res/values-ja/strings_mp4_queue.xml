@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mp4_queue_hint">保存したリストのMVは、再生し直さずに書き出せます。</string>
+    <string name="mp4_queue_ready">保存したリストを書き出せます。</string>
+    <string name="mp4_queue_add">現在のMVをリストに追加</string>
+    <string name="mp4_queue_run">リストの書き出しを開始</string>
+    <string name="mp4_queue_pause">リストを一時停止</string>
+    <string name="mp4_queue_resume">リストを再開</string>
+    <string name="mp4_queue_empty">登録されたMVはありません。</string>
+    <string name="mp4_queue_count">%1$d / %2$d件・待機 %3$d件</string>
+    <string name="mp4_queue_working">変更を反映中…</string>
+    <string name="mp4_queue_running">リストを順番に書き出しています。</string>
+    <string name="mp4_queue_waiting_scene">ゲーム画面を準備しています。</string>
+    <string name="mp4_queue_item">%1$d. %2$s</string>
+    <string name="mp4_queue_current_mv">選択したMV</string>
+    <string name="mp4_queue_unknown_title">MV %1$d</string>
+    <string name="mp4_queue_cast">出演 %1$d人</string>
+    <string name="mp4_queue_pending">待機中</string>
+    <string name="mp4_queue_active">書き出し中</string>
+    <string name="mp4_queue_paused">一時停止中</string>
+    <string name="mp4_queue_completed">完了</string>
+    <string name="mp4_queue_failed">失敗</string>
+    <string name="mp4_queue_cancelled">キャンセル済み</string>
+    <string name="mp4_queue_interrupted">アプリ終了により中断・再試行できます。</string>
+    <string name="mp4_queue_error">リストの処理エラー: %1$s</string>
+    <string name="mp4_queue_action_failed">開始できませんでした。サーバーとゲームの状態を確認してください。</string>
+    <string name="mp4_queue_actions">操作メニュー</string>
+    <string name="mp4_queue_item_actions">MV %1$dの操作メニュー</string>
+    <string name="mp4_queue_move_up">前へ移動</string>
+    <string name="mp4_queue_move_down">後ろへ移動</string>
+    <string name="mp4_queue_remove">リストから削除</string>
+    <string name="mp4_queue_delete_file_job">ファイルと作業を削除</string>
+    <string name="mp4_queue_delete_confirm">保存中のMP4とこの作業を削除します。外部に保存したファイルは残ります。</string>
+    <string name="mp4_queue_retry">最初から再試行</string>
+    <string name="mp4_queue_immediate">現在のMVを今すぐ書き出す</string>
+    <string name="mp4_queue_background_experimental">バックグラウンド書き出し（実験）</string>
+    <string name="mp4_queue_background_off">アプリが非表示になると一時停止し、戻ると再開します。</string>
+    <string name="mp4_queue_background_unverified">実験機能です。端末で動作しない場合は一時停止します。</string>
+    <string name="mp4_queue_background_active">実験機能でバックグラウンドのフレームを処理しています。</string>
+    <string name="mp4_queue_background_fallback">バックグラウンド処理が停止しました。アプリに戻ると再開します。</string>
+</resources>

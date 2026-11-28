@@ -1,0 +1,11 @@
+{
+  "missing_keys": 17,
+  "input_sha256": "16cf848f7f677f85262b7ff10d787fc8444c2358a5d81d46dc67d0ff573be8c3",
+  "output_sha256": "b30f48cdcbc0ddfc267a0a7d265ec717a7057342bdc55c9f0d16fe3ea06fc702",
+  "language": "en",
+  "bytes": 227781,
+  "source_ui_keys": 4199,
+  "translation_ui_keys": 4279,
+  "matching_keys": 4185,
+  "changed_keys_count": 3845
+}

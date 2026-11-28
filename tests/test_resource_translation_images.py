@@ -18,12 +18,12 @@ NAME = "img_story_top_main-new"
 def fixture(tmp_path):
     original_image, translated = b"original image bundle", b"UnityFS\0translated image bundle"
     database = Database(revision=1087, urlFormat="https://d2ilil7yh5oi1v.cloudfront.net/solis-{v}-{type}/{o}?generation={g}&alt=media")
-    row = database.assetBundleList.add(id=1, name=NAME, objectName="original_image", size=len(original_image),
+    row = database.assetBundleList.add(id=1, name=NAME, objectName="Image1", size=len(original_image),
         md5=hashlib.md5(original_image).hexdigest(), generation=1, uploadVersionId=202050, state=3,
         priority=7, tagid=[2], dependencie=[2])
-    database.assetBundleList.add(id=2, name="stage_model", objectName="model", size=3,
+    database.assetBundleList.add(id=2, name="stage_model", objectName="Model1", size=3,
         md5=hashlib.md5(b"old").hexdigest(), generation=1, uploadVersionId=202050, state=3)
-    database.resourceList.add(id=1, name="adv_test.txt", objectName="story", size=3,
+    database.resourceList.add(id=1, name="adv_test.txt", objectName="Story1", size=3,
         md5=hashlib.md5(b"old").hexdigest(), generation=1, uploadVersionId=202050, state=3)
     original = database.SerializeToString()
     sha = hashlib.sha256(translated).hexdigest()
@@ -75,7 +75,7 @@ def test_image_identity_and_offline_verified_cache_preserve_original_model_and_s
     assert final.assetBundleList[0].name == old.assetBundleList[0].name
     assert final.assetBundleList[0].tagid == old.assetBundleList[0].tagid
     assert final.assetBundleList[0].dependencie == old.assetBundleList[0].dependencie
-    assert ("assetbundle", 202050, "original_image", record.generation) in layer.object_aliases
+    assert ("assetbundle", 202050, "Image1", record.generation) in layer.object_aliases
     calls = []
     cache = OctoCache(tmp_path / "cache", allow_download=False, local_source=layer.open_source,
         fetcher=lambda *args, **kwargs: calls.append(args))
@@ -153,9 +153,9 @@ def test_sdk_manifest_accepts_only_the_matching_kind_for_local_image_aliases(tmp
         return cipher.encrypt(data) if encrypt else cipher.decrypt(data)
     args = dict(aes_key=b"a" * 32, client_key="synthetic", base_url="http://127.0.0.1:8080", aes_cbc=aes)
     manifest = OctoManifest(layer.manifest, object_aliases=layer.object_aliases, **args)
-    path = f"/octo/{record.upload_version}/assetbundle/original_image/{record.generation}"
+    path = f"/octo/{record.upload_version}/assetbundle/Image1/{record.generation}"
     assert manifest.lookup_object(path) == record
-    wrong_kind = {("resources", 202050, "original_image", record.generation): record}
+    wrong_kind = {("resources", 202050, "Image1", record.generation): record}
     with pytest.raises(OctoManifestError, match="alias"):
         OctoManifest(layer.manifest, object_aliases=wrong_kind, **args)
     layer.close()

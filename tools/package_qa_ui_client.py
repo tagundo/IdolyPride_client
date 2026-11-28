@@ -27,12 +27,13 @@ from idoly_local.android_package import ANDROID, AndroidPackagingError, METADATA
 
 ROOT = Path(__file__).resolve().parents[1]
 JAVA_ROOT = ROOT / "qa-game-ui/java"
-JAVA_FILES = {"NativeUiBridge.java", "UnityDispatcher.java", "LoopbackUiServer.java", "QaUiProvider.java"}
+JAVA_FILES = {"NativeUiBridge.java", "UnityDispatcher.java", "LoopbackUiServer.java", "QaUiProvider.java", "QaMp4Observation.java"}
 PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
 NORMAL_PACKAGE = "game.qualiarts.idolypride.local"
 DIAGNOSTIC_PROFILE = "diagnostic-aes"
 NORMAL_PROFILE = "normal-local"
-INPUT_PROFILES = {DIAGNOSTIC_PROFILE: PACKAGE, NORMAL_PROFILE: NORMAL_PACKAGE}
+UNIFIED_PROFILE = "unified-current"
+INPUT_PROFILES = {DIAGNOSTIC_PROFILE: PACKAGE, NORMAL_PROFILE: NORMAL_PACKAGE, UNIFIED_PROFILE: PACKAGE}
 PROVIDER = "game.qualiarts.idolypride.qa.ui.QaUiProvider"
 AUTHORITY = PACKAGE + ".qa.ui"
 MARKER = "assets/idoly-qa-ui.json"
@@ -146,9 +147,22 @@ def verify_normal_signature(source, sdk):
         raise AndroidPackagingError("Normal-local signer differs from its published certificate")
 
 
-def validate_input(source, qa_aes_report, expected_source_sha256, input_profile=DIAGNOSTIC_PROFILE):
+def validate_input(source, qa_aes_report, expected_source_sha256, input_profile=DIAGNOSTIC_PROFILE,
+                   current_source_receipt=None, source_commit=None):
     """Bind the audited original and both existing QA adaptations to this APK."""
     profile_package(input_profile)
+    if input_profile == UNIFIED_PROFILE:
+        if qa_aes_report is not None or current_source_receipt is None or source_commit is None:
+            raise AndroidPackagingError("Current unified QA requires its source commit/producer receipt and original AES")
+        if __package__:
+            from .actual_mv_qa_input import validate_current
+        else:
+            from actual_mv_qa_input import validate_current
+        provenance = validate_current(source, current_source_receipt, source_commit, expected_source_sha256, ROOT)
+        with ZipFile(source) as archive:
+            return inventory(archive), provenance
+    if current_source_receipt is not None or source_commit is not None:
+        raise AndroidPackagingError("Current-source provenance belongs only to unified-current QA")
     if input_profile == NORMAL_PROFILE:
         if qa_aes_report is not None:
             raise AndroidPackagingError("Normal-local must not receive a diagnostic QA AES report")
@@ -282,6 +296,79 @@ def verify_provider_xml(xml, input_profile=DIAGNOSTIC_PROFILE):
         raise AndroidPackagingError("Compiled QA provider/exported/debuggable manifest contract differs")
 
 
+def manifest_structure(xml):
+    """Canonical compiled manifest semantics, retaining attribute resource IDs.
+
+    aapt2 line numbers, attribute order and optional Raw string annotations are
+    presentation details. Component order, resource IDs, values and nested intent
+    records are runtime declarations and must survive the observer round trip.
+    """
+    if not isinstance(xml, str) or len(xml) > 512 * 1024:
+        raise AndroidPackagingError("Compiled manifest evidence exceeds its bound")
+    roots, stack = [], []
+    for line in xml.splitlines():
+        match = re.match(r"^(\s*)E:\s*([A-Za-z0-9_.:-]+)(?:\s+\(line=\d+\))?\s*$", line)
+        if match:
+            indent = len(match[1])
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            node = {"tag": match[2], "attributes": [], "children": []}
+            (stack[-1][1]["children"] if stack else roots).append(node)
+            stack.append((indent, node))
+        elif re.match(r"^\s*A:", line):
+            if not stack:
+                raise AndroidPackagingError("Compiled manifest attribute has no owner")
+            value = re.sub(r"\s+\(Raw:\s*.*\)\s*$", "", line.strip()[2:].strip())
+            # Normalize only the known namespace spelling; keep numeric IDs.
+            value = value.replace("http://schemas.android.com/apk/res/android:", "android:")
+            if "=" not in value:
+                raise AndroidPackagingError("Compiled manifest attribute is malformed")
+            key, val = value.split("=", 1)
+            if any(k == key for k, _ in stack[-1][1]["attributes"]):
+                raise AndroidPackagingError("Compiled manifest has duplicate attributes")
+            stack[-1][1]["attributes"].append((key.strip(), val.strip()))
+        elif line.strip() and not re.match(r"^\s*N:", line):
+            raise AndroidPackagingError("Unexpected compiled manifest evidence line")
+    if len(roots) != 1 or roots[0]["tag"] != "manifest":
+        raise AndroidPackagingError("Compiled manifest root is not unique")
+    def sort(node):
+        node["attributes"].sort()
+        for child in node["children"]:
+            sort(child)
+    sort(roots[0])
+    return roots[0]
+
+
+def verify_manifest_preserved(before_xml, after_xml, input_profile=DIAGNOSTIC_PROFILE):
+    before, after = manifest_structure(before_xml), manifest_structure(after_xml)
+    def application(tree):
+        apps = [n for n in tree["children"] if n["tag"] == "application"]
+        if len(apps) != 1:
+            raise AndroidPackagingError("Compiled application declaration is not unique")
+        return apps[0]
+    old_app, new_app = application(before), application(after)
+    def field(node, name):
+        found = [v for k, v in node["attributes"] if k == "android:" + name or k.startswith("android:" + name + "(")]
+        return found[0] if len(found) == 1 else None
+    if input_profile == UNIFIED_PROFILE:
+        if dict(old_app["attributes"]).get("android:appComponentFactory(0x0101057a)") != '"game.qualiarts.idolypride.localserver.UnifiedComponentFactory"':
+            raise AndroidPackagingError("Current unified input has no exact launcher component factory")
+        names = [dict(n["attributes"]).get("android:name(0x01010003)") for n in old_app["children"] if n["tag"] == "activity"]
+        if any(names.count('"game.qualiarts.idolypride.localserver.' + name + '"') != 1
+               for name in ("MainActivity", "UnifiedGameActivity")):
+            raise AndroidPackagingError("Current unified input launcher/game activities differ")
+    probes = [n for n in new_app["children"] if n["tag"] == "provider" and field(n, "name") == '"' + PROVIDER + '"']
+    if len(probes) != 1:
+        raise AndroidPackagingError("Compiled QA provider declaration is not unique")
+    new_app["children"].remove(probes[0])
+    for app in (old_app, new_app):
+        app["attributes"] = [(k, v) for k, v in app["attributes"]
+                             if not (k == "android:debuggable" or k.startswith("android:debuggable("))]
+    if before != after:
+        raise AndroidPackagingError("QA manifest changed application factory/activity or another original declaration")
+    return {"compiled_manifest_structure_preserved": True, "manifest_factory_and_activities_preserved": True}
+
+
 def qa_signing_material(keystore=None):
     """Reuse only an explicitly supplied private QA key, with an env password.
 
@@ -302,7 +389,7 @@ def qa_signing_material(keystore=None):
 
 def package(source, output, *, qa_aes_report=None, expected_source_sha256, native_library, emulator_only=False,
             input_profile=DIAGNOSTIC_PROFILE, apkeditor=None, build_tools=None, java=None, android_jar=None, report_path=None,
-            qa_keystore=None, session_millis=DEFAULT_SESSION_MILLIS):
+            qa_keystore=None, session_millis=DEFAULT_SESSION_MILLIS, current_source_receipt=None, source_commit=None):
     if emulator_only is not True:
         raise AndroidPackagingError("Explicit --emulator-only is required for this QA APK")
     session_millis = validate_session_millis(session_millis)
@@ -312,7 +399,11 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
         raise AndroidPackagingError("Choose a new .apk and report path; existing clients/outputs are preserved")
     signing_key, signing_environment = qa_signing_material(qa_keystore)
     package_name = profile_package(input_profile)
-    members, provenance = validate_input(source, qa_aes_report, expected_source_sha256, input_profile)
+    if input_profile == UNIFIED_PROFILE or current_source_receipt is not None or source_commit is not None:
+        members, provenance = validate_input(source, qa_aes_report, expected_source_sha256, input_profile,
+                                            current_source_receipt, source_commit)
+    else:
+        members, provenance = validate_input(source, qa_aes_report, expected_source_sha256, input_profile)
     native_library = Path(native_library).resolve(strict=True)
     native = native_library.read_bytes()
     if (native_library.name != Path(NATIVE).name or len(native) < 64 or native[:7] != b"\x7fELF\x02\x01\x01"
@@ -321,6 +412,11 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
     editor, sdk, executable = _tools(apkeditor, build_tools, java)
     if input_profile == NORMAL_PROFILE:
         verify_normal_signature(source, sdk)
+    elif input_profile == UNIFIED_PROFILE:
+        verification = _run([sdk / "apksigner", "verify", "--verbose", "--print-certs", source], "Current unified input signature verification")
+        signers = [line.split(": ", 1)[-1] for line in verification.stdout.splitlines() if "certificate SHA-256 digest:" in line]
+        if signers != [provenance["input_certificate_sha256"]]:
+            raise AndroidPackagingError("Current unified input signer differs from its producer")
     executable = Path(shutil.which(str(executable)) or executable).resolve()
     keytool = executable.with_name("keytool")
     if not keytool.is_file():
@@ -330,6 +426,8 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
     with tempfile.TemporaryDirectory(prefix=".idoly-qa-ui-", dir=output.parent) as temporary:
         work = Path(temporary)
         dex, java_hashes = compile_dex(work, executable, sdk, platform)
+        source_xml = _run([sdk / "aapt2", "dump", "xmltree", source, "--file", "AndroidManifest.xml"],
+                          "QA source manifest semantics").stdout
         decoded = work / "decoded"
         _run([executable, "-jar", editor, "d", "-dex", "-t", "xml", "-i", source, "-o", decoded], "QA UI manifest decode")
         added_dex = add_provider(decoded, input_profile)
@@ -344,6 +442,8 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
             "input_apk_sha256": expected_source_sha256, "provenance": provenance,
             "source_sha256": java_hashes, "native_library_sha256": digest(native_library), "added_dex": added_dex,
             "session_millis": session_millis}
+        if input_profile == UNIFIED_PROFILE:
+            marker["source_commit"] = source_commit
         additions = {added_dex: dex.read_bytes(), NATIVE: native,
                      MARKER: (json.dumps(marker, indent=2, sort_keys=True) + "\n").encode("utf-8")}
         if set(additions) & set(members):
@@ -381,6 +481,7 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
         if f"package: name='{package_name}'" not in badging:
             raise AndroidPackagingError("QA output changed its input profile's package identity")
         verify_provider_xml(xml, input_profile)
+        manifest_preservation = verify_manifest_preserved(source_xml, xml, input_profile)
         expected = {**members, "AndroidManifest.xml": hashlib.sha256(manifest).hexdigest(),
                     **{name: hashlib.sha256(raw).hexdigest() for name, raw in additions.items()}}
         with ZipFile(signed) as archive:
@@ -395,6 +496,7 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
             "source_apk_sha256": expected_source_sha256, "output_apk_sha256": digest(signed), "output_bytes": signed.stat().st_size,
             "qa_ui": marker, "changed_apk_members": ["AndroidManifest.xml", *additions],
             "all_existing_members_preserved_except_manifest_and_signatures": True,
+            **manifest_preservation,
             "preserved_dex_sha256": {name: value for name, value in members.items() if DEX_NAME.fullmatch(name)},
             "preserved_metadata_sha256": members[METADATA_NAME], "preserved_il2cpp_sha256": members[IL2CPP],
             "preserved_aes_sha256": members[FAST_AES],
@@ -514,6 +616,8 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--input-profile", choices=tuple(INPUT_PROFILES), default=DIAGNOSTIC_PROFILE)
     parser.add_argument("--qa-aes-report", type=Path)
+    parser.add_argument("--current-source-receipt", type=Path)
+    parser.add_argument("--source-commit")
     parser.add_argument("--expected-source-sha256", required=True)
     parser.add_argument("--native-library", type=Path)
     parser.add_argument("--refresh-existing-session", action="store_true",
@@ -531,7 +635,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.refresh_existing_session:
-            if args.native_library is not None or args.qa_aes_report is not None or args.apkeditor is not None:
+            if (args.native_library is not None or args.qa_aes_report is not None or args.apkeditor is not None
+                    or args.current_source_receipt is not None or args.source_commit is not None):
                 raise AndroidPackagingError("Session refresh does not accept native, AES or manifest overrides")
             report = refresh_session(args.source, args.output, expected_source_sha256=args.expected_source_sha256,
                 emulator_only=args.emulator_only, session_millis=args.session_millis, qa_keystore=args.qa_keystore,
@@ -543,7 +648,8 @@ def main(argv=None):
                 expected_source_sha256=args.expected_source_sha256, native_library=args.native_library,
                 emulator_only=args.emulator_only, input_profile=args.input_profile, apkeditor=args.apkeditor, build_tools=args.build_tools,
                 java=args.java, android_jar=args.android_jar, report_path=args.report, qa_keystore=args.qa_keystore,
-                session_millis=args.session_millis)
+                session_millis=args.session_millis, current_source_receipt=args.current_source_receipt,
+                source_commit=args.source_commit)
     except (AndroidPackagingError, OSError, ValueError, KeyError) as error:
         parser.exit(1, f"QA UI packaging failed: {error}\n")
     print(json.dumps(report, indent=2))

@@ -1138,3 +1138,56 @@ def test_level_overlay_without_global_dialog_still_blocks_background_menu_and_ou
     for n in (31, 32, 33):
         explorer.step(n)
     assert explorer.stopped and explorer.outcomes == []
+
+
+def test_korean_client_resource_sheet_selects_its_execute_button(download_sheet):
+    # Korean labels observed in the redroid run of the unified Korean client.
+    texts = {"/Execute/TextButtonNormal/Text": "다운로드", "/Cancel/TextButtonNormal/Text": "취소",
+             "/Header/Description": "필요한 데이터를 다운로드 합니다 (1.07 GB)", "/Header/Title": "다운로드 확인"}
+    for node in download_sheet["nodes"]:
+        for suffix, label in texts.items():
+            if node["path"].endswith(suffix):
+                node["text"] = label
+    target = download_confirmation(download_sheet)
+    assert target["instance_id"] == -2544 and target["label"] == "다운로드"
+    # A Korean purchase/deletion description never authorizes the action.
+    download_sheet["nodes"][-2]["text"] = "이 상품을 구매합니다 (1.07 GB)"
+    assert download_confirmation(download_sheet) is None
+
+
+def test_korean_forbidden_and_error_labels_are_recognized():
+    for label in ("구매", "과금", "가챠", "데이터 삭제", "계정 삭제"):
+        assert ui._FORBIDDEN.search(label)
+    assert ui._ERROR.search("서버와의 통신에 실패했습니다")
+
+
+def test_fully_localized_notice_tabs_are_accepted_but_mixed_or_forbidden_are_not(notice_snapshot):
+    tabs = [n for n in notice_snapshot["nodes"] if n.get("path", "").endswith(("Button1/Text", "Button2/Text", "Button3/Text"))]
+    for node, label in zip(sorted(tabs, key=lambda n: n["path"]), ("공지사항", "오류", "PR")):
+        node["text"] = label
+    assert ui.notice_close_target(notice_snapshot) is not None
+    sorted(tabs, key=lambda n: n["path"])[1]["text"] = "구매"
+    assert ui.notice_close_target(notice_snapshot) is None
+
+
+def test_touch_hold_spans_frames_on_a_slow_guest():
+    # redroid run 15: ~0.9 s frames; 501 notice-close touches of 150 ms all missed.
+    hold = ui.touch_hold_for_frame
+    assert hold({"frame_observation": {"unscaled_delta_time": 0.033}}, "observed_notice_close") == 150
+    assert hold({}, "qa_mv_route") == 150
+    assert hold({"frame_observation": {"unscaled_delta_time": 0.15}}, "observed_notice_close") == 390
+    # Run 17: a hold of 0.5 s or more is a long tap whose click is suppressed.
+    assert hold({"frame_observation": {"unscaled_delta_time": 0.9}}, "observed_notice_close") == 450
+    assert hold({"frame_observation": {"unscaled_delta_time": 5.0}}, "qa_mv_route") == 450
+
+
+def test_asset_retry_is_only_the_e209_dialogs_own_retry_button():
+    root = "Singleton/GlobalDialog/ErrorDialogManager/SystemDialog(Clone)/SystemDialogCommonRoot/DialogCanvas/Dialog/"
+    button = {"instance_id": 1, "kind": "button", "name": "OkButton", "path": root + "Buttons/Root/OkButton",
+              "active": True, "interactable": True, "bounds": [431.0, 652.0, 514.0, 712.0], "text": ""}
+    def snapshot(description):
+        return {"ok": True, "screen": {"width": 540, "height": 1140, "origin": "top-left", "units": "unity-screen-pixels"}, "nodes": [button, {"instance_id": 2, "kind": "tmp_text", "name": "Description",
+                "path": root + "Description", "active": True, "text": description, "bounds": [0, 0, 1, 1]}]}
+    found = ui.asset_retry_target(snapshot("에셋 획득 실패\n네트워크 환경을 확인한 후 재시도해 주세요\n(E209)"))
+    assert found is not None and found["instance_id"] == 1
+    assert ui.asset_retry_target(snapshot("다른 오류 (E100)")) is None

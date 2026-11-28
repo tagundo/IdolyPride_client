@@ -64,8 +64,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "48",
-                           tool.ANDROID + "versionName": "0.3.31"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "49",
+                           tool.ANDROID + "versionName": "0.3.32"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -121,7 +121,7 @@ def test_release_component_export_policy_is_fixed(name, old, new):
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 48;' in raw and 'VERSION_NAME = "0.3.31";' in raw
+    assert 'VERSION_CODE = 49;' in raw and 'VERSION_NAME = "0.3.32";' in raw
     assert 'DEBUG = Boolean.parseBoolean("false");' in raw and 'BUILD_TYPE = "release";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
@@ -130,7 +130,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("48")\ngradleProperty("serverVersionName").orElse("0.3.31")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("49")\ngradleProperty("serverVersionName").orElse("0.3.32")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -285,7 +285,7 @@ def test_payload_extends_only_fifteen_public_tables_and_verifies_actual_file_pro
     baseline, payload, _files, write = payload_case
     digest = write()
     with ZipFile(baseline) as archive:
-        report = tool.validate_payload(payload, digest, archive)
+        report = tool._validate_legacy_base_structure(payload, digest, archive)
     assert len(report["tables"]) == 55 and report["sha256"] == digest
 
 
@@ -314,9 +314,9 @@ def test_versioned_payload_catalog_is_bound_to_external_frozen_inventory(payload
     with ZipFile(baseline) as archive:
         if change:
             with pytest.raises(ValueError, match="catalog|provenance"):
-                tool.validate_payload(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
+                tool._validate_legacy_base_structure(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
         else:
-            report = tool.validate_payload(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
+            report = tool._validate_legacy_base_structure(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
             assert report["prebuilt_catalogs"] == inventory["prebuilt_catalogs"]
             assert report["members"] == len(files) + 1
 
@@ -335,7 +335,7 @@ def test_payload_rejects_private_extra_mutated_old_or_incomplete_tables(payload_
         files["data/master-json/StoryPart.json"] = b"[]"
     digest = write(files)
     with ZipFile(baseline) as archive, pytest.raises(ValueError):
-        tool.validate_payload(payload, digest, archive)
+        tool._validate_legacy_base_structure(payload, digest, archive)
 
 
 @pytest.mark.parametrize("table", ["CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
@@ -350,7 +350,7 @@ def test_company_menu_public_tables_must_all_exist_and_be_nonempty(payload_case,
             files.pop("data/master-json/" + table + ".json")
         digest = write(files)
         with ZipFile(baseline) as archive, pytest.raises(ValueError):
-            tool.validate_payload(payload, digest, archive)
+            tool._validate_legacy_base_structure(payload, digest, archive)
 
 
 @pytest.mark.parametrize("change", ["missing-tag", "missing-pack", "extra-pack", "version", "unrelated-pack", "photo-default"])
@@ -375,7 +375,7 @@ def test_media_master_overlay_members_and_original_constraints_are_strict(payloa
         files[name] = json.dumps(rows).encode()
     digest = write(files)
     with ZipFile(baseline) as archive, pytest.raises(ValueError):
-        tool.validate_payload(payload, digest, archive)
+        tool._validate_legacy_base_structure(payload, digest, archive)
 
 
 def test_approved_payload_hash_rejects_changed_encrypted_overlay_bytes(payload_case):
@@ -385,7 +385,7 @@ def test_approved_payload_hash_rejects_changed_encrypted_overlay_bytes(payload_c
     changed[next(iter(tool.media_master.PACK_MEMBERS.values()))] = b"z" * 4096
     write(changed)
     with ZipFile(baseline) as archive, pytest.raises(ValueError, match="hash differs"):
-        tool.validate_payload(payload, approved, archive)
+        tool._validate_legacy_base_structure(payload, approved, archive)
 
 
 @pytest.mark.parametrize("change", ["file-hash", "row-count-bool", "duplicate-path", "wrong-hash", "duplicate-member"])
@@ -406,7 +406,7 @@ def test_payload_rejects_forged_manifest_hash_and_duplicate_zip_members(payload_
             archive.writestr("data/master-json/StoryPart.json", b"[]")
     digest = "0" * 64 if change == "wrong-hash" else tool.pybundle.digest(payload)
     with ZipFile(baseline) as archive, pytest.raises(ValueError):
-        tool.validate_payload(payload, digest, archive)
+        tool._validate_legacy_base_structure(payload, digest, archive)
 
 
 @pytest.mark.parametrize("compression", [ZIP_STORED, ZIP_DEFLATED])
@@ -522,10 +522,10 @@ def test_unknown_d8_synthetic_kinds_or_malformed_suffixes_remain_rejected(suffix
     assert not tool.own_synthetic(origin + suffix, {origin + ";"})
 
 
-def test_only_nine_server_sources_are_frozen_without_installer_or_client_builder():
-    assert len(tool.JAVA_FILES) == 9
+def test_only_ten_server_sources_are_frozen_without_installer_or_client_builder():
+    assert len(tool.JAVA_FILES) == 10
     assert {Path(name).stem for name in tool.JAVA_FILES} == {
-        "MainActivity", "ServerService", "CryptoBridge", "PresentationSettings", "PlaybackSettings", "PlaybackStorage",
+        "MainActivity", "ServerService", "PreviousProcessExits", "CryptoBridge", "PresentationSettings", "PlaybackSettings", "PlaybackStorage",
         "RenderingExperiment", "LibrarySettings", "ResourceTransfers"}
     assert not any("Installer" in name or "PresentationStorage" in name for name in tool.SOURCE_FILES)
     assert not hasattr(tool, "presentation")
@@ -568,7 +568,7 @@ def test_unapproved_embedded_apk_or_presentation_asset_in_baseline_is_rejected(t
 
 
 def linked_identity():
-    badging = (f"package: name='{tool.PACKAGE}' versionCode='48' versionName='0.3.31'\n"
+    badging = (f"package: name='{tool.PACKAGE}' versionCode='49' versionName='0.3.32'\n"
                "sdkVersion:'26'\ntargetSdkVersion:'34'\nnative-code: 'arm64-v8a'\n"
                + "".join("uses-permission: name='" + name + "'\n" for name in sorted(tool.SERVER_PERMISSIONS)))
     manifest_dump = ("A: android:extractNativeLibs(0x1)=true\nA: android:debuggable(0x2)=false\n"
@@ -580,7 +580,7 @@ def test_linked_identity_requires_release_and_no_install_permission_or_callback(
     badging, manifest_dump = linked_identity()
     tool._identity(badging, manifest_dump)
     with pytest.raises(ValueError, match="identity"):
-        tool._identity(badging.replace("versionCode='48' versionName='0.3.31'",
+        tool._identity(badging.replace("versionCode='49' versionName='0.3.32'",
                                       "versionCode='43' versionName='0.3.24'"), manifest_dump)
     with pytest.raises(ValueError, match="identity"):
         tool._identity(badging, manifest_dump.replace("debuggable(0x2)=false", "debuggable(0x2)=true"))
@@ -988,3 +988,48 @@ def test_unsupported_cache_hint_still_runs_the_unchanged_memory_guard_before_spa
         tool._run(["must-not-run"], root=tmp_path, env={}, cache=cache)
     assert order == ["advice", "strict-guard"]
     assert tool.MIN_HEADROOM == 1024 * 1024 * 1024
+
+
+@pytest.mark.parametrize("damage", [None, "legacy-sha", "table-count", "namespace", "raw-counts"])
+def test_native_manual_payload_requires_exact_latest_pin_and_all_64_json_names(tmp_path, monkeypatch, damage):
+    from types import SimpleNamespace
+    names = sorted(tool.LATEST_TABLES)
+    tables = {name: 1 for name in names if name != "LoveCatalog"}
+    manifest = {"tables": tables, "prebuilt_catalogs": None}
+    if damage == "raw-counts": manifest["tables"]["CardImage"] = True
+    files = {"data/master-json/"+name+".json": b"{}" if name == "LoveCatalog" else b'[{}]' for name in names}
+    files[tool.PAYLOAD_MANIFEST] = json.dumps(manifest).encode()
+    payload = tmp_path / "new-payload.zip"; payload.write_bytes(zip_bytes(files))
+    approved = {"bytes": payload.stat().st_size, "sha256": tool.pybundle.digest(payload)}
+    output = {**approved, "entries": len(files), "master_json_tables": 64, "master_json_table_names": names}
+    pin = {"output": output, "upgrade_proof": {"synthetic": "exact fixed preparation proof"}}
+    verified = dict(output)
+    if damage == "table-count": verified["master_json_tables"] = 55
+    elif damage == "namespace": verified["master_json_table_names"] = sorted(["WrongCatalog", *names[1:]])
+    seen = []
+    def verify(path):
+        assert path == payload and tool.pybundle.digest(path) == approved["sha256"]
+        seen.append("whole-payload-verified")
+        return verified
+    monkeypatch.setattr(tool, "love_payload", SimpleNamespace(load_pin=lambda: pin, output_pin=lambda: approved,
+                                                             verify_payload=verify))
+    expected = "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223" if damage == "legacy-sha" else approved["sha256"]
+    if damage:
+        with pytest.raises(ValueError): tool.validate_payload(payload, expected, object())
+        if damage == "legacy-sha": assert seen == []
+    else:
+        result = tool.validate_payload(payload, expected, object())
+        assert result["master_json_table_names"] == names and len(result["tables"]) == 63
+        assert result["server_data_provenance"] == pin["upgrade_proof"] and seen == ["whole-payload-verified"]
+
+
+@pytest.mark.parametrize("size", [1, 222333444])
+def test_build_config_embeds_exact_native_payload_size(size):
+    raw = tool.build_config("a"*64, payload_bytes=size)
+    assert ("SERVER_DATA_BYTES = "+str(size)+"L;").encode() in raw
+
+
+@pytest.mark.parametrize("size", [True, -1, 1.0, "100", 1 << 40])
+def test_build_config_rejects_invalid_native_payload_size(size):
+    with pytest.raises(ValueError, match="payload size"):
+        tool.build_config("a"*64, payload_bytes=size)

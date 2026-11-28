@@ -50,7 +50,7 @@ public final class ServerService extends Service {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final CopyOnWriteArrayList<Observer> OBSERVERS = new CopyOnWriteArrayList<>();
     private static final ArrayDeque<String> LOGS = new ArrayDeque<>();
-    private static volatile String status = "중지됨";
+    private static volatile StatusText status = new StatusText(R.string.status_stopped);
     private static volatile boolean running = false;
     private static volatile boolean busy = false;
     private static volatile String runtimeDetails = "{}";
@@ -64,6 +64,21 @@ public final class ServerService extends Service {
         return thread;
     });
 
+    private static final AtomicBoolean ACCOUNT_BUSY = new AtomicBoolean(false);
+    private static final ExecutorService ACCOUNT_IO = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "account-management"); thread.setDaemon(true); return thread;
+    });
+
+    private static final AtomicBoolean OFFICIAL_BUSY = new AtomicBoolean(false);
+    private static final ExecutorService OFFICIAL_IO = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "official-account-transfer"); thread.setDaemon(true); return thread;
+    });
+
+    private static final AtomicBoolean EVENTS_BUSY = new AtomicBoolean(false);
+    private static final ExecutorService EVENTS_IO = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "event-settings"); thread.setDaemon(true); return thread;
+    });
+
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean stopQueued = new AtomicBoolean(false);
     private final AtomicBoolean startQueued = new AtomicBoolean(false);
@@ -73,8 +88,31 @@ public final class ServerService extends Service {
     private final AtomicBoolean resourceCancelQueued = new AtomicBoolean(false);
     private final Runnable pollState = () -> queuePoll();
 
+    /** Resolve service state using the receiving screen locale, never a cached label. */
+    public static final class StatusText {
+        private final int resourceId;
+        private final Object[] formatArgs;
+
+        StatusText(int resourceId, Object... formatArgs) {
+            if (resourceId == 0) throw new IllegalArgumentException("Status resource required");
+            this.resourceId = resourceId;
+            this.formatArgs = formatArgs.clone();
+            for (Object argument : this.formatArgs) {
+                if (argument != null && !(argument instanceof String) && !(argument instanceof Integer)
+                        && !(argument instanceof Long) && !(argument instanceof Double) && !(argument instanceof Float)
+                        && !(argument instanceof Short) && !(argument instanceof Byte) && !(argument instanceof Boolean)
+                        && !(argument instanceof Character))
+                    throw new IllegalArgumentException("Status arguments must be immutable");
+            }
+        }
+
+        String render(Context context) {
+            return context.getString(resourceId, formatArgs.clone());
+        }
+    }
+
     public interface Observer {
-        void onServerChanged(String state, boolean isRunning, boolean isBusy, List<String> logs, String detailsJson);
+        void onServerChanged(StatusText state, boolean isRunning, boolean isBusy, List<String> logs, String detailsJson);
     }
 
     /** Advances only for a validated Python status response, never a log replay. */
@@ -83,6 +121,13 @@ public final class ServerService extends Service {
     static boolean resourceServerRunning() {
         ServerService service = activeService;
         return running && !busy && service != null && !service.destroyed && !service.stopQueued.get();
+    }
+    static String effectiveLanguage() {
+        if (!resourceServerRunning()) return "";
+        try {
+            JSONObject language = new JSONObject(runtimeDetails).optJSONObject("language");
+            return language == null ? "" : language.optString("effective_language", "");
+        } catch (org.json.JSONException invalid) { return ""; }
     }
     static void resourceTransferChanged() { dispatch(); }
     /** Called only by the app-context resource I/O worker, not the lifecycle worker. */
@@ -106,6 +151,163 @@ public final class ServerService extends Service {
         } catch (RejectedExecutionException stopped) { service.resourceCancelQueued.set(false); }
     }
 
+
+    public interface AccountCallback {
+        void completed(JSONObject result);
+        default void progress(String phase, long bytes, long total) {}
+    }
+
+    static boolean isManagingAccounts() { return ACCOUNT_BUSY.get(); }
+
+    private static JSONObject accountFailure(String code) {
+        JSONObject result = new JSONObject();
+        try { result.put("schema", 1).put("ok", false).put("error", code); }
+        catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
+        return result;
+    }
+
+    /** Native controls only. File I/O and Python account operations never run on the UI thread. */
+    static void manageAccounts(Context context, String action, JSONObject payload, AccountCallback callback) {
+        accountTask(context, action, payload, null, null, null, callback);
+    }
+
+    static void previewAccountDocument(Context context, Uri source, AccountCallback callback) {
+        accountTask(context, "accounts_preview", new JSONObject(), source, null, null, callback);
+    }
+
+    static void saveAccountDocument(Context context, Uri destination, JSONObject receipt, AccountCallback callback) {
+        accountTask(context, "accounts_save_document", receipt, null, destination, receipt.optString("path"), callback);
+    }
+
+    static void discardAccountDocument(Context context, String path) {
+        Context application = context.getApplicationContext();
+        ACCOUNT_IO.execute(() -> AccountTransfers.discardExport(application, path));
+    }
+
+    private static void accountTask(Context context, String action, JSONObject payload, Uri input,
+                                    Uri output, String exportPath, AccountCallback callback) {
+        Context application = context.getApplicationContext();
+        if (busy || !ACCOUNT_BUSY.compareAndSet(false, true)) {
+            MAIN.post(() -> callback.completed(accountFailure("account_operation_busy")));
+            return;
+        }
+        final String encodedRequest = payload == null ? "{}" : payload.toString();
+        dispatch();
+        ACCOUNT_IO.execute(() -> {
+            JSONObject result;
+            File staged = null;
+            String request = encodedRequest;
+            AccountTransfers.Progress progress = (phase, bytes, total) ->
+                    MAIN.post(() -> callback.progress(phase, bytes, total));
+            try {
+                if (output != null) {
+                    JSONObject receipt = new JSONObject(encodedRequest);
+                    AccountTransfers.save(application, output, exportPath, receipt.optLong("bytes", -1), receipt.optString("sha256"), progress);
+                    result = new JSONObject().put("schema", 1).put("ok", true).put("action", action);
+                } else {
+                    if (input != null) {
+                        staged = AccountTransfers.stage(application, input, progress);
+                        request = new JSONObject().put("path", staged.getAbsolutePath()).toString();
+                    }
+                    PyObject module;
+                    synchronized (PYTHON_LOCK) {
+                        if (!Python.isStarted()) Python.start(new AndroidPlatform(application));
+                        module = Python.getInstance().getModule("android_server_runtime");
+                    }
+                    MAIN.post(() -> callback.progress("preparing", 0, 0));
+                    String value = module.callAttr("management_command_json",
+                            application.getFilesDir().getAbsolutePath(), action, request, application.getAssets()).toString();
+                    if (value.length() > 2 * 1024 * 1024) throw new IOException("Account response unavailable");
+                    result = new JSONObject(value);
+                }
+            } catch (Exception error) {
+                Log.w("IdolyLocalServer", "Account operation failed: " + error.getClass().getSimpleName());
+                String code = error instanceof AccountTransfers.Failure ? ((AccountTransfers.Failure) error).code
+                        : error instanceof SecurityException ? "account_document_permission"
+                        : error instanceof IOException ? "account_document_io" : "account_operation_failed";
+                result = accountFailure(code);
+            } finally {
+                if (staged != null) staged.delete();
+                ACCOUNT_BUSY.set(false);
+            }
+            JSONObject completed = result;
+            MAIN.post(() -> callback.completed(completed));
+            dispatch();
+        });
+    }
+
+    static boolean isImportingOfficial() { return OFFICIAL_BUSY.get(); }
+
+    /** Credentials travel only through this worker, never runtimeDetails, logs or exports. */
+    static void officialImport(Context context, String action, JSONObject payload, AccountCallback callback) {
+        Context application = context.getApplicationContext();
+        if (!OFFICIAL_BUSY.compareAndSet(false, true)) {
+            if (payload != null) { payload.remove("password"); payload.remove("user_id"); }
+            MAIN.post(() -> callback.completed(accountFailure("official_operation_busy")));
+            return;
+        }
+        // Release the mutable request and the worker's serialized reference as soon
+        // as Python has copied/validated the one-shot transfer credentials.
+        final String[] request = {payload == null ? "{}" : payload.toString()};
+        if (payload != null) { payload.remove("password"); payload.remove("user_id"); }
+        try {
+            OFFICIAL_IO.execute(() -> {
+                JSONObject result;
+                try {
+                    PyObject module;
+                    synchronized (PYTHON_LOCK) {
+                        if (!Python.isStarted()) Python.start(new AndroidPlatform(application));
+                        module = Python.getInstance().getModule("android_server_runtime");
+                    }
+                    String raw = module.callAttr("official_command_json", application.getFilesDir().getAbsolutePath(),
+                            action, request[0], application.getAssets()).toString();
+                    if (raw.length() > 2 * 1024 * 1024) throw new IOException("Official response unavailable");
+                    result = new JSONObject(raw);
+                } catch (Exception ignored) {
+                    // Exception text and stack traces may contain transfer inputs.
+                    result = accountFailure("official_operation_failed");
+                } finally {
+                    request[0] = null;
+                    OFFICIAL_BUSY.set(false);
+                }
+                JSONObject completed = result;
+                MAIN.post(() -> callback.completed(completed));
+            });
+        } catch (RejectedExecutionException ignored) {
+            request[0] = null; OFFICIAL_BUSY.set(false);
+            MAIN.post(() -> callback.completed(accountFailure("official_operation_failed")));
+        }
+    }
+
+    static boolean isManagingEventSettings() { return EVENTS_BUSY.get(); }
+
+    /** Direct native settings: background JSON I/O, no HTTP admin or lifecycle action. */
+    static void manageEventSettings(Context context, String action, JSONObject payload, AccountCallback callback) {
+        Context application = context.getApplicationContext();
+        if (!EVENTS_BUSY.compareAndSet(false, true)) {
+            MAIN.post(() -> callback.completed(accountFailure("event_settings_busy"))); return;
+        }
+        final String request = payload == null ? "{}" : payload.toString();
+        try { EVENTS_IO.execute(() -> {
+            JSONObject result;
+            try {
+                PyObject module;
+                synchronized (PYTHON_LOCK) {
+                    if (!Python.isStarted()) Python.start(new AndroidPlatform(application));
+                    module = Python.getInstance().getModule("android_server_runtime");
+                }
+                String raw = module.callAttr("management_command_json", application.getFilesDir().getAbsolutePath(),
+                        action, request).toString();
+                if (raw.length() > 2 * 1024 * 1024) throw new IOException("Settings response unavailable");
+                result = new JSONObject(raw);
+            } catch (Exception ignored) { result = accountFailure("event_settings_io"); }
+            finally { EVENTS_BUSY.set(false); }
+            JSONObject completed = result; MAIN.post(() -> callback.completed(completed)); dispatch();
+        }); } catch (RejectedExecutionException ignored) {
+            EVENTS_BUSY.set(false); MAIN.post(() -> callback.completed(accountFailure("event_settings_busy"))); dispatch();
+        }
+    }
+
     public static void observe(Observer observer) {
         OBSERVERS.addIfAbsent(observer);
         dispatch();
@@ -120,7 +322,7 @@ public final class ServerService extends Service {
         synchronized (LOGS) {
             snapshot = new ArrayList<>(LOGS);
         }
-        final String currentStatus = status;
+        final StatusText currentStatus = status;
         final boolean currentRunning = running;
         final boolean currentBusy = busy;
         final String currentDetails = runtimeDetails;
@@ -131,8 +333,8 @@ public final class ServerService extends Service {
         });
     }
 
-    private static void state(String value, boolean isRunning, boolean isBusy) {
-        status = value;
+    private static void state(int resourceId, boolean isRunning, boolean isBusy, Object... formatArgs) {
+        status = new StatusText(resourceId, formatArgs);
         running = isRunning;
         busy = isBusy;
         dispatch();
@@ -157,6 +359,7 @@ public final class ServerService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        UnifiedRuntime.installResources(this);
         activeService = this;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(CHANNEL,
@@ -172,7 +375,7 @@ public final class ServerService extends Service {
         PendingIntent stop = PendingIntent.getService(this, 1,
                 new Intent(this, ServerService.class).setAction(ACTION_STOP), flags);
         return new Notification.Builder(this, CHANNEL)
-                .setSmallIcon(R.drawable.ic_server)
+                .setSmallIcon(UnifiedRuntime.notificationIcon(this, R.drawable.ic_server))
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getString(R.string.notification_text))
                 .setContentIntent(open)
@@ -211,13 +414,15 @@ public final class ServerService extends Service {
         foreground();
         if (!startQueued.compareAndSet(false, true)) return START_NOT_STICKY;
         runtimeDetails = "{}";
-        state(getString(R.string.status_starting), false, true);
+        state(R.string.status_starting, false, true);
         appendLog("서버 데이터를 준비하고 있습니다.");
         worker.execute(() -> {
             if (stopQueued.get()) return;
             try {
                 String resourceCacheDirectory = null;
-                if (publicDownloads) {
+                if (UnifiedRuntime.isEnabled(this)) {
+                    resourceCacheDirectory = UnifiedRuntime.resourceDirectory(this, getFilesDir()).getAbsolutePath();
+                } else if (publicDownloads) {
                     boolean permission = Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager();
                     if (ResourceTransfers.storageAccess(Build.VERSION.SDK_INT, true, permission) != ResourceTransfers.STORAGE_DOWNLOADS)
                         throw new SecurityException("Downloads storage permission is required");
@@ -229,22 +434,33 @@ public final class ServerService extends Service {
                 }
                 runtime = Python.getInstance().getModule("android_server_runtime");
                 runtime.callAttr("start", getFilesDir().getAbsolutePath(), getAssets(), new LogCallback(),
-                        getApplicationInfo().nativeLibraryDir, experimentalMainLive, downloadMissingResources, mediaMode, resourceCacheDirectory);
+                        getApplicationInfo().nativeLibraryDir, experimentalMainLive, downloadMissingResources, mediaMode, resourceCacheDirectory,
+                        UnifiedRuntime.isEnabled(this) ? getFilesDir().getAbsolutePath() : null);
+                if (UnifiedRuntime.isEnabled(this)) {
+                    boolean shared = UnifiedSharedResources.prepare(getApplicationContext(),
+                            runtime.callAttr("shared_resources_json").toString());
+                    appendLog(shared ? "게임 공용 리소스 저장소 연결을 준비했습니다."
+                            : "공용 리소스 연결을 준비하지 못했습니다. 기존 게임 다운로드 경로를 사용합니다.");
+                    if (!stopQueued.get())
+                        UnifiedMP4Export.prepare(getApplicationContext(), runtime.callAttr("mp4_configuration_json").toString());
+                    if (stopQueued.get()) UnifiedMP4Export.serverStopped();
+                }
                 JSONObject details = new JSONObject(runtime.callAttr("status_json").toString());
+                if (UnifiedRuntime.isEnabled(this)) details.put("native_shared_resources", UnifiedSharedResources.snapshot());
                 runtimeDetails = details.toString();
                 if (!details.optBoolean("running", false)) {
                     throw new IllegalStateException("Runtime did not start");
                 }
                 runtimeDetailsReceivedAt = SystemClock.elapsedRealtime();
                 if (!stopQueued.get()) {
-                    state(getString(R.string.status_running), true, false);
+                    state(R.string.status_running, true, false);
                     appendLog("게임 연결 127.0.0.1:50051 · 파일 전송 127.0.0.1:8080");
                     MAIN.postDelayed(pollState, 1500);
                 }
             } catch (Throwable error) {
                 Log.e("IdolyLocalServer", "Embedded server startup failed", error);
                 appendLog("서버 시작 실패 (" + error.getClass().getSimpleName() + "). 앱 데이터와 포함된 서버 파일을 확인해 주세요.");
-                state(getString(R.string.status_failed), false, false);
+                state(R.string.status_failed, false, false);
                 queueStop(true, true);
             }
         });
@@ -255,9 +471,10 @@ public final class ServerService extends Service {
 
     private void queueStop(boolean finishService, boolean keepFailure) {
         if (!stopQueued.compareAndSet(false, true)) return;
+        UnifiedMP4Export.serverStopped();
         ResourceTransfers.cancelLocal();
         MAIN.removeCallbacks(pollState);
-        if (!keepFailure) state(getString(R.string.status_stopping), running, true);
+        if (!keepFailure) state(R.string.status_stopping, running, true);
         try {
             worker.execute(() -> {
                 try {
@@ -272,7 +489,7 @@ public final class ServerService extends Service {
                 } finally {
                     if (!keepFailure) {
                         appendLog("서버를 중지했습니다.");
-                        state(getString(R.string.status_stopped), false, false);
+                        state(R.string.status_stopped, false, false);
                     }
                     MAIN.post(() -> {
                         stopForeground(STOP_FOREGROUND_REMOVE);
@@ -305,6 +522,10 @@ public final class ServerService extends Service {
                         JSONObject details = new JSONObject(value);
                         if (!(details.opt("running") instanceof Boolean)) {
                             throw new IllegalArgumentException("Invalid runtime status");
+                        }
+                        if (UnifiedRuntime.isEnabled(this)) {
+                            details.put("native_shared_resources", UnifiedSharedResources.snapshot());
+                            value = details.toString();
                         }
                         runtimeDetailsReceivedAt = SystemClock.elapsedRealtime();
                         if (!value.equals(runtimeDetails)) {
@@ -339,24 +560,82 @@ public final class ServerService extends Service {
     /** User-picked document only; capture Python on the service worker, write off it. */
     public static void exportDiagnostics(Context context, Uri destination) {
         Context application = context.getApplicationContext();
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            MAIN.post(() -> exportDiagnostics(application, destination));
+            return;
+        }
         if (!EXPORT_BUSY.compareAndSet(false, true)) return;
+        final String mp4 = UnifiedRuntime.isEnabled(application) ? UnifiedMP4Export.diagnostics().toString() : null;
         dispatch();
         ServerService service = activeService;
         if (service != null && !service.destroyed) {
             try {
                 service.worker.execute(() -> {
                     lastDiagnostics = service.captureDiagnostics();
-                    writeExport(application, destination, lastDiagnostics);
+                    writeExport(application, destination, lastDiagnostics, mp4);
                 });
                 return;
             } catch (RejectedExecutionException ignored) {
                 // The stopped service's last safe snapshot remains available.
             }
         }
-        writeExport(application, destination, lastDiagnostics);
+        writeExport(application, destination, lastDiagnostics, mp4);
     }
 
-    private static void writeExport(Context context, Uri destination, String snapshot) {
+    /** Export only the displayed immutable snapshot using the existing document worker. */
+    public static void exportServerLogs(Context context, Uri destination, String snapshot) {
+        Context application = context.getApplicationContext();
+        if (destination == null || snapshot == null) {
+            MAIN.post(() -> Toast.makeText(application, R.string.server_logs_export_failed, Toast.LENGTH_LONG).show());
+            return;
+        }
+        if (!EXPORT_BUSY.compareAndSet(false, true)) return;
+        dispatch();
+        EXPORT_IO.execute(() -> {
+            boolean success = false;
+            try {
+                try (OutputStream stream = application.getContentResolver().openOutputStream(destination, "wt")) {
+                    if (stream == null) throw new IOException("Document is unavailable");
+                    stream.write(snapshot.getBytes(StandardCharsets.UTF_8));
+                }
+                success = true;
+            } catch (Exception error) {
+                Log.w("IdolyLocalServer", "Server record export failed: " + error.getClass().getSimpleName());
+            } finally {
+                EXPORT_BUSY.set(false);
+                boolean saved = success;
+                MAIN.post(() -> Toast.makeText(application, saved ? R.string.server_logs_export_saved
+                        : R.string.server_logs_export_failed, Toast.LENGTH_LONG).show());
+                dispatch();
+            }
+        });
+    }
+
+
+    /** Fresh persisted observations are also exported after a full app process restart. */
+    private static JSONObject readServerSettings(Context context) {
+        try {
+            PyObject module;
+            synchronized (PYTHON_LOCK) {
+                if (!Python.isStarted()) Python.start(new AndroidPlatform(context.getApplicationContext()));
+                module = Python.getInstance().getModule("android_server_runtime");
+            }
+            String raw = module.callAttr("management_command_json",
+                    context.getFilesDir().getAbsolutePath(), "server_settings_status", "{}").toString();
+            if (raw.length() > 2 * 1024 * 1024) throw new IOException("Settings observations unavailable");
+            JSONObject response = new JSONObject(raw);
+            JSONObject settings = response.optJSONObject("settings");
+            if (response.optBoolean("ok", false) && settings != null) return settings;
+        } catch (Exception error) {
+            Log.w("IdolyLocalServer", "Persisted diagnostics unavailable: " + error.getClass().getSimpleName());
+        }
+        JSONObject missing = new JSONObject();
+        try { missing.put("available", false).put("error", "server_settings_unavailable"); }
+        catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
+        return missing;
+    }
+
+    private static void writeExport(Context context, Uri destination, String snapshot, String mp4) {
         final String details = runtimeDetails;
         final List<String> lines;
         synchronized (LOGS) { lines = new ArrayList<>(LOGS); }
@@ -371,6 +650,10 @@ public final class ServerService extends Service {
                 document.put("runtime", new JSONObject(details));
                 document.put("diagnostics", new JSONObject(snapshot));
                 document.put("server_logs", new JSONArray(lines));
+                document.put("server_settings", readServerSettings(context));
+                document.put("previous_process_exits", PreviousProcessExits.collect(context));
+                if (mp4 != null) document.put("mp4_export", new JSONObject(mp4));
+                if (UnifiedRuntime.isEnabled(context)) document.put("native_shared_resources", UnifiedSharedResources.snapshot());
                 byte[] encoded = document.toString(2).getBytes(StandardCharsets.UTF_8);
                 try (OutputStream stream = context.getContentResolver().openOutputStream(destination, "wt")) {
                     if (stream == null) throw new java.io.IOException("Document is unavailable");

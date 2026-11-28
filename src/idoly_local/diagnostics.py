@@ -128,6 +128,23 @@ def _batch(raw):
     return [_event(value) for value in events]
 
 
+_INFRASTRUCTURE_FRAMES = (
+    "System.", "Cysharp.Threading.Tasks.", "UnityEngine.", "Unity.",
+    "Google.Protobuf.", "Grpc.",
+)
+
+
+def _exception_location(frames):
+    if not frames:
+        return ""
+    first = frames[0]
+    if first.startswith(_INFRASTRUCTURE_FRAMES):
+        for frame in frames[1:MAX_FRAMES]:
+            if not frame.startswith(_INFRASTRUCTURE_FRAMES):
+                return frame + " [" + first + "]"
+    return first
+
+
 def _summary(event):
     if event["kind"] == "network":
         return None
@@ -135,7 +152,7 @@ def _summary(event):
         return _STATUS[event["code"]][1]
     text = "게임 예외: " + event["type"]
     if event["frames"]:
-        text += " @ " + event["frames"][0]
+        text += " @ " + _exception_location(event["frames"])
     return text
 
 
@@ -219,10 +236,17 @@ class ClientDiagnostics:
         with self._lock:
             return {"accepted": len(events), "summary": self._summary}
 
-    def status(self) -> dict:
-        """Return an independent, JSON-serializable snapshot of safe fields."""
+    def status(self, *, include_events=True) -> dict:
+        """Return detached observations, optionally including the event history.
+
+        Routine launcher polls need only current observations. Explicit exports
+        retain the full bounded history by default, without building and then
+        discarding that history during every status refresh.
+        """
+        if type(include_events) is not bool:
+            raise ValueError("Diagnostic history choice must be a boolean")
         with self._lock:
-            return deepcopy({
+            snapshot = {
                 "received_events": self._received,
                 "stored_events": len(self._events),
                 "summary": self._summary,
@@ -235,5 +259,7 @@ class ClientDiagnostics:
                 "network": self._network,
                 "network_unavailable": self._network_unavailable,
                 "native_probe_status": self._native_probe_status,
-                "events": list(self._events),
-            })
+            }
+            if include_events:
+                snapshot["events"] = list(self._events)
+            return deepcopy(snapshot)

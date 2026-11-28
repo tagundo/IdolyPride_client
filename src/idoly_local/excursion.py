@@ -7,7 +7,7 @@ Ordinary acquisition and reward rules remain outside this gallery provider.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 import sqlite3
@@ -62,6 +62,7 @@ class ExcursionPlan:
     places: Mapping[str, tuple[str, ...]]
     settings: Mapping[tuple[str, str], str]
     reactions: Mapping[tuple[str, str, int], tuple[tuple[str, ...], tuple[str, ...], tuple[int, ...]]]
+    _master_dir: str | None = field(default=None, repr=False)
 
 
 def prepare_excursion(master_dir):
@@ -70,8 +71,16 @@ def prepare_excursion(master_dir):
 
 
 def _prepare_catalog(catalog):
-    if catalog.version() != MASTER_VERSION:
-        _fail("unsupported original master version")
+    version = catalog.version()
+    if version != MASTER_VERSION:
+        from .latest_cohort_pins import MASTER_VERSION as latest_version
+        from .public_cohort_support import require_master_cohort
+        if version != latest_version:
+            _fail("unsupported original master version")
+        try:
+            require_master_cohort(catalog.directory, "media_access")
+        except (OSError, ValueError):
+            _fail("the audited latest outing catalog is unavailable")
     characters = catalog.ids("Character", required=True)
     costumes = catalog.ids("Costume", required=True)
     types = {row.get("costumeTypeId") for row in costumes.values()}
@@ -133,15 +142,21 @@ def _prepare_catalog(catalog):
     for (character, place, number), (_, _, prerequisites) in reactions.items():
         if any(value == number or (character, place, value) not in reactions for value in prerequisites):
             _fail("an original gaze dependency has no reaction")
-    return ExcursionPlan(MASTER_VERSION, tuple(ids), MappingProxyType(places),
-                         MappingProxyType(settings), MappingProxyType(reactions))
+    return ExcursionPlan(version, tuple(ids), MappingProxyType(places),
+                         MappingProxyType(settings), MappingProxyType(reactions),
+                         str(catalog.directory) if version != MASTER_VERSION else None)
 
 
 def apply_excursion_access(snapshot, plan):
     """Raise only the real media menu aggregate, with no quest result/reward."""
-    if (not isinstance(plan, ExcursionPlan) or plan.master_version != MASTER_VERSION
+    if (not isinstance(plan, ExcursionPlan)
             or snapshot.DESCRIPTOR.full_name != "api.UserGetResponse" or not snapshot.HasField("user")):
         _fail("invalid media access plan or snapshot")
+    if plan.master_version != MASTER_VERSION:
+        from .latest_cohort_pins import MASTER_VERSION as latest_version
+        if (plan.master_version != latest_version or type(plan._master_dir) is not str
+                or _prepare_catalog(_Catalog(plan._master_dir)) != plan):
+            _fail("invalid audited latest media access plan")
     areas = _owned(snapshot.areas, "areaId")
     target = areas.get(_AREA)
     if target is not None and target.clearQuestCount < 0:

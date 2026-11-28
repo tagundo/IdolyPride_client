@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_exact_cuttlefish_indicators_and_legacy_qemu_property(tmp_path):
+def test_exact_cuttlefish_redroid_indicators_and_legacy_qemu_property(tmp_path):
     cache = Path("/workspace/.setup")
     java_home = Path(os.environ.get("JAVA_HOME", cache / "jdk-system/usr/lib/jvm/java-21-openjdk-amd64"))
     javac = java_home / "bin/javac"
@@ -47,6 +47,18 @@ public final class IndicatorHarness {
         check(false, "ranchu", "", "any", "");
         check(false, "goldfish", "", "any", "0");
         check(false, "ranchu", "", "any", null);
+        check(true, "redroid", "redroid", "redroid_arm64_only", "");
+        check(true, "redroid", "redroid", "redroid_arm64", "");
+        check(true, "redroid", "redroid", "redroid_arm64_only", "1");
+        check(false, "redroid", "", "redroid_arm64_only", "1");
+        check(false, "redroid", "ranchu", "redroid_arm64_only", "1");
+        check(false, "redroid", "redroid", "redroid_x86_64", "1");
+        check(false, "redroid", "redroid", "redroid_x86_64_only", "");
+        check(false, "redroid", "redroid", "physical", "1");
+        check(false, "redroid", "redroid", null, "1");
+        check(false, "redroid", null, "redroid_arm64_only", "1");
+        check(false, "physical", "redroid", "redroid_arm64_only", "1");
+        check(false, "ranchu", "redroid", "redroid_arm64_only", "");
         System.out.println("indicator combinations passed");
     }
 }''')

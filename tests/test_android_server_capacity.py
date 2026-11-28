@@ -332,7 +332,7 @@ def test_malicious_directory_rejects_before_any_zipfile_index_allocation(tmp_pat
     monkeypatch.setattr(tool, "ZipFile", unexpected)
     baseline = SimpleNamespace(open=unexpected)
     with pytest.raises(ValueError):
-        tool.validate_payload(path, tool.pybundle.digest(path), baseline)
+        tool._validate_legacy_base_structure(path, tool.pybundle.digest(path), baseline)
 
 
 def test_forged_small_count_cannot_hide_more_than_1024_actual_central_entries(tmp_path, monkeypatch):

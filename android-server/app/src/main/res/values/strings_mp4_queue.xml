@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mp4_queue_hint">목록에 보관한 MV는 다시 재생하지 않고 내보낼 수 있습니다.</string>
+    <string name="mp4_queue_ready">저장된 목록을 내보낼 수 있습니다.</string>
+    <string name="mp4_queue_add">현재 MV를 목록에 추가</string>
+    <string name="mp4_queue_run">목록 내보내기 시작</string>
+    <string name="mp4_queue_pause">목록 일시 정지</string>
+    <string name="mp4_queue_resume">목록 계속</string>
+    <string name="mp4_queue_empty">등록된 MV가 없습니다.</string>
+    <string name="mp4_queue_count">%1$d / %2$d개 · 대기 %3$d개</string>
+    <string name="mp4_queue_working">변경 사항 반영 중…</string>
+    <string name="mp4_queue_running">목록을 순서대로 내보내고 있습니다.</string>
+    <string name="mp4_queue_waiting_scene">게임 화면을 준비하고 있습니다.</string>
+    <string name="mp4_queue_item">%1$d. %2$s</string>
+    <string name="mp4_queue_current_mv">선택한 MV</string>
+    <string name="mp4_queue_unknown_title">MV %1$d</string>
+    <string name="mp4_queue_cast">출연 %1$d명</string>
+    <string name="mp4_queue_pending">대기</string>
+    <string name="mp4_queue_active">내보내는 중</string>
+    <string name="mp4_queue_paused">일시 정지</string>
+    <string name="mp4_queue_completed">완료</string>
+    <string name="mp4_queue_failed">실패</string>
+    <string name="mp4_queue_cancelled">취소됨</string>
+    <string name="mp4_queue_interrupted">앱 종료로 중단됨 · 다시 시도할 수 있습니다.</string>
+    <string name="mp4_queue_error">목록 처리 오류: %1$s</string>
+    <string name="mp4_queue_action_failed">목록을 시작하지 못했습니다. 서버와 게임 상태를 확인하세요.</string>
+    <string name="mp4_queue_actions">작업 메뉴</string>
+    <string name="mp4_queue_item_actions">%1$d번 MV 작업 메뉴</string>
+    <string name="mp4_queue_move_up">앞으로 이동</string>
+    <string name="mp4_queue_move_down">뒤로 이동</string>
+    <string name="mp4_queue_remove">목록에서 제거</string>
+    <string name="mp4_queue_delete_file_job">파일·작업 삭제</string>
+    <string name="mp4_queue_delete_confirm">보관 중인 MP4와 작업을 삭제합니다. 저장한 외부 파일은 유지됩니다.</string>
+    <string name="mp4_queue_retry">처음부터 다시 시도</string>
+    <string name="mp4_queue_immediate">현재 MV 바로 내보내기</string>
+    <string name="mp4_queue_background_experimental">백그라운드 내보내기 (실험)</string>
+    <string name="mp4_queue_background_off">앱을 뒤로 보내면 일시 정지하고, 돌아오면 계속합니다.</string>
+    <string name="mp4_queue_background_unverified">실험 기능입니다. 기기에 따라 동작하지 않으면 일시 정지합니다.</string>
+    <string name="mp4_queue_background_active">실험 기능으로 백그라운드 프레임을 처리하고 있습니다.</string>
+    <string name="mp4_queue_background_fallback">백그라운드 처리가 멈췄습니다. 앱으로 돌아오면 계속합니다.</string>
+</resources>

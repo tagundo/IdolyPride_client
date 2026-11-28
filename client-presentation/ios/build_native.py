@@ -15,30 +15,35 @@ import subprocess
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--llvm-bin',type=Path,required=True)
+    parser.add_argument('--llvm-bin',type=Path,help='Directory containing clang++ and ld64.lld')
+    parser.add_argument('--clang',type=Path,help='Explicit Clang++ path (for example from xcrun)')
+    parser.add_argument('--linker',type=Path,help='Explicit Darwin linker path (for example from xcrun)')
     parser.add_argument('--profile-header',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
+    if args.llvm_bin is None and (args.clang is None or args.linker is None):
+        parser.error('--llvm-bin is required unless both --clang and --linker are supplied')
+    clang=args.clang if args.clang is not None else args.llvm_bin/'clang++'
+    linker=args.linker if args.linker is not None else args.llvm_bin/'ld64.lld'
+    if not clang.is_file() or not linker.is_file():
+        raise ValueError('Clang and Darwin linker paths must be existing files')
     here=Path(__file__).resolve().parent
     output=args.output.resolve(); output.parent.mkdir(parents=True,exist_ok=True)
     if output.exists(): raise ValueError('Output already exists')
     header=args.profile_header.resolve()
     if header.name!='ios_profile.hpp' or not header.is_file(): raise ValueError('Expected generated ios_profile.hpp')
     obj=output.with_suffix('.o')
-    sources=[here.parent/'native/bridge.cpp',here.parent/'native/presentation_math.hpp',
-        here.parent/'native/presentation_scope.hpp',here.parent/'native/panorama_ui_math.hpp',
-        here.parent/'native/panorama_ui_edges.hpp',here.parent/'native/orientation.hpp',
-        here.parent/'native/playback_config.hpp',here.parent/'native/photography_ui.hpp',
-        here.parent/'native/media_policy.hpp',here.parent/'native/hangul_font.hpp',here.parent/'native/sound_persistence.hpp',*sorted(here.glob('*.hpp')),
+    sources=[here.parent/'native/bridge.cpp',*sorted((here.parent/'native').glob('*.hpp')), *sorted((here.parent/'native').glob('*.h')),
+        *sorted(here.glob('*.hpp')),
         here/'libSystem.tbd',here/'libcxx.tbd',Path(__file__).resolve()]
     hashes={str(path.relative_to(here.parent.parent)):hashlib.sha256(path.read_bytes()).hexdigest() for path in sources}
     header_hash=hashlib.sha256(header.read_bytes()).hexdigest()
     commands=[
-        [str(args.llvm_bin/'clang++'),'-target','arm64-apple-ios13.0','-std=c++17',
+        [str(clang),'-target','arm64-apple-ios13.0','-std=c++17',
          '-DIDOLY_DARWIN_BRIDGE=1','-ffreestanding','-fno-stack-protector','-fexceptions','-fno-rtti',
          '-fvisibility=hidden','-O2','-Wall','-Wextra','-Werror','-Wno-unused-variable',
          '-I',str(header.parent),'-c',str(here.parent/'native/bridge.cpp'),'-o',str(obj)],
-        [str(args.llvm_bin/'ld64.lld'),'-dylib','-arch','arm64','-platform_version','ios','13.0','13.0',
+        [str(linker),'-dylib','-arch','arm64','-platform_version','ios','13.0','13.0',
          '-install_name','@rpath/IdolyPresentation.dylib','-adhoc_codesign',str(obj),str(here/'libSystem.tbd'),str(here/'libcxx.tbd'),
          '-o',str(output)],
     ]

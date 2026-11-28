@@ -1,0 +1,677 @@
+{
+  "schema": 1,
+  "platform": "ios",
+  "sources": {
+    "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+    "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
+  },
+  "methods": {
+    "download_targets": {
+      "type": "Solis.Photography.Data.PhotographyDataUtility",
+      "name": "GetDownloadTargets",
+      "parameter_count": 1,
+      "static": true,
+      "rva": "0x313e3f4",
+      "prefix": "f44fbea9fd7b01a9fd430091f30300aa",
+      "return": "System.Collections.Generic.IEnumerable`1<System.String>",
+      "parameters": [
+        {
+          "name": "data",
+          "type": "Solis.Photography.Data.IPhotographyTransition",
+          "metadata_type_index": 60433
+        }
+      ],
+      "metadata_method_index": 3613,
+      "token_row": 3614,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa21ca38",
+      "native_abi": "void*(void*,const MethodInfo*)"
+    },
+    "pre_download": {
+      "type": "Solis.Common.Octo.ResourceDownloader",
+      "name": "PreDownloadAssetsAsync",
+      "parameter_count": 3,
+      "static": true,
+      "rva": "0x2959dbc",
+      "prefix": "ff8302d1f85f06a9f65707a9f44f08a9",
+      "return": "Cysharp.Threading.Tasks.UniTask`1<System.Boolean>",
+      "parameters": [
+        {
+          "name": "assetNames",
+          "type": "System.Collections.Generic.IEnumerable`1<System.String>",
+          "metadata_type_index": 21769
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50712
+        },
+        {
+          "name": "blocking",
+          "type": "System.Boolean",
+          "metadata_type_index": 50298
+        }
+      ],
+      "metadata_method_index": 122736,
+      "token_row": 122737,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa3054d0",
+      "native_abi": "BoolUniTask16(void*,CancellationToken8,bool,const MethodInfo*)",
+      "runtime_resolution": "Unique audited methodPointer within the pinned ResourceDownloader class; overloaded name/count is insufficient"
+    },
+    "stage_master": {
+      "type": "Solis.Common.Master.MasterManager",
+      "name": "get_PhotoQuestStageMaster",
+      "parameter_count": 0,
+      "static": true,
+      "rva": "0x293f4e0",
+      "prefix": "f44fbea9fd7b01a9fd43009113fe0390",
+      "return": "Solis.Common.Master.PhotoQuestStageMaster",
+      "parameters": [],
+      "metadata_method_index": 122189,
+      "token_row": 122190,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa3043b8",
+      "native_abi": "void*(const MethodInfo*)"
+    },
+    "music_master": {
+      "type": "Solis.Common.Master.MasterManager",
+      "name": "get_PhotoQuestMusicMaster",
+      "parameter_count": 0,
+      "static": true,
+      "rva": "0x293f48c",
+      "prefix": "f44fbea9fd7b01a9fd43009113fe0390",
+      "return": "Solis.Common.Master.PhotoQuestMusicMaster",
+      "parameters": [],
+      "metadata_method_index": 122188,
+      "token_row": 122189,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa3043b0",
+      "native_abi": "void*(const MethodInfo*)"
+    },
+    "costume_master": {
+      "type": "Solis.Common.Master.MasterManager",
+      "name": "get_CostumeMaster",
+      "parameter_count": 0,
+      "static": true,
+      "rva": "0x293d4b8",
+      "prefix": "f44fbea9fd7b01a9fd43009113fe03d0",
+      "return": "Solis.Common.Master.CostumeMaster",
+      "parameters": [],
+      "metadata_method_index": 122091,
+      "token_row": 122092,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa3040a8",
+      "native_abi": "void*(const MethodInfo*)"
+    },
+    "hair_master": {
+      "type": "Solis.Common.Master.MasterManager",
+      "name": "get_HairMaster",
+      "parameter_count": 0,
+      "static": true,
+      "rva": "0x293dee4",
+      "prefix": "f44fbea9fd7b01a9fd43009113fe03d0",
+      "return": "Solis.Common.Master.HairMaster",
+      "parameters": [],
+      "metadata_method_index": 122122,
+      "token_row": 122123,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa3041a0",
+      "native_abi": "void*(const MethodInfo*)"
+    },
+    "stage_rows": {
+      "type": "Solis.Common.Master.PhotoQuestStageMaster",
+      "name": "GetAllWithSortByKey",
+      "parameter_count": 1,
+      "static": false,
+      "rva": "0x29305a4",
+      "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+      "return": "System.Collections.Generic.List`1<Solis.Common.Proto.Master.PhotoQuestStage>",
+      "parameters": [
+        {
+          "name": "sortType1",
+          "type": "Solis.Common.Master.PhotoQuestStageSortType",
+          "metadata_type_index": 67680
+        }
+      ],
+      "metadata_method_index": 121506,
+      "token_row": 121507,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa302e60",
+      "native_abi": "void*(void*,int32_t,const MethodInfo*)"
+    },
+    "music_rows": {
+      "type": "Solis.Common.Master.PhotoQuestMusicMaster",
+      "name": "GetAllWithSortByKey",
+      "parameter_count": 1,
+      "static": false,
+      "rva": "0x293020c",
+      "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+      "return": "System.Collections.Generic.List`1<Solis.Common.Proto.Master.PhotoQuestMusic>",
+      "parameters": [
+        {
+          "name": "sortType1",
+          "type": "Solis.Common.Master.PhotoQuestMusicSortType",
+          "metadata_type_index": 67674
+        }
+      ],
+      "metadata_method_index": 121495,
+      "token_row": 121496,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa302e08",
+      "native_abi": "void*(void*,int32_t,const MethodInfo*)"
+    },
+    "find_costume": {
+      "type": "Solis.Common.Master.CostumeMaster",
+      "name": "FindByKey",
+      "parameter_count": 1,
+      "static": false,
+      "rva": "0x28f95cc",
+      "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+      "return": "Solis.Common.Proto.Master.Costume",
+      "parameters": [
+        {
+          "name": "key",
+          "type": "System.String",
+          "metadata_type_index": 74127
+        }
+      ],
+      "metadata_method_index": 119543,
+      "token_row": 119544,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa2ff108",
+      "native_abi": "void*(void*,void*,const MethodInfo*)"
+    },
+    "find_hair": {
+      "type": "Solis.Common.Master.HairMaster",
+      "name": "FindByKey",
+      "parameter_count": 1,
+      "static": false,
+      "rva": "0x28fc0c0",
+      "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+      "return": "Solis.Common.Proto.Master.Hair",
+      "parameters": [
+        {
+          "name": "key",
+          "type": "System.String",
+          "metadata_type_index": 74127
+        }
+      ],
+      "metadata_method_index": 119621,
+      "token_row": 119622,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa2ff378",
+      "native_abi": "void*(void*,void*,const MethodInfo*)"
+    },
+    "scene_set_data": {
+      "type": "Solis.Common.SolisSceneManager",
+      "name": "set_TransitionData",
+      "parameter_count": 1,
+      "static": false,
+      "rva": "0x6fae5c8",
+      "prefix": "011400f9c0035fd6f44fbea9fd7b01a9",
+      "return": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Object",
+          "metadata_type_index": 66318
+        }
+      ],
+      "metadata_method_index": 160278,
+      "token_row": 2261,
+      "module": "solis-submodule.Runtime.dll",
+      "registration_pointer_slot": "0xa7306f0",
+      "native_abi": "void(void*,void*,const MethodInfo*)"
+    },
+    "scene_load": {
+      "type": "Solis.Common.SolisSceneManager",
+      "name": "LoadScene",
+      "parameter_count": 2,
+      "static": false,
+      "rva": "0x6faea6c",
+      "prefix": "ff4301d1f85f01a9f65702a9f44f03a9",
+      "return": "System.Void",
+      "parameters": [
+        {
+          "name": "sceneBuildIndex",
+          "type": "System.Int32",
+          "metadata_type_index": 61162
+        },
+        {
+          "name": "mode",
+          "type": "UnityEngine.SceneManagement.LoadSceneMode",
+          "metadata_type_index": 63342
+        }
+      ],
+      "metadata_method_index": 160281,
+      "token_row": 2264,
+      "module": "solis-submodule.Runtime.dll",
+      "registration_pointer_slot": "0xa730708",
+      "native_abi": "void(void*,int32_t,int32_t,const MethodInfo*)"
+    },
+    "actor_ctor": {
+      "type": "Solis.Common.Data.ActorCostume",
+      "name": ".ctor",
+      "parameter_count": 2,
+      "static": false,
+      "rva": "0x2976a54",
+      "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+      "return": "System.Void",
+      "parameters": [
+        {
+          "name": "costume",
+          "type": "Solis.Common.Proto.Master.Costume",
+          "metadata_type_index": 53194
+        },
+        {
+          "name": "hair",
+          "type": "Solis.Common.Proto.Master.Hair",
+          "metadata_type_index": 58622
+        }
+      ],
+      "metadata_method_index": 123263,
+      "token_row": 123264,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa306548",
+      "native_abi": "void(void*,void*,void*,const MethodInfo*)"
+    },
+    "actor_costume_id": {
+      "type": "Solis.Common.Data.ActorCostume",
+      "name": "get_CostumeId",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x29769a4",
+      "prefix": "080840f9680000b4000d40f9c0035fd6",
+      "return": "System.String",
+      "parameters": [],
+      "metadata_method_index": 123257,
+      "token_row": 123258,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa306518",
+      "native_abi": "void*(void*,const MethodInfo*)"
+    },
+    "actor_hair_id": {
+      "type": "Solis.Common.Data.ActorCostume",
+      "name": "get_HairId",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x2976a3c",
+      "prefix": "080c40f9680000b4000d40f9c0035fd6",
+      "return": "System.String",
+      "parameters": [],
+      "metadata_method_index": 123262,
+      "token_row": 123263,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa306540",
+      "native_abi": "void*(void*,const MethodInfo*)"
+    },
+    "transition_ctor": {
+      "type": "Solis.Photography.Data.PhotographyLiveTransitionData",
+      "name": ".ctor",
+      "parameter_count": 4,
+      "static": false,
+      "rva": "0x3141c34",
+      "prefix": "fc6fbaa9fa6701a9f85f02a9f65703a9",
+      "return": "System.Void",
+      "parameters": [
+        {
+          "name": "questStage",
+          "type": "Solis.Common.Data.IPhotoQuestStage",
+          "metadata_type_index": 60412
+        },
+        {
+          "name": "photoMusic",
+          "type": "Solis.Common.Data.IPhotoQuestMusic",
+          "metadata_type_index": 60409
+        },
+        {
+          "name": "actorCostumeList",
+          "type": "System.Collections.Generic.List`1<Solis.Common.Data.ActorCostume>",
+          "metadata_type_index": 29866
+        },
+        {
+          "name": "isPreview",
+          "type": "System.Boolean",
+          "metadata_type_index": 50275
+        }
+      ],
+      "metadata_method_index": 3695,
+      "token_row": 3696,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa21ccc8",
+      "native_abi": "void(void*,void*,void*,void*,bool,const MethodInfo*)"
+    },
+    "screen_transition_ctor": {
+      "type": "Solis.Photography.Data.PhotographyLiveScreenTransitionData",
+      "name": ".ctor",
+      "parameter_count": 5,
+      "static": false,
+      "rva": "0x3141c0c",
+      "prefix": "f44fbea9fd7b01a9fd430091f30305aa",
+      "return": "System.Void",
+      "parameters": [
+        {
+          "name": "questStage",
+          "type": "Solis.Common.Data.IPhotoQuestStage",
+          "metadata_type_index": 60412
+        },
+        {
+          "name": "questMusic",
+          "type": "Solis.Common.Data.IPhotoQuestMusic",
+          "metadata_type_index": 60409
+        },
+        {
+          "name": "actorCostumeList",
+          "type": "System.Collections.Generic.List`1<Solis.Common.Data.ActorCostume>",
+          "metadata_type_index": 29866
+        },
+        {
+          "name": "isPreview",
+          "type": "System.Boolean",
+          "metadata_type_index": 50275
+        },
+        {
+          "name": "isOriginal",
+          "type": "System.Boolean",
+          "metadata_type_index": 50275
+        }
+      ],
+      "metadata_method_index": 3684,
+      "token_row": 3685,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa21cc70",
+      "native_abi": "void(void*,void*,void*,void*,bool,bool,const MethodInfo*)"
+    },
+    "field_static_get": {
+      "export": "il2cpp_field_static_get_value",
+      "rva": "0x81ea6a0",
+      "prefix": "b5700114e0700114080440f908214039",
+      "native_abi": "void(const FieldInfo*,void*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "runtime_class_init": {
+      "export": "il2cpp_runtime_class_init",
+      "rva": "0x81ea8f0",
+      "prefix": "d96e0114bd770114be770114d7770114",
+      "native_abi": "void(Il2CppClass*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "method_return_type": {
+      "export": "il2cpp_method_get_return_type",
+      "rva": "0x81ea7f8",
+      "prefix": "b4702b1629cd3d1611de0014053cb617",
+      "native_abi": "const Il2CppType*(const MethodInfo*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "class_methods": {
+      "export": "il2cpp_class_get_methods",
+      "rva": "0x81e9f4c",
+      "prefix": "90810114c781011453cf3d16303eb617",
+      "native_abi": "const MethodInfo*(void*,void**)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "bool_task_status": {
+      "rva": "0x54039d8",
+      "prefix": "f44fbea9fd7b01a9fd430091f40300aa",
+      "native_abi": "int32_t(BoolUniTask16*,const MethodInfo*)",
+      "runtime_closed_method_info_required": true,
+      "source": "Original closed UniTask<Boolean> and its Awaiter; resolve context from PreDownload return type"
+    },
+    "bool_task_awaiter": {
+      "rva": "0x5403b70",
+      "prefix": "f44fbea9fd7b01a9fd430091f30300aa",
+      "native_abi": "BoolUniTask16(BoolUniTask16*,const MethodInfo*)",
+      "runtime_closed_method_info_required": true,
+      "source": "Original closed UniTask<Boolean> and its Awaiter; resolve context from PreDownload return type"
+    },
+    "bool_task_result": {
+      "rva": "0x643c38c",
+      "prefix": "f44fbea9fd7b01a9fd430091130040f9",
+      "native_abi": "bool(BoolUniTask16*,const MethodInfo*)",
+      "runtime_closed_method_info_required": true,
+      "source": "Original closed UniTask<Boolean> and its Awaiter; resolve context from PreDownload return type"
+    },
+    "list_ctor": {
+      "type": "System.Collections.Generic.List`1",
+      "name": ".ctor",
+      "rva": "0x492f868",
+      "prefix": "f44fbea9fd7b01a9fd430091f40301aa",
+      "native_abi": "void(void*,const MethodInfo*)",
+      "runtime_closed_method_info_required": true,
+      "source": "Original closed List<ActorCostume> shared reference-generic body"
+    },
+    "list_add": {
+      "type": "System.Collections.Generic.List`1",
+      "name": "Add",
+      "rva": "0x493024c",
+      "prefix": "081c40b908050011081c00b9080840f9",
+      "native_abi": "void(void*,void*,const MethodInfo*)",
+      "runtime_closed_method_info_required": true,
+      "source": "Original closed List<ActorCostume> shared reference-generic body"
+    }
+  },
+  "runtime_types": {
+    "downloader_type": {
+      "type": "Solis.Common.Octo.ResourceDownloader",
+      "rva": "0xa5513f0",
+      "prefix": "91460000000000000000120000000000",
+      "metadata_type_index": 70592,
+      "metadata_type_definition_index": 18065
+    },
+    "scene_manager_type": {
+      "type": "Solis.Common.SolisSceneManager",
+      "rva": "0xa55b070",
+      "prefix": "5e5b0000000000000000120000000000",
+      "metadata_type_index": 73192,
+      "metadata_type_definition_index": 23390
+    },
+    "scene_define_type": {
+      "type": ".SceneDefine",
+      "rva": "0xa553c10",
+      "prefix": "09000000000000000000120000000000",
+      "metadata_type_index": 71267,
+      "metadata_type_definition_index": 9
+    },
+    "unity_scene_manager_type": {
+      "type": "UnityEngine.SceneManagement.SceneManager",
+      "rva": "0xa553c20",
+      "prefix": "715e0000000000000000120000000000",
+      "metadata_type_index": 71268,
+      "metadata_type_definition_index": 24177
+    },
+    "actor_type": {
+      "type": "Solis.Common.Data.ActorCostume",
+      "rva": "0xa4fd310",
+      "prefix": "0b470000000000000000120000000000",
+      "metadata_type_index": 48151,
+      "metadata_type_definition_index": 18187
+    },
+    "transition_type": {
+      "type": "Solis.Photography.Data.PhotographyLiveTransitionData",
+      "rva": "0xa5480a0",
+      "prefix": "37020000000000000000120000000000",
+      "metadata_type_index": 68098,
+      "metadata_type_definition_index": 567
+    },
+    "screen_transition_type": {
+      "type": "Solis.Photography.Data.PhotographyLiveScreenTransitionData",
+      "rva": "0xa548090",
+      "prefix": "35020000000000000000120000000000",
+      "metadata_type_index": 68097,
+      "metadata_type_definition_index": 565
+    }
+  },
+  "fields": {
+    "transition_video": {
+      "owner": "Solis.Photography.Data.AbstPhotographyTransitionData",
+      "name": "<IsMvMusic>k__BackingField",
+      "offset": 40,
+      "type": "System.Boolean",
+      "metadata_field_index": 2871
+    },
+    "scene_photography": {
+      "owner": ".SceneDefine",
+      "name": "Photography",
+      "offset": 16,
+      "type": "System.Int32",
+      "metadata_field_index": 60
+    },
+    "scene_allow_load": {
+      "owner": "UnityEngine.SceneManagement.SceneManager",
+      "name": "s_AllowLoadScene",
+      "offset": 0,
+      "type": "System.Boolean",
+      "metadata_field_index": 111575
+    },
+    "scene_transition_data": {
+      "owner": "Solis.Common.SolisSceneManager",
+      "name": "<TransitionData>k__BackingField",
+      "offset": 40,
+      "type": "System.Object",
+      "metadata_field_index": 108146
+    },
+    "singleton_instance": {
+      "owner": "Qua.Utility.Singleton`1",
+      "name": "_instance",
+      "offset": 0,
+      "type": "generic-parameter:6506",
+      "metadata_field_index": 145336
+    },
+    "transition_preview": {
+      "owner": "Solis.Photography.Data.AbstPhotographyTransitionData",
+      "name": "<IsPreview>k__BackingField",
+      "offset": 16,
+      "type": "System.Boolean",
+      "metadata_field_index": 2868
+    },
+    "transition_stage": {
+      "owner": "Solis.Photography.Data.PhotographyLiveTransitionData",
+      "name": "<PhotoStage>k__BackingField",
+      "offset": 104,
+      "type": "Solis.Common.Data.IPhotoQuestStage",
+      "metadata_field_index": 3022
+    },
+    "transition_music": {
+      "owner": "Solis.Photography.Data.PhotographyLiveTransitionData",
+      "name": "<PhotoMusic>k__BackingField",
+      "offset": 112,
+      "type": "Solis.Common.Data.IPhotoQuestMusic",
+      "metadata_field_index": 3023
+    },
+    "transition_original": {
+      "owner": "Solis.Photography.Data.PhotographyLiveScreenTransitionData",
+      "name": "<IsOriginal>k__BackingField",
+      "offset": 128,
+      "type": "System.Boolean",
+      "metadata_field_index": 3018
+    },
+    "costume_id": {
+      "owner": "Solis.Common.Proto.Master.Costume",
+      "name": "id_",
+      "offset": 24,
+      "type": "System.String",
+      "metadata_field_index": 79020
+    },
+    "hair_id": {
+      "owner": "Solis.Common.Proto.Master.Hair",
+      "name": "id_",
+      "offset": 24,
+      "type": "System.String",
+      "metadata_field_index": 79552
+    },
+    "actor_list": {
+      "owner": "Solis.Photography.Data.AbstPhotographyTransitionData",
+      "name": "<ActorCostumeList>k__BackingField",
+      "offset": 64,
+      "type": "System.Collections.Generic.List`1<Solis.Common.Data.ActorCostume>",
+      "metadata_field_index": 2874
+    },
+    "display_actors": {
+      "owner": "Solis.Photography.Data.AbstPhotographyTransitionData",
+      "name": "<DisplayActorCostumeList>k__BackingField",
+      "offset": 72,
+      "type": "System.Collections.Generic.List`1<Solis.Common.Data.ActorCostume>",
+      "metadata_field_index": 2875
+    },
+    "costume": {
+      "owner": "Solis.Common.Data.ActorCostume",
+      "name": "_costume",
+      "offset": 16,
+      "type": "Solis.Common.Proto.Master.Costume",
+      "metadata_field_index": 86027
+    },
+    "hair": {
+      "owner": "Solis.Common.Data.ActorCostume",
+      "name": "_hair",
+      "offset": 24,
+      "type": "Solis.Common.Proto.Master.Hair",
+      "metadata_field_index": 86028
+    },
+    "stage_id": {
+      "owner": "Solis.Common.Proto.Master.PhotoQuestStage",
+      "name": "id_",
+      "offset": 24,
+      "type": "System.String",
+      "metadata_field_index": 80825
+    },
+    "music_id": {
+      "owner": "Solis.Common.Proto.Master.PhotoQuestMusic",
+      "name": "id_",
+      "offset": 24,
+      "type": "System.String",
+      "metadata_field_index": 80800
+    }
+  },
+  "enums": {
+    "stage_sort": 0,
+    "music_sort": 0,
+    "load_mode": 0
+  },
+  "scene_manager_ancestry": [
+    {
+      "type": "Solis.Common.SolisSceneManager",
+      "parent": "Qua.Utility.Singleton`1<Solis.Common.SolisSceneManager>"
+    },
+    {
+      "type": "Qua.Utility.Singleton`1",
+      "parent": "UnityEngine.MonoBehaviour"
+    },
+    {
+      "type": "UnityEngine.MonoBehaviour",
+      "parent": "UnityEngine.Behaviour"
+    },
+    {
+      "type": "UnityEngine.Behaviour",
+      "parent": "UnityEngine.Component"
+    },
+    {
+      "type": "UnityEngine.Component",
+      "parent": "UnityEngine.Object"
+    },
+    {
+      "type": "UnityEngine.Object",
+      "parent": "System.Object"
+    }
+  ],
+  "bool_task_layout": {
+    "bytes": 16,
+    "source": 0,
+    "result": 8,
+    "token": 10
+  },
+  "scope": {
+    "normal_master_only": true,
+    "special_wrappers_supported": false,
+    "game_executed": false,
+    "runtime_verified": false
+  }
+}

@@ -134,6 +134,22 @@ def bootstrap(schema, port):
     return check, login
 
 
+def complete_initial_storage_choice(qa):
+    """Use the app's existing private-storage action if its dialog is shown.
+
+    The fresh API-30 guest has no all-files special access. Ordinary install -g
+    does not grant it; observing the dialog is required before any extra touch.
+    QA.capture bounds malformed/idle retries, and QA.tap rechecks fresh UI.
+    """
+    hierarchy = qa.capture("01-storage-choice")
+    label = "앱 전용으로 시작"
+    if any(node.get("text") == label and node.get("enabled") == "true"
+           for node in hierarchy.iter("node")):
+        qa.tap(label, "01-storage-private-start")
+        return True
+    return False
+
+
 def wait_server(schema, port, expected=True, timeout=120):
     deadline = time.monotonic() + timeout
     next_progress = time.monotonic() + 15
@@ -993,6 +1009,77 @@ def verify_main_live_database(qa, schema, receipt=None, *, expected_clock=None, 
             return clock, attempts
 
 
+def _qa_bounds(node):
+    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+    if match:
+        left, top, right, bottom = map(int, match.groups())
+        if right > left and bottom > top:
+            return left, top, right, bottom
+    return None
+
+
+def _main_options_swipe(hierarchy):
+    views = [(node, _qa_bounds(node)) for node in hierarchy.iter("node")
+             if node.get("class") == "android.widget.ScrollView" and node.get("scrollable") == "true"]
+    views = [(node, bounds) for node, bounds in views if bounds is not None]
+    if not views:
+        raise RuntimeError("Main options ScrollView is not observable")
+    main, bounds = max(views, key=lambda item: (item[1][2]-item[1][0])*(item[1][3]-item[1][1]))
+    left, top, right, bottom = bounds
+    width, height = right-left, bottom-top
+    blocked = [_qa_bounds(node) for node in hierarchy.iter("node") if node is not main
+               and (node.get("scrollable") == "true" or node.get("class", "").endswith("Spinner"))]
+    for x in (left+max(1,width//20), right-max(1,width//20), left+width//2):
+        for start, end in ((2,8),(1,7),(3,9)):
+            first, last = top+max(1,height*start//10), top+height*end//10
+            if not (left < x < right and top < first < last < bottom):
+                continue
+            if any(box is not None and box[0] <= x < box[2] and box[1] <= first < box[3] for box in blocked):
+                continue
+            # A downward finger gesture returns toward the earlier options.
+            return x, first, x, last
+    raise RuntimeError("No safe observed main-options swipe start")
+
+
+def enable_main_live_through_ui(qa, *, max_scrolls=8):
+    """Find the actual checkbox through bounded, observed main-view scrolling."""
+    if type(max_scrolls) is not int or not 0 <= max_scrolls <= 8:
+        raise ValueError("Main-live UI scroll bound differs")
+    label = "첫 메인 라이브 실험 기능 사용"
+    navigation = {}
+    for attempt in range(max_scrolls+1):
+        hierarchy = qa.capture("48-main-live-find-"+str(attempt))
+        matches = [node for node in hierarchy.iter("node") if node.get("text") == label
+                   and node.get("class") == "android.widget.CheckBox" and node.get("checkable") == "true"]
+        if len(matches) > 1:
+            raise RuntimeError("Main-live checkbox is ambiguous")
+        if matches:
+            node = matches[0]
+            if node.get("enabled") != "true":
+                time.sleep(.5)
+                continue
+            if node.get("checked") != "false" or _qa_bounds(node) is None:
+                raise RuntimeError("Main-live checkbox is not initially unchecked")
+            qa.tap(label, "48-main-live-opt-in")
+            for check in range(5):
+                observed = qa.capture("48-main-live-checked-"+str(check))
+                checked = [item for item in observed.iter("node") if item.get("text") == label
+                           and item.get("class") == "android.widget.CheckBox" and item.get("checkable") == "true"]
+                if len(checked) == 1 and checked[0].get("enabled") == "true" and checked[0].get("checked") == "true":
+                    return True
+                if check < 4:
+                    time.sleep(.5)
+            raise RuntimeError("Main-live checkbox did not become checked")
+        if attempt < max_scrolls:
+            if any(node.get("content-desc", "").startswith("idoly.nav.") for node in hierarchy.iter("node")):
+                from qa_account_management import navigation_step
+                if navigation_step(qa, hierarchy, ("server", "experimental"), navigation):
+                    time.sleep(.25)
+                    continue
+            qa.adb("shell", "input", "swipe", *map(str, _main_options_swipe(hierarchy)), "400")
+    raise RuntimeError("Enabled main-live checkbox not found within bounded observations")
+
+
 def exercise_main_live_checks(qa, schema, grpc_port, token, master_dir, startup_timeout, preserved):
     from idoly_local.main_live_qa import assert_main_live_retries, run_main_live_checks
     original_clock, existing_attempts = verify_main_live_database(qa, schema)
@@ -1014,7 +1101,7 @@ def exercise_main_live_checks(qa, schema, grpc_port, token, master_dir, startup_
         raise RuntimeError("Disabled main live changed the snapshot")
     qa.tap("서버 중지", "47-main-live-default-stop")
     wait_server(schema, grpc_port, expected=False, timeout=30)
-    qa.tap("첫 메인 라이브 실험 기능 사용", "48-main-live-opt-in")
+    enable_main_live_through_ui(qa)
     qa.tap("서버 시작", "49-main-live-enabled-start")
     wait_server(schema, grpc_port, timeout=startup_timeout)
     invoke = lambda path, request, identity: rpc(schema, grpc_port, path, token, request, request_id=identity)
@@ -1073,7 +1160,12 @@ def main():
         result["expected_starter_marker"] = expected_marker
         replays = {kind: load_tutorial_replay(schema, args.public_tutorial_dir, kind) for kind in TUTORIAL_REPLAYS}
         print("Starting the server through its native UI", flush=True)
+        from qa_launcher_guard import recover_initial_launcher
+        recover_initial_launcher(qa, result["target_evidence"])
+        from qa_interface import exercise_interface_configuration, exercise_running_interface_languages
+        result.update(exercise_interface_configuration(qa))
         qa.tap("서버 시작", "01-start")
+        result["initial_storage_private_selected"] = complete_initial_storage_choice(qa)
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
         print("Native server ready; checking encrypted RPCs and HTTP files", flush=True)
         qa.capture("02-running")
@@ -1082,6 +1174,7 @@ def main():
                       bootstrap_rpc_order=["System.Check", "Refund.GetTerm", "Auth.Login"])
         if not login.gameAuthToken:
             raise RuntimeError("Local login did not return a session")
+        result["actual_os_api_resource_configuration"]["running_languages"] = exercise_running_interface_languages(qa)
         user = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         if not user.HasField("user") or not user.user.name:
             raise RuntimeError("Local User.Get snapshot is absent")
@@ -1287,6 +1380,13 @@ def main():
                                                  args.master_dir, args.startup_timeout, preserved))
         result.update(exercise_main_live_checks(qa, schema, grpc_port, login.gameAuthToken,
                                                 args.master_dir, args.startup_timeout, preserved))
+        from qa_account_management import exercise_account_management
+        result.update(exercise_account_management(qa, schema, grpc_port, asset_port, args.startup_timeout,
+            wait_server=wait_server, bootstrap=bootstrap, rpc=rpc, copy_database=_copy_private_database,
+            guard_stopped=_guard_stopped_emulator, checkpoint=_checkpoint))
+        from qa_event_settings import exercise_event_settings
+        result.update(exercise_event_settings(qa, schema, grpc_port, asset_port, args.startup_timeout,
+            wait_server=wait_server, bootstrap=bootstrap, rpc=rpc, copy_database=_copy_private_database))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)
     except BaseException as error:
@@ -1294,6 +1394,7 @@ def main():
         result["error"] = str(error)
         raise
     finally:
+        result["launcher_environment_incidents"] = getattr(qa, "launcher_environment_incidents", [])
         if verified_target:
             try:
                 qa.capture("55-final")

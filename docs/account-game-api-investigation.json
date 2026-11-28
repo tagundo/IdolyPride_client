@@ -1,0 +1,298 @@
+{
+  "schema": 1,
+  "date": "2026-11-16",
+  "stage": "SOURCE_ONLY_NOT_RELEASED",
+  "descriptor": {
+    "path": "data/protocol/idolypride-6.1.1.pb",
+    "bytes": 508520,
+    "sha256": "c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad"
+  },
+  "counting": "RPC contracts, not complete gameplay features; local scope restrictions remain",
+  "core": {
+    "api.Auth": {
+      "total": 4,
+      "existing_local": 1,
+      "new_source": 0,
+      "unsupported": 3,
+      "methods": [
+        {
+          "path": "/api.Auth/Create",
+          "stage": "unsupported",
+          "module": "",
+          "scope_limit": "no_imported_user_fixture_assumed"
+        },
+        {
+          "path": "/api.Auth/Delete",
+          "stage": "unsupported",
+          "module": "",
+          "scope_limit": "no_imported_user_fixture_assumed"
+        },
+        {
+          "path": "/api.Auth/Login",
+          "stage": "existing_local",
+          "module": "application",
+          "scope_limit": "local_auth_not_official_Firebase_validation"
+        },
+        {
+          "path": "/api.Auth/Recreate",
+          "stage": "unsupported",
+          "module": "",
+          "scope_limit": "no_imported_user_fixture_assumed"
+        }
+      ]
+    },
+    "api.Profile": {
+      "total": 12,
+      "existing_local": 9,
+      "new_source": 2,
+      "unsupported": 1,
+      "methods": [
+        {
+          "path": "/api.Profile/ClearTwitterMission",
+          "stage": "unsupported",
+          "module": "",
+          "scope_limit": "no_imported_user_fixture_assumed"
+        },
+        {
+          "path": "/api.Profile/FindUser",
+          "stage": "new_source",
+          "module": "profile_directory",
+          "scope_limit": "selected_local_account_server_or_public_ID_only; saved_profile_and_owned_favorite_media; master_backed_unranked_hierarchy; remote_or_other_local_ID_NOT_FOUND; read_only"
+        },
+        {
+          "path": "/api.Profile/Top",
+          "stage": "existing_local",
+          "module": "profile_top",
+          "scope_limit": "readonly_saved_hierarchy_points_using_Home_master_grade_rules; rank_zero_not_global_ranking; empty_local_friend_graph; no_state_change"
+        },
+        {
+          "path": "/api.Profile/UpdateBackground",
+          "stage": "existing_local",
+          "module": "profile_preferences",
+          "scope_limit": "existing_profile_default_photo_or_card_background; both_supplied_owned_references_and_actual_card_image_availability_validated; atomic_four_fields"
+        },
+        {
+          "path": "/api.Profile/UpdateBirthday",
+          "stage": "new_source",
+          "module": "profile_directory",
+          "scope_limit": "initial_unset_calendar_month_day_only; exact_retry_preserves_wire; existing_other_birthday_rejected; full_profile_ACK; no_birthday_ADV_reminder_campaign_or_rewards"
+        },
+        {
+          "path": "/api.Profile/UpdateBuddyCard",
+          "stage": "existing_local",
+          "module": "profile_preferences",
+          "scope_limit": "nonempty_owned_master_valid_buddy_card_only; atomic_user_preference_no_progress_or_rewards"
+        },
+        {
+          "path": "/api.Profile/UpdateDecoration",
+          "stage": "existing_local",
+          "module": "profile_preferences",
+          "scope_limit": "nonempty_owned_master_valid_decoration_only; explicit_media_profile_gets_real_master_cosmetics; ordinary_inventory_never_granted"
+        },
+        {
+          "path": "/api.Profile/UpdateEmblem",
+          "stage": "existing_local",
+          "module": "profile_emblems",
+          "scope_limit": "existing_owned_master_valid_nonempty_emblem_only; atomic_user_emblem_preference; no_unlocks_or_mission_rewards"
+        },
+        {
+          "path": "/api.Profile/UpdateFavoriteCharacters",
+          "stage": "existing_local",
+          "module": "profile_favorites",
+          "scope_limit": "ordered_existing_profile_favorites_only; distinct_owned_master_valid_characters_naturally_bounded_by_inventory; empty_clears_without_creating_ownership; no_mission_progress_or_rewards"
+        },
+        {
+          "path": "/api.Profile/UpdateLayout",
+          "stage": "existing_local",
+          "module": "profile_layout",
+          "scope_limit": "existing_profile_layout_information_color_enums_only; no_background_inventory_or_rewards"
+        },
+        {
+          "path": "/api.Profile/UpdateMessage",
+          "stage": "existing_local",
+          "module": "profile_messages",
+          "scope_limit": "existing_profile_message_only; 1_to_60_UTF16_code_units; reject_blank_or_tab_local_policy; preserve_accepted_whitespace_CR_LF_and_normalization; no_moderation_mission_progress_or_rewards"
+        },
+        {
+          "path": "/api.Profile/UpdateName",
+          "stage": "existing_local",
+          "module": "profile_names",
+          "scope_limit": "authoritative_user_name_only; 1_to_10_UTF16_code_units; preserve_nonblank_spacing; local_single_line_policy; no_moderation_or_mission_progress"
+        }
+      ]
+    },
+    "api.User": {
+      "total": 2,
+      "existing_local": 1,
+      "new_source": 0,
+      "unsupported": 1,
+      "methods": [
+        {
+          "path": "/api.User/Get",
+          "stage": "existing_local",
+          "module": "application",
+          "scope_limit": "saved_local_or_imported_snapshot"
+        },
+        {
+          "path": "/api.User/ProvideExternalReward",
+          "stage": "unsupported",
+          "module": "",
+          "scope_limit": "no_imported_user_fixture_assumed"
+        }
+      ]
+    },
+    "api.System": {
+      "total": 3,
+      "existing_local": 3,
+      "new_source": 0,
+      "unsupported": 0,
+      "methods": [
+        {
+          "path": "/api.System/Check",
+          "stage": "existing_local",
+          "module": "application",
+          "scope_limit": "local_maintenance_review_keepalive"
+        },
+        {
+          "path": "/api.System/CheckApp",
+          "stage": "existing_local",
+          "module": "application",
+          "scope_limit": "intentional_empty_local_response"
+        },
+        {
+          "path": "/api.System/GetMetadata",
+          "stage": "existing_local",
+          "module": "application",
+          "scope_limit": "intentional_empty_local_response"
+        }
+      ]
+    },
+    "api.Home": {
+      "total": 5,
+      "existing_local": 5,
+      "new_source": 0,
+      "unsupported": 0,
+      "methods": [
+        {
+          "path": "/api.Home/Enter",
+          "stage": "existing_local",
+          "module": "gameplay",
+          "scope_limit": "home_and_saved_settings/tutorial/deck_explicit_local_scope"
+        },
+        {
+          "path": "/api.Home/Login",
+          "stage": "existing_local",
+          "module": "gameplay",
+          "scope_limit": "home_and_saved_settings/tutorial/deck_explicit_local_scope"
+        },
+        {
+          "path": "/api.Home/ReadTalk",
+          "stage": "existing_local",
+          "module": "home_talk",
+          "scope_limit": "master_valid_owned_home_talk_ack; normal_eligibility_or_explicit_media_mode; no_rewards"
+        },
+        {
+          "path": "/api.Home/SetCharacterPosition",
+          "stage": "existing_local",
+          "module": "gameplay",
+          "scope_limit": "home_and_saved_settings/tutorial/deck_explicit_local_scope"
+        },
+        {
+          "path": "/api.Home/SetReview",
+          "stage": "existing_local",
+          "module": "gameplay",
+          "scope_limit": "home_and_saved_settings/tutorial/deck_explicit_local_scope"
+        }
+      ]
+    }
+  },
+  "setting_services": [],
+  "related": {
+    "api.Birthday": [
+      {
+        "path": "/api.Birthday/OutputWatchedLog",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Birthday/ReceiveReward",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Birthday/SetWatched",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Birthday/SetWatchedRemindInfo",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Birthday/Top",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      }
+    ],
+    "api.Friend": [
+      {
+        "path": "/api.Friend/Apply",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Friend/Approve",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Friend/Cancel",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Friend/CancelAll",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Friend/Delete",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Friend/List",
+        "status": "restricted_local_handler",
+        "scope_limit": "empty_local_inbox_and_social_lists_only_no_receipts_or_relationship_mutations"
+      },
+      {
+        "path": "/api.Friend/ListApplied",
+        "status": "restricted_local_handler",
+        "scope_limit": "empty_local_inbox_and_social_lists_only_no_receipts_or_relationship_mutations"
+      },
+      {
+        "path": "/api.Friend/ListApplying",
+        "status": "restricted_local_handler",
+        "scope_limit": "empty_local_inbox_and_social_lists_only_no_receipts_or_relationship_mutations"
+      },
+      {
+        "path": "/api.Friend/Reject",
+        "status": "unsupported_by_default",
+        "scope_limit": "no_imported_user_fixture_assumed"
+      },
+      {
+        "path": "/api.Friend/Search",
+        "status": "restricted_local_handler",
+        "scope_limit": "empty_local_inbox_and_social_lists_only_no_receipts_or_relationship_mutations"
+      }
+    ],
+    "api.Shop/RegisterBirthday": {
+      "rpc_path": "/api.Shop/RegisterBirthday",
+      "request_type": "api.ShopRegisterBirthdayRequest",
+      "response_type": "api.ShopRegisterBirthdayResponse",
+      "default_status": "unsupported_by_default",
+      "scope_limit": "no_imported_user_fixture_assumed"
+    }
+  }
+}

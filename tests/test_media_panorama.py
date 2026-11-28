@@ -29,7 +29,7 @@ def schema():
 
 @pytest.fixture
 def game(schema, tmp_path):
-    master = tmp_path / "master"
+    master = tmp_path / "master-json"
     master.mkdir()
     # Values are synthetic: only the public catalog identities are fixed.
     rows = {
@@ -254,8 +254,9 @@ def test_master_version_is_pinned_and_constructor_does_not_eagerly_read_it(game)
     provider = MediaPanorama(game[0].schema, None, "no-profile", game[2])
     assert provider.handle(CREATE, b"invalid") is None
     assert provider.handle("/unrelated/Method", b"invalid") is None
-    with pytest.raises(RpcFailure, match="pinned original"):
+    with pytest.raises(RpcFailure, match="audited latest cohort") as denied:
         prepare_media_panorama(game[2])
+    assert denied.value.code == RpcCode.FAILED_PRECONDITION
 
 
 def test_missing_or_invalid_snapshot_and_duplicate_ownership_do_not_mutate_it(game):
@@ -280,3 +281,42 @@ def test_malformed_requests_and_create_never_grant_or_consume_anything(game):
     assert error.value.code == RpcCode.INVALID_ARGUMENT
     assert game[0].handle(CREATE, b"") is None
     assert dump(game[1]) == before
+
+
+def latest_panorama_fixture(game, monkeypatch):
+    from test_media_access import approve_latest_fixture
+    by_music = {row["id"]: row for row in game[3]["Music"]}
+    rules = (*PANORAMA_RULES, *MASTER_PANORAMA_RULES)
+    musics = []
+    for rule in rules:
+        original = by_music[rule.music_id]
+        row = {key: original[key] for key in ("id", "assetId", "is360LiveExist", "displayCharacterAmount")}
+        if original["id"] == "music-hsm-017":
+            row.update(selectableStageIds=["stage-live-dome-03-00"], releaseTime="1788145200000")
+        musics.append(row)
+    stages = sorted(deepcopy(game[3]["Stage"]), key=lambda row: row["id"])
+    projection = {"schema": 1, "musics": musics, "stages": stages}
+    return approve_latest_fixture(game[2], monkeypatch, "panorama", ("Music", "Stage"), projection)
+
+
+def test_latest_audited_panorama_lists_and_checks_without_changing_account(game, monkeypatch):
+    latest_panorama_fixture(game, monkeypatch)
+    before = dump(game[1])
+    result = call(game, LIST)
+    assert [(row.musicId, row.stageId, row.order) for row in result.musics] == [
+        (rule.music_id, rule.stage_id, rule.order) for rule in (*PANORAMA_RULES, *MASTER_PANORAMA_RULES)]
+    call(game, CHECK, **cast(game))
+    assert dump(game[1]) == before
+
+
+@pytest.mark.parametrize("damage", ["unapproved", "proof", "file", "projection", "other-version"])
+def test_latest_panorama_needs_approved_files_and_exact_scene_projection(game, monkeypatch, damage):
+    pins = latest_panorama_fixture(game, monkeypatch)
+    if damage == "unapproved":monkeypatch.setattr(pins, "PROJECTION_SHA256", {})
+    elif damage == "proof":(game[2].parent / "latest-semantic-controls.json").write_text('{}')
+    elif damage == "file":rewrite(game, "Stage", lambda rows: rows[0].update(assetId="other-real-shaped-asset"))
+    elif damage == "projection":monkeypatch.setattr(pins, "PROJECTION_SHA256", {"panorama": "f" * 64})
+    else:(game[2] / "!version.txt").write_text("e" * 64)
+    before = dump(game[1])
+    with pytest.raises(RpcFailure) as denied:prepare_media_panorama(game[2])
+    assert denied.value.code == RpcCode.FAILED_PRECONDITION and dump(game[1]) == before

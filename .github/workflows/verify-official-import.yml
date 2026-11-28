@@ -1,0 +1,106 @@
+name: Official account import checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/ios-unified-server
+    paths:
+      - .github/workflows/verify-official-import.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: official-import-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONUNBUFFERED: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      UV_NO_PROGRESS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare pinned Android harness tools
+        run: sdkmanager 'build-tools;34.0.0' 'platforms;android-34'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked Python dependencies
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Prepare actual pinned 6.1.1 protocol
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROTOCOL_PAYLOAD: ${{ runner.temp }}/idoly-public-protocol-payload.zip
+        run: |
+          gh api repos/tagundo/IdolyPride_client/releases/assets/732944285 \
+            --header 'Accept: application/octet-stream' > "$PROTOCOL_PAYLOAD"
+          uv run --locked --offline python macos-preserver/extract_descriptor.py \
+            --payload "$PROTOCOL_PAYLOAD" --output data/protocol/idolypride-6.1.1.pb
+          rm "$PROTOCOL_PAYLOAD"
+      - name: Verify offline account, transport and platform contracts
+        # All official-account cases use synthetic transports or loopback TLS.
+        # No real account credentials or official-service authentication is used.
+        run: |
+          command -v openssl
+          tests=(
+            tests/test_official_account.py
+            tests/test_official_account_config.py
+            tests/test_extract_official_client_config.py
+            tests/test_official_transport.py
+            tests/test_official_transport_tls.py
+            tests/test_official_import.py
+            tests/test_official_import_original_protocol.py
+            tests/test_android_official_import.py
+            tests/test_android_official_service_harness.py
+            tests/test_ios_unified_official_import.py
+            tests/test_ios_unified_ui_test_driver.py
+            tests/test_ios_unified_probe_smoke.py
+            macos-server/tests/test_macos_official_import.py
+            tests/test_account_manager.py
+            tests/test_account_state_backup.py
+            tests/test_profiles.py
+            tests/test_profile_directory.py
+            tests/test_main_live_state.py
+            tests/test_preference_state.py
+            tests/test_preference_application.py
+            tests/test_lesson_state.py
+            tests/test_starter_state.py
+            tests/test_server.py
+            tests/test_android_account_management.py
+            tests/test_android_server_standalone.py
+            tests/test_ios_host.py
+            tests/test_ios_unified_accounts.py
+            macos-server/tests/test_accounts.py
+          )
+          for test_path in "${tests[@]}"; do
+            if [ ! -f "$test_path" ]; then
+              echo "::error file=$test_path::Required account-import test file is missing"
+              exit 1
+            fi
+          done
+          uv run --locked --offline --all-extras python -m pytest -q \
+            "${tests[@]}" --junitxml="$RUNNER_TEMP/official-import-junit.xml"
+      - name: Keep short-lived test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-import-junit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/official-import-junit.xml
+          if-no-files-found: error
+          retention-days: 3

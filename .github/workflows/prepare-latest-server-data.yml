@@ -1,0 +1,260 @@
+name: Prepare complete latest public server data
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/prepare-latest-server-data.yml
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked original-data compiler and offline test dependencies
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Fetch only the immutable public historical baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --no-sync python - <<'PY'
+          import hashlib, importlib.util, os
+          from pathlib import Path
+          from zipfile import ZipFile
+          root = Path.cwd()
+          work = Path(os.environ['RUNNER_TEMP']) / 'latest-server-data'
+          work.mkdir(mode=0o700)
+          (work / 'proof').mkdir()
+          spec = importlib.util.spec_from_file_location('public_input_fetch', root / 'ios-unified/fetch_inputs.py')
+          fetch = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(fetch)
+          donor = work / 'immutable-public-donor.zip'
+          fetch.lfs_download({'bytes': 332386192, 'sha256': '303ac7c4977956d5187a0f3967409dc263dfd3ba2d97b1d6d17eb7a24b64a3cc'}, donor)
+          base = work / 'BaseServerData.zip'
+          value, count = hashlib.sha256(), 0
+          with ZipFile(donor) as archive:
+              matches = [i for i in archive.infolist() if i.filename == 'assets/ServerData.zip']
+              assert len(matches) == 1 and matches[0].file_size == 191343014
+              with archive.open(matches[0]) as incoming, base.open('xb') as outgoing:
+                  while block := incoming.read(65536):
+                      count += len(block)
+                      assert count <= 191343014
+                      value.update(block)
+                      outgoing.write(block)
+          assert count == 191343014 and value.hexdigest() == '37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223'
+          donor.unlink()
+          with ZipFile(base) as archive:
+              infos = [i for i in archive.infolist() if i.filename == 'data/protocol/idolypride-6.1.1.pb']
+              assert len(infos) == 1 and infos[0].file_size <= 4 * 1024 * 1024
+              raw = archive.read(infos[0])
+          assert hashlib.sha256(raw).hexdigest() == 'c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad'
+          with (work / 'idolypride-6.1.1.pb').open('xb') as output:
+              output.write(raw)
+          protocol = root / 'data/protocol/idolypride-6.1.1.pb'
+          protocol.parent.mkdir(parents=True, exist_ok=True)
+          if protocol.exists():
+              assert not protocol.is_symlink() and protocol.read_bytes() == raw
+          else:
+              with protocol.open('xb') as output:
+                  output.write(raw)
+          print('Verified immutable public baseline and prepared the exact original 6.1.1 protocol for tests')
+          PY
+      # Generation bootstrap runs all synthetic pin contracts and the real
+      # source-closure gate. The checked-in positive pin belongs to the separate
+      # full/focused gate after this new cohort has an independently verified pin.
+      - name: Test strict cohort, source-blob and semantic controls offline
+        run: |
+          test -f tests/test_prepare_latest_server_data.py
+          test -f tests/test_latest_server_data_pin.py
+          test -f tests/test_story_read_semantics.py
+          test -f tests/test_register_latest_server_data_lfs.py
+          test -f tests/test_resource_translation_rebase.py
+          test -f tests/test_resource_translation_runtime.py
+          test -f tests/test_octo_runtime_latest.py
+          test -f tests/test_public_payload_transaction.py
+          test -f tests/test_public_cohort_support.py
+          test -f tests/test_love_compatibility.py
+          test -f tests/test_latest_dream_semantics.py
+          test -f tests/test_latest_main_live_semantics.py
+          test -f tests/test_master_field_aliases.py
+          test -f tests/test_ios_unified_packaging.py
+          uv run --no-sync python -m pytest -q \
+            tests/test_prepare_latest_server_data.py tests/test_latest_server_data_pin.py \
+            tests/test_story_read_semantics.py tests/test_register_latest_server_data_lfs.py \
+            tests/test_resource_translation_rebase.py tests/test_resource_translation_runtime.py \
+            tests/test_octo_runtime_latest.py \
+            tests/test_public_payload_transaction.py tests/test_public_cohort_support.py \
+            tests/test_love_compatibility.py tests/test_latest_dream_semantics.py \
+            tests/test_latest_main_live_semantics.py tests/test_master_field_aliases.py \
+            tests/test_ios_unified_packaging.py::test_real_core_closure_matches_manifest_without_developer_tools \
+            tests/test_ios_unified_packaging.py::test_runtime_source_closure_is_explicit_and_rejects_grpc
+      - name: Collect anonymous Master.Get and public packs without accounts
+        # No Create/Login/Migration/transfer/auth API is called. Raw packs and
+        # collector logs stay on this remote runner and are never artifacts.
+        run: |
+          umask 077
+          if ! uv run --no-sync idoly-local \
+            --descriptor-set "$RUNNER_TEMP/latest-server-data/idolypride-6.1.1.pb" \
+            archive-master --app-version 6.1.1 --workers 4 \
+            --output "$RUNNER_TEMP/latest-server-data/candidate" \
+            > "$RUNNER_TEMP/latest-server-data/collection.log" 2>&1; then
+            python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'latest-server-data/proof/latest-server-data.report.json'
+          path.write_text(json.dumps({'schema': 1, 'status': 'FAIL', 'phase': 'anonymous_public_master',
+              'error_code': 'anonymous_public_master_unavailable'}, separators=(',', ':')) + '\n')
+          PY
+            echo 'Anonymous public master endpoint unavailable'
+            exit 1
+          fi
+      - name: Compile one coherent latest public cohort and freeze exact bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Only the small fixed-phase JSON result is public. No raw exception,
+        # public application SDK key, translation URL, or collector output is logged.
+        run: |
+          umask 077
+          if uv run --no-sync python tools/prepare_latest_server_data.py \
+            --compile \
+            --base-zip "$RUNNER_TEMP/latest-server-data/BaseServerData.zip" \
+            --latest-archive "$RUNNER_TEMP/latest-server-data/candidate" \
+            --output "$RUNNER_TEMP/latest-server-data/ServerData.zip" \
+            --source-blob "$RUNNER_TEMP/latest-server-data/latest-server-overlay.zip" \
+            --report "$RUNNER_TEMP/latest-server-data/proof/latest-server-data.report.json" \
+            --work "$RUNNER_TEMP/latest-server-data/compiled" \
+            > "$RUNNER_TEMP/latest-server-data/compile.log" 2>&1; then
+            echo 'Latest cohort compilation completed; independently validating full output'
+          else
+            echo 'Latest cohort preparation rejected; see fixed-phase proof artifact'
+            exit 1
+          fi
+      - name: Independently reopen full source blob, output, inventory and source pins
+        run: |
+          uv run --no-sync python - <<'PY'
+          import hashlib, importlib.util, json, os
+          from pathlib import Path
+          from zipfile import ZipFile
+          root = Path.cwd()
+          work = Path(os.environ['RUNNER_TEMP']) / 'latest-server-data'
+          proof = work / 'proof'
+          def canonical(value):
+              return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
+          def sha(path):
+              value = hashlib.sha256()
+              with path.open('rb') as stream:
+                  while block := stream.read(65536):
+                      value.update(block)
+              return value.hexdigest()
+          report_raw = (proof / 'latest-server-data.report.json').read_bytes()
+          assert len(report_raw) <= 512 * 1024
+          report = json.loads(report_raw)
+          assert report['status'] == 'PASS' and report['operation'] == 'latest-cohort-overlay-v1'
+          payload, source = work / 'ServerData.zip', work / 'latest-server-overlay.zip'
+          assert payload.stat().st_size == source.stat().st_size == report['output']['bytes'] <= 512 * 1024 * 1024
+          assert sha(payload) == sha(source) == report['output']['sha256'] == report['source_blob']['sha256']
+          inventory = []
+          with ZipFile(source) as archive:
+              assert len(archive.infolist()) <= 2048
+              names = sorted(archive.namelist())
+              assert names == sorted(set(names)) == report['output']['member_names']
+              for info in sorted(archive.infolist(), key=lambda row: row.filename):
+                  assert not info.is_dir() and not info.extra and not info.comment
+                  assert info.date_time == (2000, 1, 1, 0, 0, 0)
+                  value, count = hashlib.sha256(), 0
+                  with archive.open(info) as stream:
+                      while block := stream.read(65536):
+                          count += len(block)
+                          assert count <= info.file_size
+                          value.update(block)
+                  assert count == info.file_size
+                  if info.filename != 'data/payload-manifest.json':
+                      inventory.append({'path': info.filename, 'bytes': count, 'sha256': value.hexdigest()})
+              manifest_raw = archive.read('data/payload-manifest.json')
+              manifest = json.loads(manifest_raw)
+              tables = sorted(Path(name).stem for name in names if name.startswith('data/master-json/') and name.endswith('.json'))
+              assert len(tables) == 64 and tables == report['output']['master_json_table_names']
+          assert inventory == report['output']['members'] == manifest['files']
+          assert hashlib.sha256(canonical(inventory)).hexdigest() == report['output']['member_inventory_sha256']
+          assert hashlib.sha256(manifest_raw).hexdigest() == report['output']['payload_manifest_sha256']
+          assert manifest['schema'] == 1 and manifest['master_version'] == '6b77e0d8a64b26d5bebd09a7c19a47f2dfad2af914c5160418aa2e7292e13a11'
+          sources = report['component_sources']
+          assert all(sha(root / name) == value for name, value in sources.items())
+          assert hashlib.sha256(canonical(sources)).hexdigest() == report['component_sources_sha256']
+          assert manifest['source_overlay']['component_sources'] == sources
+          assert manifest['semantic_controls'] == report['semantic_controls']
+          spec = importlib.util.spec_from_file_location('latest_pin_verifier', root / 'tools/latest_server_data_pin.py')
+          verifier = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(verifier)
+          # The first compile has no actual static latest pin yet. These pure
+          # validators require the exact source closure and immutable legacy
+          # facts without loading or manufacturing a production pin.
+          verifier._output(report['output'])
+          verifier._proof(report, verifier._source_hashes(), report['output'])
+          summary = {key: report['output'][key] for key in ('bytes', 'sha256', 'payload_manifest_sha256',
+              'member_inventory_sha256', 'entries', 'master_json_tables')}
+          readback = {'schema': 1, 'status': 'PASS', 'operation': report['operation'],
+              'report_sha256': hashlib.sha256(report_raw).hexdigest(), 'output': summary,
+              'source_blob': report['source_blob'], 'component_sources_sha256': report['component_sources_sha256']}
+          (proof / 'latest-server-data.readback.json').write_bytes(canonical(readback) + b'\n')
+          assert {path.name for path in proof.iterdir()} == {'latest-server-data.report.json',
+              'latest-server-data.readback.json', 'latest-semantic-controls.json', 'latest-octo-proof.json'}
+          proof_sizes = {path.name: path.stat().st_size for path in sorted(proof.iterdir())}
+          proof_total = sum(proof_sizes.values())
+          print(json.dumps({'proof_file_bytes': proof_sizes, 'proof_total_bytes': proof_total}, sort_keys=True))
+          assert all(0 < size <= 512 * 1024 for size in proof_sizes.values())
+          assert proof_total <= 1024 * 1024
+          print(json.dumps({'status': 'PASS', 'payload': summary, 'report_sha256': readback['report_sha256'],
+              'raw_tables': 63, 'derived_love_catalog': 1, 'original_packs': 202}))
+          PY
+      - name: Admit bounded fixed-name proofs even when preparation fails
+        if: always()
+        run: |
+          python - <<'PY'
+          import importlib.util, os
+          from pathlib import Path
+          root = Path.cwd()
+          work = Path(os.environ['RUNNER_TEMP']) / 'latest-server-data'
+          work.mkdir(mode=0o700, exist_ok=True)
+          spec = importlib.util.spec_from_file_location('latest_proof_admission', root / 'tools/prepare_latest_server_data.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          valid = module.admit_proof_artifact(work / 'proof', work / 'proof-upload')
+          print('Bounded public proofs admitted' if valid else 'Only a fixed proof-admission failure is retained')
+          raise SystemExit(0 if valid else 1)
+          PY
+      - name: Retain only bounded public preparation proofs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-server-data-proof-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/latest-server-data/proof-upload/latest-server-data.report.json
+            ${{ runner.temp }}/latest-server-data/proof-upload/latest-server-data.readback.json
+            ${{ runner.temp }}/latest-server-data/proof-upload/latest-semantic-controls.json
+            ${{ runner.temp }}/latest-server-data/proof-upload/latest-octo-proof.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain the frozen complete public source blob remotely only
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-server-data-source-${{ github.sha }}
+          path: ${{ runner.temp }}/latest-server-data/latest-server-overlay.zip
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="unified_start_server">먼저 서버를 시작해 주세요.</string>
+    <string name="unified_restart_server">게임 언어를 적용하려면 서버를 중지한 뒤 다시 시작해 주세요.</string>
+    <string name="unified_restart_app">언어를 바꾸려면 앱을 완전히 종료한 뒤 다시 실행해 주세요.</string>
+    <string name="unified_preparing">선택한 언어의 게임 데이터를 준비하고 있습니다.</string>
+    <string name="app_name">아이프라 서버</string>
+    <string name="server_description">이 기기에서 아이프라 로컬 서버를 실행합니다.</string>
+    <string name="tutorial_replay_notice">튜토리얼 라이브는 원본 기록을 재생합니다.</string>
+    <string name="start_server">서버 시작</string>
+    <string name="stop_server">서버 중지</string>
+    <string name="launch_client">아이프라 로컬 실행</string>
+    <string name="client_missing">아이프라 로컬 클라이언트 APK를 먼저 설치해 주세요.</string>
+    <string name="client_launch_failed">로컬 클라이언트를 열지 못했습니다.</string>
+    <string name="server_start_failed">서버 서비스를 시작하지 못했습니다.</string>
+    <string name="server_ports">이 기기 · 127.0.0.1
+게임 연결 50051 · 파일 전송 8080</string>
+    <string name="server_logs">서버 기록</string>
+    <string name="waiting_logs">서버를 시작하면 진행 상황이 표시됩니다.</string>
+    <string name="status_stopped">중지됨</string>
+    <string name="status_starting">시작 중</string>
+    <string name="status_running">실행 중</string>
+    <string name="status_stopping">중지 중</string>
+    <string name="status_failed">시작 실패</string>
+    <string name="notification_channel">로컬 서버 실행</string>
+    <string name="notification_text">127.0.0.1 · 게임 50051 / 파일 8080</string>
+    <string name="first_launch_note">첫 실행에서는 포함된 서버 데이터를 준비합니다. 기존 로컬 계정과 저장 데이터는 유지됩니다.</string>
+    <string name="launch_diagnostic_client">아이프라 실행</string>
+    <string name="diagnostic_client_missing">아이프라 로컬 클라이언트 APK를 먼저 설치해 주세요.</string>
+    <string name="export_diagnostics">진단·서버 기록 내보내기</string>
+    <string name="export_server_logs">서버 기록 내보내기</string>
+    <string name="server_logs_export_saved">서버 기록을 저장했습니다.</string>
+    <string name="server_logs_export_failed">서버 기록을 저장하지 못했습니다. 저장 위치를 다시 선택해 주세요.</string>
+    <string name="export_saved">진단·서버 기록을 저장했습니다.</string>
+    <string name="export_failed">진단·서버 기록을 저장하지 못했습니다. 저장 위치를 다시 선택해 주세요.</string>
+    <string name="export_picker_failed">파일 저장 화면을 열지 못했습니다.</string>
+    <string name="game_state_title">게임 로딩 상태</string>
+    <string name="game_state_waiting">게임 상태 수신 대기</string>
+    <string name="game_last_phase">마지막 단계 · %1$s</string>
+    <string name="game_network_waiting">게임 전체 네트워크 수신/송신 측정 대기</string>
+    <string name="game_network_unavailable">게임 전체 네트워크 수신/송신을 측정할 수 없습니다.</string>
+    <string name="game_network_totals">게임 전체 네트워크 수신 %1$s · 송신 %2$s\n진단 시작 후 %3$d초 누적 · 다운로드 진행률 아님</string>
+    <string name="master_transfer_waiting">이 세션 마스터 파일 전송 대기</string>
+    <string name="master_transfer_active">이 세션 마스터 파일 전송 · %1$s / %2$s</string>
+    <string name="master_transfer_finished">이 세션 마스터 파일 · 완료 %1$d건 · 마지막 전송 %2$s</string>
+    <string name="latest_game_exception">최근 게임 예외: %1$s</string>
+    <string name="master_transfer_failed">마스터 파일 전송 오류 · %1$s / %2$s</string>
+    <string name="experimental_main_live">첫 메인 라이브 실험 기능 사용</string>
+    <string name="experimental_main_live_notice">첫 퀘스트만 지원합니다. 점수는 로컬 계산 규칙을 사용하며 공식 서버와 다를 수 있습니다. 기본값은 꺼짐입니다.</string>
+    <string name="download_missing_resources">없는 게임 리소스 내려받기</string>
+    <string name="download_missing_resources_notice">게임에서 요청한 파일만 내려받아 이 기기에 보관합니다. 끄면 이미 보관한 파일만 제공합니다.</string>
+    <string name="media_mode">감상용 전체 해금</string>
+    <string name="media_mode_notice">감상용 저장은 일반 진행과 별도로 보관합니다. 모드를 바꾼 뒤에는 서버를 다시 시작하고 게임 타이틀에서 다시 로그인해 주세요. 기본값은 꺼짐입니다.</string>
+    <string name="resource_transfer_title">게임 리소스</string>
+    <string name="resource_transfer_waiting">서버를 시작하면 게임 리소스 상태가 표시됩니다.</string>
+    <string name="resource_transfer_unavailable">게임 리소스 목록이 포함되지 않았습니다.</string>
+    <string name="resource_transfer_idle">게임 리소스 요청 대기</string>
+    <string name="resource_transfer_cache_only">보관한 게임 리소스만 사용</string>
+    <string name="resource_transfer_downloading">게임 리소스 내려받는 중</string>
+    <string name="resource_transfer_active">게임 리소스 내려받는 중 · 요청 %1$d개</string>
+    <string name="resource_transfer_ready">최근 요청한 게임 리소스 준비됨</string>
+    <string name="resource_transfer_failed">게임 리소스 요청 실패 · 서버 기록을 확인해 주세요.</string>
+    <string name="resource_transfer_received">이번 실행 · 내려받은 양 %1$s · 새로 보관한 파일 %2$d개</string>
+    <string name="resource_transfer_served">이번 실행 · 게임으로 보낸 양 %1$s</string>
+    <string name="presentation_title">그래픽·촬영 화면 ▾</string>
+    <string name="rendering_mt_experiment">다중 스레드 렌더링 시작 실험 (기본 꺼짐)</string>
+    <string name="rendering_mt_notice">게임을 완전히 종료한 뒤 이 서버 앱의 게임 실행 버튼으로 다시 여세요. 변경은 새 게임 프로세스를 시작할 때만 요청합니다. 실행 중인 게임이나 홈 화면으로 돌아온 게임에는 적용되지 않습니다. 실제 렌더링 모드는 아래의 게임 측정값으로 확인합니다.</string>
+    <string name="rendering_request_original">요청: 원본 시작 설정</string>
+    <string name="rendering_request_mt">요청: 다중 스레드 렌더링 시작 실험</string>
+    <string name="rendering_probe_waiting">실제 모드: 서버와 게임의 측정 응답 대기</string>
+    <string name="rendering_probe_client_waiting">실제 모드: 지원 클라이언트의 측정 응답 대기</string>
+    <string name="rendering_probe_stale">실제 모드: 최근 측정이 오래되어 새 응답 대기</string>
+    <string name="rendering_probe_unsupported">실제 모드: 이 게임에서 측정을 지원하지 않습니다.</string>
+    <string name="rendering_probe_init_failed">실제 모드: 측정 초기화 실패</string>
+    <string name="rendering_probe_observed">실제 측정: %1$s · 그래픽 API %2$d</string>
+    <string name="rendering_mode_direct">Direct (0 · 직접 렌더링)</string>
+    <string name="rendering_mode_single">SingleThreaded (1 · 단일 스레드)</string>
+    <string name="rendering_mode_multi">MultiThreaded (2 · 다중 스레드)</string>
+    <string name="rendering_mode_legacy_jobs">LegacyJobified (3)</string>
+    <string name="rendering_mode_native_jobs">NativeGraphicsJobs (4)</string>
+    <string name="rendering_mode_native_jobs_without_render">NativeGraphicsJobsWithoutRenderThread (5)</string>
+    <string name="rendering_mt_not_observed">다중 스레드 모드는 관측되지 않았습니다. 게임을 완전히 종료한 뒤 다시 여세요. 다시 실행해도 같으면 이 실험이 적용되지 않은 상태입니다.</string>
+    <string name="rendering_frame_times">CPU 프레임 시간: %1$s ms · GPU 프레임 시간: %2$s ms\n화면에 표시된 실제 FPS 측정값은 아닙니다.</string>
+    <string name="rendering_frame_times_unavailable">CPU·GPU 프레임 시간: 검증된 최신 측정값 없음</string>
+    <string name="rendering_launch_conflict">기존 Unity 시작 인수와 렌더링 실험을 함께 사용할 수 없습니다. 실험을 끈 뒤 다시 여세요.</string>
+    <string name="playback_wait_for_orientation">MV 진입·종료 시 화면 회전 대기</string>
+    <string name="playback_wait_notice">켜면 MV를 시작하거나 나갈 때 화면이 돌아갈 때까지 기다립니다. 기본값은 켜짐이며, 다음 MV 진입·종료부터 적용됩니다.</string>
+    <string name="playback_waiting">회전 설정 · 서버와 게임 응답 대기</string>
+    <string name="playback_saved_waiting">회전 설정 저장됨 · 클라이언트 수신 확인 대기</string>
+    <string name="playback_client_waiting">회전 설정 지원 클라이언트 응답 대기 · 지원 클라이언트 업데이트가 필요합니다.</string>
+    <string name="playback_unsupported">회전 설정 수신 확인 대기 · 응답이 없으면 지원 클라이언트로 업데이트해 주세요.</string>
+    <string name="playback_received">클라이언트에서 설정 수신 확인 · 다음 MV 진입·종료부터 적용</string>
+    <string name="playback_save_failed">회전 설정을 저장하지 못했습니다. 이전 설정을 유지합니다.</string>
+    <string name="playback_invalid">저장된 회전 설정을 읽지 못해 기본값을 표시합니다. 설정을 바꾸면 새로 저장합니다.</string>
+    <string name="presentation_title_expanded">그래픽·촬영 화면 ▴</string>
+    <string name="presentation_notice">그래픽 설정을 지원하는 게임이 필요합니다. 서버 실행 중에도 바꿀 수 있습니다. 변경 사항은 저장한 뒤 게임의 적용 확인을 기다립니다.</string>
+    <string name="presentation_custom_graphics">사용자 그래픽 설정 사용</string>
+    <string name="presentation_quality">그래픽 품질</string>
+    <string name="presentation_target_fps">목표 프레임 수</string>
+    <string name="presentation_render_scale">3D 렌더 배율</string>
+    <string name="presentation_max_buffer_pixel">렌더 버퍼 최대 크기</string>
+    <string name="presentation_anti_aliasing">가장자리 다듬기</string>
+    <string name="presentation_shadow_resolution">캐릭터 그림자 해상도</string>
+    <string name="presentation_expand_photography">촬영·360 화면의 3D 표시 영역 확장</string>
+    <string name="presentation_photography_notice">기본 16:9 바깥에도 3D 장면을 렌더링합니다. 확대·잘라내기·늘이기 방식이 아닙니다. 그래픽 설정 사용 여부와 별도로 저장됩니다.</string>
+    <string name="presentation_waiting">원본 설정 · 그래픽 설정을 지원하는 게임의 응답 대기</string>
+    <string name="presentation_saved_waiting">설정 저장됨 · 게임의 적용 확인 대기</string>
+    <string name="presentation_save_failed">설정을 저장하지 못했습니다. 이전 설정을 유지합니다.</string>
+    <string name="presentation_invalid">저장된 설정을 읽지 못해 기본값을 표시합니다. 설정을 바꾸면 새로 저장합니다.</string>
+    <string name="presentation_applied">게임에서 현재 설정의 적용을 확인했습니다.</string>
+    <string name="presentation_disabled">게임에서 원본 화면 설정 사용을 확인했습니다.</string>
+    <string name="presentation_unsupported">현재 게임 또는 화면 배치에서는 이 설정을 적용할 수 없습니다.</string>
+    <string name="presentation_waiting_for_scene">게임에서 설정 수신 · 촬영·360 화면 적용 확인 대기</string>
+    <string name="presentation_init_failed">게임의 화면 설정 초기화에 실패했습니다.</string>
+    <string name="presentation_launch_button">아이프라 실행</string>
+    <string name="presentation_client_notice">서버 APK와 그래픽 기능이 포함된 게임 APK를 각각 설치해 주세요. 이 서버 앱은 게임 APK를 내려받거나 수정·설치하지 않습니다.</string>
+    <string name="presentation_launch_missing">그래픽 기능을 지원하는 게임을 찾지 못했습니다. 별도로 제공되는 게임 APK를 먼저 설치해 주세요.</string>
+    <string-array name="presentation_quality_options">
+        <item>원본 유지 (0)</item>
+        <item>낮음 (10)</item>
+        <item>중간 (20)</item>
+        <item>높음 (30)</item>
+        <item>최고 (40)</item>
+        <item>촬영용 (100)</item>
+    </string-array>
+    <string-array name="presentation_target_fps_options">
+        <item>원본 유지 (0)</item>
+        <item>30 fps</item>
+        <item>60 fps</item>
+        <item>90 fps</item>
+        <item>120 fps</item>
+    </string-array>
+    <string-array name="presentation_render_scale_options">
+        <item>0.25배</item>
+        <item>0.5배</item>
+        <item>0.75배</item>
+        <item>1배 (기본)</item>
+        <item>1.25배</item>
+        <item>1.5배</item>
+        <item>2배</item>
+    </string-array>
+    <string-array name="presentation_max_buffer_pixel_options">
+        <item>720 px</item>
+        <item>1080 px</item>
+        <item>1440 px</item>
+        <item>1920 px</item>
+        <item>2560 px</item>
+        <item>3840 px</item>
+        <item>4096 px (기본)</item>
+    </string-array>
+    <string-array name="presentation_anti_aliasing_options">
+        <item>원본 유지 (-1)</item>
+        <item>끔 (0)</item>
+        <item>FXAA (1)</item>
+        <item>SMAA (2)</item>
+    </string-array>
+    <string-array name="presentation_shadow_resolution_options">
+        <item>원본 유지 (0)</item>
+        <item>512</item>
+        <item>1024</item>
+        <item>2048</item>
+        <item>4096</item>
+    </string-array>
+    <string name="library_settings_title">목록·표시 언어</string>
+    <string name="resource_storage">리소스 저장 위치</string>
+    <string-array name="resource_storage_options"><item>Downloads/IdolyPride (기본)</item><item>앱 전용 저장소</item></string-array>
+    <string name="resource_storage_public_notice">원본 리소스를 Downloads/IdolyPride/octo-cache(Android)·octo-cache-ios(iOS)에 바로 보관합니다. Android 11 이상에서 모든 파일 접근 권한이 필요합니다. 계정·설정·마스터 데이터는 앱 전용 저장소에 유지합니다.</string>
+    <string name="resource_storage_private_notice">선택한 앱 전용 저장소에 리소스를 보관합니다. 권한 없이 사용할 수 있으며, 필요하면 ZIP 가져오기·내보내기를 사용할 수 있습니다.</string>
+    <string name="resource_storage_permission_title">Downloads에 리소스 바로 저장</string>
+    <string name="resource_storage_permission_notice">Downloads/IdolyPride에 원본 리소스를 직접 보관하려면 이 서버 앱의 모든 파일 접근 권한이 필요합니다. 권한 설정 후 돌아오면 서버 시작을 다시 시도합니다. 원하지 않으면 앱 전용 저장소를 직접 선택해 시작할 수 있습니다.</string>
+    <string name="resource_storage_older_android">Downloads 직접 보관은 Android 11 이상에서 지원합니다. 이 기기에서는 앱 전용 저장소를 선택하고 ZIP 파일 선택 화면으로 내보내기를 사용할 수 있습니다. 저장 위치는 자동으로 바꾸지 않습니다.</string>
+    <string name="resource_storage_use_private">앱 전용으로 시작</string>
+    <string name="resource_storage_later">취소</string>
+    <string name="resource_storage_open_settings">권한 설정 열기</string>
+    <string name="resource_storage_settings_unavailable">이 기기에서 권한 설정을 열지 못했습니다. 저장 위치를 앱 전용으로 직접 선택하거나 권한 설정을 확인해 주세요.</string>
+    <string name="resource_storage_permission_denied">Downloads 권한을 허용하지 않아 서버를 시작하지 않았습니다. 권한을 허용하거나 앱 전용 저장소를 직접 선택해 주세요.</string>
+    <string name="library_language">게임 데이터 언어</string>
+    <string name="library_hide_video_mv">라이브 촬영에서 영상 전용 MV 숨기기</string>
+    <string name="library_mv_sort">MV 정렬</string>
+    <string name="library_outfit_sort">의상 정렬</string>
+    <string name="library_settings_notice">변경 후 서버를 다시 시작하고 게임 타이틀에서 다시 로그인해 주세요. UI 언어를 바꾸려면 같은 언어의 클라이언트로 업데이트해 주세요. 의상 정렬은 최신 지원 클라이언트가 필요합니다. 번역이 없는 항목은 원문을 유지합니다.</string>
+    <string name="library_settings_invalid">저장된 목록·언어 설정을 읽지 못해 기본값을 표시합니다. 바꾸면 새로 저장합니다.</string>
+    <string name="library_settings_failed">목록·언어 설정을 저장하지 못했습니다. 이전 값을 유지합니다.</string>
+    <string-array name="library_language_options"><item>일본어 (원문)</item><item>한국어</item><item>English</item></string-array>
+    <string-array name="library_mv_sort_options"><item>최신 공개순</item><item>오래된 공개순</item><item>제목순</item><item>ID순</item></string-array>
+    <string-array name="library_outfit_sort_options"><item>원본 정렬</item><item>최신 출시순</item><item>오래된 출시순</item><item>이름순</item><item>ID순</item></string-array>
+    <string name="library_resources_title">리소스 보관함</string>
+    <string name="library_resource_platform">리소스 플랫폼</string>
+    <string-array name="library_resource_platform_options"><item>Android</item><item>iOS · PlayCover</item></string-array>
+    <string name="library_download_parallelism">동시 다운로드 수</string>
+    <string-array name="library_download_parallelism_options"><item>1개</item><item>2개</item><item>4개 (기본)</item><item>8개</item></string-array>
+    <string name="library_download_parallelism_notice">선택한 개수만큼 파일을 동시에 받습니다. 새 다운로드 작업부터 적용됩니다.</string>
+    <string name="library_resources_notice">서버 시작 전에 선택한 위치에 원본 파일을 직접 보관합니다. 전체 다운로드는 많은 데이터와 저장 공간을 사용하며, 다시 시작하면 검증 완료 파일을 재사용합니다. ZIP 가져오기·내보내기는 선택 기능이며 계정 저장은 포함하지 않습니다.</string>
+    <string name="library_download_all">전체 리소스 다운로드·이어받기</string>
+    <string name="library_import">리소스 ZIP 가져오기</string>
+    <string name="library_export">보관 리소스 ZIP 내보내기</string>
+    <string name="library_cancel">리소스 작업 취소</string>
+    <string name="library_resources_waiting">리소스 작업은 서버를 실행한 뒤 사용할 수 있습니다.</string>
+    <string name="library_resources_unavailable">서버 실행 상태와 진행 중인 리소스 작업을 확인해 주세요.</string>
+    <string name="library_resources_ready">플랫폼을 선택한 뒤 다운로드·가져오기·내보내기를 시작할 수 있습니다.</string>
+    <string name="library_resources_preparing">%1$s 준비 중 · %2$s · 취소는 작업 준비가 끝나면 가능합니다.</string>
+    <string name="library_resources_working">%1$s 진행 중 · 로컬 전송 %2$s</string>
+    <string name="library_resources_cancelling">%1$s 취소 중 · %2$s · 완료 전까지 기다려 주세요.</string>
+    <string name="library_resources_failed">리소스 작업을 완료하지 못했습니다. 서버 상태와 선택한 파일·저장 위치를 확인해 주세요. 새로 만든 미완성 파일은 가능한 경우 삭제합니다.</string>
+    <string name="library_resources_cancelled">리소스 작업을 취소했습니다. 검증 완료 보관 파일은 유지합니다.</string>
+    <string name="library_import_seekable">선택한 파일을 직접 탐색할 수 없습니다. ZIP을 이 기기의 로컬 저장소에 저장한 뒤 다시 선택해 주세요.</string>
+    <string name="library_catalog_unavailable">선택한 플랫폼의 리소스 카탈로그가 없습니다. 해당 카탈로그를 포함한 서버 파일이 필요합니다.</string>
+    <string name="library_picker_failed">파일 선택 화면을 열지 못했습니다.</string>
+    <string name="library_job_running">준비·진행 중</string>
+    <string name="library_job_completed">완료</string>
+    <string name="library_job_partial">일부만 완료 · 보관되지 않았거나 실패한 파일이 있습니다.</string>
+    <string name="library_job_failed">실패</string>
+    <string name="library_job_cancelled">취소됨</string>
+    <string name="library_job_cancelling">취소 중</string>
+    <string name="library_job_summary">%1$s · %2$s\n검증 완료 %3$d / %4$d개 · 미보관 %5$d개 · 실패 %6$d개</string>
+    <string name="library_job_parallelism">%1$d개 동시 다운로드 · 진행 중 %2$d개</string>
+    <string name="library_job_transfer_metrics">수신 %1$s · 평균 수신 %2$s/s · %3$d초</string>
+    <string name="library_job_bytes">용량 검증 완료 %1$s / %2$s</string>
+    <string name="library_job_phase_summary">연결 %1$d · 받기 %2$d · 검증 %3$d · 저장 %4$d · 복사 %5$d개</string>
+    <string name="library_job_cached">기존 보관 파일 재사용 %1$d개</string>
+    <string name="library_export_downloads">ZIP을 다운로드/IdolyPride/exports에 저장했습니다.</string>
+    <string name="library_export_document">ZIP을 선택한 위치에 저장했습니다.</string>
+    <string name="library_import_result">가져온 검증 완료 파일 %1$d개 · 실패 %2$d개</string>
+    <string name="library_import_partial">일부 파일은 가져오지 못했습니다. 검증 완료된 보관 파일은 유지했습니다.</string>
+    <string name="settings_automatic_notice">변경하면 자동 저장합니다.</string>
+    <string name="mode_section_title">감상 모드</string>
+    <string name="experiment_section_title">실험 기능</string>
+    <string name="playback_section_title">MV 재생</string>
+    <string name="resources_section_title">게임 리소스</string>
+    <string name="diagnostics_section_title">진단</string>
+    <string name="diagnostics_details">상태·최근 기록 보기 ▾</string>
+    <string name="diagnostics_details_expanded">상태·최근 기록 보기 ▴</string>
+    <string name="diagnostics_export_notice">게임·서버 상태와 최근 기록을 JSON 한 파일로 저장합니다.</string>
+    <string name="accounts_title">유저 관리</string>
+    <string name="accounts_notice">일반·감상 계정을 따로 관리합니다. 계정 ZIP에는 게임 저장·진행 기록이 포함되며 리소스 ZIP과는 별개입니다. 선택한 계정은 다음 서버 시작부터 사용합니다.</string>
+    <string name="accounts_waiting">계정 상태 확인 대기</string>
+    <string name="accounts_ready">계정 선택·백업을 사용할 수 있습니다.</string>
+    <string name="accounts_complete">계정 작업을 완료했습니다.</string>
+    <string name="accounts_previous">이전 계정 목록</string>
+    <string name="accounts_next">다음 계정 목록</string>
+    <string name="accounts_refresh">계정 목록 새로고침</string>
+    <string name="accounts_create">새 계정 만들기</string>
+    <string name="accounts_clone">선택한 계정 복제</string>
+    <string name="accounts_select">해당 모드의 다음 계정으로 선택</string>
+    <string name="accounts_export">선택한 계정 ZIP 백업</string>
+    <string name="accounts_import">계정 ZIP 가져오기</string>
+    <string name="accounts_restore_notice">계정을 교체하기 전 자동 복원 지점을 만듭니다. 복원할 계정과 같은 계정의 복원 지점을 선택하세요.</string>
+    <string name="accounts_restore_next">다음 복원 지점 목록 · 마지막에서 처음으로</string>
+    <string name="accounts_restore">선택한 복원 지점으로 복원</string>
+    <string name="accounts_restore_empty">보관된 복원 지점 없음</string>
+    <string name="accounts_choose">먼저 계정을 선택해 주세요.</string>
+    <string name="accounts_working">계정 작업 중…</string>
+    <string name="accounts_selected">해당 모드의 다음 계정으로 선택했습니다. 사용할 감상용 전체 해금 설정도 확인해 주세요. 게임을 완전히 종료하고 서버를 중지·시작한 뒤 다시 게임을 열어 주세요.</string>
+    <string name="accounts_restored">계정 저장을 가져왔습니다. 현재 사용하려면 계정을 선택한 뒤 게임과 서버를 다시 시작해 주세요.</string>
+    <string name="accounts_exported">계정 ZIP을 저장했습니다. 다른 설치 환경에서도 계정 ZIP 가져오기로 사용할 수 있습니다.</string>
+    <string name="accounts_unprepared">첫 시작 준비 필요</string>
+    <string name="accounts_empty">저장된 계정 없음</string>
+    <string name="accounts_page">계정 %1$d–%2$d / 전체 %3$d개</string>
+    <string name="accounts_restore_page">복원 지점 %1$d–%2$d / 전체 %3$d개</string>
+    <string name="accounts_normal">일반</string>
+    <string name="accounts_media">감상</string>
+    <string name="accounts_next_selection">다음 시작 · 일반 %1$s / 감상 %2$s</string>
+    <string name="accounts_active">현재 실행 · %1$s · %2$s</string>
+    <string name="accounts_not_running">현재 서버 중지 상태</string>
+    <string name="accounts_profile_hint">로컬 저장 슬롯 이름 · UTF-8 64바이트 이내</string>
+    <string name="accounts_manager_hint">게임 안의 매니저 이름 · 1~10자</string>
+    <string name="accounts_manager_default">매니저</string>
+    <string name="accounts_profile_required">계정 이름을 입력해 주세요.</string>
+    <string name="accounts_import_preview">계정 백업 확인</string>
+    <string name="accounts_import_new">새 계정으로 가져오기</string>
+    <string name="accounts_import_replace">선택한 계정에 덮어쓰기</string>
+    <string name="accounts_archive_summary">백업 %1$d바이트\n라이브 처리 기록 %2$d개 · 설정 처리 기록 %3$d개\n리소스 파일은 포함되지 않습니다.</string>
+    <string name="accounts_replace_confirm">%1$s 계정 ‘%2$s’의 저장을 교체합니다. 현재 저장은 자동 복원 지점에 보관합니다. 다른 계정은 변경하지 않습니다.</string>
+    <string name="accounts_restore_choose_target">복원 지점과 같은 계정을 위 목록에서 먼저 선택해 주세요.</string>
+    <string name="accounts_stop_to_restore">현재 실행 중인 계정입니다. 게임을 완전히 종료하고 서버를 중지한 뒤 복원해 주세요.</string>
+    <string name="accounts_failed">계정 작업을 완료하지 못했습니다. 기존 저장을 확인하고 다시 시도해 주세요. (%1$s)</string>
+    <string name="accounts_transfer">%1$s · %2$s</string>
+    <string name="accounts_transfer_total">%1$s · %2$s / %3$s</string>
+    <string name="accounts_transfer_saving">계정 백업 저장 중</string>
+    <string name="accounts_transfer_copying">계정 ZIP 복사·검사 중</string>
+    <string name="server_checks_title">서버 연결·자료 검사</string>
+    <string name="server_checks_waiting">아직 서버 시작 검사를 실행하지 않았습니다.</string>
+    <string name="server_checks_refresh">검사·오류 기록 새로고침</string>
+    <string name="server_checks_current">이번 실행의 서버 준비 검사 · 게임 전체 실행 검증은 아닙니다.</string>
+    <string name="server_checks_previous">이전 실행의 검사 기록 · 현재 연결 상태를 뜻하지 않습니다.</string>
+    <string name="server_history_empty">보관된 최근 실패 기록 없음</string>
+    <string name="server_history_view">보관된 진단 기록 보기</string>
+    <string name="server_history_clear">보관된 진단 기록 지우기</string>
+    <string name="server_history_clear_confirm">보관된 서버 진단 기록만 지웁니다. 계정과 리소스는 유지합니다.</string>
+    <string name="server_history_last">최근 보관된 실패 · %1$s\n%2$s</string>
+    <string name="server_check_ready">준비됨</string>
+    <string name="server_check_blocked">확인 필요</string>
+    <string name="server_check_attention">주의 항목 있음</string>
+    <string name="server_check_stopped">중지됨</string>
+    <string name="server_check_unchecked">미검사</string>
+    <string name="server_check_protocol">게임 프로토콜</string>
+    <string name="server_check_catalog">게임 목록</string>
+    <string name="server_check_master">원본 마스터</string>
+    <string name="server_check_storage">보관 위치</string>
+    <string name="server_check_http">파일 서버 연결</string>
+    <string name="server_check_grpc">게임 서버 연결</string>
+    <string name="server_check_resources">리소스 목록</string>
+    <string name="server_check_account">선택한 계정</string>
+    <string name="server_check_unknown">기타 검사</string>
+    <string name="accounts_clone_notice">복제는 같은 게임 계정의 저장 분기입니다. 게임 안의 ID와 진행은 그대로 복사하며 로컬 저장 슬롯만 새로 만듭니다.</string>
+    <string name="accounts_too_large">계정 ZIP은 최대 128MiB까지 가져올 수 있습니다. 리소스 ZIP은 게임 리소스 메뉴에서 가져와 주세요.</string>
+    <string name="accounts_empty_archive">선택한 계정 ZIP이 비어 있습니다. 다른 파일을 선택해 주세요.</string>
+    <string name="accounts_provider_permission">선택한 파일에 접근할 수 없습니다. 파일 앱의 저장 위치와 접근 권한을 확인하고 다시 선택해 주세요.</string>
+    <string name="accounts_preparing">계정 관리 자료를 준비하고 저장을 검사하는 중…</string>
+    <string name="accounts_confirm">확인</string>
+    <string name="accounts_cancel">취소</string>
+    <string name="accounts_date_unknown">시각 확인 불가</string>
+    <string name="official_title">일본 공식 계정 가져오기 · 현재 작동하지 않음</string>
+    <string name="official_notice">일본 공식 계정 가져오기는 현재 작동하지 않습니다. 일본판 인계 ID와 연계 비밀번호로 자료를 내려받아 일반 로컬 계정에 저장합니다. 이메일·Apple·Google 계정 비밀번호를 입력하지 마세요.</string>
+    <string name="official_warning">공식 인계 인증은 기존 기기의 로그인·인계 세션에 영향을 줄 수 있습니다. 비밀번호는 저장하지 않으며, 자료를 받은 뒤 로컬 계정에 저장할 대상을 다시 확인합니다.</string>
+    <string name="official_inspect">인계 ID 확인</string>
+    <string name="official_fetch">공식 인계 로그인·내려받기</string>
+    <string name="official_apply_new">새 일반 계정으로 저장</string>
+    <string name="official_apply_replace">선택한 일반 계정에 덮어쓰기</string>
+    <string name="official_cancel">가져오기 취소</string>
+    <string name="official_select_imported">가져온 계정을 다음 일반 계정으로 선택</string>
+    <string name="official_normal_mode">일반 모드로 전환</string>
+    <string name="official_normal_selected">일반 모드로 설정했습니다. 게임을 종료하고 서버를 다시 시작하면 선택한 일반 계정을 사용합니다.</string>
+    <string name="official_credentials_title">일본판 인계 정보</string>
+    <string name="official_id_label">일본판 사용자 ID</string>
+    <string name="official_password_label">연계 비밀번호</string>
+    <string name="official_platform_label">공식 계정에서 사용하던 기기</string>
+    <string name="official_id_hint">게임에 표시되는 인계용 사용자 ID</string>
+    <string name="official_password_hint">게임에서 설정한 연계 비밀번호</string>
+    <string name="official_confirm_inspect">입력한 ID 확인</string>
+    <string name="official_fetch_title">확인한 공식 계정으로 진행</string>
+    <string name="official_preview">매니저: %1$s · Lv %2$d\n공개 ID: %3$s</string>
+    <string name="official_counts">카드 %1$d · 아이템 %2$d · 사진 %3$d</string>
+    <string name="official_expiry">인계 정보 확인을 시작한 뒤 최대 10분간 유효합니다.</string>
+    <string name="official_ready_notice">내려받은 자료의 검증이 끝났습니다. 기본값은 새 일반 계정 저장입니다. 기존 계정 덮어쓰기는 서버를 중지한 뒤 계정 관리에서 대상을 고르세요.</string>
+    <string name="official_completed_notice">일반 계정에 저장했습니다. 아래에서 가져온 계정을 선택하고 일반 모드로 전환한 뒤 게임과 서버를 다시 시작하세요. 감상 계정은 별도로 유지됩니다.</string>
+    <string name="official_choose_slot">로컬 계정 이름</string>
+    <string name="official_slot_hint">예: 일본 계정 (게임 내 매니저 이름과 별개)</string>
+    <string name="official_apply_confirm">로컬 계정에 저장</string>
+    <string name="official_replace_confirm">일반 계정 %1$s의 저장 자료를 교체합니다. 현재 자료의 자동 복구점을 먼저 만들고, 확인한 버전이 그대로일 때만 교체합니다. 게임이 종료되어 있는지 확인하세요.</string>
+    <string name="official_replace_blocked">게임을 종료하고 위쪽에서 서버를 중지한 뒤 다시 시도하세요.</string>
+    <string name="official_choose_normal">계정 관리에서 덮어쓸 일반 계정을 선택해 주세요. 감상 계정은 덮어쓰지 않습니다.</string>
+    <string name="official_error_generic">가져오기를 완료하지 못했습니다. 입력 정보와 연결 상태를 확인하고 다시 시도해 주세요.</string>
+    <string name="official_error_input">사용자 ID와 연계 비밀번호를 그대로 입력해 주세요. 앞뒤 공백은 사용할 수 없습니다.</string>
+    <string name="official_error_stale">대상 계정이 변경되었습니다. 계정 목록을 새로 고치고 대상을 다시 확인해 주세요.</string>
+    <string name="official_error_expired">확인 정보가 만료되었거나 취소되었습니다. 인계 ID 확인부터 다시 진행해 주세요.</string>
+    <string name="official_error_catalog">공식 자료를 확인할 수 없습니다. 서버 데이터 준비와 네트워크 연결을 확인해 주세요.</string>
+    <string name="official_stage_idle">일본 공식 계정 가져오기는 현재 작동하지 않습니다.</string>
+    <string name="official_stage_preparing">가져오기 준비 중</string>
+    <string name="official_stage_checking">인계 ID 확인 중</string>
+    <string name="official_stage_verifying">공식 계정 확인 중</string>
+    <string name="official_stage_verified">공식 계정 확인 완료 · 아래 요약을 확인하세요.</string>
+    <string name="official_stage_transferring">공식 인계 처리 중</string>
+    <string name="official_stage_firebase">공식 로그인 인증 중</string>
+    <string name="official_stage_login">공식 게임 로그인 중</string>
+    <string name="official_stage_master">공식 마스터 자료 확인 중</string>
+    <string name="official_stage_account">공식 계정 자료 받는 중</string>
+    <string name="official_stage_collected">공식 계정 자료 수신 완료</string>
+    <string name="official_stage_fetching">공식 자료 내려받는 중</string>
+    <string name="official_stage_catalog_check">로컬 자료와 호환성 확인 중</string>
+    <string name="official_stage_staging">로컬 저장 자료 검증 중</string>
+    <string name="official_stage_ready">검증 완료 · 저장 대상을 선택하세요.</string>
+    <string name="official_stage_completed">로컬 계정 저장 완료</string>
+    <string name="official_stage_cancelled">가져오기를 취소했습니다.</string>
+    <string name="official_stage_failed">가져오기 실패</string>
+    <string name="official_slot_invalid">로컬 계정 이름을 입력해 주세요. 이름이 너무 길거나 줄바꿈·슬래시가 있으면 저장할 수 없습니다.</string>
+    <string name="official_stage_applying">검증된 계정을 로컬에 저장 중</string>
+    <string name="official_committed_cleanup">계정은 저장되었습니다. 임시 자료 정리가 남아 있습니다.</string>
+    <string name="official_committed_refresh">계정은 저장되었습니다. 로컬 계정 목록을 새로 고쳐 저장된 항목을 확인해 주세요.</string>
+    <string name="official_refresh_local">로컬 계정 목록 새로고침</string>
+    <string name="events_title">모시코이 설정</string>
+    <string name="events_notice">일반 계정과 감상 계정의 이벤트 선택을 따로 보관합니다. 이벤트를 꺼도 진행 자료는 유지합니다.</string>
+    <string name="events_preset_notice">지원 자료가 있는 이벤트만 선택할 수 있습니다. 처음 켜면 현재 시각부터 30일로 설정합니다. 아래 기간은 로컬 진행용이며 공식 일정은 바꾸지 않습니다.</string>
+    <string name="events_loading">저장된 이벤트 설정 확인 중</string>
+    <string name="events_catalog">지원 이벤트</string>
+    <string name="events_empty">지원 가능한 이벤트 없음</string>
+    <string name="events_enabled">선택한 모시코이 사용</string>
+    <string name="events_extra_entry">게임 홈 → 이벤트 → 사큐×마호</string>
+    <string name="events_start">시작: %1$s</string>
+    <string name="events_end">종료: %1$s</string>
+    <string name="events_start_name">로컬 시작 시각</string>
+    <string name="events_end_name">로컬 종료 시각</string>
+    <string name="events_start_notice">시작 시각을 바꾸면 현재 설정한 기간을 유지해 종료 시각도 함께 이동합니다.</string>
+    <string name="events_summary">%1$s · 선택 %2$d · 적용 %3$s</string>
+    <string name="events_count">%1$d개</string>
+    <string name="events_not_running">중지</string>
+    <string name="events_saved_next">저장됨 · 다음 시작 적용</string>
+    <string name="events_saved_active">저장됨</string>
+    <string name="events_restart">저장됨 · 재시작 필요</string>
+    <string name="events_pending">설정 저장 중</string>
+    <string name="events_unsaved">변경 내용 저장 대기</string>
+    <string name="events_selected_status">저장: %1$s\n현재 적용: %2$s</string>
+    <string name="events_off">꺼짐</string>
+    <string name="events_window">%1$s ~ %2$s</string>
+    <string name="events_refresh">저장값 다시 불러오기</string>
+    <string name="events_disable_all">모두 끄기</string>
+    <string name="events_unavailable">지원 자료를 불러올 수 없습니다. 새 활성화는 할 수 없으며 기존 설정 끄기만 가능합니다.</string>
+    <string name="events_invalid_file">설정 파일을 읽을 수 없습니다. 원래 파일과 진행 자료는 보존됩니다.</string>
+    <string name="events_error_conflict">충돌한 변경은 보관했으니 다시 저장해 주세요.</string>
+    <string name="events_error_invalid">이벤트와 기간을 확인해 주세요. 종료는 시작 이후여야 하며 기간은 최대 366일입니다.</string>
+    <string name="events_error_storage">저장 실패 · 다시 시도해 주세요.</string>
+    <string name="events_error_busy">다른 설정 작업이 끝나면 저장 상태를 다시 확인합니다.</string>
+    <string name="nav_console">콘솔</string>
+    <string name="nav_server">서버</string>
+    <string name="nav_users">계정</string>
+    <string name="nav_content">콘텐츠</string>
+    <string name="nav_graphics">그래픽</string>
+    <string name="panel_expanded">펼쳐짐</string>
+    <string name="panel_collapsed">접힘</string>
+    <string name="console_panel_title">서버 연결·자료 검사·진단</string>
+    <string name="console_notice">시작 검사, 게임 연결과 최근 기록을 한곳에서 확인합니다.</string>
+    <string name="graphics_panel_title">그래픽·촬영 화면</string>
+    <string name="events_enable_all">모두 켜기</string>
+    <string name="events_always">상시 진행</string>
+    <string name="events_schedule_editor">일반 계정의 개별 운영 기간 편집</string>
+    <string name="events_media_notice">감상 계정은 처음에 지원 이벤트가 모두 켜집니다. 원하는 이벤트를 자유롭게 켜고 끌 수 있으며 기간 제한은 없습니다.</string>
+    <string name="events_retry_save">변경 내용 다시 저장</string>
+    <string name="help_details">도움말</string>
+    <string name="help_for">%1$s 도움말</string>
+    <string name="official_warning_short">일본 공식 계정 가져오기는 현재 작동하지 않습니다.</string>
+    <string name="official_completed_short">가져오기 완료 · 사용할 계정을 선택하세요.</string>
+    <string name="events_normal_short">여러 이벤트를 한 번에 선택할 수 있습니다.</string>
+    <string name="events_media_short">감상 계정은 기본 모두 켜지며 기간 제한이 없습니다.</string>
+    <string name="events_current_short">서버 설정: %1$s</string>
+    <string name="events_on">등록됨</string>
+    <string name="resource_storage_public_short">리소스: 다운로드 폴더</string>
+    <string name="resource_storage_private_short">리소스: 앱 전용 저장소</string>
+    <string name="library_settings_short">언어 변경 후 같은 언어의 APK로 교체하고 재시작하세요.</string>
+</resources>

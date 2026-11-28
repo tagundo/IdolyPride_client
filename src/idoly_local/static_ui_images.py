@@ -2,7 +2,9 @@
 
 Each original Sprite keeps its object ID, normalized pivot, border and scale.
 New replacements use the translated PNG rectangle, as Localify does; the
-original seven retain their previous padded rectangle for compatibility.
+original seven retain their previous padded rectangle for compatibility. Fixed
+Love button labels use the original UI rectangle with a centered, uniform fit;
+changing their Sprite rectangle alone stretches Korean glyphs in fixed Images.
 A separate RGBA32 texture and full rectangle mesh replace its atlas dependency,
 so no neighbouring atlas pixels are decoded or recompressed. Original image
 translation data remains subject to its upstream terms (NOASSERTION).
@@ -21,6 +23,50 @@ from . import font_assets
 
 POLICY = "korean-static-sprites-v2"
 LEGACY_POLICY = "korean-static-sprites-v1"
+TEXT_LAYOUT_POLICY = "original-rect-love-text-v1"
+# The reported Love buttons retain their original fixed-size Image rectangle.
+# Retain each approved original rectangle, rather than stretching short Korean
+# words to the Japanese caption width. PNG identities stay in the frozen input
+# catalog. Only MAX needs a small uniform downscale; the rest retain every pixel.
+FIXED_LOVE_TEXT = {
+    "love_btn_achievement": ((280, 40), (250, 40)),
+    "love_btn_fin": ((159, 40), (147, 40)),
+    "love_btn_max": ((72, 28), (74, 28)),
+    "love_btn_mission": ((80, 40), (78, 37)),
+    "love_btn_playing": ((240, 48), (96, 48)),
+    "love_btn_present": ((194, 40), (72, 40)),
+    "love_btn_setting": ((80, 40), (75, 40)),
+    "love_btn_status": ((192, 40), (185, 37)),
+    "love_button_start": ((192, 48), (184, 48)),
+    "love_header_level_label": ((96, 32), (96, 28)),
+}
+LOGO_LAYOUT_POLICY = "love-logo-whole-label-uniform-v1"
+LOGO_ANDROID_MEMBER = "assets/bin/Data/ed811ae7dad6e450c8b1306dc4b48c85"
+LOGO_ANDROID_BYTES = 179676
+LOGO_ANDROID_SHA256 = "ad15cfbf1b0781ee27828217101ae96a0d1cd9d8e9151cd03c39c83a308ca243"
+# Exact adjacent Image consumers, independently read from the immutable original
+# Android prefab and iOS resource graph. Retain every full translated PNG and all
+# object/animation identities; fit all four Korean glyphs at one uniform scale.
+LOGO_TRANSFORMS = {
+    "love_label_mo": {"png_size": (31,32), "old_x": -32.0, "x": -35.625, "width": 23.25,
+        "android": {"path_id":939,"owner":104,"parent":693,"image_path_id":1460,"external_id":69,
+            "image_sha256":"544f7f248620d8481155224a35790b27f9865cd16a0823740185a875e71a5c64",
+            "sha256":"a7e435d3000878f8e268a9db2d920443bed136ac28abb904110994dfa8406934"},
+        "ios": {"path_id":253735,"owner":27278,"parent":196549,
+            "sha256":"405a65bd45c8fc6b9def4cc5bd50d7950d5b1f63d93b860b363d09b6f0ce7c9f"}},
+    "love_label_shi": {"png_size": (32,32), "old_x": 0.0, "x": -12.0, "width": 24.0,
+        "android": {"path_id":849,"owner":88,"parent":693,"image_path_id":1403,"external_id":63,
+            "image_sha256":"5ac064f1f99112eeb601083eac1cc021ad04074ab542eaa8a3fcb40a9f97057c",
+            "sha256":"3f1edd90e9d074168b9377af51bbcb822d15e52177d998eddf9fac9c01af457c"},
+        "ios": {"path_id":231861,"owner":24904,"parent":196549,
+            "sha256":"08479eb31ff6e4c083ec658646706dd6fe2ca15ca9f33fd8676ca213f668d50f"}},
+    "love_label_koi": {"png_size": (63,32), "old_x": 32.0, "x": 23.625, "width": 47.25,
+        "android": {"path_id":935,"owner":387,"parent":693,"image_path_id":1235,"external_id":39,
+            "image_sha256":"3527802b3273025390294576c3f2951918b2c02c24efd418ab9ba8c7badd40f8",
+            "sha256":"cd74807fca2b8e5c561c28fc15615c4b64b6f97e9da8b23b495fb7212b1f16a0"},
+        "ios": {"path_id":251370,"owner":100870,"parent":196549,
+            "sha256":"27181f442ff15fce8493d10564b115e75bb16e0afc2dbdc14748c53128ffe4c5"}},
+}
 SOURCE_REPOSITORY = "https://github.com/CyleAR/ipr-translation-data-ko"
 SOURCE_REVISION = "f6e5689bcd6878d962996edfd390c1442b926c0f"
 TEXTURE_TEMPLATE_BYTES = 8340
@@ -58,6 +104,22 @@ LEGACY_PROFILES = (
 def _need(ok, message):
     if not ok:
         raise ValueError(message)
+
+
+def _text_layout(profile):
+    expected = FIXED_LOVE_TEXT.get(profile["name"])
+    if expected is None:
+        return profile
+    size, png_size = expected
+    targets = ([profile["android"]] if profile["android"] is not None else []) + profile["ios"]
+    _need(tuple(profile["png_size"]) == png_size and targets
+          and all(tuple(target["source_layout"]["sprite_size"]) == size for target in targets),
+          "Fixed Love text layout differs from the original audited rectangle")
+    scale = min(1., size[0] / png_size[0], size[1] / png_size[1])
+    content = tuple(max(1, min(bound, round(value * scale))) for bound, value in zip(size, png_size))
+    return {**profile, "sprite_size": list(size), "content_size": list(content),
+            "padding_offset": [(bound - value) // 2 for bound, value in zip(size, content)],
+            "layout_policy": TEXT_LAYOUT_POLICY, "render_key_policy": TEXT_LAYOUT_POLICY}
 
 
 def _profiles():
@@ -107,7 +169,7 @@ def _profiles():
     # Preserve the seven v1 texture IDs as well as their private GUIDs/pixels.
     order = [row["name"] for row in LEGACY_PROFILES]
     order += sorted(set(by_name) - set(order))
-    return tuple(by_name[name] for name in order)
+    return tuple(_text_layout(by_name[name]) for name in order)
 
 
 PROFILES = _profiles()
@@ -146,6 +208,15 @@ def _canvas(png, profile):
               and source.size == tuple(profile["png_size"]),
               "Translated sprite PNG decode differs")
         image = source.convert("RGBA")
+    content = tuple(profile.get("content_size", profile["png_size"]))
+    if content != image.size:
+        scale = min(1., profile["sprite_size"][0] / image.width, profile["sprite_size"][1] / image.height)
+        expected = tuple(max(1, min(bound, round(value * scale)))
+                         for bound, value in zip(profile["sprite_size"], image.size))
+        _need(profile.get("layout_policy") == TEXT_LAYOUT_POLICY and content == expected
+              and all(0 < fitted <= original for fitted, original in zip(content, image.size)),
+              "Only audited Love text may use a bounded uniform downscale")
+        image = image.resize(content, Image.Resampling.LANCZOS)
     canvas = Image.new("RGBA", profile["sprite_size"], (0, 0, 0, 0))
     x, y = profile["padding_offset"]
     _need(0 <= x and 0 <= y and x + image.width <= canvas.width and y + image.height <= canvas.height,
@@ -328,13 +399,96 @@ def _proof(platform, language, rows):
             "runtime_image_hooks": False, "atlas_pixels_modified": False,
             "original_sprite_IDs_preserved": True,
             "original_pivots_borders_pixels_per_unit_preserved": True,
-            "layout_policy": "preserved-v1-layout or Localify PNG rectangle",
+            "layout_policy": "preserved-v1-layout, Localify PNG rectangle, or fixed Love text aspect",
+            "fixed_text_layout_policy": TEXT_LAYOUT_POLICY,
+            "fixed_text_sprites": sum(row["layout_policy"] == TEXT_LAYOUT_POLICY for row in rows),
             "original_layout_preserved": all(row["original_layout_size"] == row["layout_size"] for row in rows),
             "texture_format": "RGBA32", "lossy_recompression": False,
             "private_sprite_render_data_keys": True}
 
 
-def android_members(archive, *, language="ja", image_dir=None):
+def _logo_rect(raw, name, platform):
+    target = LOGO_TRANSFORMS[name]; source = target[platform]
+    _need(len(raw) == 108 and _sha(raw) == source["sha256"]
+          and struct.unpack_from("<iq",raw) == (0,source["owner"])
+          and struct.unpack_from("<iq",raw,56) == (0,source["parent"])
+          and struct.unpack_from("<10f",raw,68) == (0.5,0.5,0.5,0.5,target["old_x"],0.0,32.0,32.0,0.5,0.5),
+          "Original Love logo RectTransform differs")
+    _need(target["width"] == target["png_size"][0]*0.75 and target["png_size"][1]*0.75 == 24.0,
+          "Love logo glyphs must share one uniform scale")
+    updated = raw[:84] + struct.pack("<4f",target["x"],0.0,target["width"],24.0) + raw[100:]
+    _need(len(updated)==len(raw) and updated[:84]==raw[:84] and updated[100:]==raw[100:],
+          "Love logo changed outside its position and size")
+    return updated, {"name":name,"path_id":source["path_id"],"class_id":224,
+        "input_sha256":_sha(raw),"output_sha256":_sha(updated),"object_bytes":108,
+        "original_position":[target["old_x"],0.0],"position":[target["x"],0.0],
+        "original_size":[32.0,32.0],"size":[target["width"],24.0],
+        "full_png_size":list(target["png_size"]),"uniform_scale":0.75,
+        "only_position_and_size_changed":True}
+
+
+def _logo_summary(platform, transforms, members):
+    _need(len(transforms)==3 and {row["name"] for row in transforms}==set(LOGO_TRANSFORMS),
+          "Complete Love logo layout proof required")
+    return {"policy":LOGO_LAYOUT_POLICY,"platform":platform,"uniform_scale":0.75,
+        "original_frame":[96.0,32.0],"content_size":[94.5,24.0],
+        "full_translated_glyphs_preserved":True,"all_other_object_bytes_identical":True,
+        "transforms":transforms,"members":members,"runtime_gameplay_tested":False}
+
+
+def _android_logo(archive, existing_replacements):
+    UnityPy, _ = _imports()
+    name=LOGO_ANDROID_MEMBER
+    _need(archive.namelist().count(name)==1 and archive.getinfo(name).file_size==LOGO_ANDROID_BYTES,
+          "Original Love logo prefab inventory differs")
+    original=archive.read(name)
+    _need(_sha(original)==LOGO_ANDROID_SHA256,"Original Love logo prefab fingerprint differs")
+    env=UnityPy.load(original); original_asset=next(iter(env.files.values()))
+    _need(len(env.files)==1 and len(original_asset.objects)==1472,"Original Love logo prefab graph differs")
+    for label,target in LOGO_TRANSFORMS.items():
+        entry=target["android"]; obj=original_asset.objects.get(entry["image_path_id"])
+        _need(obj is not None and obj.class_id==114,"Original Love logo Image is missing")
+        raw=obj.get_raw_data()
+        _need(len(raw)==136 and _sha(raw)==entry["image_sha256"]
+              and struct.unpack_from("<iq",raw)==(0,entry["owner"])
+              and struct.unpack_from("<iq",raw,16)==(1,9028)
+              and struct.unpack_from("<iq",raw,88)==(entry["external_id"],1),
+              "Original Love logo Image consumer differs")
+    current=(existing_replacements or {}).get(name,original)
+    _need(type(current) is bytes and len(current)<=2*1024*1024,"Bounded composed Love prefab required")
+    current_env=UnityPy.load(current); asset=next(iter(current_env.files.values()))
+    _need(len(current_env.files)==1 and set(asset.objects)==set(original_asset.objects),
+          "Composed Love logo prefab object identities differ")
+    updated=bytearray(current); rows=[]; spans=[]
+    for label,target in LOGO_TRANSFORMS.items():
+        entry=target["android"]; obj=asset.objects.get(entry["path_id"])
+        image=asset.objects.get(entry["image_path_id"])
+        _need(image is not None and image.class_id==114 and _sha(image.get_raw_data())==entry["image_sha256"],
+              "Composed Love logo Image consumer differs")
+        _need(obj is not None and obj.class_id==224,"Original Love logo RectTransform is missing")
+        raw=obj.get_raw_data(); replacement,proof=_logo_rect(raw,label,"android")
+        offset=obj.byte_start
+        _need(0<=offset<=len(current)-108 and current[offset:offset+108]==raw,
+              "Composed Love logo object span differs")
+        updated[offset+84:offset+100]=replacement[84:100]
+        spans.append((offset+84,offset+100));rows.append(proof)
+    before=0
+    for start,end in sorted(spans):
+        _need(before<=start and updated[before:start]==current[before:start],"Love prefab changed outside its three field spans")
+        before=end
+    _need(updated[before:]==current[before:] and len(updated)==len(current),"Love prefab tail changed")
+    saved=bytes(updated); check=UnityPy.load(saved); checked=next(iter(check.files.values()))
+    for proof in rows:
+        obj=checked.objects[proof["path_id"]]; value=obj.read()
+        _need(_sha(obj.get_raw_data())==proof["output_sha256"]
+              and [value.m_AnchoredPosition.x,value.m_AnchoredPosition.y]==proof["position"]
+              and [value.m_SizeDelta.x,value.m_SizeDelta.y]==proof["size"],"Love logo RectTransform readback differs")
+    member={"member":name,"original_sha256":LOGO_ANDROID_SHA256,"input_sha256":_sha(current),
+        "output_sha256":_sha(saved),"output_bytes":len(saved),"only_three_position_size_spans_changed":True}
+    return {name:saved},_logo_summary("android",rows,[member])
+
+
+def android_members(archive, *, language="ja", image_dir=None, existing_replacements=None):
     _need(language in ("ja", "ko", "en"), "Unknown static image language")
     if language != "ko":
         return {}, _proof("android", language, [])
@@ -381,13 +535,32 @@ def android_members(archive, *, language="ja", image_dir=None):
                      "layout_size": list(profile["sprite_size"]), "png_size": list(profile["png_size"]),
                      "layout_policy": profile["layout_policy"],
                      "transparent_padding_offset": list(profile["padding_offset"]),
+                     "content_size": list(profile.get("content_size", profile["png_size"])),
+                     "PNG_resampled": profile.get("content_size", profile["png_size"]) != profile["png_size"],
                      "readback_pixel_exact": True})
         del env, source, tiny, check
-    return replacements, _proof("android", language, rows)
+    logo_members, logo_proof = _android_logo(archive,existing_replacements)
+    _need(not replacements.keys() & logo_members.keys(), "Love prefab collides with Sprite members")
+    replacements.update(logo_members)
+    proof=_proof("android",language,rows);proof["logo_layout"]=logo_proof
+    return replacements, proof
 
 
 def _ios_originals(archive, member, data_offset):
-    targets = sorted((target["relative_offset"], target) for profile in PROFILES for target in profile["ios"])
+    targets = [(target["relative_offset"], target) for profile in PROFILES for target in profile["ios"]]
+    from .ui_assets import ASSETS, _metadata
+    profile=ASSETS["ios"]; logo={row["ios"]["path_id"]:row["ios"] for row in LOGO_TRANSFORMS.values()}
+    with archive.open(member) as source:
+        metadata=_metadata(source,profile)
+    found=set()
+    for index in range(profile["object_count"]):
+        path,relative,size,_=struct.unpack_from("<qQIi",metadata,profile["table_offset"]+index*24)
+        if path in logo:
+            _need(path not in found and size==108,"Original Love logo transform inventory differs")
+            found.add(path);targets.append((relative,{"path_id":path,"relative_offset":relative,"bytes":size,
+                "object_sha256":logo[path]["sha256"]}))
+    _need(found==set(logo),"Original Love logo transform is missing")
+    targets.sort(key=lambda item:item[0]);del metadata
     originals = {}
     with archive.open(member) as source:
         position = 0
@@ -440,7 +613,15 @@ def ios_patches(archive, *, language="ja", image_dir=None):
                          "layout_policy": translated["layout_policy"],
                          "png_size": list(translated["png_size"]),
                          "transparent_padding_offset": list(translated["padding_offset"]),
+                         "content_size": list(translated.get("content_size", translated["png_size"])),
+                         "PNG_resampled": translated.get("content_size", translated["png_size"]) != translated["png_size"],
                          "readback_pixel_exact": True})
             del tiny
-    _need(not originals, "Original iOS Sprite inventory was not fully consumed")
-    return replacements, appended, _proof("ios", language, rows)
+    transforms=[]
+    for name,target in LOGO_TRANSFORMS.items():
+        path=target["ios"]["path_id"]; raw=originals.pop(path)
+        updated,proof=_logo_rect(raw,name,"ios")
+        replacements[path]={"input_sha256":target["ios"]["sha256"],"raw":updated};transforms.append(proof)
+    _need(not originals, "Original iOS Sprite and logo inventory was not fully consumed")
+    proof=_proof("ios",language,rows);proof["logo_layout"]=_logo_summary("ios",transforms,[])
+    return replacements, appended, proof

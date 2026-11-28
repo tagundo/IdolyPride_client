@@ -1,0 +1,55 @@
+{
+  "adv_count": 3114,
+  "archive": {
+    "bytes": 160873732,
+    "prefix": "ipr-translation-data-ko-11ecceb451833b81c614f666a3667be0d08e0281/local-files/",
+    "sha256": "9a52f6a05c460f7fd22146ebd5076a20b43c7a992edf9143e5ab70c3a7eb95ea",
+    "url": "https://codeload.github.com/CyleAR/ipr-translation-data-ko/zip/11ecceb451833b81c614f666a3667be0d08e0281"
+  },
+  "platforms": {
+    "android": {
+      "base": {
+        "bytes": 125709184,
+        "sha256": "22c166ffc3bbbc9e38739cea21fbfd7a87436a166ed56cdb7ee650acfc222dec"
+      },
+      "image_count": 667,
+      "original_manifest": {
+        "bytes": 5882188,
+        "path": "data/public-octo/manifest.pb",
+        "sha256": "51dcb276625e9e669f43715cb69d92ef2cffadf1e7ecc7a3b4130f3db42c2ead"
+      },
+      "output": {
+        "bytes": 126137138,
+        "manifest_sha256": "18902d8a1a4db03ef9bcfb9134ad9449aad3f193d4f61e8ee19f7619dd6cfc21",
+        "sha256": "2e963b8ab88cec949a8ad483603bd40ec1172eb839c1e234e8f8f2cb98b9e3f6"
+      },
+      "revision": 1099
+    },
+    "ios": {
+      "base": {
+        "bytes": 125717042,
+        "sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72"
+      },
+      "image_count": 667,
+      "original_manifest": {
+        "bytes": 5879111,
+        "path": "data/public-octo-ios/manifest.pb",
+        "sha256": "2696d17d4f6ba5c6deac43f6b16ab9e04a594d327699d7c9ffee8f673ea2edf3"
+      },
+      "output": {
+        "bytes": 126145109,
+        "manifest_sha256": "f49c39d490ab8e70d79dd223ad6e3c7a2e29523d8dbbe874c8cd30aef405e099",
+        "sha256": "ad3ffddd7ebdb2b3278f79293a11073d2beb15fef53c6ad095dbce51a0e42304"
+      },
+      "revision": 1171
+    }
+  },
+  "schema": 1,
+  "source": {
+    "data_terms": "NOASSERTION",
+    "license_note": "No root LICENSE or attribution document exists in this pinned upstream data repository; no additional license is asserted.",
+    "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+    "revision": "11ecceb451833b81c614f666a3667be0d08e0281"
+  },
+  "version": "ko-2026.11.16-11ecceb451833"
+}

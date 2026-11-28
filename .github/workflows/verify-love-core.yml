@@ -1,0 +1,215 @@
+name: Love core and account compatibility checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/ios-unified-server
+    paths:
+      - .github/workflows/verify-love-core.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: love-core-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    # Match the pinned browser's supported OS; ubuntu-latest now resolves 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONUNBUFFERED: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      UV_NO_PROGRESS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked Python dependencies
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Prepare pinned browser outside project dependencies
+        timeout-minutes: 5
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/idoly-layout-browsers
+        run: |
+          python3 -m venv "$RUNNER_TEMP/idoly-layout-python"
+          "$RUNNER_TEMP/idoly-layout-python/bin/python" -m pip install --disable-pip-version-check playwright==1.56.0 pyee==13.0.0 greenlet==3.2.4
+          "$RUNNER_TEMP/idoly-layout-python/bin/python" -m playwright install --with-deps chromium
+      - name: Observe actual settings layout at portrait landscape and desktop sizes
+        timeout-minutes: 3
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/idoly-layout-browsers
+        run: >-
+          "$RUNNER_TEMP/idoly-layout-python/bin/python" tools/check_settings_layout.py
+          --output "$RUNNER_TEMP/idoly-settings-layout"
+      - name: Keep bounded settings layout observations
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: settings-layout-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-settings-layout
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Prepare actual pinned 6.1.1 protocol
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROTOCOL_PAYLOAD: ${{ runner.temp }}/idoly-public-protocol-payload.zip
+        run: |
+          gh api repos/tagundo/IdolyPride_client/releases/assets/732944285 \
+            --header 'Accept: application/octet-stream' > "$PROTOCOL_PAYLOAD"
+          uv run --locked --offline python macos-preserver/extract_descriptor.py \
+            --payload "$PROTOCOL_PAYLOAD" --output data/protocol/idolypride-6.1.1.pb
+          rm "$PROTOCOL_PAYLOAD"
+      - name: Fetch the frozen latest cohort for real media startup contracts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --locked --all-extras python - <<'PY'
+          import os
+          from pathlib import Path
+          from tools import latest_server_data_pin as latest
+          expected = {"bytes":198675046,"sha256":"3ea45bd9fba07d35cf366d50e8bc7604aeb67ea0aa1cd55f751474a75724dbce"}
+          assert latest.output_pin() == expected
+          work = Path(os.environ['RUNNER_TEMP']) / 'idoly-latest-media'
+          work.mkdir(mode=0o700)
+          payload = work / 'ServerData.zip'
+          fetched = latest.fetch_overlay(payload)
+          assert {key:fetched[key] for key in ('bytes','sha256')} == expected
+          verified = latest.verify_payload(payload)
+          assert {key:verified[key] for key in ('bytes','sha256')} == expected
+          # The registered whole blob is the complete latest ZIP. BASE inputs,
+          # their three mandatory contracts and their reports stay unchanged.
+          PY
+      - name: Require both actual latest Korean media startup and retention contracts
+        shell: bash
+        env:
+          IDOLY_LATEST_MEDIA_PAYLOAD: ${{ runner.temp }}/idoly-latest-media/ServerData.zip
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/idoly-portable"
+          uv run --locked --all-extras python -m pytest -q \
+            tests/test_latest_media_startup.py \
+            --junitxml="$RUNNER_TEMP/idoly-portable/latest-media-contracts.xml" \
+            | tee "$RUNNER_TEMP/idoly-portable/latest-media-contracts.txt"
+          python3 - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          root = ET.parse(pathlib.Path(os.environ['RUNNER_TEMP'])/'idoly-portable/latest-media-contracts.xml').getroot()
+          expected = {'test_actual_latest_media_preparation_and_restart_preserve_accounts[' + platform + ']'
+                      for platform in ('android','ios')}
+          cases = list(root.iter('testcase'))
+          assert len(cases) == 2 and {case.attrib['name'] for case in cases} == expected
+          assert not any(list(root.iter(tag)) for tag in ('failure','error','skipped'))
+          assert all(int(suite.get(key,'0')) == 0 for suite in root.iter('testsuite')
+                     for key in ('failures','errors','skipped'))
+          PY
+      - name: Verify finite offline Love and account contracts
+        # All event cases use synthetic inputs and local state. No official
+        # account authentication, native build, or public release is performed.
+        run: |
+          tests=(
+            tests/test_ios_unified_probe_navigation.py
+            tests/test_startup_receipt.py
+            tests/test_startup_receipt_handoff.py
+            tests/test_android_event_selection_queue.py
+            tests/test_android_interface_languages.py
+            tests/test_android_interface_qa.py
+            tests/test_release_interface_contract.py
+            tests/test_android_official_service_harness.py
+            tests/test_android_account_picker_lifecycle.py
+            tests/test_ios_unified_web.py
+            tests/test_love.py
+            tests/test_love_application.py
+            tests/test_story_application.py
+            tests/test_love_state.py
+            tests/test_event_settings.py
+            tests/test_account_manager.py
+            tests/test_account_state_backup.py
+            tests/test_profiles.py
+            tests/test_official_import.py
+            tests/test_official_master_preflight.py
+            tests/test_official_import_original_protocol.py
+            tests/test_love_catalog.py
+            tests/test_love_translation.py
+            tests/test_android_bundle_love.py
+            macos-server/tests/test_macos_build_diagnostics.py
+            android-server/ci/test_launcher_guard.py
+            tests/test_release_preference_gate.py
+            tests/test_public_payload.py
+            tests/test_public_payload_transaction.py
+            tests/test_public_cohort_support.py
+            tests/test_love_compatibility.py
+            tests/test_latest_server_data_pin.py
+            tests/test_latest_server_data_pin_checked_in.py
+            tests/test_prepare_latest_server_data.py
+            tests/test_register_latest_server_data_lfs.py
+            tests/test_story_read_semantics.py
+            tests/test_latest_dream_semantics.py
+            tests/test_latest_main_live_semantics.py
+            tests/test_master_field_aliases.py
+            tests/test_media_access.py
+            tests/test_excursion.py
+            tests/test_media_panorama.py
+            tests/test_story_reads.py
+            tests/test_media_stories.py
+            tests/test_dream.py
+            tests/test_live_input.py
+            tests/test_resource_archive.py
+            tests/test_resource_library.py
+            tests/test_resource_translation_runtime.py
+            tests/test_resource_translation_rebase.py
+            tests/test_octo_runtime_latest.py
+            macos-server/tests/test_macos_latest_payload.py
+            tests/test_stage_private_candidate.py
+            tests/test_love_server_data_pin.py
+            tests/test_love_server_data_pin_checked_in.py
+            tests/test_prepare_love_server_data.py
+            tests/test_build_android_server_manual.py
+            tests/test_android_server_capacity.py
+            tests/test_ios_unified_ci.py
+            tests/test_ios_unified_delivery.py
+            tests/test_ios_unified_packaging.py
+            tests/test_publish_optimized_release.py
+            tests/test_build_server_payload.py
+            tests/test_event_master_data.py
+            tests/test_android_event_settings.py
+            tests/test_ios_unified_event_settings.py
+            tests/test_ios_unified_accounts.py
+            tests/test_ios_unified_probe_smoke.py
+            tests/test_ios_unified_ui_test_driver.py
+            tests/test_release_event_contract.py
+            tests/test_release_platform_builds.py
+            macos-server/tests/test_macos_event_settings.py
+            macos-server/tests/test_macos_account_schema.py
+            android-server/ci/test_account_management_qa.py
+            android-server/ci/test_event_settings_qa.py
+          )
+          for test_path in "${tests[@]}"; do
+            if [ ! -f "$test_path" ]; then
+              echo "::error file=$test_path::Required Love/account test file is missing"
+              exit 1
+            fi
+          done
+          uv run --locked --offline --all-extras python -m pytest -q \
+            "${tests[@]}" --junitxml="$RUNNER_TEMP/love-core-junit.xml"
+      - name: Keep short-lived test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: love-core-junit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/love-core-junit.xml
+            ${{ runner.temp }}/idoly-portable/latest-media-contracts.xml
+            ${{ runner.temp }}/idoly-portable/latest-media-contracts.txt
+          if-no-files-found: error
+          retention-days: 3

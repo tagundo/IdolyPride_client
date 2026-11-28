@@ -481,3 +481,134 @@ def test_real_mana_and_collaborators_receive_the_native_fan_average_minimum_with
     assert all((row.lightFanAmount, row.middleFanAmount, row.heavyFanAmount) == (0, 0, 0)
                for row in snapshot.characters)
     assert sources["Setting"] == original_setting
+
+
+def test_media_decoration_upgrade_adds_only_missing_rows_and_preserves_selection_and_unknown_fields(
+        schema, master, snapshot):
+    original_plan = prepare_media_inventory(schema, master[0])
+    assert original_plan.decoration_ids == ()
+    assert apply_media_inventory(snapshot, original_plan, obtained_time=NOW)
+    snapshot.profile.decorationId = "deco-a"
+    snapshot.decorations.add(decorationId="deco-a").MergeFromString(UNKNOWN)
+    snapshot.decorations.add(decorationId="kept-legacy-decoration").MergeFromString(UNKNOWN)
+    source = master[0] / "Decoration.json"
+    source.write_text(json.dumps([{"id": "deco-b"}, {"id": "deco-a"}]))
+    plan = prepare_media_inventory(schema, master[0])
+    assert plan.decoration_ids == ("deco-a", "deco-b")
+    expected = type(snapshot).FromString(snapshot.SerializeToString())
+    expected.decorations.add(decorationId="deco-b")
+    before_master = source.read_bytes()
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW + 1)
+    assert snapshot.SerializeToString() == expected.SerializeToString()
+    assert UNKNOWN in snapshot.decorations[0].SerializeToString()
+    assert snapshot.profile.decorationId == "deco-a"
+    before_retry = snapshot.SerializeToString()
+    assert not apply_media_inventory(snapshot, plan, obtained_time=NOW + 2)
+    assert snapshot.SerializeToString() == before_retry and source.read_bytes() == before_master
+
+
+@pytest.mark.parametrize("invalid", ("empty", "duplicate", "missing-id", "empty-id", "wrong-shape", "broken-link"))
+def test_invalid_custom_decoration_master_fails_before_any_media_inventory_change(
+        schema, master, snapshot, invalid):
+    source = master[0] / "Decoration.json"
+    if invalid == "broken-link":
+        source.symlink_to(master[0] / "missing-decoration.json")
+    else:
+        value = {"empty": [], "duplicate": [{"id": "a"}, {"id": "a"}], "missing-id": [{}],
+                 "empty-id": [{"id": ""}], "wrong-shape": {"id": "a"}}[invalid]
+        source.write_text(json.dumps(value))
+    before = snapshot.SerializeToString()
+    with pytest.raises(RpcFailure) as error:
+        prepare_media_inventory(schema, master[0])
+    assert error.value.code == RpcCode.FAILED_PRECONDITION
+    assert snapshot.SerializeToString() == before
+
+
+@pytest.mark.parametrize("bad", (("deco-a", "deco-a"), ("",), ["deco-a"]))
+def test_invalid_prepared_decoration_identities_cannot_partially_apply_other_media_grants(
+        schema, master, snapshot, bad):
+    from dataclasses import replace
+    plan = replace(prepare_media_inventory(schema, master[0]), decoration_ids=bad)
+    before = snapshot.SerializeToString()
+    with pytest.raises(RpcFailure) as error:
+        apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    assert error.value.code == RpcCode.FAILED_PRECONDITION and snapshot.SerializeToString() == before
+
+
+@pytest.mark.parametrize("invalid", ("empty", "duplicate"))
+def test_invalid_existing_decoration_inventory_cannot_partially_add_characters_or_cards(
+        schema, master, snapshot, invalid):
+    (master[0] / "Decoration.json").write_text('[{"id":"deco-a"},{"id":"deco-b"}]')
+    plan = prepare_media_inventory(schema, master[0])
+    snapshot.decorations.add(decorationId="deco-a")
+    snapshot.decorations.add(decorationId="" if invalid == "empty" else "deco-a")
+    before = snapshot.SerializeToString()
+    with pytest.raises(RpcFailure) as error:
+        apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    assert error.value.code == RpcCode.FAILED_PRECONDITION and snapshot.SerializeToString() == before
+
+
+def test_custom_catalog_without_decoration_table_preserves_old_plan_constructor_and_existing_rows(
+        schema, master, snapshot):
+    from idoly_local.media_profile import MediaInventoryPlan
+    plan = prepare_media_inventory(schema, master[0])
+    assert plan.decoration_ids == ()
+    old = MediaInventoryPlan(plan.schema_fingerprint, plan.master_version, plan.character_ids,
+        plan.costume_ids, plan.hair_ids, plan.card_ids, plan._appearances, plan._cards,
+        plan._stamina, plan._snapshot_type)
+    assert old.decoration_ids == ()
+    retained = snapshot.decorations.add(decorationId="kept-decoration")
+    retained.MergeFromString(UNKNOWN)
+    raw = retained.SerializeToString()
+    assert apply_media_inventory(snapshot, old, obtained_time=NOW)
+    assert len(snapshot.decorations) == 1 and snapshot.decorations[0].SerializeToString() == raw
+
+
+def test_schema_without_decoration_inventory_fails_clearly_for_present_decoration_master(
+        master, tmp_path):
+    from test_gameplay import synthetic_schema
+    (master[0] / "Decoration.json").write_text('[{"id":"deco-a"}]')
+    old = synthetic_schema(tmp_path / "old-protocol.pb")
+    assert "decorations" not in old.response_type("/api.User/Get").DESCRIPTOR.fields_by_name
+    with pytest.raises(RpcFailure) as error:
+        prepare_media_inventory(old, master[0])
+    assert error.value.code == RpcCode.FAILED_PRECONDITION
+    assert "schema has no decoration inventory" in str(error.value)
+
+
+def test_actual_pinned_media_inventory_includes_all_verified_decorations(schema, snapshot):
+    import os
+    from idoly_local import preference_master_data as data
+    root = Path(__file__).resolve().parents[1]
+    explicit = os.environ.get("IDOLY_PREFERENCE_MASTER_DIR")
+    directory = Path(explicit) if explicit else root / "data/master-json"
+    required = tuple(directory / name for name in ("Card.json", "Costume.json", "!version.txt"))
+    if not all(path.is_file() for path in required):
+        if explicit:
+            pytest.fail("The required pinned real media-master gate input is incomplete")
+        pytest.skip("Original public master catalog is unavailable")
+    assert (directory / "!version.txt").read_text().strip() == data.MASTER_VERSION
+    expected_ids = tuple(sorted(row["id"] for row in json.loads(data.ROWS_JSON["Decoration"])))
+    assert len(expected_ids) == 361
+    plan = prepare_media_inventory(schema, directory)
+    assert plan.decoration_ids == expected_ids
+    original = snapshot.decorations.add(decorationId=expected_ids[0])
+    original.MergeFromString(UNKNOWN)
+    retained = original.SerializeToString()
+    snapshot.decorations.add(decorationId="kept-custom-decoration").MergeFromString(UNKNOWN)
+    snapshot.profile.decorationId = expected_ids[0]
+    protected = type(snapshot).FromString(snapshot.SerializeToString())
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    current = {row.decorationId: row for row in snapshot.decorations}
+    assert len(current) == 362 and set(expected_ids) <= set(current)
+    assert current[expected_ids[0]].SerializeToString() == retained
+    assert snapshot.profile == protected.profile
+    inventory_fields = ("characters", "costumes", "hairs", "cards", "decorations")
+    rest = type(snapshot).FromString(snapshot.SerializeToString())
+    for field in inventory_fields:
+        rest.ClearField(field)
+        protected.ClearField(field)
+    assert rest.SerializeToString() == protected.SerializeToString()
+    before_retry = snapshot.SerializeToString()
+    assert not apply_media_inventory(snapshot, plan, obtained_time=NOW + 1)
+    assert snapshot.SerializeToString() == before_retry

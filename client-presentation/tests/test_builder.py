@@ -310,3 +310,33 @@ def test_static_runtime_notice_is_in_both_profiles_and_dependency_notices_are_pi
     assert all(value in notice for value in (b"Component: compiler-rt", b"Component: libc++abi", b"Component: libunwind",
         b"LLVM Exceptions to the Apache 2.0 License", b"Copyright (c) 2009-2019", b"Copyright (c) 2011-2019"))
     assert (tool.LICENSE_PREFIX + "SHADOWHOOK-LICENSE" in members) == (profile == "resources")
+
+
+@pytest.mark.parametrize("explicit", (True, False))
+def test_build_resource_callback_is_explicit_and_default_strict_guard_is_preserved(tmp_path, monkeypatch, explicit):
+    import os
+    from types import SimpleNamespace
+    import build_android_server_manual as limits
+    base, native = tmp_path / "base.apk", tmp_path / "native.so"
+    base.write_bytes(b"stable base fixture"); native.write_bytes(b"stable native fixture")
+    monkeypatch.setattr(tool, "frozen_sources", lambda *_: {})
+    monkeypatch.setattr(tool, "verified_native", lambda *_: {})
+    monkeypatch.setattr(tool, "check_elf", lambda *_: [16384])
+    class StopAtGuard(Exception):
+        pass
+    calls = []
+    def strict(root):
+        calls.append(("strict", root)); raise StopAtGuard()
+    def selected(root):
+        calls.append(("selected", root)); raise StopAtGuard()
+    monkeypatch.setattr(limits, "_resource_guard", strict)
+    args = SimpleNamespace(source_commit="1" * 40, profile="diagnostics", base_apk=base,
+        native_library=native, output=tmp_path / "output.apk", jdk_bin=tmp_path,
+        build_tools=tmp_path, android_jar=tmp_path / "android.jar")
+    old_umask = os.umask(0o077)
+    try:
+        with pytest.raises(StopAtGuard):
+            tool.build(args, **({"resource_guard": selected} if explicit else {}))
+    finally:
+        os.umask(old_umask)
+    assert calls == [("selected" if explicit else "strict", tool.ROOT)]

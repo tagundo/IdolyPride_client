@@ -1,0 +1,74 @@
+name: Inspect NPC model metadata
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/audit-npc-models.yml
+      - tools/audit_npc_models.py
+      - tests/test_npc_model_audit.py
+permissions:
+  contents: read
+concurrency:
+  group: npc-model-audit-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked host verification dependencies
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Verify metadata and source boundaries without model loading
+        run: uv run --locked python -m pytest -q tests/test_npc_model_audit.py --junitxml="$RUNNER_TEMP/idoly-npc-unit.xml"
+      - name: Fetch SHA-pinned public server input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          uv run --locked python tools/release_platform_builds.py
+          --platform inputs --source-commit "$GITHUB_SHA"
+          --work "$RUNNER_TEMP/idoly-npc-input-fetch"
+          --output "$RUNNER_TEMP/idoly-npc-inputs"
+      - name: Prepare isolated pinned Unity reader
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/idoly-npc-reader"
+          "$RUNNER_TEMP/idoly-npc-reader/bin/python" -m pip install --disable-pip-version-check --no-cache-dir UnityPy==1.25.4 protobuf==7.36.2 pycryptodome==3.23.0
+          "$RUNNER_TEMP/idoly-npc-reader/bin/python" -m pip freeze > "$RUNNER_TEMP/idoly-npc-environment.txt"
+      - name: Inspect twelve verified public model parts in isolated workers
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+          MKL_NUM_THREADS: '1'
+          NUMEXPR_NUM_THREADS: '1'
+        run: >-
+          "$RUNNER_TEMP/idoly-npc-reader/bin/python" -B tools/audit_npc_models.py
+          --server-data "$RUNNER_TEMP/idoly-npc-inputs/ServerData.zip"
+          --source-commit "$GITHUB_SHA"
+          --work "$RUNNER_TEMP/idoly-npc-audit"
+          --output "$RUNNER_TEMP/idoly-npc-audit.json"
+      - name: Retain bounded metadata only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npc-model-audit-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/idoly-npc-audit.json
+            ${{ runner.temp }}/idoly-npc-audit/metadata/*.json
+            ${{ runner.temp }}/idoly-npc-environment.txt
+            ${{ runner.temp }}/idoly-npc-unit.xml
+          if-no-files-found: warn
+          retention-days: 14

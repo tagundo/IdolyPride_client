@@ -40,4 +40,4 @@ def test_font_installation_precedes_startup_delay_and_engine_calls_follow_origin
     publisher = (ios / "static_install.hpp").read_text()
     assert publisher.index("load_calls();") < publisher.index("*hook.original=") < publisher.index("__atomic_store_n(")
     assert "HOOK(font_awake,font_awake_hook,font_awake_original)" in publisher
-    assert "native/hangul_font.hpp" in (ios / "build_native.py").read_text()
+    assert "glob('*.hpp')" in (ios / "build_native.py").read_text()

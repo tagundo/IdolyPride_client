@@ -45,13 +45,15 @@ def minimal_schema(path):
             + [("campaignDropRewardIds", 9, True)])
     message("AreaInfo", fields(("areaId", 9), ("unlocked", 8)) + [("quests", "QuestInfo", True)])
     message("AreaGroupInfo", fields(("areaGroupId", 9)) + [("areas", "AreaInfo", True)])
+    message("TowerAreaInfo", fields(("area", "AreaInfo"), ("currentTowerQuestId", 9)))
     message("PvpInfo", fields(("rank", 5), ("remainingChallengeCount", 5), ("latestPvpSeason", "Empty")))
     message("HierarchyInfo", fields(("currentDetailGradeId", 9), ("currentRank", 5)))
     message("CommonResponse", fields(("updatedData", "Empty"), ("deletedData", "Empty")))
     message("QuestTopResponse", [("mainAreaGroups", "AreaGroupInfo", True)]
             + fields(("pvpInfo", "PvpInfo"), ("hierarchyNotiInfo", "HierarchyInfo"),
                      ("towerArea", "AreaInfo"), ("contestArea", "AreaInfo"), ("gvgInfo", "Empty"),
-                     ("isDailyPlayable", 8), ("commonResponse", "CommonResponse")))
+                     ("isDailyPlayable", 8), ("currentTowerQuestId", 9), ("isTowerTopUnlocked", 8),
+                     ("commonResponse", "CommonResponse")) + [("dailyAreas", "AreaInfo", True)])
     message("QuestListMainResponse", [("areaGroups", "AreaGroupInfo", True)]
             + fields(("commonResponse", "CommonResponse")))
     for service_name, response in [("User", "UserGetResponse"), ("Quest", "QuestTopResponse")]:
@@ -61,6 +63,16 @@ def minimal_schema(path):
     file.service.add(name="System").method.add(name="Check", input_type=".api.Empty", output_type=".api.Empty")
     quest_service = next(service for service in file.service if service.name == "Quest")
     quest_service.method.add(name="ListMain", input_type=".api.Empty", output_type=".api.QuestListMainResponse")
+    message("QuestListDailyResponse", [("areas", "AreaInfo", True), ("bulkDailyInfos", "Empty", True)]
+            + fields(("commonResponse", "CommonResponse")))
+    for name in ("QuestListContestResponse", "QuestListTowerResponse"):
+        message(name, fields(("area", "AreaInfo"), ("commonResponse", "CommonResponse")))
+    message("QuestTowerTopResponse", fields(("towerArea", "TowerAreaInfo"),
+                                            ("hierarchyNotiInfo", "HierarchyInfo"))
+            + [("subTowerAreas", "TowerAreaInfo", True)])
+    for route in ("ListDaily", "ListContest", "ListTower", "TowerTop"):
+        quest_service.method.add(name=route, input_type=".api.Empty",
+                                 output_type=".api.Quest" + route + "Response")
     descriptors = descriptor_pb2.FileDescriptorSet()
     descriptors.file.add().CopyFrom(file)
     path.write_bytes(descriptors.SerializeToString())

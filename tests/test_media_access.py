@@ -1,5 +1,6 @@
 """The explicit media Photography gate changes one real area aggregate only."""
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -154,3 +155,68 @@ def test_actual_public_master_has_the_exact_three_photography_prerequisite_quest
     plan = prepare_media_access(root)
     assert plan.quest_ids == ("qt-main-1-002-01", "qt-main-1-002-02", "qt-main-1-002-03")
     assert plan.required_clear_count == 3
+
+
+def approve_latest_fixture(master_dir, monkeypatch, feature, tables, projection):
+    """Synthetic authority for exercising the real file/cohort admission helper."""
+    from idoly_local import latest_cohort_pins as pins
+    canonical = lambda value: json.dumps(value, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":"), allow_nan=False).encode("utf-8")
+    (master_dir / "!version.txt").write_text(pins.MASTER_VERSION)
+    features = {}
+    for scope in ("story_reads", "media_access", "panorama", "dream", "main_live", "octo"):
+        receipt = {"source": "synthetic contract fixture"}
+        features[scope] = {"status": "PASS", "scope": scope, "master_version": pins.MASTER_VERSION,
+            "schema_sha256": "0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3", "receipt": receipt,
+            "receipt_sha256": hashlib.sha256(canonical(receipt)).hexdigest()}
+    raw = canonical({"schema": 1, "master_version": pins.MASTER_VERSION, "features": features}) + b"\n"
+    (master_dir.parent / "latest-semantic-controls.json").write_bytes(raw)
+    files = []
+    for name in sorted(["!version.txt", *(table + ".json" for table in tables)]):
+        body = (master_dir / name).read_bytes()
+        files.append({"path": "master-json/" + name, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()})
+    monkeypatch.setattr(pins, "CONTROLS_SHA256", hashlib.sha256(raw).hexdigest())
+    monkeypatch.setattr(pins, "FEATURE_FILES", {feature: files})
+    monkeypatch.setattr(pins, "PROJECTION_SHA256", {feature: hashlib.sha256(canonical(projection)).hexdigest()}, raising=False)
+    return pins
+
+
+def latest_access_fixture(master, monkeypatch):
+    ids = ["gate-quest-a", "gate-quest-b", "gate-quest-c"]
+    projection = {"schema": 1, "area": {"id": PHOTOGRAPHY_AREA_ID, "type": 1, "questIds": ids},
+        "quests": [{"id": identity, "areaId": PHOTOGRAPHY_AREA_ID} for identity in ids]}
+    return approve_latest_fixture(master[0], monkeypatch, "media_access", ("Area", "Quest"), projection)
+
+
+def test_latest_audited_gate_preserves_snapshot_except_real_area_aggregate(master, snapshot, monkeypatch):
+    pins = latest_access_fixture(master, monkeypatch)
+    before = snapshot.SerializeToString()
+    expected = type(snapshot).FromString(before)
+    expected.areas.add(areaId=PHOTOGRAPHY_AREA_ID, clearQuestCount=3)
+    plan = prepare_media_access(master[0])
+    assert plan.master_version == pins.MASTER_VERSION and plan.required_clear_count == 3
+    assert apply_media_access(snapshot, plan) and snapshot.SerializeToString() == expected.SerializeToString()
+    assert not apply_media_access(snapshot, plan)
+
+
+@pytest.mark.parametrize("damage", ["unapproved", "proof", "file", "projection", "other-version"])
+def test_latest_gate_needs_both_approved_cohort_and_exact_used_projection(master, snapshot, monkeypatch, damage):
+    pins = latest_access_fixture(master, monkeypatch)
+    if damage == "unapproved":monkeypatch.setattr(pins, "PROJECTION_SHA256", {})
+    elif damage == "proof":(master[0].parent / "latest-semantic-controls.json").write_text('{}')
+    elif damage == "file":rewrite(master, "Area", lambda rows: rows[1]["questIds"].pop())
+    elif damage == "projection":monkeypatch.setattr(pins, "PROJECTION_SHA256", {"media_access": "f" * 64})
+    else:(master[0] / "!version.txt").write_text("e" * 64)
+    before = snapshot.SerializeToString()
+    with pytest.raises(RpcFailure) as denied:prepare_media_access(master[0])
+    assert denied.value.code == RpcCode.FAILED_PRECONDITION and snapshot.SerializeToString() == before
+
+
+@pytest.mark.parametrize("quest_ids", [("invented-quest",), ("gate-quest-a", "gate-quest-a"), ({"bad": "id"},), 123])
+def test_latest_apply_refuses_a_forged_quest_aggregate(master, snapshot, monkeypatch, quest_ids):
+    from idoly_local.media_access import MediaAccessPlan
+    pins = latest_access_fixture(master, monkeypatch)
+    before = snapshot.SerializeToString()
+    plan = MediaAccessPlan(pins.MASTER_VERSION, PHOTOGRAPHY_AREA_ID, quest_ids)
+    with pytest.raises(RpcFailure) as denied:apply_media_access(snapshot, plan)
+    assert denied.value.code == RpcCode.FAILED_PRECONDITION and snapshot.SerializeToString() == before

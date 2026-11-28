@@ -1,0 +1,521 @@
+{
+  "schema": 1,
+  "platforms": {
+    "android": {
+      "platform": "android",
+      "sources": {
+        "native_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+        "metadata_sha256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e"
+      },
+      "methods": {
+        "director_state": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "get_state",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8fb2a18",
+          "prefix": "fe0f1ef8f44f01a954860090814243f9",
+          "return": "UnityEngine.Playables.PlayState",
+          "parameters": [],
+          "metadata_method_index": 221822,
+          "token_row": 1,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa026c68",
+          "native_abi": "int32_t(void*,const MethodInfo*)"
+        },
+        "director_play": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "Play",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8fb3178",
+          "prefix": "fe0f1ef8f44f01a9348600f0811a43f9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 221844,
+          "token_row": 23,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa026d18",
+          "native_abi": "void(void*,const MethodInfo*)"
+        },
+        "director_pause": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "Pause",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8fb34e4",
+          "prefix": "fe0f1ef8f44f01a9348600f0812243f9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 221846,
+          "token_row": 25,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa026d28",
+          "native_abi": "void(void*,const MethodInfo*)"
+        },
+        "director_resume": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "Resume",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8fb3520",
+          "prefix": "fe0f1ef8f44f01a9348600f0812643f9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 221847,
+          "token_row": 26,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa026d30",
+          "native_abi": "void(void*,const MethodInfo*)"
+        },
+        "director_rebuild": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "RebuildGraph",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x8fb355c",
+          "prefix": "fe0f1ef8f44f01a9348600f0812a43f9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 221848,
+          "token_row": 27,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa026d38",
+          "native_abi": "void(void*,const MethodInfo*)"
+        },
+        "player_playing": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "get_IsPlaying",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x888d644",
+          "prefix": "00c44139c0035fd62800001208c40139",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 161158,
+          "token_row": 3560,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0x9fc8e48",
+          "native_abi": "bool(void*,const MethodInfo*)"
+        },
+        "player_paused": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "get_IsPause",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x888d658",
+          "prefix": "00c84139c0035fd62800001208c80139",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 161160,
+          "token_row": 3562,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0x9fc8e58",
+          "native_abi": "bool(void*,const MethodInfo*)"
+        },
+        "player_set_playing": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "set_IsPlaying",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x888d64c",
+          "prefix": "2800001208c40139c0035fd600c84139",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "value",
+              "type": "System.Boolean",
+              "metadata_type_index": 50428
+            }
+          ],
+          "metadata_method_index": 161159,
+          "token_row": 3561,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0x9fc8e50",
+          "native_abi": "void(void*,bool,const MethodInfo*)"
+        },
+        "player_set_paused": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "set_IsPause",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x888d660",
+          "prefix": "2800001208c80139c0035fd6fe5fbda9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "value",
+              "type": "System.Boolean",
+              "metadata_type_index": 50428
+            }
+          ],
+          "metadata_method_index": 161161,
+          "token_row": 3563,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0x9fc8e60",
+          "native_abi": "void(void*,bool,const MethodInfo*)"
+        }
+      },
+      "fields": {
+        "<Built>k__BackingField": {
+          "offset": 112,
+          "type": "System.Boolean",
+          "metadata_field_index": 109371
+        },
+        "<IsPlaying>k__BackingField": {
+          "offset": 113,
+          "type": "System.Boolean",
+          "metadata_field_index": 109372
+        },
+        "<IsPause>k__BackingField": {
+          "offset": 114,
+          "type": "System.Boolean",
+          "metadata_field_index": 109373
+        }
+      },
+      "enums": {
+        "game_time": {
+          "value": 1,
+          "proof": {
+            "type": "UnityEngine.Playables.DirectorUpdateMode",
+            "name": "GameTime",
+            "metadata_field_index": 112461,
+            "default_data_index": 1237111,
+            "signed_compressed_byte": 2,
+            "underlying": "System.Int32"
+          }
+        },
+        "paused": {
+          "value": 0,
+          "proof": {
+            "type": "UnityEngine.Playables.PlayState",
+            "name": "Paused",
+            "metadata_field_index": 112467,
+            "default_data_index": 1237114,
+            "signed_compressed_byte": 0,
+            "underlying": "System.Int32"
+          }
+        },
+        "playing": {
+          "value": 1,
+          "proof": {
+            "type": "UnityEngine.Playables.PlayState",
+            "name": "Playing",
+            "metadata_field_index": 112468,
+            "default_data_index": 1237115,
+            "signed_compressed_byte": 2,
+            "underlying": "System.Int32"
+          }
+        }
+      },
+      "base_lifecycle_audit": {
+        "Play": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "Play",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x888de44",
+          "prefix": "fe0f1df8f65701a9f44f02a934bf0090",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 161171,
+          "token_row": 3573,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0x9fc8eb0"
+        },
+        "Pause": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "Pause",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x888df74",
+          "prefix": "ff8301d1fe5704a9f44f05a934bf0090",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 161172,
+          "token_row": 3574,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0x9fc8eb8"
+        },
+        "Resume": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "Resume",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x888e19c",
+          "prefix": "fe0f1ff808c8413968010034081c40f9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 161173,
+          "token_row": 3575,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0x9fc8ec0"
+        }
+      },
+      "scope": {
+        "typed_managed_call_bindings_verified": true,
+        "game_or_gpu_executed": false,
+        "automatic_export_permitted_without_verified_dependent_state": false,
+        "native_rebuild_and_actor_job_fence_proof_required": true
+      }
+    },
+    "ios": {
+      "platform": "ios",
+      "sources": {
+        "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+        "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda"
+      },
+      "methods": {
+        "director_state": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "get_state",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x789c494",
+          "prefix": "f44fbea9fd7b01a9fd430091138401b0",
+          "return": "UnityEngine.Playables.PlayState",
+          "parameters": [],
+          "metadata_method_index": 222524,
+          "token_row": 1,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa790bf8",
+          "native_abi": "int32_t(void*,const MethodInfo*)"
+        },
+        "director_play": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "Play",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x789cee0",
+          "prefix": "f44fbea9fd7b01a9fd430091138401b0",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 222546,
+          "token_row": 23,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa790ca8",
+          "native_abi": "void(void*,const MethodInfo*)"
+        },
+        "director_pause": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "Pause",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x789d378",
+          "prefix": "f44fbea9fd7b01a9fd43009113840190",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 222548,
+          "token_row": 25,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa790cb8",
+          "native_abi": "void(void*,const MethodInfo*)"
+        },
+        "director_resume": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "Resume",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x789d3c8",
+          "prefix": "f44fbea9fd7b01a9fd43009113840190",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 222549,
+          "token_row": 26,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa790cc0",
+          "native_abi": "void(void*,const MethodInfo*)"
+        },
+        "director_rebuild": {
+          "type": "UnityEngine.Playables.PlayableDirector",
+          "name": "RebuildGraph",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x789d418",
+          "prefix": "f44fbea9fd7b01a9fd43009113840190",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 222550,
+          "token_row": 27,
+          "module": "UnityEngine.DirectorModule.dll",
+          "registration_pointer_slot": "0xa790cc8",
+          "native_abi": "void(void*,const MethodInfo*)"
+        },
+        "player_playing": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "get_IsPlaying",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x6fee3c4",
+          "prefix": "00c44139c0035fd601c40139c0035fd6",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 161578,
+          "token_row": 3561,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0xa732f90",
+          "native_abi": "bool(void*,const MethodInfo*)"
+        },
+        "player_paused": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "get_IsPause",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x6fee3d4",
+          "prefix": "00c84139c0035fd601c80139c0035fd6",
+          "return": "System.Boolean",
+          "parameters": [],
+          "metadata_method_index": 161580,
+          "token_row": 3563,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0xa732fa0",
+          "native_abi": "bool(void*,const MethodInfo*)"
+        },
+        "player_set_playing": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "set_IsPlaying",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x6fee3cc",
+          "prefix": "01c40139c0035fd600c84139c0035fd6",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "value",
+              "type": "System.Boolean",
+              "metadata_type_index": 50275
+            }
+          ],
+          "metadata_method_index": 161579,
+          "token_row": 3562,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0xa732f98",
+          "native_abi": "void(void*,bool,const MethodInfo*)"
+        },
+        "player_set_paused": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "set_IsPause",
+          "parameter_count": 1,
+          "static": false,
+          "rva": "0x6fee3dc",
+          "prefix": "01c80139c0035fd6f85fbca9f65701a9",
+          "return": "System.Void",
+          "parameters": [
+            {
+              "name": "value",
+              "type": "System.Boolean",
+              "metadata_type_index": 50275
+            }
+          ],
+          "metadata_method_index": 161581,
+          "token_row": 3564,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0xa732fa8",
+          "native_abi": "void(void*,bool,const MethodInfo*)"
+        }
+      },
+      "fields": {
+        "<Built>k__BackingField": {
+          "offset": 112,
+          "type": "System.Boolean",
+          "metadata_field_index": 109494
+        },
+        "<IsPlaying>k__BackingField": {
+          "offset": 113,
+          "type": "System.Boolean",
+          "metadata_field_index": 109495
+        },
+        "<IsPause>k__BackingField": {
+          "offset": 114,
+          "type": "System.Boolean",
+          "metadata_field_index": 109496
+        }
+      },
+      "enums": {
+        "game_time": {
+          "value": 1,
+          "proof": {
+            "type": "UnityEngine.Playables.DirectorUpdateMode",
+            "name": "GameTime",
+            "metadata_field_index": 112676,
+            "default_data_index": 1235051,
+            "signed_compressed_byte": 2,
+            "underlying": "System.Int32"
+          }
+        },
+        "paused": {
+          "value": 0,
+          "proof": {
+            "type": "UnityEngine.Playables.PlayState",
+            "name": "Paused",
+            "metadata_field_index": 112682,
+            "default_data_index": 1235054,
+            "signed_compressed_byte": 0,
+            "underlying": "System.Int32"
+          }
+        },
+        "playing": {
+          "value": 1,
+          "proof": {
+            "type": "UnityEngine.Playables.PlayState",
+            "name": "Playing",
+            "metadata_field_index": 112683,
+            "default_data_index": 1235055,
+            "signed_compressed_byte": 2,
+            "underlying": "System.Int32"
+          }
+        }
+      },
+      "base_lifecycle_audit": {
+        "Play": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "Play",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x6feed60",
+          "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 161591,
+          "token_row": 3574,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0xa732ff8"
+        },
+        "Pause": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "Pause",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x6feee90",
+          "prefix": "ff8301d1f65703a9f44f04a9fd7b05a9",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 161592,
+          "token_row": 3575,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0xa733000"
+        },
+        "Resume": {
+          "type": "Solis.Common.Live.SolisLivePlayerBase",
+          "name": "Resume",
+          "parameter_count": 0,
+          "static": false,
+          "rva": "0x6fef0e8",
+          "prefix": "fd7bbfa9fd03009108c841391f050071",
+          "return": "System.Void",
+          "parameters": [],
+          "metadata_method_index": 161593,
+          "token_row": 3576,
+          "module": "solis-submodule.Runtime.dll",
+          "registration_pointer_slot": "0xa733008"
+        }
+      },
+      "scope": {
+        "typed_managed_call_bindings_verified": true,
+        "game_or_gpu_executed": false,
+        "automatic_export_permitted_without_verified_dependent_state": false,
+        "native_rebuild_and_actor_job_fence_proof_required": true
+      }
+    }
+  }
+}

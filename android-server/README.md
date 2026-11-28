@@ -1,60 +1,50 @@
-# 아이프라 서버 Android 앱
+# Android 서버 앱
 
-서버와 공개 게임 데이터를 APK 안에 넣습니다. 설치 후 **서버 시작**을 누르고 **게임 열기**로 같은 기기의 로컬 클라이언트를 실행합니다. 서버는 `127.0.0.1:50051`, 마스터 파일은 `127.0.0.1:8080`에서 제공합니다. Termux가 필요하지 않습니다.
+Android에서는 **서버 APK와 게임 APK 하나**를 같은 기기에 설치합니다. [현재 공개 릴리즈 2026.11.17.2](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.2)에서 서버와 한국어·일본어·영어 게임 APK를 받습니다. 파일 이름에 릴리즈 날짜와 언어가 표시됩니다.
 
-최초 실행은 포함된 `ServerData.zip`의 공개 데이터만 앱 전용 저장소에 설치합니다. 프로필과 진행 상태 DB는 앱 업데이트 후에도 유지됩니다. 앱 삭제나 Android 설정의 데이터 지우기는 해당 데이터를 제거합니다.
+## 시작하기
 
-[GitHub에 배포된 Android 서버 APK는 v0.3.2](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android.apk)입니다. 현재 v0.3.4 후보 소스에는 게임 리소스 경로와 포토 이름·프로필 레이아웃 저장을 추가했습니다. 후보는 아직 GitHub에 게시하지 않았습니다. Mac 배포 앱은 v0.3.2를 유지합니다.
+1. 서버 앱을 열고 **서버 시작**을 누릅니다.
+2. 상태가 **실행 중**으로 바뀌면 **아이프라 실행**을 누릅니다.
+3. 게임을 마치면 서버 앱의 **서버 중지**로 종료합니다.
 
-후보의 **없는 게임 리소스 내려받기**는 기본값이 켜짐입니다. 서버를 중지한 상태에서 선택한 뒤 시작합니다. 게임이 요청한 파일만 공식 CDN에서 받아 크기·MD5 확인 후 이 앱의 전용 저장소에 보관합니다. 끄면 보관한 파일만 제공합니다. **게임 리소스**에는 이번 실행의 수신량·새로 보관한 파일 수와 게임으로 보낸 양을 따로 표시하며, 게임 전체 다운로드 완료율은 표시하지 않습니다. 상세 범위·검증 상태는 [게임 리소스 안내](../docs/resource-support.md)에 있습니다.
+Termux나 별도 Python 설치는 필요하지 않습니다. 게임 언어는 설치한 게임 APK의 언어를 따릅니다. iPhone·iPad와 Mac/PlayCover에서는 [서버·게임 통합 IPA](../ios-unified/README.md)를 사용합니다.
 
-리소스 후보 연결판 `game.qualiarts.idolypride.local.resources`는 기존 공식·로컬 게임 앱과 나란히 설치합니다. 기존 앱은 유지합니다. 새 연결판은 기존 연결판과 패키지·서명이 다르고 전용 캐시도 별도입니다. 서버 앱은 기존 서명의 업데이트 경로를 유지하며, **아이프라 로컬 실행**은 새 연결판이 설치돼 있으면 이를 우선 엽니다. 없으면 기존 연결판을 엽니다.
+## 설정과 기록
 
-실제 게임에서 내장 서버의 `Auth.Login → Master.Get → User.Get` 교환 뒤 원본 SDK의 리소스 시간 초과 `E209`를 확인했습니다. 새 목록 경로의 로컬 HTTP 검사는 통과했으며, 실제 SDK 적용 후의 오류 해결·다운로드 UI·홈·일반 라이브는 검증 중입니다. 앞선 v0.3.3 후보에서 검사한 DB 보존 업데이트·서버 시작·암호화 RPC 결과와 구분합니다. GitHub 파일 업로드의 `401 Bad credentials` 오류로 후보는 미게시 상태입니다.
+설정은 변경하면 자동 저장합니다. 적용 시점과 실패한 저장은 화면에서 확인합니다. 그래픽·촬영 설정은 펼친 상태로 제공하며, 게임 실행 버튼은 상단에 있습니다.
 
-이미지 트레이닝·VENUS 읽기 모듈도 소스에 포함됩니다. 실제 읽기에는 보존한 개인 자료와 추가 마스터를 준비한 소스 환경이 필요하며, 후보의 기존 40개 디코딩 JSON 마스터만으로 이벤트 메뉴를 복원하지는 않습니다. 개인 자료 가져오기 UI·포토 촬영·지역 생성·이벤트 라이브·VENUS 대전·보상 정산은 아직 지원하지 않습니다.
+**진단·서버 기록 내보내기**는 게임·서버 상태와 최근 기록을 JSON 한 파일로 저장합니다. 오류가 발생하면 앱을 종료하기 전에 내보내 주세요. 계정 백업이나 게임 리소스는 포함하지 않습니다.
 
-Java 17 이상, Android SDK 34, Python 3.13을 준비한 뒤 저장소 루트에서 빌드합니다.
+## ZIP 가져오기·백업
 
-아래는 미게시 v0.3.4 후보 소스의 빌드 예시입니다. 현재 배포 링크는 [저장소 README](../README.md#앱으로-실행하기)의 v0.3.2 파일입니다. 스키마·원본 마스터 202개·서버용 JSON 40개를 준비한 뒤, 공개 Octo 설정과 목록 두 파일을 명시적으로 넣어 데이터 묶음을 만듭니다. `public-octo`에는 원본 클라이언트의 공개 SDK 설정만 넣으며 계정·Firebase 인증 자료는 넣지 않습니다.
+| 파일 | 포함 내용 | 사용할 메뉴 |
+| --- | --- | --- |
+| 리소스 ZIP | 모델·이미지·음성 등 받은 게임 파일 | 리소스 ZIP 가져오기·내보내기 |
+| 계정 ZIP | 로컬 계정의 진행·보유 항목·게임 설정 | 유저 관리의 계정 ZIP 가져오기·백업 |
 
-```sh
-uv run python tools/build_server_payload.py \
-  --data-dir data \
-  --output /tmp/IdolyPride-ServerData-v0.3.4.zip \
-  --octo-data /path/to/public-octo
+리소스 ZIP을 가져오면 앱이 파일을 검사해 보관합니다. **완료** 표시를 확인한 뒤 게임을 실행하면 됩니다. 직접 압축을 풀 필요는 없습니다. Android 게임에는 Android용 리소스가 필요합니다.
 
-cd android-server
-./gradlew :app:assembleDebug \
-  -PbuildPython=/path/to/python3.13 \
-  -PserverData=/tmp/IdolyPride-ServerData-v0.3.4.zip
-```
+받지 않은 리소스는 **없는 리소스 자동 받기**가 켜져 있으면 게임의 요청에 따라 내려받습니다. 네트워크가 필요하며, 검증한 파일은 다시 사용합니다. 전체 받기는 많은 저장 공간과 데이터를 사용할 수 있습니다. [리소스 안내](../docs/resource-support.md)에서 보관 위치와 범위를 확인할 수 있습니다.
 
-현재 후보 데이터 묶음은 84,041,457바이트이며 원본 마스터 202개와 기존 JSON 40개를 유지합니다. 추가한 리소스 목록의 54,442개 참조는 메타데이터이며 전체 약 39.3GB의 리소스 파일은 동봉하지 않습니다. 목록은 일본 Android 6.1.1용이며 iOS·한국판 목록은 포함하지 않습니다.
+계정 ZIP은 검사 결과와 대상을 확인한 뒤 가져옵니다. 덮어쓰기 전 상태는 복구점으로 남깁니다. 계정 선택은 다음 서버 시작에 적용됩니다. [계정·저장 안내](../docs/client-setup.md)를 참고하세요.
 
-기본 ABI는 `arm64-v8a`입니다. CI 에뮬레이터용 빌드는 `-PserverAbi=x86_64`를 추가합니다. 결과는 `app/build/outputs/apk/debug/app-debug.apk`입니다. v0.3.4 후보의 Android 버전 코드는 23이며 기존 서버 개발 서명을 재사용합니다. Chaquopy 17과 Python 3.13을 사용하며 protobuf·HTTP/2는 순수 Python, AES와 HTTPS는 Android의 플랫폼 구현을 사용합니다.
+같은 앱·서명으로 업데이트하면 계정과 설정을 유지합니다. 앱 삭제나 Android 설정의 **데이터 지우기** 전에는 필요한 계정과 리소스를 내보냅니다.
 
-## 첫 메인 라이브 실험 기능
+## 이번 릴리즈
 
-앱의 **첫 메인 라이브 실험 기능 사용**은 기본값이 꺼져 있습니다. 서버를 중지한 상태에서 선택한 뒤 시작하면 첫 퀘스트 `qt-main-1-001-01`만 현재 소유 카드 다섯 장으로 계산합니다. 설정은 다음 실행에도 유지됩니다. 점수는 `live-v5` 로컬 규칙을 사용하며 공식 서버와 다를 수 있습니다. 첫 성공 때만 보상·경험치를 지급하고, 같은 요청을 재시도하면 저장된 결과를 돌려줍니다. 자세한 제한은 [첫 일반 라이브 안내](../docs/first-live-support.md)에 있습니다.
+이번 날짜 릴리즈의 서버 내부 버전은 `0.3.37`(build 54)입니다. [전체 플랫폼 검증](https://github.com/tagundo/IdolyPride_client/actions/runs/44015901340)을 통과한 파일을 제공합니다. [게시 파일 검증](https://github.com/tagundo/IdolyPride_client/actions/runs/44022899574)에서는 같은 빌드 파일 5개의 전체 SHA를 재확인했습니다.
 
-이 기능을 포함한 APK는 [네이티브 엔진](../native-live-engine/README.md)을 먼저 빌드합니다. Go 1.27.3과 NDK 26.3.11579264가 있는 Linux x86_64 호스트에서, 저장소 루트 기준으로 실행합니다.
+- 콘솔·서버·계정·콘텐츠·그래픽 분류와 가로 화면 대응
+- 기본 접힘 설정, 짧은 안내와 필요할 때 여는 도움말
+- 모시코이 목록 번역·여러 이벤트 선택·전체 켜기/끄기
+- 감상 계정의 지원 이벤트 기본 활성화
+- 시작 시 번역 자료 준비 최적화와 한국어 이미지 비율 수정
 
-```sh
-python3 native-live-engine/scripts/build.py --target android \
-  --go /path/to/go1.27.3/bin/go \
-  --ndk /path/to/android-ndk/26.3.11579264 \
-  --output /tmp/idoly-live/jni/arm64-v8a --cache /tmp/idoly-live/cache
+## 개발과 검증
 
-cd android-server
-./gradlew :app:assembleDebug \
-  -PbuildPython=/path/to/python3.13 \
-  -PserverData=/tmp/IdolyPride-ServerData-v0.3.4.zip \
-  -PliveEngineDir=/tmp/idoly-live/jni
-```
+빌드 입력과 필수 실행 검사는 [전체 플랫폼 릴리즈 workflow](../.github/workflows/release-all-platforms.yml)와 [플랫폼 빌드 도구](../tools/release_platform_builds.py)에서 관리합니다. Android 서버는 JDK 17, Android SDK 34, Python 3.13·Chaquopy 17을 사용합니다. 배포 ABI는 `arm64-v8a`이고, 자동 UI·암호화 RPC 검사는 별도 `x86_64` 빌드에서 실행합니다.
 
-`liveEngineDir` 바로 아래에 선택한 ABI의 `libidoly_live.so`가 있어야 합니다. x86_64 검사용은 `--target android-x86_64 --output /tmp/idoly-live/jni/x86_64`로 만든 뒤 Gradle에 `-PserverAbi=x86_64`를 추가합니다. Gradle은 해당 ABI 라이브러리와 원본 라이선스·고지만 APK에 넣습니다. `liveEngineDir`를 생략한 빌드는 일반 라이브 엔진을 포함하지 않으며, 이 상태에서 실험 기능을 켜면 서버 시작 시 명확한 오류로 중단합니다.
+공식 인계 계정 인증, Android ARM64 실기기의 전체 게임·MV 재생과 성능은 자동 서버 검사와 구분합니다. 구현 범위와 제한은 [게임 상태 안내](../docs/gameplay-status.md)를 참고하세요.
 
-`local-server-development.keystore`는 이 프로젝트의 **공개 개발용 키**입니다. 별칭은 `idoly-local-server`, 저장소·키 비밀번호는 모두 `android`입니다. 실험용 서버 APK를 동일한 서명으로 업데이트하여 로컬 DB를 보존하려고 저장소에 포함했습니다. 운영용 비밀 키로 사용하지 않습니다. 향후 별도의 릴리스 서명이 필요하면 `IDOLY_SERVER_KEYSTORE`, `IDOLY_SERVER_STORE_PASSWORD`, `IDOLY_SERVER_KEY_ALIAS`, `IDOLY_SERVER_KEY_PASSWORD`를 설정할 수 있습니다.
-
-표준 Gradle wrapper만 참고 저장소에서 재사용했으며 앱 구현은 독립적으로 작성했습니다. 실제 게임 플레이 지원 범위는 서버의 구현된 기능에 따라 달라집니다.
+`local-server-development.keystore`는 업데이트 호환성을 유지하기 위한 공개 개발용 키입니다. 운영용 비밀 키로 사용하지 않습니다.

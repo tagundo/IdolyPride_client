@@ -1,0 +1,456 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="unified_start_server">Start the server first.</string>
+    <string name="unified_restart_server">Stop and restart the server to apply the selected game language.</string>
+    <string name="unified_restart_app">Close the app completely and reopen it to change the game language.</string>
+    <string name="unified_preparing">Preparing game data for the selected language.</string>
+    <string name="official_title">Import a Japanese official account · Currently unavailable</string>
+    <string name="official_notice">Japanese official account import is currently unavailable. Download data using the Japanese game user ID and transfer password, then save it in a normal local account. Do not enter an email, Apple or Google password.</string>
+    <string name="official_warning">Official transfer authentication may affect login or transfer sessions on your existing device. The password is not saved. Review the local destination after data is downloaded.</string>
+    <string name="official_inspect">Check transfer ID</string>
+    <string name="official_fetch">Transfer login and download</string>
+    <string name="official_apply_new">Save as a new normal account</string>
+    <string name="official_apply_replace">Replace the selected normal account</string>
+    <string name="official_cancel">Cancel import</string>
+    <string name="official_select_imported">Select imported account for the next normal start</string>
+    <string name="official_normal_mode">Switch to normal mode</string>
+    <string name="official_normal_selected">Normal mode selected. Close the game and restart the server to use the selected normal account.</string>
+    <string name="official_credentials_title">Japanese transfer credentials</string>
+    <string name="official_id_label">Japanese user ID</string>
+    <string name="official_password_label">Transfer password</string>
+    <string name="official_platform_label">Platform used by the official account</string>
+    <string name="official_id_hint">User ID displayed by the game</string>
+    <string name="official_password_hint">Transfer password set in the game</string>
+    <string name="official_confirm_inspect">Check this ID</string>
+    <string name="official_fetch_title">Continue with this official account</string>
+    <string name="official_preview">Manager: %1$s · Lv %2$d\nPublic ID: %3$s</string>
+    <string name="official_counts">Cards %1$d · Items %2$d · Photos %3$d</string>
+    <string name="official_expiry">Verification expires within 10 minutes of starting the check.</string>
+    <string name="official_ready_notice">Downloaded data is verified. Save it as a new normal account, or stop the server and choose an existing normal account in Account management before replacing it.</string>
+    <string name="official_completed_notice">Saved in a normal account. Select the imported account below, switch to normal mode, then restart the game and server. Viewing accounts remain separate.</string>
+    <string name="official_choose_slot">Local account slot name</string>
+    <string name="official_slot_hint">Example: Japanese account (separate from the in-game manager name)</string>
+    <string name="official_apply_confirm">Save local account</string>
+    <string name="official_replace_confirm">Replace saved data in normal account %1$s. A restore point is created first, and replacement proceeds only if its checked version is unchanged. Close the game first.</string>
+    <string name="official_replace_blocked">Close the game, stop the server using the top controls, then try again.</string>
+    <string name="official_choose_normal">Choose a normal account in Account management. Viewing accounts cannot be replaced here.</string>
+    <string name="official_error_generic">Import could not be completed. Check the transfer credentials and connection, then try again.</string>
+    <string name="official_error_input">Enter the user ID and transfer password exactly. Leading or trailing spaces are not allowed.</string>
+    <string name="official_error_stale">The destination account changed. Refresh the account list and confirm it again.</string>
+    <string name="official_error_expired">Transfer verification expired or was cancelled. Start again by checking the transfer ID.</string>
+    <string name="official_error_catalog">Official data could not be verified. Check server data preparation and the network connection.</string>
+    <string name="official_stage_idle">Japanese official account import is currently unavailable.</string>
+    <string name="official_stage_preparing">Preparing import</string>
+    <string name="official_stage_checking">Checking transfer ID</string>
+    <string name="official_stage_verifying">Verifying official account</string>
+    <string name="official_stage_verified">Official account verified. Review the summary below.</string>
+    <string name="official_stage_transferring">Processing official transfer</string>
+    <string name="official_stage_firebase">Authenticating official login</string>
+    <string name="official_stage_login">Signing in to the official game</string>
+    <string name="official_stage_master">Checking official master data</string>
+    <string name="official_stage_account">Downloading official account data</string>
+    <string name="official_stage_collected">Official account data received</string>
+    <string name="official_stage_fetching">Downloading official data</string>
+    <string name="official_stage_catalog_check">Checking local data compatibility</string>
+    <string name="official_stage_staging">Verifying local import data</string>
+    <string name="official_stage_ready">Verified. Choose a local destination.</string>
+    <string name="official_stage_completed">Local account saved</string>
+    <string name="official_stage_cancelled">Import cancelled.</string>
+    <string name="official_stage_failed">Import failed</string>
+    <string name="official_slot_invalid">Enter a local account name. Shorten it if it is too long, and remove line breaks or slashes.</string>
+    <string name="official_stage_applying">Saving the verified account locally</string>
+    <string name="official_committed_cleanup">The account is saved. Temporary data cleanup is pending.</string>
+    <string name="official_committed_refresh">The account is saved. Refresh the local account list to view the saved entry.</string>
+    <string name="official_refresh_local">Refresh local account list</string>
+    <string name="events_title">Moshi-koi settings</string>
+    <string name="events_notice">Normal and viewing accounts keep separate event selections. Turning an event off preserves its progress.</string>
+    <string name="events_preset_notice">Only supported events can be selected. Enabling an event starts a local 30-day window. These dates do not change the official schedule.</string>
+    <string name="events_loading">Reading saved event settings</string>
+    <string name="events_catalog">Supported event</string>
+    <string name="events_empty">No supported events</string>
+    <string name="events_enabled">Enable the selected event</string>
+    <string name="events_extra_entry">Game Home → Event → Succu × Magic</string>
+    <string name="events_start">Start: %1$s</string>
+    <string name="events_end">End: %1$s</string>
+    <string name="events_start_name">Local start time</string>
+    <string name="events_end_name">Local end time</string>
+    <string name="events_start_notice">Changing the start time shifts the end time by the same amount.</string>
+    <string name="events_summary">%1$s · Selected %2$d · Applied %3$s</string>
+    <string name="events_count">%1$d</string>
+    <string name="events_not_running">Stopped</string>
+    <string name="events_saved_next">Saved · Next start</string>
+    <string name="events_saved_active">Saved</string>
+    <string name="events_restart">Saved · Restart needed</string>
+    <string name="events_pending">Saving settings</string>
+    <string name="events_unsaved">Changes waiting to save</string>
+    <string name="events_selected_status">Saved: %1$s\nEffective: %2$s</string>
+    <string name="events_off">Off</string>
+    <string name="events_window">%1$s – %2$s</string>
+    <string name="events_refresh">Reload saved settings</string>
+    <string name="events_disable_all">Disable all</string>
+    <string name="events_unavailable">Supported data is unavailable. Existing events can be disabled, but new ones cannot be enabled.</string>
+    <string name="events_invalid_file">The settings file cannot be read. The original file and progress are preserved.</string>
+    <string name="events_error_conflict">Your changes are kept; retry saving.</string>
+    <string name="events_error_invalid">Check the event and dates. The end must follow the start, with a maximum duration of 366 days.</string>
+    <string name="events_error_storage">Save failed · Retry.</string>
+    <string name="events_error_busy">The saved state will be checked after the current settings operation finishes.</string>
+    <string name="nav_console">Console</string>
+    <string name="nav_server">Server</string>
+    <string name="nav_users">Users</string>
+    <string name="nav_content">Content</string>
+    <string name="nav_graphics">Graphics</string>
+    <string name="panel_expanded">Expanded</string>
+    <string name="panel_collapsed">Collapsed</string>
+    <string name="console_panel_title">Connection, data checks and diagnostics</string>
+    <string name="console_notice">Startup checks, game connections and recent records appear together here.</string>
+    <string name="graphics_panel_title">Graphics and photography</string>
+    <string name="events_enable_all">Enable all</string>
+    <string name="events_always">Always available</string>
+    <string name="events_schedule_editor">Edit an individual normal-account schedule</string>
+    <string name="events_media_notice">All supported events start enabled for viewing accounts. You can enable or disable each event without a time limit.</string>
+    <string name="events_retry_save">Retry saving changes</string>
+    <string name="help_details">Help</string>
+    <string name="help_for">Help for %1$s</string>
+    <string name="settings_automatic_notice">Changes save automatically.</string>
+    <string name="official_warning_short">Japanese official account import is currently unavailable.</string>
+    <string name="official_completed_short">Import complete · Select the account to use.</string>
+    <string name="events_normal_short">Select several events at once.</string>
+    <string name="events_media_short">Viewing accounts start with all events enabled without time limits.</string>
+    <string name="events_current_short">Server setting: %1$s</string>
+    <string name="events_on">Enabled</string>
+    <string name="resource_storage_public_short">Resources: Downloads folder</string>
+    <string name="resource_storage_private_short">Resources: App storage</string>
+    <string name="library_settings_short">After changing language, install its APK and restart.</string>
+
+    <!-- Complete English server interface; keep keys and option order aligned with values. -->
+    <string name="app_name">IDOLY PRIDE Server</string>
+    <string name="server_description">Run the local IDOLY PRIDE server on this device.</string>
+    <string name="tutorial_replay_notice">The tutorial live replays the original recording.</string>
+    <string name="start_server">Start server</string>
+    <string name="stop_server">Stop server</string>
+    <string name="launch_client">Launch IDOLY PRIDE Local</string>
+    <string name="client_missing">Install the IDOLY PRIDE Local client APK first.</string>
+    <string name="client_launch_failed">Could not open the local client.</string>
+    <string name="server_start_failed">Could not start the server service.</string>
+    <string name="server_ports">This device · 127.0.0.1\nGame connection 50051 · File transfer 8080</string>
+    <string name="server_logs">Server logs</string>
+    <string name="waiting_logs">Progress appears here when the server starts.</string>
+    <string name="status_stopped">Stopped</string>
+    <string name="status_starting">Starting</string>
+    <string name="status_running">Running</string>
+    <string name="status_stopping">Stopping</string>
+    <string name="status_failed">Start failed</string>
+    <string name="notification_channel">Local server</string>
+    <string name="notification_text">127.0.0.1 · Game 50051 / Files 8080</string>
+    <string name="first_launch_note">Included server data is prepared on the first start. Existing local accounts and saved data are preserved.</string>
+    <string name="launch_diagnostic_client">Launch IDOLY PRIDE</string>
+    <string name="diagnostic_client_missing">Install the IDOLY PRIDE Local client APK first.</string>
+    <string name="export_diagnostics">Export diagnostics and server logs</string>
+    <string name="export_server_logs">Export server logs</string>
+    <string name="server_logs_export_saved">Server logs saved.</string>
+    <string name="server_logs_export_failed">Could not save server logs. Choose the save location again.</string>
+    <string name="export_saved">Diagnostics and server logs saved.</string>
+    <string name="export_failed">Could not save diagnostics and server logs. Choose the save location again.</string>
+    <string name="export_picker_failed">Could not open the file save dialog.</string>
+    <string name="game_state_title">Game loading status</string>
+    <string name="game_state_waiting">Waiting for game status</string>
+    <string name="game_last_phase">Last stage · %1$s</string>
+    <string name="game_network_waiting">Waiting to measure total game network traffic</string>
+    <string name="game_network_unavailable">Total game network traffic cannot be measured.</string>
+    <string name="game_network_totals">Total game traffic: received %1$s · Sent %2$s\nAccumulated over %3$d seconds since diagnostics began · Not download progress</string>
+    <string name="master_transfer_waiting">Waiting for master file transfers in this session</string>
+    <string name="master_transfer_active">Master file transfer this session · %1$s / %2$s</string>
+    <string name="master_transfer_finished">Master files this session · %1$d completed · Last transfer %2$s</string>
+    <string name="latest_game_exception">Latest game exception: %1$s</string>
+    <string name="master_transfer_failed">Master file transfer failed · %1$s / %2$s</string>
+    <string name="experimental_main_live">Enable the first main live experiment</string>
+    <string name="experimental_main_live_notice">Only the first quest is supported. Scores use local rules and may differ from the official server. Off by default.</string>
+    <string name="download_missing_resources">Download missing game resources</string>
+    <string name="download_missing_resources_notice">Only files requested by the game are downloaded and kept on this device. When off, only stored files are served.</string>
+    <string name="media_mode">Viewing mode · Unlock all</string>
+    <string name="media_mode_notice">Viewing mode saves are separate from normal progress. After switching modes, restart the server and sign in again from the game title screen. Off by default.</string>
+    <string name="resource_transfer_title">Game resources</string>
+    <string name="resource_transfer_waiting">Game resource status appears when the server starts.</string>
+    <string name="resource_transfer_unavailable">The game resource catalog is not included.</string>
+    <string name="resource_transfer_idle">Waiting for game resource requests</string>
+    <string name="resource_transfer_cache_only">Using stored game resources only</string>
+    <string name="resource_transfer_downloading">Downloading game resources</string>
+    <string name="resource_transfer_active">Downloading game resources · %1$d requests</string>
+    <string name="resource_transfer_ready">Recently requested game resources are ready</string>
+    <string name="resource_transfer_failed">Game resource request failed · Check the server logs.</string>
+    <string name="resource_transfer_received">This session · Downloaded %1$s · %2$d newly stored files</string>
+    <string name="resource_transfer_served">This session · Sent %1$s to the game</string>
+    <string name="presentation_title">Graphics and photography ▾</string>
+    <string name="rendering_mt_experiment">Experimental multithreaded rendering at launch (off by default)</string>
+    <string name="rendering_mt_notice">Fully close the game, then reopen it using the launch button in this server app. Changes are requested only when starting a new game process, not while it is running or returning from the background. Check the measured rendering mode below.</string>
+    <string name="rendering_request_original">Requested: original launch settings</string>
+    <string name="rendering_request_mt">Requested: experimental multithreaded rendering</string>
+    <string name="rendering_probe_waiting">Actual mode: waiting for server and game measurements</string>
+    <string name="rendering_probe_client_waiting">Actual mode: waiting for a supported client to report</string>
+    <string name="rendering_probe_stale">Actual mode: previous measurement is old; waiting for an update</string>
+    <string name="rendering_probe_unsupported">Actual mode: measurement is not supported by this game.</string>
+    <string name="rendering_probe_init_failed">Actual mode: measurement initialization failed</string>
+    <string name="rendering_probe_observed">Measured: %1$s · Graphics API %2$d</string>
+    <string name="rendering_mode_direct">Direct (0 · Direct rendering)</string>
+    <string name="rendering_mode_single">SingleThreaded (1 · Single thread)</string>
+    <string name="rendering_mode_multi">MultiThreaded (2 · Multiple threads)</string>
+    <string name="rendering_mode_legacy_jobs">LegacyJobified (3)</string>
+    <string name="rendering_mode_native_jobs">NativeGraphicsJobs (4)</string>
+    <string name="rendering_mode_native_jobs_without_render">NativeGraphicsJobsWithoutRenderThread (5)</string>
+    <string name="rendering_mt_not_observed">Multithreaded rendering was not observed. Fully close and reopen the game. If unchanged after restarting, the experiment has not taken effect.</string>
+    <string name="rendering_frame_times">CPU frame time: %1$s ms · GPU frame time: %2$s ms\nThese are not measurements of the displayed FPS.</string>
+    <string name="rendering_frame_times_unavailable">CPU/GPU frame time: no recent verified measurement</string>
+    <string name="rendering_launch_conflict">Existing Unity launch arguments cannot be combined with the rendering experiment. Turn off the experiment and reopen the game.</string>
+    <string name="playback_wait_for_orientation">Wait for rotation when entering or leaving an MV</string>
+    <string name="playback_wait_notice">When enabled, waits for screen rotation when entering or leaving an MV. On by default; applies from the next MV transition.</string>
+    <string name="playback_waiting">Rotation setting · Waiting for server and game responses</string>
+    <string name="playback_saved_waiting">Rotation setting saved · Waiting for client confirmation</string>
+    <string name="playback_client_waiting">Waiting for a supported client to report the rotation setting · Update the client.</string>
+    <string name="playback_unsupported">Waiting for rotation setting confirmation · If there is no response, update to a supported client.</string>
+    <string name="playback_received">Client confirmed the setting · Applies from the next MV transition</string>
+    <string name="playback_save_failed">Could not save the rotation setting. The previous setting is preserved.</string>
+    <string name="playback_invalid">Could not read the saved rotation setting. Showing the default; changing it saves a new value.</string>
+    <string name="presentation_title_expanded">Graphics and photography ▴</string>
+    <string name="presentation_notice">Requires a game client that supports graphics settings. Settings can be changed while the server is running. After saving, wait for the game to confirm they have been applied.</string>
+    <string name="presentation_custom_graphics">Use custom graphics settings</string>
+    <string name="presentation_quality">Graphics quality</string>
+    <string name="presentation_target_fps">Target frame rate</string>
+    <string name="presentation_render_scale">3D render scale</string>
+    <string name="presentation_max_buffer_pixel">Maximum render buffer size</string>
+    <string name="presentation_anti_aliasing">Anti-aliasing</string>
+    <string name="presentation_shadow_resolution">Character shadow resolution</string>
+    <string name="presentation_expand_photography">Expand the 3D area in photography and 360° views</string>
+    <string name="presentation_photography_notice">Renders the 3D scene beyond the default 16:9 area without zooming, cropping or stretching. Saved separately from custom graphics settings.</string>
+    <string name="presentation_waiting">Original settings · Waiting for a supported game client</string>
+    <string name="presentation_saved_waiting">Settings saved · Waiting for game confirmation</string>
+    <string name="presentation_save_failed">Could not save settings. The previous settings are preserved.</string>
+    <string name="presentation_invalid">Could not read saved settings. Showing defaults; changing a setting saves a new value.</string>
+    <string name="presentation_applied">The game confirmed that the current settings are applied.</string>
+    <string name="presentation_disabled">The game confirmed that original display settings are in use.</string>
+    <string name="presentation_unsupported">These settings cannot be applied to the current game or screen layout.</string>
+    <string name="presentation_waiting_for_scene">Game received the settings · Waiting for confirmation in photography or 360° view</string>
+    <string name="presentation_init_failed">Could not initialize game display settings.</string>
+    <string name="presentation_launch_button">Launch IDOLY PRIDE</string>
+    <string name="presentation_client_notice">Install both the server APK and a game APK with graphics support. This server app does not download, modify or install the game APK.</string>
+    <string name="presentation_launch_missing">No supported game client was found. Install the separately provided game APK first.</string>
+    <string-array name="presentation_quality_options">
+        <item>Original (0)</item>
+        <item>Low (10)</item>
+        <item>Medium (20)</item>
+        <item>High (30)</item>
+        <item>Highest (40)</item>
+        <item>Photography (100)</item>
+    </string-array>
+    <string-array name="presentation_target_fps_options">
+        <item>Original (0)</item>
+        <item>30 fps</item>
+        <item>60 fps</item>
+        <item>90 fps</item>
+        <item>120 fps</item>
+    </string-array>
+    <string-array name="presentation_render_scale_options">
+        <item>0.25×</item>
+        <item>0.5×</item>
+        <item>0.75×</item>
+        <item>1× (default)</item>
+        <item>1.25×</item>
+        <item>1.5×</item>
+        <item>2×</item>
+    </string-array>
+    <string-array name="presentation_max_buffer_pixel_options">
+        <item>720 px</item>
+        <item>1080 px</item>
+        <item>1440 px</item>
+        <item>1920 px</item>
+        <item>2560 px</item>
+        <item>3840 px</item>
+        <item>4096 px (default)</item>
+    </string-array>
+    <string-array name="presentation_anti_aliasing_options">
+        <item>Original (-1)</item>
+        <item>Off (0)</item>
+        <item>FXAA (1)</item>
+        <item>SMAA (2)</item>
+    </string-array>
+    <string-array name="presentation_shadow_resolution_options">
+        <item>Original (0)</item>
+        <item>512</item>
+        <item>1024</item>
+        <item>2048</item>
+        <item>4096</item>
+    </string-array>
+    <string name="library_settings_title">Lists and language</string>
+    <string name="resource_storage">Resource storage location</string>
+    <string-array name="resource_storage_options">
+        <item>Downloads/IdolyPride (default)</item>
+        <item>App storage</item>
+    </string-array>
+    <string name="resource_storage_public_notice">Original resources are stored directly in Downloads/IdolyPride/octo-cache (Android) or octo-cache-ios (iOS). All files access is required on Android 11 or later. Accounts, settings and master data stay in app storage.</string>
+    <string name="resource_storage_private_notice">Resources are kept in the selected app storage. No storage permission is needed. Use ZIP import or export to move them.</string>
+    <string name="resource_storage_permission_title">Store resources directly in Downloads</string>
+    <string name="resource_storage_permission_notice">To store original resources directly in Downloads/IdolyPride, this server app needs All files access. Server start is retried when you return from permission settings. You can instead choose app storage and start without this permission.</string>
+    <string name="resource_storage_older_android">Direct Downloads storage requires Android 11 or later. On this device, choose app storage and use the ZIP file dialog to export resources. The storage location is not changed automatically.</string>
+    <string name="resource_storage_use_private">Start with app storage</string>
+    <string name="resource_storage_later">Cancel</string>
+    <string name="resource_storage_open_settings">Open permission settings</string>
+    <string name="resource_storage_settings_unavailable">Could not open permission settings on this device. Choose app storage manually or check the app permissions.</string>
+    <string name="resource_storage_permission_denied">The server was not started because Downloads access was not granted. Grant access or choose app storage manually.</string>
+    <string name="library_language">Game data language</string>
+    <string name="library_hide_video_mv">Hide video-only MVs in live photography</string>
+    <string name="library_mv_sort">MV order</string>
+    <string name="library_outfit_sort">Outfit order</string>
+    <string name="library_settings_notice">After changing these settings, restart the server and sign in again from the game title screen. To change the game UI language, install the client APK for that language. Outfit sorting requires a recent supported client. Items without translations retain the original text.</string>
+    <string name="library_settings_invalid">Could not read saved list and language settings. Showing defaults; changing a setting saves a new value.</string>
+    <string name="library_settings_failed">Could not save list and language settings. The previous values are preserved.</string>
+    <string-array name="library_language_options">
+        <item>Japanese (original)</item>
+        <item>Korean</item>
+        <item>English</item>
+    </string-array>
+    <string-array name="library_mv_sort_options">
+        <item>Newest released first</item>
+        <item>Oldest released first</item>
+        <item>Title</item>
+        <item>ID</item>
+    </string-array>
+    <string-array name="library_outfit_sort_options">
+        <item>Original order</item>
+        <item>Newest released first</item>
+        <item>Oldest released first</item>
+        <item>Name</item>
+        <item>ID</item>
+    </string-array>
+    <string name="library_resources_title">Resource library</string>
+    <string name="library_resource_platform">Resource platform</string>
+    <string-array name="library_resource_platform_options">
+        <item>Android</item>
+        <item>iOS · PlayCover</item>
+    </string-array>
+    <string name="library_download_parallelism">Simultaneous downloads</string>
+    <string-array name="library_download_parallelism_options">
+        <item>1 file</item>
+        <item>2 files</item>
+        <item>4 files (default)</item>
+        <item>8 files</item>
+    </string-array>
+    <string name="library_download_parallelism_notice">Downloads up to this many files at once. Applies to new download jobs.</string>
+    <string name="library_resources_notice">Store original files in the selected location before starting the game. Downloading everything uses considerable data and storage. Resuming reuses verified files. ZIP import and export are optional and do not include account saves.</string>
+    <string name="library_download_all">Download or resume all resources</string>
+    <string name="library_import">Import resource ZIP</string>
+    <string name="library_export">Export stored resources as ZIP</string>
+    <string name="library_cancel">Cancel resource job</string>
+    <string name="library_resources_waiting">Resource jobs are available after starting the server.</string>
+    <string name="library_resources_unavailable">Check the server status and any resource job in progress.</string>
+    <string name="library_resources_ready">Choose a platform, then download, import or export resources.</string>
+    <string name="library_resources_preparing">Preparing %1$s · %2$s · Cancellation is available after preparation.</string>
+    <string name="library_resources_working">%1$s in progress · Local transfer %2$s</string>
+    <string name="library_resources_cancelling">Cancelling %1$s · %2$s · Wait for it to finish.</string>
+    <string name="library_resources_failed">Could not complete the resource job. Check the server, selected file and storage location. Newly created incomplete files are removed when possible.</string>
+    <string name="library_resources_cancelled">Resource job cancelled. Verified stored files are preserved.</string>
+    <string name="library_import_seekable">The selected file cannot be accessed directly. Save the ZIP to local storage on this device and select it again.</string>
+    <string name="library_catalog_unavailable">No resource catalog is available for this platform. Server files containing that catalog are required.</string>
+    <string name="library_picker_failed">Could not open the file picker.</string>
+    <string name="library_job_running">Preparing or working</string>
+    <string name="library_job_completed">Completed</string>
+    <string name="library_job_partial">Partially completed · Some files are missing or failed.</string>
+    <string name="library_job_failed">Failed</string>
+    <string name="library_job_cancelled">Cancelled</string>
+    <string name="library_job_cancelling">Cancelling</string>
+    <string name="library_job_summary">%1$s · %2$s\nVerified %3$d / %4$d files · Missing %5$d · Failed %6$d</string>
+    <string name="library_job_parallelism">%1$d simultaneous downloads · %2$d active</string>
+    <string name="library_job_transfer_metrics">Received %1$s · Average %2$s/s · %3$d seconds</string>
+    <string name="library_job_bytes">Verified %1$s / %2$s</string>
+    <string name="library_job_phase_summary">Connecting %1$d · Downloading %2$d · Verifying %3$d · Saving %4$d · Copying %5$d</string>
+    <string name="library_job_cached">Reused %1$d stored files</string>
+    <string name="library_export_downloads">ZIP saved to Downloads/IdolyPride/exports.</string>
+    <string name="library_export_document">ZIP saved to the selected location.</string>
+    <string name="library_import_result">Imported %1$d verified files · Failed %2$d</string>
+    <string name="library_import_partial">Some files could not be imported. Verified stored files were preserved.</string>
+    <string name="mode_section_title">Viewing mode</string>
+    <string name="experiment_section_title">Experiments</string>
+    <string name="playback_section_title">MV playback</string>
+    <string name="resources_section_title">Game resources</string>
+    <string name="diagnostics_section_title">Diagnostics</string>
+    <string name="diagnostics_details">View status and recent logs ▾</string>
+    <string name="diagnostics_details_expanded">View status and recent logs ▴</string>
+    <string name="diagnostics_export_notice">Saves game status, server status and recent logs in one JSON file.</string>
+    <string name="accounts_title">Account management</string>
+    <string name="accounts_notice">Normal and viewing accounts are managed separately. Account ZIPs contain game saves and progress, separate from resource ZIPs. The selected account is used from the next server start.</string>
+    <string name="accounts_waiting">Waiting for account status</string>
+    <string name="accounts_ready">Account selection and backup are available.</string>
+    <string name="accounts_complete">Account operation completed.</string>
+    <string name="accounts_previous">Previous accounts</string>
+    <string name="accounts_next">Next accounts</string>
+    <string name="accounts_refresh">Refresh account list</string>
+    <string name="accounts_create">Create account</string>
+    <string name="accounts_clone">Clone selected account</string>
+    <string name="accounts_select">Select for the next start in this mode</string>
+    <string name="accounts_export">Back up selected account as ZIP</string>
+    <string name="accounts_import">Import account ZIP</string>
+    <string name="accounts_restore_notice">A restore point is created before replacing an account. Choose a restore point for the same account you want to restore.</string>
+    <string name="accounts_restore_next">Next restore points · Wraps to the beginning</string>
+    <string name="accounts_restore">Restore from selected point</string>
+    <string name="accounts_restore_empty">No saved restore points</string>
+    <string name="accounts_choose">Select an account first.</string>
+    <string name="accounts_working">Working on account…</string>
+    <string name="accounts_selected">Selected for the next start in this mode. Check the viewing mode setting too. Fully close the game, stop and start the server, then reopen the game.</string>
+    <string name="accounts_restored">Account save imported. To use it now, select the account and restart the game and server.</string>
+    <string name="accounts_exported">Account ZIP saved. Use Import account ZIP to open it in another installation.</string>
+    <string name="accounts_unprepared">First-start preparation required</string>
+    <string name="accounts_empty">No saved accounts</string>
+    <string name="accounts_page">Accounts %1$d–%2$d of %3$d</string>
+    <string name="accounts_restore_page">Restore points %1$d–%2$d of %3$d</string>
+    <string name="accounts_normal">Normal</string>
+    <string name="accounts_media">Viewing</string>
+    <string name="accounts_next_selection">Next start · Normal %1$s / Viewing %2$s</string>
+    <string name="accounts_active">Running now · %1$s · %2$s</string>
+    <string name="accounts_not_running">Server is stopped</string>
+    <string name="accounts_profile_hint">Local save slot name · Up to 64 UTF-8 bytes</string>
+    <string name="accounts_manager_hint">In-game manager name · 1–10 characters</string>
+    <string name="accounts_manager_default">Manager</string>
+    <string name="accounts_profile_required">Enter an account name.</string>
+    <string name="accounts_import_preview">Review account backup</string>
+    <string name="accounts_import_new">Import as a new account</string>
+    <string name="accounts_import_replace">Replace selected account</string>
+    <string name="accounts_archive_summary">Backup: %1$d bytes\nLive records %2$d · Settings records %3$d\nResource files are not included.</string>
+    <string name="accounts_replace_confirm">Replace saved data in %1$s account “%2$s”. The current save is kept in an automatic restore point. Other accounts are unchanged.</string>
+    <string name="accounts_restore_choose_target">First select the account that matches this restore point in the account list above.</string>
+    <string name="accounts_stop_to_restore">This account is currently in use. Fully close the game and stop the server before restoring it.</string>
+    <string name="accounts_failed">Could not complete the account operation. Check the existing save and try again. (%1$s)</string>
+    <string name="accounts_transfer">%1$s · %2$s</string>
+    <string name="accounts_transfer_total">%1$s · %2$s / %3$s</string>
+    <string name="accounts_transfer_saving">Saving account backup</string>
+    <string name="accounts_transfer_copying">Copying and checking account ZIP</string>
+    <string name="server_checks_title">Connection and data checks</string>
+    <string name="server_checks_waiting">Server startup checks have not run yet.</string>
+    <string name="server_checks_refresh">Refresh checks and error history</string>
+    <string name="server_checks_current">Server readiness checks for this session · Not a full game test.</string>
+    <string name="server_checks_previous">Checks from a previous session · Not the current connection status.</string>
+    <string name="server_history_empty">No recent failures saved</string>
+    <string name="server_history_view">View saved diagnostics</string>
+    <string name="server_history_clear">Clear saved diagnostics</string>
+    <string name="server_history_clear_confirm">Only saved server diagnostics are deleted. Accounts and resources are preserved.</string>
+    <string name="server_history_last">Last saved failure · %1$s\n%2$s</string>
+    <string name="server_check_ready">Ready</string>
+    <string name="server_check_blocked">Check required</string>
+    <string name="server_check_attention">Needs attention</string>
+    <string name="server_check_stopped">Stopped</string>
+    <string name="server_check_unchecked">Not checked</string>
+    <string name="server_check_protocol">Game protocol</string>
+    <string name="server_check_catalog">Game catalog</string>
+    <string name="server_check_master">Original master data</string>
+    <string name="server_check_storage">Storage location</string>
+    <string name="server_check_http">File server connection</string>
+    <string name="server_check_grpc">Game server connection</string>
+    <string name="server_check_resources">Resource catalog</string>
+    <string name="server_check_account">Selected account</string>
+    <string name="server_check_unknown">Other checks</string>
+    <string name="accounts_clone_notice">Cloning creates a separate local save slot for the same game account. The in-game ID and progress are copied unchanged.</string>
+    <string name="accounts_too_large">Account ZIPs up to 128 MiB can be imported. Import resource ZIPs from the game resources menu.</string>
+    <string name="accounts_empty_archive">The selected account ZIP is empty. Choose another file.</string>
+    <string name="accounts_provider_permission">Cannot access the selected file. Check its location and permissions in the Files app, then select it again.</string>
+    <string name="accounts_preparing">Preparing account management and checking saved data…</string>
+    <string name="accounts_confirm">Confirm</string>
+    <string name="accounts_cancel">Cancel</string>
+    <string name="accounts_date_unknown">Time unavailable</string>
+</resources>

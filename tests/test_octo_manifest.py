@@ -8,7 +8,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
 from idoly_local.octo_manifest import (
-    Database, OctoManifest, OctoManifestError, OctoRequestError, decrypt_manifest,
+    Database, OctoManifest, OctoManifestError, OctoObject, OctoRequestError, decrypt_manifest,
 )
 
 
@@ -54,10 +54,13 @@ def response(archive, revision=0, headers=None):
                                      HEADERS if headers is None else headers)
 
 
-def independent_decode(wire):
+def independent_plain(wire):
     # This decoder intentionally does not use the module's decrypt function.
-    plain = unpad(AES.new(KEY, AES.MODE_CBC, wire[:16]).decrypt(wire[16:]), 16)
-    return Database.FromString(plain)
+    return unpad(AES.new(KEY, AES.MODE_CBC, wire[:16]).decrypt(wire[16:]), 16)
+
+
+def independent_decode(wire):
+    return Database.FromString(independent_plain(wire))
 
 
 def varint(value):
@@ -71,7 +74,92 @@ def bytes_field(number, payload):
     return varint(number*8+2) + varint(len(payload)) + payload
 
 
+def translated_fixture(language="ko", kind="assetbundle", alias="Ab12Z9"):
+    database = fixture()
+    row = database.assetBundleList[0] if kind == "assetbundle" else database.resourceList[0]
+    # The real SDK's original object ID is six ASCII base62 characters. Keep
+    # the older raw-wire fixture above unchanged: it tests a separate contract.
+    row.objectName = "local_" + language + "_" + "0123456789abcdef" * 2
+    row.generation += 10
+    row.MergeFromString(bytes_field(101, b"translated-row-unknown"))
+    record = OctoObject(kind, row.uploadVersionId, row.objectName, row.generation,
+                        row.size, row.md5, row.name)
+    identity = (kind, row.uploadVersionId, alias, row.generation)
+    return database, {identity: record}, record
+
+
 class OctoManifestProtocolTests(unittest.TestCase):
+    def test_localized_sdk_wire_uses_six_character_alias_without_changing_canonical_records(self):
+        for language in ("ko", "en"):
+            for kind in ("assetbundle", "resources"):
+                with self.subTest(language=language, kind=kind):
+                    source, aliases, canonical = translated_fixture(language, kind)
+                    original = source.SerializeToString(deterministic=True)
+                    server = archive(source, object_aliases=aliases)
+                    decoded = independent_decode(response(server))
+                    expected = Database.FromString(original)
+                    expected.urlFormat = LOCAL_URL
+                    rows = expected.assetBundleList if kind == "assetbundle" else expected.resourceList
+                    rows[0].objectName = "Ab12Z9"
+                    self.assertEqual(decoded.SerializeToString(deterministic=True),
+                                     expected.SerializeToString(deterministic=True))
+                    self.assertEqual(source.SerializeToString(deterministic=True), original)
+                    self.assertEqual(server.objects[canonical.identity], canonical)
+                    self.assertTrue(server.objects[canonical.identity].object_name.startswith("local_" + language + "_"))
+                    alias_identity = next(iter(aliases))
+                    self.assertNotIn(alias_identity, server.objects)
+                    path = f"/octo/{canonical.upload_version}/{kind}/Ab12Z9/{canonical.generation}"
+                    self.assertIs(server.lookup_object(path), server.objects[canonical.identity])
+                    with self.assertRaises(OctoRequestError):
+                        server.lookup_object(path.rsplit("/", 1)[0] + "/" + str(canonical.generation - 10))
+
+    def test_localized_projection_preserves_unknowns_and_unpacked_field_values(self):
+        source, aliases, canonical = translated_fixture()
+        row = Database.FromString(source.SerializeToString()).assetBundleList[0]
+        row.ClearField("objectName")
+        untouched_data = (b"\xd1\x05" + b"12345678" + row.SerializeToString(deterministic=True)
+                          + b"\x38\x02\x40\x02" + b"\xe0\x05\x82\x00")
+        # A translated snapshot may serialize known fields canonically. Feed
+        # overlong tags and unpacked integers to verify their decoded values,
+        # unknown fields and all non-name fields survive that projection.
+        object_tag = b"\xda\x00"
+        original_data = untouched_data + object_tag + varint(len(canonical.object_name)) + canonical.object_name.encode()
+        expected_data = untouched_data + object_tag + varint(6) + b"Ab12Z9"
+        before = b"\xa0\x06\x7b" + b"\x08" + varint(source.revision)
+        after = (bytes_field(4, source.resourceList[0].SerializeToString(deterministic=True))
+                 + bytes_field(2, source.assetBundleList[1].SerializeToString(deterministic=True))
+                 + bytes_field(3, b"home") + b"\xdd\x05ABCD")
+        data_tag, url_tag = b"\x92\x00", b"\xaa\x00"
+        raw = (before + data_tag + varint(len(original_data)) + original_data
+               + url_tag + varint(len(ORIGINAL_URL)) + ORIGINAL_URL.encode() + after)
+        expected = (before + data_tag + varint(len(expected_data)) + expected_data
+                    + url_tag + varint(len(LOCAL_URL)) + LOCAL_URL.encode() + after)
+        server = OctoManifest(raw, aes_key=KEY, client_key="synthetic-key",
+                              base_url="http://127.0.0.1:8080", aes_cbc=aes, object_aliases=aliases)
+        self.assertEqual(independent_decode(response(server)), Database.FromString(expected))
+        self.assertEqual(server.objects[canonical.identity], canonical)
+        decoded = Database.FromString(expected)
+        self.assertEqual(list(decoded.assetBundleList[0].tagid), [1, 2])
+        self.assertEqual(list(decoded.assetBundleList[0].dependencie), [2])
+
+    def test_localized_row_requires_one_unambiguous_validated_sdk_alias(self):
+        source, aliases, canonical = translated_fixture()
+        identity = next(iter(aliases))
+        ambiguous = {**aliases, (identity[0], identity[1], "Qw34Er", identity[3]): canonical}
+        for candidate in (None, {}, ambiguous):
+            with self.subTest(aliases=candidate), self.assertRaises(OctoManifestError):
+                archive(source, object_aliases=candidate)
+
+    def test_localized_alias_must_be_six_ascii_base62_at_the_canonical_generation(self):
+        source, _aliases, canonical = translated_fixture()
+        for name in ("Ab12Z", "Ab12Z90", "Ab_2Z9", "Ab-2Z9", "Abé2Z9"):
+            aliases = {(canonical.kind, canonical.upload_version, name, canonical.generation): canonical}
+            with self.subTest(name=name), self.assertRaises(OctoManifestError):
+                archive(source, object_aliases=aliases)
+        wrong_generation = {(canonical.kind, canonical.upload_version, "Ab12Z9", canonical.generation - 10): canonical}
+        with self.assertRaises(OctoManifestError):
+            archive(source, object_aliases=wrong_generation)
+
     def test_cold_archive_changes_only_url_preserving_unknown_fields(self):
         source = fixture()
         original = source.SerializeToString(deterministic=True)

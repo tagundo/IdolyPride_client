@@ -13,7 +13,7 @@ from google.protobuf.message import DecodeError
 
 from .gameplay import _Catalog
 from .rpc import RpcCode, RpcFailure
-from .story_read_rules import MASTER_VERSION, SCHEMA_SHA256
+from .story_read_rules import MASTER_VERSION, LATEST_MASTER_VERSION, SCHEMA_SHA256
 
 
 _USER = "/api.User/Get"
@@ -36,8 +36,14 @@ def _identity(value):
 
 
 def _stories(catalog):
-    if catalog.version() != MASTER_VERSION:
+    if catalog.version() not in (MASTER_VERSION, LATEST_MASTER_VERSION):
         _fail("Media stories require the supported master version")
+    if catalog.version() == LATEST_MASTER_VERSION:
+        try:
+            from .public_cohort_support import require_master_cohort
+            require_master_cohort(catalog.directory, "story_reads")
+        except (ImportError, OSError, ValueError):
+            _fail("Media stories require the approved public master cohort")
     rows = catalog.ids("Story", required=True)
     for row in rows.values():
         types, assets = row.get("advPlayTypes"), row.get("advAssetIds")

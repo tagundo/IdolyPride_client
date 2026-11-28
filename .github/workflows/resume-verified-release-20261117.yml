@@ -1,0 +1,91 @@
+name: Resume verified 2026.11.17.2 publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish only the frozen five verified 837f458 build artifacts after full readback
+        type: boolean
+        default: false
+        required: true
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/resume-verified-release-20261117.yml
+      - tools/resume_verified_release_20261117.py
+      - tests/test_resume_verified_release.py
+      - tools/publish_optimized_release.py
+      - tests/test_publish_optimized_release.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optimized-release
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  verify-resume-control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify frozen resume boundaries and optional empty staging
+        run: |
+          python3 -m pip install --disable-pip-version-check pytest==8.4.2
+          python3 -B -m pytest -q -p no:cacheprovider control/tests/test_resume_verified_release.py
+          python3 -B -m pytest -q -p no:cacheprovider control/tests/test_publish_optimized_release.py -k optional
+
+  resume-verified-publication:
+    needs: verify-resume-control
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RESUME_PUBLISH: ${{ inputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+          lfs: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 837f458a708fe0be4a01a38952d349efa54f3a02
+          path: build
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Reverify original build and resume publication only on explicit request
+        shell: bash
+        run: |
+          args=()
+          if [[ "$RESUME_PUBLISH" == "true" ]]; then args+=(--publish); fi
+          python3 -B control/tools/resume_verified_release_20261117.py \
+            --work "$RUNNER_TEMP/idoly-resume-20261117-work" \
+            --output "$RUNNER_TEMP/idoly-resume-20261117-proof" "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verified-release-resume-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/idoly-resume-20261117-proof
+          if-no-files-found: error
+          retention-days: 14

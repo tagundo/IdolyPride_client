@@ -217,7 +217,7 @@ public:
             while (parent_index < parent_count && parent_points[parent_index].parent != parent) ++parent_index;
             ParentPoints &points = parent_points[parent_index];
             if (parent_index == parent_count) {
-                points = {}; points.parent = parent; ++parent_count;
+                points = ParentPoints{}; points.parent = parent; ++parent_count;
             }
             if (!points.have_origin) {
                 api_.inverse_transform_point(parent, &world_origin, &points.origin, nullptr);

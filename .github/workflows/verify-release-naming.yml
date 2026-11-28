@@ -1,0 +1,50 @@
+name: Verify calendar release names
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/verify-release-naming.yml
+      - .github/workflows/release-all-platforms.yml
+      - tools/release_identity.py
+      - tools/publish_optimized_release.py
+      - tools/stage_private_candidate.py
+      - tests/test_release_identity.py
+      - tests/test_publish_optimized_release.py
+      - tests/test_stage_private_candidate.py
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  naming:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install bounded verification dependencies
+        run: python -m pip install pytest==8.4.2
+      - name: Check date labels, artifact names and publication guards
+        run: >-
+          python -B -m pytest -q --noconftest -p no:cacheprovider
+          tests/test_release_identity.py tests/test_publish_optimized_release.py
+          tests/test_stage_private_candidate.py
+          tests/test_release_preference_gate.py
+          --junitxml "$RUNNER_TEMP/release-naming.xml"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-naming-${{ github.sha }}
+          path: ${{ runner.temp }}/release-naming.xml
+          if-no-files-found: warn
+          retention-days: 14

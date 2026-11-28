@@ -791,3 +791,219 @@ def test_midstream_export_failure_never_sets_archive_complete(library_case):
     job=library.status()['job']
     assert not job['archive_complete'] and job['failed_files']==1 and job['state'] in {'failed','partial'}
     assert 'sensitive' not in json.dumps(job) and len(calls)==6
+
+
+
+def latest_catalog_case(root, monkeypatch, platform="android"):
+    from idoly_local import latest_cohort_pins, resource_translation
+    monkeypatch.setattr(latest_cohort_pins, "RESOURCE_ARCHIVES", {})
+    old_manifest, old_payloads = catalog(root, platform, count=3)
+    version = old_manifest.application_version
+    directory = root/("public-octo-ios" if platform == "ios" else "public-octo")
+    old_raw = (directory/"manifest.pb").read_bytes()
+    storage = root/"old-resource-storage"; storage.mkdir()
+    old = ResourceLibrary(root, {platform: old_manifest}, aes_cbc=AES,
+        fetcher=lambda url, **kw: Response(old_payloads[url]), resource_cache_dir=storage)
+    try:
+        old.start_download(platform); assert complete(old)["state"] == "completed"
+        ready = old.prepare_export(platform)
+        output = io.BytesIO(); old.write_export(ready["job_id"], output)
+        old_zip = output.getvalue()
+    finally: old.close()
+    database = Database.FromString(old_raw); database.revision += 101
+    bodies = {(row.kind, row.object_name): old_payloads[row.upstream_url]
+              for row in old_manifest.objects.values()}
+    changed = database.assetBundleList[1]; changed.generation += 1
+    bodies[("assetbundle", changed.objectName)] = b"new generation CDN body"
+    changed.size = len(bodies[("assetbundle", changed.objectName)])
+    changed.md5 = hashlib.md5(bodies[("assetbundle", changed.objectName)]).hexdigest()
+    changed = database.resourceList[1]
+    bodies[("resources", changed.objectName)] = b"same key but new size and digest"
+    changed.size = len(bodies[("resources", changed.objectName)])
+    changed.md5 = hashlib.md5(bodies[("resources", changed.objectName)]).hexdigest()
+    new_body = b"brand new CDN object"
+    new = database.assetBundleList.add(id=4, name="new_bundle", size=len(new_body), state=1,
+        md5=hashlib.md5(new_body).hexdigest(), objectName="brand_new", generation=2001,
+        uploadVersionId=101050 if platform == "ios" else 202050)
+    bodies[("assetbundle", new.objectName)] = new_body
+    raw = database.SerializeToString()
+    (directory/"legacy-manifest.pb").write_bytes(old_raw)
+    (directory/"manifest.pb").write_bytes(raw)
+    settings = json.loads((directory/"settings.json").read_bytes())
+    settings.update(revision=database.revision, manifest_sha256=hashlib.sha256(raw).hexdigest())
+    (directory/"settings.json").write_text(json.dumps(settings))
+    monkeypatch.setitem(resource_translation.LEGACY_MANIFEST_SHA256, platform, hashlib.sha256(old_raw).hexdigest())
+    approved = {"application_version": version, "revision": database.revision,
+                "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                "legacy_manifest_sha256": hashlib.sha256(old_raw).hexdigest()}
+    monkeypatch.setattr(latest_cohort_pins, "RESOURCE_ARCHIVES", {platform: approved})
+    manifest = OctoManifest(raw, aes_key=bytes.fromhex(settings["aes_key_hex"]), client_key=settings["client_key"],
+        base_url="http://127.0.0.1:8080", aes_cbc=AES, application_version=version)
+    payloads = {row.upstream_url: bodies[(row.kind, row.object_name)] for row in manifest.objects.values()}
+    calls = []
+    def fetch(url, **kw): calls.append(url); return Response(payloads[url])
+    library = ResourceLibrary.from_data_dir(root, aes_cbc=AES, active_gateway=SimpleNamespace(manifest=manifest), fetcher=fetch)
+    return library, manifest, payloads, calls, old_zip, approved
+
+
+@pytest.mark.parametrize("platform", ["android", "ios"])
+def test_latest_registry_preserves_only_exact_old_zip_overlap_then_downloads_changed_and_new(tmp_path, monkeypatch, platform):
+    library, manifest, payloads, calls, old_zip, approved = latest_catalog_case(tmp_path, monkeypatch, platform)
+    from idoly_local.resource_archive import cache_member
+    before = {name: b"existing private raw bytes" for name in ("state.db", "media-state.db", "client-language.json")}
+    for name, raw in before.items(): (tmp_path/name).write_bytes(raw)
+    current_names = {cache_member(platform, row) for row in manifest.objects.values()}
+    with ZipFile(io.BytesIO(old_zip)) as archive:
+        obsolete = next(name for name in archive.namelist() if name.endswith(".bin") and name not in current_names)
+        before[obsolete] = archive.read(obsolete)
+    old_cache = tmp_path/obsolete; old_cache.parent.mkdir(parents=True); old_cache.write_bytes(before[obsolete])
+    try:
+        summary = library.catalog_summary(platform)[platform]
+        assert summary["application_version"] == approved["application_version"]
+        assert summary["revision"] == approved["revision"] and summary["object_count"] == 7
+        imported = library.import_from(io.BytesIO(old_zip), platform)
+        assert imported["state"] == "partial" and imported["imported_files"] == imported["verified_files"] == 4
+        assert imported["missing_files"] == 3 and imported["received_bytes"] == 0 and calls == []
+        library.start_download(platform)
+        done = complete(library)
+        assert done["state"] == "completed" and done["cache_hit_files"] == 4 and done["downloaded_files"] == 3
+        assert len(calls) == 3
+        assert {name: (tmp_path/name).read_bytes() for name in before} == before
+        prepared = library.prepare_export(platform); output = io.BytesIO(); library.write_export(prepared["job_id"], output)
+        with ZipFile(io.BytesIO(output.getvalue())) as archive:
+            portable = json.loads(archive.read("portable-manifest.json"))
+            assert portable["revision"] == approved["revision"] and portable["manifest_sha256"] == approved["manifest_sha256"]
+            assert obsolete not in archive.namelist()
+    finally: library.close()
+
+
+@pytest.mark.parametrize("damage", ["none", "wrong-sha", "wrong-legacy-sha", "bool-revision", "extra-field"])
+def test_unapproved_latest_registry_never_opens_cache_or_accepts_arbitrary_revision(tmp_path, monkeypatch, damage):
+    from idoly_local import latest_cohort_pins
+    library, _, _, calls, _, approved = latest_catalog_case(tmp_path, monkeypatch)
+    library.close()
+    if damage == "none": monkeypatch.setattr(latest_cohort_pins, "RESOURCE_ARCHIVES", {})
+    else:
+        changed = dict(approved)
+        if damage == "wrong-sha": changed["manifest_sha256"] = "0"*64
+        elif damage == "wrong-legacy-sha": changed["legacy_manifest_sha256"] = "0"*64
+        elif damage == "bool-revision": changed["revision"] = True
+        else: changed["extra"] = "unapproved"
+        monkeypatch.setattr(latest_cohort_pins, "RESOURCE_ARCHIVES", {"android": changed})
+    with pytest.raises((ValueError, ResourceLibraryError)):
+        rejected = ResourceLibrary.from_data_dir(tmp_path, aes_cbc=AES)
+        try: rejected.prepare_export("android")
+        finally: rejected.close()
+    assert calls == [] and not (tmp_path/"octo-cache").exists()
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt", "symlink"])
+def test_legacy_zip_fallback_requires_exact_pinned_legacy_manifest(tmp_path, monkeypatch, damage):
+    library, _, _, calls, old_zip, _ = latest_catalog_case(tmp_path, monkeypatch)
+    legacy = tmp_path/"public-octo/legacy-manifest.pb"
+    if damage == "missing": legacy.unlink()
+    elif damage == "corrupt": legacy.write_bytes(b"unknown manifest")
+    else:
+        outside = tmp_path/"outside.pb"; outside.write_bytes(legacy.read_bytes()); legacy.unlink(); legacy.symlink_to(outside)
+    try:
+        with pytest.raises(ResourceLibraryError, match="import_failed"):
+            library.import_from(io.BytesIO(old_zip), "android")
+        assert calls == [] and not (tmp_path/"octo-cache").exists()
+    finally: library.close()
+
+
+
+def test_current_zip_fast_path_does_not_require_unused_legacy_catalog(tmp_path, monkeypatch):
+    library, _, _, calls, _, _ = latest_catalog_case(tmp_path, monkeypatch)
+    try:
+        library.start_download("android"); assert complete(library)["state"] == "completed"
+        ready = library.prepare_export("android"); output = io.BytesIO(); library.write_export(ready["job_id"], output)
+        (tmp_path/"public-octo/legacy-manifest.pb").unlink()
+        imported = library.import_from(io.BytesIO(output.getvalue()), "android")
+        assert imported["state"] == "completed" and imported["verified_files"] == 7
+        assert imported["missing_files"] == 0 and len(calls) == 7
+    finally: library.close()
+
+
+def test_corrupt_unchanged_old_zip_object_never_publishes_and_no_network_is_used(tmp_path, monkeypatch):
+    from idoly_local.resource_archive import cache_member
+    library, manifest, _, calls, old_zip, _ = latest_catalog_case(tmp_path, monkeypatch)
+    selected = next(row for row in manifest.objects.values() if row.object_name == "object_assetbundle_0")
+    name = cache_member("android", selected)
+    with ZipFile(io.BytesIO(old_zip)) as archive:
+        files = {entry: archive.read(entry) for entry in archive.namelist()}
+    files[name] = b"x"*len(files[name])
+    damaged = io.BytesIO()
+    with ZipFile(damaged, "w") as archive:
+        for entry, raw in files.items(): archive.writestr(entry, raw)
+    try:
+        imported = library.import_from(io.BytesIO(damaged.getvalue()), "android")
+        assert imported["state"] == "partial" and imported["failed_files"] == 1
+        assert imported["imported_files"] == 3 and imported["missing_files"] == 3
+        assert calls == [] and not (tmp_path/name).exists()
+        assert not list(tmp_path.rglob("*.part"))
+    finally: library.close()
+
+
+
+def test_legacy_compatibility_never_follows_a_replaced_public_catalog_directory(tmp_path, monkeypatch):
+    library, _, _, calls, old_zip, _ = latest_catalog_case(tmp_path, monkeypatch)
+    directory = tmp_path/"public-octo"; moved = tmp_path/"moved-public-octo"
+    directory.rename(moved); directory.symlink_to(moved, target_is_directory=True)
+    try:
+        with pytest.raises(ResourceLibraryError, match="import_failed"):
+            library.import_from(io.BytesIO(old_zip), "android")
+        assert calls == [] and not (tmp_path/"octo-cache").exists()
+    finally: library.close()
+
+
+@pytest.mark.parametrize("registry", [None, {}, {"android": None}])
+def test_legacy_zip_cannot_supply_its_own_authority_when_latest_pin_is_unprepared(tmp_path, monkeypatch, registry):
+    from idoly_local import latest_cohort_pins
+    library, _, _, calls, old_zip, _ = latest_catalog_case(tmp_path, monkeypatch)
+    monkeypatch.setattr(latest_cohort_pins, "RESOURCE_ARCHIVES", registry)
+    try:
+        with pytest.raises(ResourceLibraryError, match="import_failed"):
+            library.import_from(io.BytesIO(old_zip), "android")
+        assert calls == [] and not (tmp_path/"octo-cache").exists()
+    finally: library.close()
+
+
+
+@pytest.mark.parametrize("platform", ["android", "ios"])
+@pytest.mark.parametrize("corrupt_original", [False, True])
+def test_japanese_old_revision_history_collision_never_reuses_transformed_latest_gateway(
+        tmp_path, monkeypatch, platform, corrupt_original):
+    from idoly_local.resource_translation_runtime import pin_manifest_revision
+    library, original, _, _, _, approved = latest_catalog_case(tmp_path, monkeypatch, platform)
+    library.close()
+    directory = tmp_path/("public-octo-ios" if platform == "ios" else "public-octo")
+    old_raw = (directory/"legacy-manifest.pb").read_bytes()
+    raw = (directory/"manifest.pb").read_bytes()
+    settings = json.loads((directory/"settings.json").read_bytes())
+    state = tmp_path/("client-resource-revision-"+platform+".json")
+    pin_manifest_revision(old_raw, state, language="ko")
+    previous = json.loads(state.read_bytes())
+    assert previous["revision"] < approved["revision"]
+    selected, compatible = pin_manifest_revision(raw, state, language="ja", preserve_original=True)
+    rewritten = Database.FromString(selected)
+    assert compatible and rewritten.revision == approved["revision"]
+    assert all(row.state == 2 for rows in (rewritten.assetBundleList, rewritten.resourceList) for row in rows)
+    gateway = OctoManifest(selected, aes_key=bytes.fromhex(settings["aes_key_hex"]),
+        client_key=settings["client_key"], base_url="http://127.0.0.1:8080", aes_cbc=AES,
+        application_version=original.application_version, allow_previous_revisions=compatible)
+    assert gateway.revision == approved["revision"] and gateway.archive_sha256 != approved["manifest_sha256"]
+    if corrupt_original: (directory/"manifest.pb").write_bytes(b"corrupt static original")
+    restored = ResourceLibrary.from_data_dir(tmp_path, aes_cbc=AES,
+        active_gateway=SimpleNamespace(manifest=gateway))
+    try:
+        assert platform not in restored._catalogs
+        if corrupt_original:
+            with pytest.raises(ResourceLibraryError, match="invalid_catalog"): restored.catalog_summary(platform)
+        else:
+            assert restored.catalog_summary(platform)[platform]["revision"] == approved["revision"]
+            assert restored._catalogs[platform].raw == raw
+            assert restored._catalogs[platform].manifest is not gateway
+            assert restored._catalogs[platform].manifest.archive_sha256 == approved["manifest_sha256"]
+        assert not (tmp_path/("octo-cache-ios" if platform == "ios" else "octo-cache")).exists()
+    finally: restored.close()

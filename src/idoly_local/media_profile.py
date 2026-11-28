@@ -17,6 +17,7 @@ from .gameplay import _Catalog
 from .initial_inventory import _initial_releases, _initial_skill, _level_rows
 from .live_assets import _wearable
 from .media_outfit_policy import COSTUME_IDS, is_audited_work_costume
+from .profile_preferences import PREFERENCE_MASTER_VERSION, preference_master_rows
 from .rpc import RpcCode, RpcFailure
 
 
@@ -68,6 +69,26 @@ class MediaInventoryPlan:
     _cards: tuple[bytes, ...] = field(repr=False)
     _stamina: int = field(repr=False)
     _snapshot_type: type = field(repr=False, compare=False)
+    decoration_ids: tuple[str, ...] = ()
+
+
+def _media_decoration_ids(schema, catalog):
+    source = catalog.directory / "Decoration.json" if catalog.directory else None
+    # Custom/older catalogs without decorations keep their existing behavior.
+    # Only the exact public master version opts into the verified supplement.
+    if source is None or (not source.exists() and not source.is_symlink()
+                          and catalog.version() != PREFERENCE_MASTER_VERSION):
+        return ()
+    rows = preference_master_rows(catalog, "Decoration")
+    identities = tuple(_identity(row.get("id"), "decoration identity") for row in rows)
+    if len(set(identities)) != len(identities):
+        _fail("duplicate decoration identities")
+    field = schema.response_type(_USER).DESCRIPTOR.fields_by_name.get("decorations")
+    if (field is None or not field.is_repeated or field.message_type is None
+            or "decorationId" not in field.message_type.fields_by_name
+            or field.message_type.fields_by_name["decorationId"].type != 9):
+        _fail("schema has no decoration inventory")
+    return tuple(sorted(identities))
 
 
 def prepare_media_inventory(schema, master_dir: Path) -> MediaInventoryPlan:
@@ -86,9 +107,11 @@ def prepare_media_inventory(schema, master_dir: Path) -> MediaInventoryPlan:
     same two integer floors and initial skill-release checks as the starter.
     Original 6.1.1 Card.get_IllustrationStage selects stage one when initial
     rarity exceeds four; its explicit display enum is AfterLimitBreak (2).
-    No extra master tables beyond the normal payload are required.
+    Profile decorations come from a present validated table or the exact-version
+    public supplement. Custom catalogs without that table retain no new grants.
     """
     catalog = _Catalog(master_dir)
+    decorations = _media_decoration_ids(schema, catalog)
     cards = catalog.ids("Card", required=True)
     characters = catalog.ids("Character", required=True)
     costumes = catalog.ids("Costume", required=True)
@@ -204,7 +227,7 @@ def prepare_media_inventory(schema, master_dir: Path) -> MediaInventoryPlan:
         prepared.append(card_type(**values).SerializeToString())
     return MediaInventoryPlan(schema.fingerprint, catalog.version(), tuple(sorted(owners)),
         tuple(sorted(available_costumes)), tuple(sorted(available_hairs)), tuple(sorted(cards)),
-        tuple(appearances), tuple(prepared), stamina, snapshot_type)
+        tuple(appearances), tuple(prepared), stamina, snapshot_type, decoration_ids=decorations)
 
 
 def apply_media_inventory(snapshot, plan: MediaInventoryPlan, *, obtained_time: int) -> bool:
@@ -230,6 +253,15 @@ def apply_media_inventory(snapshot, plan: MediaInventoryPlan, *, obtained_time: 
     owned_costumes = _owned(snapshot.costumes, "costumeId")
     owned_hairs = _owned(snapshot.hairs, "hairId")
     owned_cards = _owned(snapshot.cards, "cardId")
+    if (not isinstance(plan.decoration_ids, tuple)
+            or any(not isinstance(key, str) or not key for key in plan.decoration_ids)
+            or len(set(plan.decoration_ids)) != len(plan.decoration_ids)):
+        _fail("invalid prepared decoration identities")
+    owned_decorations = {}
+    if plan.decoration_ids:
+        if "decorations" not in snapshot.DESCRIPTOR.fields_by_name:
+            _fail("schema has no decoration inventory")
+        owned_decorations = _owned(snapshot.decorations, "decorationId")
     result = plan._snapshot_type()
     result.CopyFrom(snapshot)
     result_cards = {row.cardId: row for row in result.cards}
@@ -264,6 +296,10 @@ def apply_media_inventory(snapshot, plan: MediaInventoryPlan, *, obtained_time: 
             if initial.displayType == 2:
                 result_cards[identity].displayType = 2
                 changed = True
+    for identity in plan.decoration_ids:
+        if identity not in owned_decorations:
+            result.decorations.add(decorationId=identity)
+            changed = True
     if changed:
         snapshot.CopyFrom(result)
     return changed

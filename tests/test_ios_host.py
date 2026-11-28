@@ -1,0 +1,751 @@
+"""In-process lifecycle and trusted native-command boundary, without an iOS VM."""
+import json
+import os
+from pathlib import Path
+import socket
+import threading
+from types import SimpleNamespace
+
+import pytest
+
+from idoly_local import ios_host as host
+from idoly_local import media_settings, playback, presentation
+
+
+class Bridge:
+    def __init__(self):
+        self.events = []
+
+    def post_event(self, raw):
+        assert len(raw.encode()) <= host.MAX_JSON_BYTES
+        self.events.append(json.loads(raw))
+
+    def aes_cbc(self, _encrypt, _key, _iv, raw):
+        return raw
+
+    def open_url(self, *_args, **_kwargs):
+        raise AssertionError("Tests must not contact a network resource")
+
+
+class Library:
+    def __init__(self):
+        self.downloads = []; self.cancelled = []; self.imported = None
+
+    def catalog_summary(self, platform):
+        assert platform == "ios"
+        return {"platform": platform, "files": 1, "bytes": 7}
+
+    def start_download(self, platform, *, parallelism):
+        self.downloads.append((platform, parallelism))
+        return {"job_id": "download", "state": "running"}
+
+    def cancel(self, identifier):
+        self.cancelled.append(identifier)
+        return {"job_id": identifier, "state": "cancelled"}
+
+    def prepare_export(self, platform):
+        return {"job_id": "export", "state": "export_ready", "total_bytes": 7}
+
+    def write_export(self, identifier, out):
+        out.write(b"archive")
+        return {"job_id": identifier, "state": "completed", "archive_complete": True, "failed_files": 0}
+
+    def import_from(self, source, platform):
+        self.imported = source.read()
+        return {"job_id": "import", "state": "completed", "failed_files": 0}
+
+
+class Runtime:
+    def __init__(self, root, *, ready=True):
+        self.root = root; self.stops = 0; self.running = True; self.alive = ready
+        self._grpc = SimpleNamespace(running=ready)
+        self._asset_thread = SimpleNamespace(is_alive=lambda: self.alive)
+        self._library = Library()
+        self.active_media = dict(media_settings.DEFAULTS)
+
+    def status(self):
+        return {"running": self.running, "logs": ["x" * 2000] * 200,
+            "presentation": presentation.PresentationState(self.root / "client-presentation.json").status(),
+            "playback": playback.PlaybackState(self.root / "client-playback.json").status(),
+            "media_options": {"settings": media_settings.MediaSettingsState(self.root / "client-media.json").settings(),
+                              "effective_settings": self.active_media}}
+
+    def stop(self):
+        self.stops += 1; self.running = False; self._grpc.running = False; self.alive = False
+
+
+@pytest.fixture
+def harness(tmp_path):
+    from idoly_local import codec
+    previous_aes = codec._cipher_backend
+    bundle = tmp_path / "app/LocalServer"; bundle.mkdir(parents=True)
+    data = tmp_path / "Library/Application Support/IdolyPrideLocal"
+    resources = tmp_path / "Documents/IdolyPride"
+    bridge = Bridge(); runtimes = []; calls = []
+    def factory(root, **kwargs):
+        calls.append(kwargs); runtime = Runtime(root); runtimes.append(runtime); return runtime
+    subject = host._Host(bridge=bridge, runtime_factory=factory, installer=lambda *_args: None,
+                         translation_installer=lambda *_args, **_kwargs: None)
+    yield SimpleNamespace(subject=subject, bundle=bundle, data=data, resources=resources,
+        bridge=bridge, runtimes=runtimes, calls=calls)
+    subject.close()
+    codec.configure_aes(previous_aes)
+
+
+def start(h):
+    return h.subject.start(h.bundle, h.data, h.resources, ports=host.PortParams(0, 0))
+
+
+def command(h, action, **fields):
+    return json.loads(h.subject.command(json.dumps({"id": 7, "action": action, **fields})))
+
+
+def test_oversized_snapshot_retains_bounded_http_and_both_transfer_observations(harness, monkeypatch):
+    h = harness
+    start(h)
+    observed = h.runtimes[0].status()
+    observed["unrelated_large_history"] = "x" * (host.MAX_JSON_BYTES * 2)
+    observed["language"] = {"settings": {"schema": 1, "language": "ko"},
+                            "public_report": "x" * (host.MAX_JSON_BYTES * 2)}
+    observed["asset_transfer"] = {"completed_requests": 2, "failed_requests": 1,
+        "http_status": 404, "path": "/master/file.db?query-secret", "session_bytes_sent": 12}
+    observed["resource_transfer"] = {"session_http_requests": 4, "session_http_failures": 1,
+        "last_failed_request": {"request_id": 4, "kind": "manifest", "http_status": 404,
+                                "error_code": "octo_not_found", "phase": "failed"},
+        "recent_requests": [{"object_name": "x" * 4000, "http_status": 200}] * 30}
+    observed["http_requests"] = {"total_requests": 7, "active_requests": 0,
+        "completed_requests": 5, "failed_requests": 2,
+        "last_request": {"request_id": 7, "method": "HEAD", "path": "/missing?query-secret",
+                         "http_status": 404, "phase": "failed", "elapsed_ms": 1},
+        "last_failed_request": {"request_id": 1, "method": "GET", "path": "/early-missing?query-secret",
+                                "http_status": 404, "phase": "failed", "elapsed_ms": 1},
+        "recent_requests": [{"request_id": 7, "method": "HEAD", "path": "/missing",
+                             "http_status": 404, "phase": "failed", "elapsed_ms": 1}] * 30}
+    monkeypatch.setattr(h.runtimes[0], "status", lambda: observed)
+    result = json.loads(h.subject.command('{"id":1,"action":"status"}'))
+    assert result["ok"] is True
+    status = result["result"]
+    assert status["diagnostics_truncated"] is True
+    runtime = status["runtime"]
+    assert runtime["language"]["settings"]["language"] == "ko"
+    assert "public_report" not in runtime["language"]
+    assert runtime["asset_transfer"]["failed_requests"] == 1
+    assert runtime["asset_transfer"]["path"] == "/master/file.db"
+    assert runtime["resource_transfer"]["last_failed_request"]["http_status"] == 404
+    assert len(runtime["resource_transfer"]["recent_requests"]) == 3
+    assert runtime["http_requests"]["total_requests"] == 7
+    assert runtime["http_requests"]["last_request"]["path"] == "/missing"
+    assert runtime["http_requests"]["last_failed_request"]["path"] == "/early-missing"
+    assert len(runtime["http_requests"]["recent_requests"]) == 10
+    assert "query-secret" not in json.dumps(result)
+    assert len(h.subject.command('{"id":1,"action":"status"}').encode()) <= host.MAX_JSON_BYTES
+
+
+def test_fresh_defaults_native_adapters_and_both_listeners_ready(harness):
+    h = harness; result = start(h)
+    assert result["state"] == "ready" and result["running"]
+    assert result["options"] == {**host.DEFAULT_OPTIONS, "language": "ko"}
+    assert result["options"] == result["effective_options"] and not result["restart_required"]
+    assert h.calls[0]["grpc_port"] == h.calls[0]["asset_port"] == 0
+    assert h.calls[0]["resource_platform"] == "ios" and h.calls[0]["media_mode"] is True
+    assert h.calls[0]["aes_cbc"] == h.bridge.aes_cbc and h.calls[0]["resource_fetcher"] == h.bridge.open_url
+    assert h.bridge.events[-1]["event"] == "ready"
+    assert start(h)["running"] and len(h.runtimes) == 1
+    assert len(h.subject.command('{"id":1,"action":"status"}').encode()) <= host.MAX_JSON_BYTES
+
+
+def test_existing_preferences_and_both_databases_are_preserved(harness):
+    h = harness; h.data.mkdir(parents=True)
+    normal = h.data / "state.db"; media = h.data / "media-state.db"
+    normal.write_bytes(b"normal account"); media.write_bytes(b"gallery account")
+    options = {"schema": 1, "media_mode": False, "download_missing_resources": False}
+    (h.data / "ios-host.json").write_text(json.dumps(options))
+    (h.data / "client-language.json").write_text('{"schema":1,"language":"en"}')
+    result = start(h)
+    assert result["options"] == {**options, "language": "en", "interface_language": "system"}
+    assert h.calls[0]["media_mode"] is False and h.calls[0]["download_missing_resources"] is False
+    assert normal.read_bytes() == b"normal account" and media.read_bytes() == b"gallery account"
+    assert json.loads((h.data / "ios-host.json").read_text()) == options
+
+
+def test_save_options_defers_language_and_profile_changes_until_next_launch(harness):
+    h = harness; start(h)
+    result = command(h, "save_options", media_mode=False, language="ja", download_missing_resources=False)
+    assert result["ok"] and result["result"]["restart_required"]
+    assert result["result"]["effective_options"]["language"] == "ko"
+    assert h.runtimes[0].stops == 0 and len(h.calls) == 1
+    assert result["result"]["options"]["language"] == "ja"
+    assert json.loads((h.data / "ios-host.json").read_text())["media_mode"] is False
+    assert json.loads((h.data / "ios-host.json").read_text())["language"] == "ja"
+    assert json.loads((h.data / "client-language.json").read_text())["language"] == "ko"
+    h.subject.close()
+    relaunched = host._Host(bridge=h.bridge, runtime_factory=lambda root, **_kwargs: Runtime(root),
+        installer=lambda *_args: None, translation_installer=lambda *_args, **_kwargs: None)
+    try:
+        next_run = relaunched.start(h.bundle, h.data, h.resources, ports=host.PortParams(0, 0))
+        assert next_run["effective_options"] == result["result"]["options"]
+        assert json.loads((h.data / "client-language.json").read_text())["language"] == "ja"
+    finally:
+        relaunched.close()
+
+
+@pytest.mark.parametrize("action,settings,filename", [
+    ("save_presentation", {**presentation.DEFAULTS, "expand_photography": True}, "client-presentation.json"),
+    ("save_playback", {"schema": 1, "revision": 0, "wait_for_orientation": False}, "client-playback.json"),
+    ("save_media", {**media_settings.DEFAULTS, "mv_sort": "old"}, "client-media.json"),
+])
+def test_settings_save_uses_shared_validation_atomic_file_and_revision(harness, action, settings, filename):
+    h = harness; start(h)
+    assert command(h, action, settings=settings)["ok"]
+    saved = json.loads((h.data / filename).read_text())
+    assert saved["revision"] > settings["revision"]
+    assert all(saved[k] == v for k, v in settings.items() if k != "revision")
+    assert (h.data / filename).stat().st_mode & 0o777 == 0o600
+    assert not list(h.data.glob("." + filename + ".*"))
+    assert not command(h, action, settings={**settings, "schema": True})["ok"]
+    assert json.loads((h.data / filename).read_text()) == saved
+
+
+@pytest.mark.parametrize("raw", ["[]", '{"action":"status","action":"status"}',
+    '{"action":"save_options","media_mode":NaN}', '{"action":"unknown"}',
+    '{"action":"status","path":"/private"}', '{"id":true,"action":"status"}',
+    '{"id":"\\ud800","action":"status"}', '[[' * 18 + '0' + ']]' * 18,
+    '"' + "x" * host.MAX_JSON_BYTES + '"'])
+def test_commands_reject_malformed_duplicate_nonfinite_deep_and_oversize_json(harness, raw):
+    reply = json.loads(harness.subject.command(raw))
+    assert reply["ok"] is False and len(json.dumps(reply).encode()) <= host.MAX_JSON_BYTES
+
+
+def test_close_racing_start_does_not_publish_ready_or_leak_runtime(harness):
+    h = harness; entered = threading.Event(); release = threading.Event()
+    def factory(root, **_kwargs):
+        runtime = Runtime(root); h.runtimes.append(runtime); entered.set(); assert release.wait(3); return runtime
+    h.subject._factory = factory
+    thread = threading.Thread(target=start, args=(h,)); thread.start(); assert entered.wait(3)
+    h.subject.close(); release.set(); thread.join(3)
+    assert not thread.is_alive() and h.subject.status()["state"] == "closed"
+    assert h.runtimes[0].stops == 1
+    assert not any(event["event"] == "ready" for event in h.bridge.events)
+
+
+def test_concurrent_start_calls_share_one_runtime(harness):
+    h = harness; barrier = threading.Event(); entered = threading.Event()
+    def factory(root, **_kwargs):
+        entered.set(); assert barrier.wait(3); runtime = Runtime(root); h.runtimes.append(runtime); return runtime
+    h.subject._factory = factory
+    results = []
+    a = threading.Thread(target=lambda: results.append(start(h))); a.start(); assert entered.wait(3)
+    b = threading.Thread(target=lambda: results.append(start(h))); b.start(); barrier.set(); a.join(3); b.join(3)
+    assert not a.is_alive() and not b.is_alive() and len(h.runtimes) == 1
+    assert len(results) == 2 and all(value["state"] == "ready" for value in results)
+
+
+def test_incomplete_listener_start_is_cleaned_up_and_can_retry(harness):
+    h = harness
+    def factory(root, **_kwargs):
+        runtime = Runtime(root, ready=len(h.runtimes) > 0); h.runtimes.append(runtime); return runtime
+    h.subject._factory = factory
+    assert start(h)["state"] == "failed" and h.runtimes[0].stops == 1
+    assert not any(event["event"] == "ready" for event in h.bridge.events)
+    assert start(h)["state"] == "ready"
+
+
+def test_retry_does_not_replace_runtime_until_failed_cleanup_succeeds(harness):
+    h = harness; first = Runtime(h.data, ready=False); allow_cleanup = threading.Event()
+    def stop():
+        if not allow_cleanup.is_set(): raise RuntimeError("cleanup pending")
+        first.stops += 1; first.running = False
+    first.stop = stop
+    h.subject._factory = lambda *_args, **_kwargs: first
+    assert start(h)["state"] == "failed" and h.subject._runtime is first
+    h.subject._factory = lambda root, **_kwargs: Runtime(root)
+    assert start(h)["state"] == "failed" and h.subject._runtime is first
+    allow_cleanup.set()
+    assert start(h)["state"] == "ready" and first.stops == 1
+
+
+def test_writable_paths_inside_bundle_or_overlapping_are_rejected_before_creation(harness):
+    h = harness; inside = h.bundle / "private"
+    assert h.subject.start(h.bundle, inside, h.resources)["state"] == "failed"
+    assert not inside.exists()
+    assert h.subject.start(h.bundle, h.data, h.data / "cache")["state"] == "failed"
+    assert not h.data.exists()
+
+
+def test_foreground_recovers_only_without_saved_restart_changes(harness):
+    h = harness; start(h); h.runtimes[0].alive = False
+    assert h.subject.foreground()["state"] == "ready" and len(h.runtimes) == 2
+    command(h, "save_options", language="ja")
+    h.runtimes[-1].alive = False
+    result = h.subject.foreground()
+    assert result["state"] == "failed" and result["restart_required"] and len(h.runtimes) == 2
+
+
+def test_native_foreground_accessor_refreshes_restarted_descriptor_without_public_export(harness, monkeypatch):
+    h = harness
+    monkeypatch.setattr(Runtime, "shared_resources_configuration", lambda self: {
+        "schema": 1, "available": self.running, "directory": str(self.root / ("ipc-" + str(id(self)))),
+        "epoch": id(self)}, raising=False)
+    assert h.subject.shared_resources_configuration() == {"schema": 1, "available": False}
+    start(h)
+    original = h.subject.shared_resources_configuration()
+    assert original["available"] is True
+    monkeypatch.setattr(host, "_HOST", h.subject)
+    assert host.shared_resources_configuration() == original
+    assert original["directory"] not in json.dumps(h.subject.status())
+    assert not command(h, "shared_resources_configuration")["ok"]
+    h.runtimes[0].alive = False
+    assert h.subject.foreground()["state"] == "ready"
+    refreshed = host.shared_resources_configuration()
+    assert refreshed["available"] is True and refreshed["epoch"] != original["epoch"]
+    assert refreshed["directory"] != original["directory"] and h.runtimes[0].stops == 1
+    assert refreshed["directory"] not in json.dumps(h.subject.status())
+    h.subject.close()
+    assert host.shared_resources_configuration() == {"schema": 1, "available": False}
+
+
+def test_native_private_accessor_falls_back_when_runtime_has_no_live_broker(harness, monkeypatch):
+    h = harness; start(h)
+    assert h.subject.shared_resources_configuration() == {"schema": 1, "available": False}
+    def unavailable():
+        raise OSError("synthetic unavailable private IPC")
+    monkeypatch.setattr(h.runtimes[-1], "shared_resources_configuration", unavailable, raising=False)
+    assert h.subject.shared_resources_configuration() == {"schema": 1, "available": False}
+    assert "synthetic unavailable" not in json.dumps(h.subject.status())
+
+
+
+def test_close_cleanup_failure_is_retained_for_retry(harness):
+    h = harness; start(h); runtime = h.runtimes[0]; original = runtime.stop
+    def once():
+        runtime.stop = original
+        raise RuntimeError("private details must not enter the error reply")
+    runtime.stop = once
+    h.subject.close(); assert h.subject.status()["last_error"]["code"] == "cleanup_failed"
+    h.subject.close(); assert runtime.stops == 1 and h.subject._runtime is None
+
+
+def test_atomic_preferences_reject_symlinks_and_preserve_original_on_replace_failure(harness, monkeypatch):
+    h = harness; start(h); target = h.data / "ios-host.json"; original = target.read_bytes()
+    real_replace = os.replace
+    def failed(source, destination):
+        if destination == target: raise OSError("simulated full disk")
+        return real_replace(source, destination)
+    monkeypatch.setattr(os, "replace", failed)
+    assert not command(h, "save_options", language="en")["ok"]
+    assert target.read_bytes() == original and not list(h.data.glob(".ios-host.json.*"))
+    target.unlink(); outside = h.data.parent / "outside.json"; outside.write_text('secret')
+    target.symlink_to(outside)
+    assert not command(h, "save_options", language="ja")["ok"] and outside.read_text() == 'secret'
+
+
+def test_archive_export_is_async_and_import_requires_native_owned_regular_file(harness, tmp_path):
+    h = harness; start(h)
+    initial = command(h, "resources_export")
+    assert initial["ok"] and initial["result"]["ready"] is False
+    h.subject._archive_worker.join(3)
+    completed = h.subject.status()["resource_operation"]
+    assert completed["ready"] and Path(completed["output_path"]).read_bytes() == b"archive"
+    imports = h.data / "imports"; selected = imports / "approved.zip"; selected.write_bytes(b"trusted copied archive")
+    assert command(h, "resources_import", path=str(selected))["ok"]
+    h.subject._archive_worker.join(3)
+    assert h.runtimes[0]._library.imported == b"trusted copied archive"
+    assert not command(h, "resources_import", path=str(tmp_path / "outside.zip"))["ok"]
+    alias = imports / "alias.zip"; alias.symlink_to(selected)
+    assert not command(h, "resources_import", path=str(alias))["ok"]
+    alias.unlink(); os.link(selected, alias)
+    assert not command(h, "resources_import", path=str(alias))["ok"]
+    assert command(h, "resources_download", parallelism=8)["ok"]
+    assert h.runtimes[0]._library.downloads == [("ios", 8)]
+    assert not command(h, "resources_download", parallelism=True)["ok"]
+
+
+def test_archive_import_accepts_native_owned_parent_through_ancestor_alias(harness, tmp_path):
+    h = harness; assert start(h)["running"]
+    selected = h.data / "imports/copied.zip"
+    selected.write_bytes(b"native copied iOS archive")
+    ancestor = tmp_path / "native-container-alias"
+    ancestor.symlink_to(h.data.parent, target_is_directory=True)
+    native_path = ancestor / h.data.name / "imports" / selected.name
+    assert native_path.parent != h.subject._paths[1] / "imports"
+    assert native_path.parent.resolve() == h.subject._paths[1] / "imports"
+    result = command(h, "resources_import", path=str(native_path))
+    assert result["ok"] and result["result"]["accepted"]
+    h.subject._archive_worker.join(3)
+    assert not h.subject._archive_worker.is_alive()
+    assert h.subject.status()["resource_operation"]["ready"]
+    assert h.runtimes[0]._library.imported == b"native copied iOS archive"
+
+
+def test_archive_import_aliases_cannot_escape_owned_parent_or_follow_links(harness, tmp_path):
+    h = harness; assert start(h)["running"]
+    imports = h.data / "imports"
+    selected = imports / "copied.zip"; selected.write_bytes(b"owned archive")
+    ancestor = tmp_path / "native-container-alias"
+    ancestor.symlink_to(h.data.parent, target_is_directory=True)
+    native_parent = ancestor / h.data.name / "imports"
+    outside = tmp_path / "outside"; (outside / "imports").mkdir(parents=True)
+    (outside / "imports/copied.zip").write_bytes(b"outside archive")
+    outside_alias = tmp_path / "outside-alias"
+    outside_alias.symlink_to(outside, target_is_directory=True)
+    assert not command(h, "resources_import", path=str(outside_alias / "imports/copied.zip"))["ok"]
+    parent_alias = tmp_path / "imports-alias"
+    parent_alias.symlink_to(imports, target_is_directory=True)
+    assert not command(h, "resources_import", path=str(parent_alias / selected.name))["ok"]
+    linked = imports / "linked.zip"; linked.symlink_to(selected)
+    assert not command(h, "resources_import", path=str(native_parent / linked.name))["ok"]
+    linked.unlink(); os.link(selected, linked)
+    assert not command(h, "resources_import", path=str(native_parent / linked.name))["ok"]
+    linked.unlink(); selected.unlink(); imports.rmdir()
+    imports.symlink_to(outside / "imports", target_is_directory=True)
+    assert not command(h, "resources_import", path=str(native_parent / "copied.zip"))["ok"]
+    assert h.runtimes[0]._library.imported is None
+    assert h.subject._archive_worker is None
+
+
+def test_export_size_and_retained_temp_file_bounds(harness, monkeypatch):
+    h = harness; start(h); monkeypatch.setattr(host, "MAX_ARCHIVE_BYTES", 3)
+    assert command(h, "resources_export")["ok"]
+    h.subject._archive_worker.join(3)
+    assert not h.subject.status()["resource_operation"]["accepted"]
+    exports = h.data / "tmp/exports"
+    assert not list(exports.iterdir())
+    for index in range(host.MAX_EXPORT_FILES): (exports / str(index)).write_bytes(b"x")
+    assert not command(h, "resources_export")["ok"]
+
+
+def tiny_core(h, monkeypatch):
+    """Small wire fixtures; real Runtime/SQLite/HTTP/H2 listener ownership."""
+    from google.protobuf import descriptor_pb2
+    from idoly_local import application, gameplay
+    def install(_bundle, root, _log):
+        root.mkdir(parents=True, exist_ok=True)
+        file = descriptor_pb2.FileDescriptorProto(name="ios-host.proto", package="api", syntax="proto3")
+        file.message_type.add(name="Empty")
+        pack = file.message_type.add(name="MasterPack")
+        for number, name, kind in [(1,"type",9),(2,"fileName",9),(3,"fileSize",5),(4,"cryptoKey",9),(5,"downloadUrl",9)]:
+            pack.field.add(name=name, number=number, type=kind)
+        tag = file.message_type.add(name="MasterTag")
+        tag.field.add(name="version", number=1, type=9)
+        tag.field.add(name="masterTagPacks", number=2, type=11, label=3, type_name=".api.MasterPack")
+        response = file.message_type.add(name="MasterGetResponse")
+        response.field.add(name="masterTag", number=1, type=11, type_name=".api.MasterTag")
+        file.service.add(name="Master").method.add(name="Get", input_type=".api.Empty", output_type=".api.MasterGetResponse")
+        file.service.add(name="System").method.add(name="Check", input_type=".api.Empty", output_type=".api.Empty")
+        # Services and messages share a protobuf package namespace.
+        user = file.message_type.add(name="SavedUser")
+        user.field.add(name="name", number=1, type=9)
+        user_response = file.message_type.add(name="UserGetResponse")
+        user_response.field.add(name="user", number=1, type=11, type_name=".api.SavedUser")
+        file.service.add(name="User").method.add(name="Get", input_type=".api.Empty", output_type=".api.UserGetResponse")
+        descriptor = descriptor_pb2.FileDescriptorSet(); descriptor.file.add().CopyFrom(file)
+        (root / "protocol").mkdir(exist_ok=True)
+        (root / "protocol/idolypride-6.1.1.pb").write_bytes(descriptor.SerializeToString())
+        master = root / "original-master"; (master / "assets/master").mkdir(parents=True, exist_ok=True)
+        (master / "assets/master/tiny").write_bytes(b"tiny")
+        (master / "master-tag.json").write_text(json.dumps({"version":"fixture","masterTagPacks":[
+            {"type":"Fixture","fileName":"tiny","fileSize":4,"cryptoKey":"key","downloadUrl":"https://invalid/tiny"}]}))
+        (root / "master-json").mkdir(exist_ok=True)
+        (root / "ios-host.json").write_text(json.dumps({"schema":1,"media_mode":False,"download_missing_resources":False}))
+        (root / "client-language.json").write_text('{"schema":1,"language":"ja"}')
+    class Application:
+        def __init__(self, schema, *_args, **_kwargs): self.schema = schema
+        def handle(self, path, _raw, _context): return self.schema.response_type(path)().SerializeToString()
+    monkeypatch.setattr(application, "Application", Application)
+    monkeypatch.setattr(gameplay, "seed_starter_profile", lambda *_args: None)
+    h.subject._installer = install; h.subject._factory = None
+
+
+def startup_reason(result, opened=None):
+    runtime = result.get("runtime", {})
+    return json.dumps({"state": result.get("state"), "last_error": result.get("last_error"),
+        "startup_checks": runtime.get("startup_checks"),
+        "last_failure": runtime.get("durable_history", {}).get("last_failure"),
+        "opened_asset_ports": opened}, ensure_ascii=False, sort_keys=True)
+
+
+def test_failed_bind_real_runtime_releases_already_bound_asset_listener(harness, monkeypatch):
+    from idoly_local import assets
+    h = harness; tiny_core(h, monkeypatch)
+    resource = socket.socket(); resource.bind(("127.0.0.1", 0)); occupied = resource.getsockname()[1]
+    opened = []; original = assets.create_asset_server
+    def observe(*args, **kwargs):
+        server = original(*args, **kwargs); opened.append(server.server_address[1]); return server
+    monkeypatch.setattr(assets, "create_asset_server", observe)
+    try:
+        result = h.subject.start(h.bundle, h.data, h.resources, ports=host.PortParams(occupied, 0))
+        assert result["state"] == "failed" and len(opened) == 1, startup_reason(result, opened)
+        probe = socket.socket()
+        try: probe.bind(("127.0.0.1", opened[0]))
+        finally: probe.close()
+        assert not any(event["event"] == "ready" for event in h.bridge.events)
+    finally: resource.close()
+
+
+def test_real_core_loopback_http_h2_sqlite_start_and_shutdown(harness, monkeypatch):
+    from urllib.request import urlopen
+    from h2.config import H2Configuration
+    from h2.connection import H2Connection
+    from h2.events import StreamEnded, TrailersReceived
+    h = harness; tiny_core(h, monkeypatch); result = start(h)
+    assert result["state"] == "ready", startup_reason(result)
+    address = result["runtime"]["grpc_address"]; asset_url = result["runtime"]["asset_url"]
+    with urlopen(asset_url + "/client/playback", timeout=3) as response:
+        assert json.loads(response.read())["wait_for_orientation"] is True
+    connection = H2Connection(H2Configuration(client_side=True, header_encoding="utf-8"))
+    connection.initiate_connection()
+    connection.send_headers(1,[(":method","POST"),(":scheme","http"),(":authority",address),
+        (":path","/api.System/Check"),("content-type","application/grpc+proto"),("te","trailers")])
+    connection.send_data(1,b"\0"*5,end_stream=True); statuses=[]; ended=False
+    with socket.create_connection(tuple([address.rsplit(":",1)[0],int(address.rsplit(":",1)[1])]),timeout=3) as stream:
+        stream.sendall(connection.data_to_send())
+        while not ended:
+            for event in connection.receive_data(stream.recv(65536)):
+                if isinstance(event,TrailersReceived): statuses.append(dict(event.headers)["grpc-status"])
+                if isinstance(event,StreamEnded): ended=True
+            pending=connection.data_to_send()
+            if pending:stream.sendall(pending)
+    assert statuses == ["0"] and (h.data / "state.db").is_file()
+    ports=[int(address.rsplit(":",1)[1]),int(asset_url.rsplit(":",1)[1])]
+    h.subject.close()
+    for port in ports:
+        probe=socket.socket();probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        try:probe.bind(("127.0.0.1",port))
+        finally:probe.close()
+
+
+def test_interface_language_saves_without_restarting_the_game_server(harness):
+    h = harness; start(h)
+    result = command(h, "save_options", interface_language="ja")
+    assert result["ok"] and result["result"]["options"]["interface_language"] == "ja"
+    assert result["result"]["restart_required"] is False
+    assert h.runtimes[0].stops == 0 and len(h.runtimes) == 1
+    assert json.loads((h.data / "ios-host.json").read_text())["interface_language"] == "ja"
+
+
+@pytest.mark.parametrize("value", [None, True, 1, "fr", [], {}])
+def test_interface_language_rejects_invalid_values_without_overwriting_preferences(harness, value):
+    h = harness; start(h)
+    before = (h.data / "ios-host.json").read_bytes()
+    assert not command(h, "save_options", interface_language=value)["ok"]
+    assert (h.data / "ios-host.json").read_bytes() == before
+
+
+def test_game_start_applies_selected_language_before_preparing_embedded_data(harness, monkeypatch):
+    from idoly_local import ios_client_data
+    h = harness; start(h)
+    assert command(h, "save_options", language="ja", media_mode=False)["ok"]
+    observed = []
+    def prepare(app, data, language):
+        assert app == h.bundle.parent and data == h.data
+        assert language == h.subject.status()["effective_options"]["language"] == "ja"
+        assert json.loads((h.data / "client-language.json").read_text())["language"] == "ja"
+        observed.append(language)
+        return {"schema": 1, "language": language, "bundle_id": "local.idoly.client-data",
+                "bundle_path": str(data / "client-data/ja.bundle"), "files": 46, "reused": False}
+    monkeypatch.setattr(ios_client_data, "prepare_client_data", prepare)
+    result = h.subject.prepare_game_start()
+    assert result["running"] and result["client_data"]["language"] == "ja"
+    assert observed == ["ja"] and len(h.runtimes) == 2 and h.runtimes[0].stops == 1
+    assert h.calls[-1]["media_mode"] is False
+
+
+@pytest.mark.parametrize("state", ["preparing", "running", "export_ready", "cancelling"])
+def test_game_start_preserves_an_active_resource_job(harness, monkeypatch, state):
+    from idoly_local import ios_client_data
+    h = harness; start(h); runtime = h.runtimes[0]
+    original_status = runtime.status
+    monkeypatch.setattr(runtime, "status", lambda: {**original_status(), "resource_library": {"job": {"state": state}}})
+    monkeypatch.setattr(ios_client_data, "prepare_client_data", lambda *_: pytest.fail("active job must be retained"))
+    assert command(h, "save_options", language="en")["ok"]
+    with pytest.raises(RuntimeError, match="Finish or cancel"):
+        h.subject.prepare_game_start()
+    assert runtime.stops == 0 and len(h.runtimes) == 1
+
+
+def test_failed_game_start_restart_reports_server_unavailable(harness, monkeypatch):
+    h = harness; start(h)
+    assert command(h, "save_options", language="en")["ok"]
+    def failed_factory(*_args, **_kwargs):
+        raise OSError("fixture listener failure")
+    h.subject._factory = failed_factory
+    with pytest.raises(RuntimeError, match="could not apply"):
+        h.subject.prepare_game_start()
+    assert h.subject.readiness() == {"state": "failed", "running": False}
+    assert h.runtimes[0].stops == 1
+
+
+def test_data_only_failure_keeps_existing_server_available(harness, monkeypatch):
+    from idoly_local import ios_client_data
+    h = harness; start(h)
+    def damaged_data(*_args): raise ValueError("fixture client data damaged")
+    monkeypatch.setattr(ios_client_data, "prepare_client_data", damaged_data)
+    with pytest.raises(ValueError, match="client data damaged"):
+        h.subject.prepare_game_start()
+    assert h.subject.readiness() == {"state": "ready", "running": True}
+    assert h.runtimes[0].stops == 0
+
+
+def test_immediate_interface_language_preserves_pending_game_options(harness, monkeypatch):
+    h = harness
+    assert h.subject.start(h.bundle, h.data, h.resources)["running"]
+    assert command(h, "save_options", language="en", media_mode=False,
+                   download_missing_resources=False)["ok"]
+    before = h.subject.status()
+    language_file = (h.data / "client-language.json").read_bytes()
+    def forbidden():
+        raise AssertionError("Interface-only preferences do not require a running game server")
+    monkeypatch.setattr(h.subject, "_ready_runtime", forbidden)
+    for locale in ("ja", "en", "ko", "system"):
+        reply = command(h, "save_interface_language", interface_language=locale)
+        assert reply["ok"] and reply["result"] == {"interface_language": locale}
+        saved = json.loads((h.data / "ios-host.json").read_text())
+        assert saved == {**before["options"], "interface_language": locale}
+        assert h.subject.status()["effective_options"] == before["effective_options"]
+        assert h.subject.status()["restart_required"] is True
+        assert (h.data / "client-language.json").read_bytes() == language_file
+    assert len(h.runtimes) == 1 and h.runtimes[0].stops == 0
+
+
+def test_interface_language_can_be_saved_after_server_startup_failure(harness, monkeypatch):
+    h = harness
+    def failed_factory(*_args, **_kwargs):
+        raise RuntimeError("controlled startup failure")
+    monkeypatch.setattr(h.subject, "_factory", failed_factory)
+    assert h.subject.start(h.bundle, h.data, h.resources)["state"] == "failed"
+    reply = command(h, "save_interface_language", interface_language="ja")
+    assert reply["ok"] and reply["result"] == {"interface_language": "ja"}
+    assert h.subject.status()["state"] == "failed"
+    assert json.loads((h.data / "ios-host.json").read_text())["interface_language"] == "ja"
+
+
+@pytest.mark.parametrize("locale", [None, True, 1, "fr", [], {}, "ja\n"])
+def test_interface_only_command_rejects_invalid_language_without_writing(harness, locale):
+    h = harness
+    assert h.subject.start(h.bundle, h.data, h.resources)["running"]
+    path = h.data / "ios-host.json"
+    before = path.read_bytes()
+    assert not command(h, "save_interface_language", interface_language=locale)["ok"]
+    assert path.read_bytes() == before
+
+
+def test_interface_only_command_rejects_missing_or_game_fields(harness):
+    h = harness
+    assert h.subject.start(h.bundle, h.data, h.resources)["running"]
+    path = h.data / "ios-host.json"
+    before = path.read_bytes()
+    assert not command(h, "save_interface_language")["ok"]
+    assert not command(h, "save_interface_language", interface_language="ja", language="en")["ok"]
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("policy",["latest-cohort-overlay-v1","korean-master-refresh-v1"])
+def test_package_generated_outer_payload_pin_reaches_installer_before_runtime(harness,policy):
+    h=harness
+    pin={"schema":1,"policy":policy,"bytes":123,"sha256":"a"*64,
+        "manifest_sha256":"b"*64,"master_version":"c"*64}
+    (h.bundle/"payload-pin.json").write_text(json.dumps(pin))
+    seen=[]
+    def install(source,data,log,**kwargs):
+        assert source==h.bundle/"ServerData.zip" and data==h.data
+        assert h.runtimes==[]
+        seen.append(kwargs)
+    h.subject._installer=install
+    assert start(h)["state"]=="ready"
+    assert seen==[{"expected_bytes":123,"expected_sha256":"a"*64}]
+
+
+@pytest.mark.parametrize("changed",[{"schema":True},{"policy":"love-source-overlay-v1"},{"bytes":True},
+    {"bytes":0},{"bytes":512*1024**2+1},{"sha256":"not-a-digest"},{"manifest_sha256":"x"*64},
+    {"master_version":"fixture"},{"path":"/private/unapproved"}])
+def test_invalid_bundled_payload_pin_never_reaches_installer_or_runtime(harness,changed):
+    h=harness
+    pin={"schema":1,"policy":"latest-cohort-overlay-v1","bytes":123,"sha256":"a"*64,
+        "manifest_sha256":"b"*64,"master_version":"c"*64}
+    (h.bundle/"payload-pin.json").write_text(json.dumps({**pin,**changed}))
+    seen=[];h.subject._installer=lambda *args,**kwargs:seen.append(True)
+    result=start(h)
+    assert result["state"]=="failed" and h.runtimes==[] and seen==[]
+
+
+def test_bundled_payload_pin_is_small_regular_and_rejects_duplicate_keys(tmp_path):
+    bundle=tmp_path/"LocalServer";bundle.mkdir();path=bundle/"payload-pin.json"
+    path.write_text('{"schema":1,"schema":1}')
+    with pytest.raises(ValueError,match="Duplicate"):_=host._bundled_payload_pin(bundle)
+    path.write_text(" "*4097)
+    with pytest.raises(ValueError,match="public payload pin"):_=host._bundled_payload_pin(bundle)
+    path.unlink();outside=tmp_path/"outside.json";outside.write_text('{}');path.symlink_to(outside)
+    with pytest.raises(OSError):_=host._bundled_payload_pin(bundle)
+    path.unlink();os.mkfifo(path)
+    with pytest.raises(ValueError,match="public payload pin"):_=host._bundled_payload_pin(bundle)
+
+
+def test_startup_failure_persists_only_safe_source_coordinates_and_preserves_private_state(harness):
+    h = harness
+    h.data.mkdir(parents=True)
+    private = h.data / "state.db"
+    private.write_bytes(b"private-account-snapshot")
+    secret = "password-do-not-record /private/provider/customer.zip"
+    def fail(*_args, **_kwargs):
+        raise ValueError(secret)
+    h.subject._installer = fail
+    result = start(h)
+    path = h.data / host.STARTUP_FAILURE_FILE
+    raw = path.read_bytes(); value = json.loads(raw)
+    assert result["state"] == "failed" and result["startup_failure"]["persistence"] == "stored"
+    assert value["stage"] == "catalog" and value["error_code"] == "invalid_input" and value["error_type"] == "ValueError"
+    assert value["frames"] and value["frames"][-1]["file"] == "ios_host.py"
+    assert value["frames"][-1]["function"] == "start" and value["frames"][-1]["line"] > 0
+    assert secret not in raw.decode() and "/private/" not in raw.decode() and "fail" not in [row["function"] for row in value["frames"]]
+    assert len(value["frames"]) <= 8 and len(raw) <= host.STARTUP_FAILURE_MAX
+    assert path.stat().st_mode & 0o777 == 0o600 and private.read_bytes() == b"private-account-snapshot"
+    from test_ios_unified_probe_smoke import probe
+    assert probe.read_startup_failure(h.data.parents[2]) == {**value, "available": True}
+
+
+@pytest.mark.parametrize("damage", ["symlink", "oversized"])
+def test_startup_diagnostic_write_failure_is_fixed_and_never_overwrites_target(harness, damage):
+    h = harness; h.data.mkdir(parents=True)
+    outside = h.data.parent / "outside-secret"; outside.write_bytes(b"credential-provider-private")
+    path = h.data / host.STARTUP_FAILURE_FILE
+    if damage == "symlink": path.symlink_to(outside)
+    else: path.write_bytes(b"x" * (host.MAX_SETTINGS_BYTES + 1))
+    def fail(*_args, **_kwargs): raise PermissionError("private credential details")
+    h.subject._installer = fail
+    result = start(h)
+    assert result["state"] == "failed" and result["last_error"]["type"] == "PermissionError"
+    assert result["startup_failure"]["persistence"] == "unavailable"
+    assert "private credential details" not in json.dumps(result["startup_failure"])
+    assert outside.read_bytes() == b"credential-provider-private"
+    if damage == "oversized": assert path.read_bytes() == b"x" * (host.MAX_SETTINGS_BYTES + 1)
+
+
+def test_startup_source_coordinates_bound_recursion_without_stringifying_exception():
+    class SecretFailure(Exception):
+        def __str__(self): raise AssertionError("must not stringify credentials")
+    namespace = {"error": SecretFailure("private password and path")}
+    exec(compile("def recursive(depth):\n if depth: return recursive(depth-1)\n raise error\n", host.__file__, "exec"), namespace)
+    try: namespace["recursive"](20)
+    except SecretFailure as error: observed = host._startup_failure(error, "runtime")
+    assert observed["error_type"] == "OtherError" and observed["error_code"] == "internal_error"
+    assert len(observed["frames"]) == 8
+    assert all(row["file"] == "ios_host.py" and row["function"] == "recursive" for row in observed["frames"])
+    assert "private" not in json.dumps(observed) and "password" not in json.dumps(observed)
+
+
+def test_startup_factory_failure_is_distinct_from_payload_preparation(harness):
+    def fail(*_args, **_kwargs): raise KeyError("private-account-identifier")
+    harness.subject._factory = fail
+    result = start(harness)
+    saved = json.loads((harness.data / host.STARTUP_FAILURE_FILE).read_bytes())
+    assert result["state"] == "failed" and saved["stage"] == "runtime"
+    assert saved["error_type"] == "KeyError" and saved["error_code"] == "internal_error"
+    assert "private-account-identifier" not in json.dumps(saved)
+
+
+@pytest.mark.parametrize("number,retained", [(13, True), (0, True), (4096, True), (-1, False), (4097, False), (True, False), (None, False)])
+def test_startup_failure_retains_only_bounded_integer_errno(number, retained):
+    observed = host._startup_failure(PermissionError(number, "provider-password-private"), "storage")
+    assert ("errno" in observed) is retained
+    if retained: assert type(observed["errno"]) is int and observed["errno"] == number
+    assert "provider-password-private" not in json.dumps(observed)

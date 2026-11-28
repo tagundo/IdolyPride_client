@@ -1,0 +1,57 @@
+{
+  "extraction_scope": "descriptor, original tag/response/report, Card JSON, two explicit public packs",
+  "input_unchanged": true,
+  "master_version": "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60",
+  "output": {
+    "json": {
+      "bytes": 246419,
+      "sha256": "1187e728b5fb900f92f3bbbff7da75f5365c19f065eb924aaa9c3fa18f0377dd"
+    },
+    "module": {
+      "bytes": 256035,
+      "sha256": "b421aca693494615e0d21b238000fd2d9879c43814185672b25196a51ec4a538"
+    }
+  },
+  "packs": {
+    "CardImage": {
+      "bytes": 86016,
+      "file_name": "e1f8704abf0264ed2bc03c971f1da0848d3f24261f140926c431a8a78aea6326",
+      "json_bytes": 138812,
+      "json_sha256": "c46e3b4c105ab77673625785ac3efef51b76fb5a94c2fc25774a2302c71735ee",
+      "rows": 611,
+      "sha256": "6fc5cfc7c5824990ec32d35eb206d4c3eb2d479a9ecbe8fcbeccb9f123ded5ff"
+    },
+    "Decoration": {
+      "bytes": 90112,
+      "file_name": "abef4715e7e8be438a109b598d0e78019574d0b16c12107225a2420c135f3b0c",
+      "json_bytes": 106644,
+      "json_sha256": "1d5b528bd6243f8d7b94a9b45f906ae1474e703c43d87091da31eca52a191cf5",
+      "rows": 361,
+      "sha256": "b757aead5bd82e1580f5071062d49d96e4267bb567a8b792f03cc10aae013df1"
+    }
+  },
+  "policy": "public-preference-master-v1",
+  "schema": 1,
+  "schema_sha256": "c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad",
+  "source": {
+    "bytes": 191343014,
+    "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"
+  },
+  "source_sha256": {
+    "src/idoly_local/master_build.py": "9ae4b0d259f320458ef2a50ad54a193401fa8747524e7a57e1ae51dd4974e74d",
+    "src/idoly_local/master_translation_build.py": "56287a499c25f524d2ad5b5187503fa23fb89ab706e45c27b59fafa126a15313",
+    "src/idoly_local/schema.py": "aba598dbc17ee70b4704b68ad6115b5fde4bd5e6523559c724e562b4bcfbdc56",
+    "tools/prepare_preference_masters.py": "634778236e879f2c09fa101e78a964efb80b8278fc3c3637c72d222dd506dd5b"
+  },
+  "sqlcipher_version": "4.12.0 community",
+  "status": "PASS",
+  "generation": {
+    "run_id": 43720413432,
+    "source_commit": "fc2c8bf11dfead10069c1981d1d46158af12dcf3",
+    "artifact_id": 14164171917,
+    "archive_bytes": 47297,
+    "archive_sha256": "edb250f887532bf1c83c72151334cd5d7b55d3146fdf7ad464e6de3ec64d08a1",
+    "data_only_AST_verified": true,
+    "module_path": "src/idoly_local/preference_master_data.py"
+  }
+}

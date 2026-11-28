@@ -1,12 +1,15 @@
 package game.qualiarts.idolypride.qa.ui;
 
 import android.app.Application;
+import android.app.Activity;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -34,15 +37,50 @@ public final class QaUiProvider extends ContentProvider {
                 || !context.getPackageName().equals(Application.getProcessName()) || !emulatorHardware()) return true;
         long sessionMillis = markerSessionMillis(context);
         if (sessionMillis <= 0 || !STARTED.compareAndSet(false, true)) return true;
+        Context application = context.getApplicationContext();
+        if (application instanceof Application)
+            ((Application)application).registerActivityLifecycleCallbacks(new ActivityObservation(application));
         Thread worker = new Thread(new Bootstrap(context.getApplicationContext(), sessionMillis), "IdolyQaUiBootstrap");
         worker.setDaemon(true);
         worker.start();
         return true;
     }
 
+    /** Fixed, bounded observations only: no Intent contents or lifecycle changes. */
+    private static final class ActivityObservation implements Application.ActivityLifecycleCallbacks {
+        private final File file;
+        private int records;
+        ActivityObservation(Context context) {
+            file = new File(context.getFilesDir(), "idoly-qa-lifecycle.txt");
+            try (FileOutputStream output = new FileOutputStream(file, false)) {
+                output.write("observer_registered\n".getBytes(StandardCharsets.US_ASCII));
+            } catch (Exception ignored) { Log.i(TAG, "activity_observer_file_unavailable"); }
+        }
+        private synchronized void record(Activity activity, String phase) {
+            if (records++ >= 128) return;
+            String name = activity.getClass().getName();
+            String role = "game.qualiarts.idolypride.localserver.MainActivity".equals(name) ? "server"
+                : "game.qualiarts.idolypride.localserver.UnifiedGameActivity".equals(name) ? "game" : "other";
+            String line = SystemClock.elapsedRealtime() + " " + role + " " + phase
+                + " finishing=" + activity.isFinishing() + " destroyed=" + activity.isDestroyed() + "\n";
+            Log.i(TAG, "activity_" + role + "_" + phase);
+            try (FileOutputStream output = new FileOutputStream(file, true)) {
+                output.write(line.getBytes(StandardCharsets.US_ASCII));
+            } catch (Exception ignored) { Log.i(TAG, "activity_observer_write_unavailable"); }
+        }
+        @Override public void onActivityPreCreated(Activity a, Bundle b) { record(a, "precreated"); }
+        @Override public void onActivityCreated(Activity a, Bundle b) { record(a, "created"); }
+        @Override public void onActivityStarted(Activity a) { record(a, "started"); }
+        @Override public void onActivityResumed(Activity a) { record(a, "resumed"); }
+        @Override public void onActivityPaused(Activity a) { record(a, "paused"); }
+        @Override public void onActivityStopped(Activity a) { record(a, "stopped"); }
+        @Override public void onActivitySaveInstanceState(Activity a, Bundle b) { record(a, "saved"); }
+        @Override public void onActivityDestroyed(Activity a) { record(a, "destroyed"); }
+    }
+
     private static boolean emulatorHardware() {
         return "ranchu".equals(Build.HARDWARE) || "goldfish".equals(Build.HARDWARE)
-            || "cutf_cvm".equals(Build.HARDWARE);
+            || "cutf_cvm".equals(Build.HARDWARE) || "redroid".equals(Build.HARDWARE);
     }
 
     private static long markerSessionMillis(Context context) {
@@ -58,6 +96,18 @@ public final class QaUiProvider extends ContentProvider {
             String packageName = context.getPackageName();
             String profile = marker.optString("input_profile", "diagnostic-aes");
             boolean supportedProfile = DIAGNOSTIC_PACKAGE.equals(packageName) && "diagnostic-aes".equals(profile);
+            if (DIAGNOSTIC_PACKAGE.equals(packageName) && "unified-current".equals(profile)) {
+                JSONObject provenance = marker.optJSONObject("provenance");
+                String source = marker.optString("source_commit", "");
+                supportedProfile = provenance != null && source.matches("[0-9a-f]{40}")
+                    && source.equals(provenance.optString("source_commit", ""))
+                    && marker.optString("input_apk_sha256", "").matches("[0-9a-f]{64}")
+                    && marker.optString("input_apk_sha256", "").equals(provenance.optString("current_unified_apk_sha256", ""))
+                    && !provenance.optBoolean("sdk_aes_store_adaptations", true)
+                    && (DIAGNOSTIC_PACKAGE + ".qa.ui").equals(marker.optString("authority", ""))
+                    && !marker.optBoolean("exported", true) && marker.optBoolean("debuggable", false)
+                    && marker.optBoolean("loopback_only", false);
+            }
             if (NORMAL_PACKAGE.equals(packageName)) {
                 supportedProfile = "normal-local".equals(profile)
                     && NORMAL_INPUT_SHA256.equals(marker.optString("input_apk_sha256", ""))
@@ -75,6 +125,12 @@ public final class QaUiProvider extends ContentProvider {
         static boolean matches(String hardware, String bootHardware, String device, String qemu) {
             if ("cutf_cvm".equals(hardware)) {
                 return "cutf_cvm".equals(bootHardware) && "vsoc_arm64_only".equals(device);
+            }
+            if ("redroid".equals(hardware)) {
+                // Disposable redroid container (native ARM64, no ARM translation).
+                // Its init sets androidboot.hardware=redroid; only ARM64 products.
+                return "redroid".equals(bootHardware)
+                    && ("redroid_arm64".equals(device) || "redroid_arm64_only".equals(device));
             }
             return ("ranchu".equals(hardware) || "goldfish".equals(hardware)) && "1".equals(qemu);
         }
@@ -95,9 +151,9 @@ public final class QaUiProvider extends ContentProvider {
     }
 
     private static boolean emulatorProperty() {
-        if ("cutf_cvm".equals(Build.HARDWARE)) {
-            // Stock Cuttlefish has no ro.kernel.qemu property. Require its
-            // observed boot hardware and exact ARM64-only product instead.
+        if ("cutf_cvm".equals(Build.HARDWARE) || "redroid".equals(Build.HARDWARE)) {
+            // Stock Cuttlefish and redroid need no ro.kernel.qemu property. Require
+            // their observed boot hardware and exact ARM64 product instead.
             return EmulatorIndicators.matches(Build.HARDWARE, property("ro.boot.hardware", 3), Build.DEVICE, "");
         }
         return EmulatorIndicators.matches(Build.HARDWARE, "", Build.DEVICE, property("ro.kernel.qemu", 1));

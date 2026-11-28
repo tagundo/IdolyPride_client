@@ -1,0 +1,139 @@
+{
+  "schema": 1,
+  "scope": "Original runtime type-data initialization proof; full game not executed",
+  "descriptor_row_bytes": 88,
+  "platforms": {
+    "android": {
+      "native_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+      "metadata_sha256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e",
+      "initializer_rva": "0x4188608",
+      "loop_start": "0x418873c",
+      "loop_end": "0x41887c8",
+      "original_loop_sha256": "5aeec9bb7ead5be62c02a4d39c6a7981f9cce2ebb52f9538462a0f9a3b28d1eb",
+      "metadata_base_global": "0xa07f690",
+      "metadata_header_global": "0xa07f698",
+      "metadata_base_equals_header_store_proven": true,
+      "metadata_header_magic": "0xfab11baf",
+      "metadata_header_version": 31,
+      "type_definition_bytes": 2986192,
+      "type_definition_count": 33934,
+      "language_variants": [
+        {
+          "language": "original",
+          "metadata_sha256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e",
+          "metadata_bytes": 28760848,
+          "type_definition_offset": 22225200,
+          "type_definition_bytes": 2986192
+        },
+        {
+          "language": "ja",
+          "metadata_sha256": "e85d3cb26fad111e0b057ece90120b7ff3eea7d00bfbf2fd208a4df066be6f2a",
+          "metadata_bytes": 28760872,
+          "type_definition_offset": 22225224,
+          "type_definition_bytes": 2986192
+        },
+        {
+          "language": "en",
+          "metadata_sha256": "b68450eb6d38d8a34add1384f2912052db749b6accdd6759798608b7d1352714",
+          "metadata_bytes": 28760904,
+          "type_definition_offset": 22225256,
+          "type_definition_bytes": 2986192
+        },
+        {
+          "language": "ko",
+          "metadata_sha256": "0c64e79c426766e572c718aab1f21b5f2165537c15497944a8ff759c8ac496cb",
+          "metadata_bytes": 28760912,
+          "type_definition_offset": 22225264,
+          "type_definition_bytes": 2986192
+        }
+      ],
+      "observed_initializer_writes_only_descriptor_data8": true,
+      "runtime_types": [
+        {
+          "type": "System.Single",
+          "rva": "0x9d8b360",
+          "type_definition_index": 18907,
+          "file_prefix": "db4900000000000000000c8000000000"
+        },
+        {
+          "type": "UnityEngine.AudioClip",
+          "rva": "0x9d97650",
+          "type_definition_index": 32743,
+          "file_prefix": "e77f0000000000000000120000000000"
+        },
+        {
+          "type": "UnityEngine.Texture2D",
+          "rva": "0x9d8c170",
+          "type_definition_index": 23899,
+          "file_prefix": "5b5d0000000000000000120000000000"
+        }
+      ]
+    },
+    "ios": {
+      "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+      "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+      "initializer_rva": "0x8234ee0",
+      "loop_start": "0x823501c",
+      "loop_end": "0x82350a8",
+      "original_loop_sha256": "56eee9e232759a7845000343cd12af7cae7312922c1c9b2dbf4197dc097466b5",
+      "metadata_base_global": "0xa924018",
+      "metadata_header_global": "0xa924020",
+      "metadata_base_equals_header_store_proven": true,
+      "metadata_header_magic": "0xfab11baf",
+      "metadata_header_version": 31,
+      "type_definition_bytes": 2993848,
+      "type_definition_count": 34021,
+      "language_variants": [
+        {
+          "language": "original",
+          "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+          "metadata_bytes": 28805072,
+          "type_definition_offset": 22256544,
+          "type_definition_bytes": 2993848
+        },
+        {
+          "language": "ja",
+          "metadata_sha256": "28c722d379ebcfda619a41610042e90b3e8720de2d0a5492b7e534d8883908a7",
+          "metadata_bytes": 28805096,
+          "type_definition_offset": 22256568,
+          "type_definition_bytes": 2993848
+        },
+        {
+          "language": "en",
+          "metadata_sha256": "8e2a72ba0146f5a99b1aebc1e8d73601ea105d59e404f044405b47a031f87ad8",
+          "metadata_bytes": 28805128,
+          "type_definition_offset": 22256600,
+          "type_definition_bytes": 2993848
+        },
+        {
+          "language": "ko",
+          "metadata_sha256": "aa117e6a0ce9dad6710384507838fd2b81c87be744fe5cfa7453844e58dd0d27",
+          "metadata_bytes": 28805136,
+          "type_definition_offset": 22256608,
+          "type_definition_bytes": 2993848
+        }
+      ],
+      "observed_initializer_writes_only_descriptor_data8": true,
+      "runtime_types": [
+        {
+          "type": "System.Single",
+          "rva": "0xa4f4f40",
+          "type_definition_index": 18890,
+          "file_prefix": "ca4900000000000000000c8000000000"
+        },
+        {
+          "type": "UnityEngine.AudioClip",
+          "rva": "0xa501010",
+          "type_definition_index": 32827,
+          "file_prefix": "3b800000000000000000120000000000"
+        },
+        {
+          "type": "UnityEngine.Texture2D",
+          "rva": "0xa4f5d50",
+          "type_definition_index": 23947,
+          "file_prefix": "8b5d0000000000000000120000000000"
+        }
+      ]
+    }
+  }
+}

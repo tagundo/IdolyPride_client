@@ -4,7 +4,11 @@ import resource
 import shutil
 import subprocess
 
+import sys
+
 import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason='SDK-free C cross contracts require the Linux host toolchain and resource limits')
 
 
 def test_playback_json_types_revision_and_independent_graphics(tmp_path):

@@ -218,3 +218,137 @@ class ResourceTranslation:
         with self._lock:
             if self._archive is not None:
                 self._archive.close(); self._archive = None
+
+
+class RebasedResourceTranslation:
+    """Reuse verified translations only for unchanged original object identities.
+
+    New catalog IDs, dependency graphs and unknown fields stay authoritative.
+    A changed or new object receives its original Japanese data instead.
+    """
+
+    def __init__(self, layer, legacy_manifest, original_manifest):
+        self._layer = layer
+        self.language = layer.language
+        old = Database.FromString(legacy_manifest)
+        prepared = Database.FromString(layer.manifest)
+        current = Database.FromString(original_manifest)
+        original_revision = current.revision
+        self._records = {}
+        aliases = {}
+        translated_names = {"resources": set(), "assetbundle": set()}
+        fields = ("objectName", "generation", "size", "md5", "crc", "state")
+        def identity(row):
+            return (row.name, row.size, row.md5, row.generation,
+                    row.objectName, row.uploadVersionId)
+        for kind, old_rows, prepared_rows, current_rows in (
+                ("resources", old.resourceList, prepared.resourceList, current.resourceList),
+                ("assetbundle", old.assetBundleList, prepared.assetBundleList, current.assetBundleList)):
+            candidates = {}
+            if len(old_rows) != len(prepared_rows):
+                raise ValueError("Prepared translation base record count differs")
+            for before, local in zip(old_rows, prepared_rows):
+                if before.name in candidates:
+                    raise ValueError("Duplicate legacy translation object name")
+                # ResourceTranslation already checked every permitted field.
+                candidates[before.name] = (identity(before), before.state,
+                    tuple(getattr(local, field) for field in fields))
+            seen = set()
+            for row in current_rows:
+                if row.name in seen:
+                    raise ValueError("Duplicate latest translation object name")
+                seen.add(row.name)
+                candidate = candidates.get(row.name)
+                if candidate is None or candidate[0] != identity(row) or row.state == 4 or candidate[1] == 4:
+                    continue
+                values = candidate[2]
+                if values[0] == row.objectName:
+                    continue
+                original_name = row.objectName
+                for field, value in zip(fields, values):
+                    setattr(row, field, value)
+                record = OctoObject(kind, row.uploadVersionId, row.objectName,
+                    row.generation, row.size, row.md5, row.name)
+                if record.cache_key not in layer._records or layer._records[record.cache_key] != record:
+                    raise ValueError("Rebased translation object was not validated")
+                alias = (kind, row.uploadVersionId, original_name, row.generation)
+                if alias in aliases:
+                    raise ValueError("Rebased translation alias conflicts")
+                aliases[alias] = record
+                self._records[record.cache_key] = record
+                translated_names[kind].add(row.name)
+        current.revision = max(current.revision + 1, prepared.revision)
+        # Parsed baselines are no longer needed once the six-field edits have
+        # been copied. Avoid retaining them through serialization and reporting.
+        before = local = None
+        del old, prepared, old_rows, prepared_rows, candidates
+        if current.revision > 2**31 - 1:
+            raise ValueError("Rebased translation revision is exhausted")
+        self.manifest = current.SerializeToString(deterministic=True)
+        adv_total = sum(bool(re.fullmatch(r"adv_[a-z0-9_-]{1,160}\.txt", row.name))
+            for row in current.resourceList if row.state != 4)
+        self.report = dict(layer.report)
+        self.report.update(original_manifest_sha256=hashlib.sha256(original_manifest).hexdigest(),
+            manifest_sha256=hashlib.sha256(self.manifest).hexdigest(),
+            base_revision=original_revision,
+            revision=current.revision,
+            rebased_from_manifest_sha256=hashlib.sha256(legacy_manifest).hexdigest(),
+            coverage={"adv_resources": adv_total,
+                "translated": len(translated_names["resources"]),
+                "missing": adv_total - len(translated_names["resources"]),
+                "unchanged_original": 0})
+        self.object_aliases = MappingProxyType(aliases)
+
+    def open_source(self, record):
+        expected = self._records.get(record.cache_key)
+        if expected is None:
+            if record.object_name.startswith(("local_ko_", "local_en_")):
+                raise ValueError("Unprepared rebased language object")
+            return None
+        if expected != record:
+            raise ValueError("Rebased language resource identity differs")
+        return self._layer.open_source(record)
+
+    def close(self):
+        self._layer.close()
+
+
+LEGACY_MANIFEST_SHA256 = {
+    "android": "23b66c095821ed73cf9690c394d4acdbd2394315b39d30398d85f87a5762017a",
+    "ios": "b431d531ef393ff1807229bbee4bbe75d4c9821007329f91e4822527d9844e9b",
+}
+
+
+def load_resource_translation(directory, original_manifest, *, language, data_dir, platform):
+    """Select the strict layer, reusing only already validated immutable inputs."""
+    def authorize():
+        # Approval is re-evaluated even on a process-local metadata cache hit.
+        report = json.loads(_read(Path(directory) / "manifest.json", MAX_MANIFEST).decode("utf-8"))
+        source_sha = hashlib.sha256(original_manifest).hexdigest()
+        if not isinstance(report, dict) or report.get("original_manifest_sha256") == source_sha:
+            return None
+        from .octo_runtime import latest_resource_archive_pin
+        approved = latest_resource_archive_pin(platform)
+        legacy_sha = LEGACY_MANIFEST_SHA256.get(platform)
+        if (not isinstance(approved, dict) or not legacy_sha
+                or approved.get("manifest_sha256") != source_sha
+                or approved.get("legacy_manifest_sha256") != legacy_sha
+                or report.get("original_manifest_sha256") != legacy_sha):
+            raise ValueError("Prepared translation latest cohort is not approved")
+        archive = "public-octo" if platform == "android" else "public-octo-ios"
+        legacy = _read(Path(data_dir) / archive / "legacy-manifest.pb", MAX_MANIFEST)
+        if hashlib.sha256(legacy).hexdigest() != legacy_sha:
+            raise ValueError("Prepared translation legacy manifest differs")
+        return legacy
+    def build(legacy):
+        if legacy is None:
+            return ResourceTranslation(directory, original_manifest, language=language)
+        layer = ResourceTranslation(directory, legacy, language=language)
+        try:
+            return RebasedResourceTranslation(layer, legacy, original_manifest)
+        except BaseException:
+            layer.close()
+            raise
+    from .resource_translation_cache import validated_layer
+    return validated_layer(directory, original_manifest, language=language, data_dir=data_dir,
+                           platform=platform, authorize=authorize, build=build)

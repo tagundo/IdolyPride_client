@@ -218,8 +218,17 @@ def _rewrite(source, destination, profile, targets, texts, platform, language,
             else ui_assets._replacement(raw, csv_bytes, csv_target))
     for path, item in extra_replacements.items():
         class_id = types[object_records[path][3]][0]
-        _need(class_id in (213, 28), "Extra replacement must target an existing Sprite or Texture2D")
-        maximum = MAX_OBJECT if class_id == 213 else MAX_TEXTURE_BYTES
+        if class_id == 224:
+            from .static_ui_images import LOGO_TRANSFORMS, _logo_rect
+            labels=[name for name,target in LOGO_TRANSFORMS.items() if target["ios"]["path_id"]==path]
+            _need(platform=="ios" and language=="ko" and len(labels)==1,
+                  "Only the three audited Korean Love logo transforms may change")
+            expected,_=_logo_rect(originals[path],labels[0],"ios")
+            _need(isinstance(item,dict) and item.get("raw")==expected,
+                  "Love logo transform differs from the exact approved layout")
+        else:
+            _need(class_id in (213, 28), "Extra replacement must target an existing Sprite or Texture2D")
+        maximum = MAX_OBJECT if class_id in (213,224) else MAX_TEXTURE_BYTES
         _need(isinstance(item, dict) and isinstance(item.get("raw"), bytes)
               and 0 < len(item["raw"]) <= maximum
               and _sha(originals[path]) == item.get("input_sha256"),

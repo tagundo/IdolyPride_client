@@ -1,0 +1,44 @@
+name: Verify owned macOS process sampling
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/verify-owned-process-sampling.yml
+      - ios-unified/probe/tests/verify_owned_process_sampling.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-owned-process-sampling
+  cancel-in-progress: false
+
+jobs:
+  owned-process-sampling:
+    runs-on: macos-15
+    timeout-minutes: 5
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Observe the actual strict process guard on two owned Foundation processes
+        run: >-
+          python3 -B ios-unified/probe/tests/verify_owned_process_sampling.py
+          --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          --output "$RUNNER_TEMP/idoly-owned-process-sampling.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owned-process-sampling-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/idoly-owned-process-sampling.json
+          if-no-files-found: error
+          retention-days: 14
