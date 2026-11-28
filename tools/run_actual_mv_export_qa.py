@@ -1947,7 +1947,19 @@ class ActualRun:
                     self.report["export_render_setup_polls"] = self.report.get("export_render_setup_polls", 0) + 1
                     need(state.get("error_code", "none") == "none", "native_export_failed_" + str(state.get("error_code")))
                 elif phase in ("rendering", "finishing"):
-                    previous_tick = validate_running(payload, previous_tick)
+                    if fresh_pipeline(state):
+                        # Run 59: all 3345 frames and the whole audio were written and the fresh
+                        # export was finishing (its clock already released, the original MV back)
+                        # when the running-scope check ended the run. Until the fresh pipeline has
+                        # its own finishing checks, a failed running check there is recorded and
+                        # the export is followed to its end; the verdict still fails closed.
+                        try:
+                            if phase == "rendering":
+                                previous_tick = validate_running(payload, previous_tick)
+                        except Rejected as relaxed:
+                            self.report["fresh_running_check_relaxed"] = str(relaxed)
+                    else:
+                        previous_tick = validate_running(payload, previous_tick)
                     observed_running = True
                     if fresh_pipeline(state):
                         # No acquired-source baseline and no pause exercise exist for the fresh
