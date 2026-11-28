@@ -109,7 +109,7 @@ def test_probe_never_blocks_the_game_and_both_use_the_explicit_redroid_guest():
     assert "continue-on-error" not in game and "timeout-minutes: 240" in game
     assert 'run_actual_mv_export_qa.py --guest redroid --serial "$REDROID_SERIAL"' in game
     assert "--fps '${{ matrix.fps }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}'" in game
-    assert "--startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}" in game
+    assert "--startup-timeout 3600 --export-timeout 9600 ${{ matrix.extra }}" in game
 
 
 def test_environment_evidence_and_bounded_redacted_logs_are_always_retained():
@@ -387,7 +387,7 @@ def test_game_step_prepares_the_completed_opening_fixture_and_the_x86_workflow_d
                      '--master-dir "$FIXTURE_DIR/master-json"'):
         assert setup.count(argument) == 1, argument
     assert "PROFILE_SETUP: ${{ inputs.profile_setup || 'viewing-mode' }}" in WORKFLOW.read_text()
-    assert "--startup-timeout 3600 --export-timeout 7200 ${{ matrix.extra }}" in command
+    assert "--startup-timeout 3600 --export-timeout 9600 ${{ matrix.extra }}" in command
     x86 = X86_WORKFLOW.read_text()
     for absent in ("--prepare-completed-opening", "--descriptor-set", "--master-dir", "actual_mv_fixture_inputs", "grpcio"):
         assert absent not in x86

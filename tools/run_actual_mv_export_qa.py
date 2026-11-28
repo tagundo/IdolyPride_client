@@ -1890,9 +1890,26 @@ class ActualRun:
                     # The fresh pipeline reloads the original scene before it renders
                     # (run 21: preparing_audio with the source briefly unavailable).
                     state = payload.get("native") if type(payload) is dict else None
+                    # Run 57: the fresh export rendered all 3345 frames and entered "finishing";
+                    # its disposable MV had then ended (source unavailable) and the driver left
+                    # before the file was complete. The fresh pipeline's own phases are followed
+                    # without a selected source, and a completed movie is kept first.
+                    fresh_phase = fresh_pipeline(state) and state.get("phase") in ("rendering", "finishing", "completed")
                     if (str(error) not in ("normal_3d_source_unavailable", "source_observation_invalid")
-                            or type(state) is not dict or state.get("phase") not in PREPARING_PHASES):
+                            or type(state) is not dict
+                            or (state.get("phase") not in PREPARING_PHASES and not fresh_phase)):
+                        if type(state) is dict and state.get("phase") == "failed":
+                            self.salvage_movie(state)
+                            need(False, "native_export_failed_" + str(state.get("error_code", "unknown")))
                         raise
+                    if fresh_phase and state.get("phase") == "completed":
+                        self.salvage_movie(state)
+                        self.record("fresh_export_completed_without_selected_source", payload)
+                        self.capture_mp4_diagnostics("completed", force=True)
+                        raise Rejected("fresh_export_completed_but_source_ended_before_verdict")
+                    if fresh_phase:
+                        self.report["fresh_export_source_unavailable_polls"] = self.report.get(
+                            "fresh_export_source_unavailable_polls", 0) + 1
                     self.report["export_preparing_source_unavailable"] = self.report.get(
                         "export_preparing_source_unavailable", 0) + 1
                     need(state.get("error_code", "none") == "none", "native_export_failed_" + str(state.get("error_code")))
@@ -1916,6 +1933,9 @@ class ActualRun:
                     validate_completed(baseline, payload, self.args.width, self.args.height, self.args.fps)
                     self.record("native_export_completed_and_restored", payload)
                     return payload, baseline
+                if phase == "failed":
+                    # A failure after the last frame may still leave a finished file: keep it.
+                    self.salvage_movie(state)
                 need(phase not in ("failed", "cancelled"), "native_export_failed_" + str(state.get("error_code", "unknown")))
                 if phase == "rendering" and obs.get("accepted_frames") == 0 and not observed_running \
                         and obs.get("world_admission") != "verified":
